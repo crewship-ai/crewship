@@ -6,7 +6,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -14,7 +13,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -23,7 +21,6 @@ import (
 
 func TestPipelineRun_BadBody400(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "covbad")
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "x"}, nil)
 
@@ -40,7 +37,6 @@ func TestPipelineRun_BadBody400(t *testing.T) {
 
 func TestPipelineRun_TierAndTriggerOverrides(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "covtier")
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "x"}, nil)
 
@@ -65,7 +61,6 @@ func TestPipelineRun_TierAndTriggerOverrides(t *testing.T) {
 
 func TestPipelineDryRun_BadBody400(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "covdry")
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "x"}, nil)
 
@@ -82,7 +77,6 @@ func TestPipelineDryRun_BadBody400(t *testing.T) {
 
 func TestPipelineDryRun_NotFound404(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", nil), "ws_smoke")
 	req.SetPathValue("slug", "ghost")
@@ -93,19 +87,13 @@ func TestPipelineDryRun_NotFound404(t *testing.T) {
 	}
 }
 
-// seedSmokePipelineDef inserts a pipeline row with a caller-supplied raw
-// definition JSON so manifest-enrichment tests can exercise the declared
-// blast radius (integrations, egress, credentials, datastores, tools).
-func seedSmokePipelineDef(t *testing.T, db *sql.DB, slug, def string) {
+// seedSmokePipelineDef preserves raw definition bytes, including intentionally
+// malformed DSL, while creating a real immutable archive via Store.Save.
+func seedSmokePipelineDef(t *testing.T, db *sql.DB, slug, definition string) *pipeline.Pipeline {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := db.ExecContext(context.Background(), `
-INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, ephemeral, workspace_visible, author_crew_id, author_agent_id, authored_via, last_test_run_at, last_test_run_passed, created_at, updated_at)
-VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_call', ?, 1, ?, ?)`,
-		"pln_test_"+slug, slug, slug, def, "hash_"+slug, now, now, now)
-	if err != nil {
-		t.Fatalf("seed def: %v", err)
-	}
+	return seedArchivedAPIFixture(t, db, "ws_smoke", slug, definition, pipeline.AuthorMeta{
+		CrewID: "crew_a", AgentID: "agent_lead", Via: pipeline.AuthoredViaAgent,
+	})
 }
 
 // TestPipelineDryRun_IncludesManifest pins the dry_run contract: the response
@@ -114,7 +102,6 @@ VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_cal
 // plan, so the UI can preview the routine's full blast radius.
 func TestPipelineDryRun_IncludesManifest(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	def := `{"name":"manifest-demo",` +
 		`"integrations_required":["github","slack"],` +
 		`"egress_targets":["discord.com"],` +
@@ -185,7 +172,6 @@ func TestPipelineDryRun_IncludesManifest(t *testing.T) {
 // a (200) report — manifest is null rather than 500-ing the preview.
 func TestPipelineDryRun_MalformedDefinition_ManifestNull(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	// steps must be an array; a string makes pipeline.Parse fail.
 	seedSmokePipelineDef(t, db, "corrupt", `{"name":"corrupt","steps":"not-an-array"}`)
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "x"}, nil)

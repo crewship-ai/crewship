@@ -14,243 +14,26 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
-
-	_ "modernc.org/sqlite"
 )
 
-// pipelineSmokeSchema is the minimum subset of the v78 schema the
-// HTTP handlers need to operate. We mirror it here rather than
-// running the full migrate package — keeps the HTTP test fast and
-// independent of unrelated migrations.
-const pipelineSmokeSchema = `
-CREATE TABLE workspaces (
-    id TEXT PRIMARY KEY,
-    execution_tiers_json TEXT NOT NULL DEFAULT '{}'
-);
-INSERT INTO workspaces (id) VALUES ('ws_smoke');
-
-CREATE TABLE users (id TEXT PRIMARY KEY);
--- kind + deleted_at are not decoration here: the internal save/test_run
--- handlers read them to decide whether the caller is the onboarding setup
--- crew, which may author for another crew and may own nothing itself
--- (internal_delegated_crew.go). A crews table missing them makes every
--- agent-authored routine 500 — which is how this fixture failed when the
--- gate landed, and the reason the columns are spelled out rather than
--- left to the default.
-CREATE TABLE crews (
-    id           TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    slug         TEXT,
-    kind         TEXT NOT NULL DEFAULT 'standard',
-    deleted_at   TEXT
-);
-INSERT INTO crews (id, workspace_id, slug) VALUES ('crew_a', 'ws_smoke', 'crew-a'), ('crew_b', 'ws_smoke', 'crew-b');
-CREATE TABLE agents (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL);
-INSERT INTO agents (id, crew_id) VALUES ('agent_lead', 'crew_a');
-
-CREATE TABLE pipelines (
-chat_origin_id TEXT,
-    id                       TEXT PRIMARY KEY,
-    workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    slug                     TEXT NOT NULL,
-    name                     TEXT NOT NULL,
-    description              TEXT,
-    dsl_version              TEXT NOT NULL DEFAULT '1.0',
-    definition_json          TEXT NOT NULL,
-    definition_hash          TEXT NOT NULL,
-    ephemeral                INTEGER NOT NULL DEFAULT 0,
-    workspace_visible        INTEGER NOT NULL DEFAULT 1,
-    invocation_count         INTEGER NOT NULL DEFAULT 0,
-    last_invoked_at          TEXT,
-    last_invocation_status   TEXT,
-    author_crew_id           TEXT REFERENCES crews(id) ON DELETE SET NULL,
-    author_agent_id          TEXT REFERENCES agents(id) ON DELETE SET NULL,
-    author_user_id           TEXT REFERENCES users(id) ON DELETE SET NULL,
-    author_chat_id           TEXT,
-    author_run_id            TEXT,
-    authored_via             TEXT NOT NULL DEFAULT 'agent_tool_call',
-    imported_from_url        TEXT,
-    last_test_run_at         TEXT,
-    last_test_run_passed     INTEGER NOT NULL DEFAULT 0,
-    execution_tier_json      TEXT,
-    status                   TEXT NOT NULL DEFAULT 'active'
-                               CHECK (status IN ('active','proposed','disabled')),
-    monthly_budget_usd       REAL NOT NULL DEFAULT 0,
-    icon                     TEXT,
-    color                    TEXT,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    deleted_at               TEXT,
-    UNIQUE (workspace_id, slug)
-);
-
-CREATE TABLE pipeline_runs (
-chat_origin_id TEXT,
-invocation_source_run_id TEXT,
-    id                  TEXT PRIMARY KEY,
-    workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-    pipeline_slug       TEXT NOT NULL,
-    pipeline_version    INTEGER,
-    definition_hash     TEXT,
-    status              TEXT NOT NULL,
-    outcome             TEXT,
-    due_at              TEXT,
-    mode                TEXT NOT NULL DEFAULT 'run',
-    started_at          TEXT NOT NULL,
-    ended_at            TEXT,
-    current_step_id     TEXT,
-    step_outputs_json   TEXT NOT NULL DEFAULT '{}',
-    output              TEXT,
-    cost_usd            REAL NOT NULL DEFAULT 0,
-    duration_ms         INTEGER NOT NULL DEFAULT 0,
-    error_message       TEXT,
-    failed_at_step      TEXT,
-    error_fingerprint   TEXT,
-    invoking_crew_id    TEXT,
-    invoking_agent_id   TEXT,
-    invoking_user_id    TEXT,
-    invocation_authority TEXT NOT NULL DEFAULT '',
-    triggered_via       TEXT NOT NULL DEFAULT 'manual',
-    triggered_by_id     TEXT,
-    idempotency_key     TEXT,
-    inputs_json         TEXT NOT NULL DEFAULT '{}',
-    concurrency_key     TEXT,
-    metadata_json       TEXT NOT NULL DEFAULT '{}',
-    is_replay           INTEGER NOT NULL DEFAULT 0,
-    replay_of           TEXT,
-    warnings_json       TEXT NOT NULL DEFAULT '[]',
-    chain_depth         INTEGER NOT NULL DEFAULT 0,
-    chain_origin        TEXT,
-    created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
-);
-CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
-    run_id     TEXT NOT NULL,
-    step_id    TEXT NOT NULL,
-    output     TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (run_id, step_id)
-);
-CREATE TABLE IF NOT EXISTS run_tags (
-    run_id       TEXT NOT NULL,
-    workspace_id TEXT NOT NULL,
-    tag          TEXT NOT NULL,
-    PRIMARY KEY (run_id, tag)
-);
-
-CREATE TABLE journal_entries (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    crew_id TEXT,
-    agent_id TEXT,
-    mission_id TEXT,
-    ts TEXT NOT NULL,
-    entry_type TEXT NOT NULL,
-    severity TEXT NOT NULL DEFAULT 'info',
-    priority TEXT NOT NULL DEFAULT 'normal',
-    actor_type TEXT NOT NULL,
-    actor_id TEXT,
-    summary TEXT NOT NULL,
-    payload TEXT NOT NULL DEFAULT '{}',
-    refs TEXT NOT NULL DEFAULT '{}',
-    trace_id TEXT,
-    span_id TEXT,
-    expires_at TEXT
-);
-
-CREATE TABLE inbox_items (
-    id                   TEXT PRIMARY KEY,
-    workspace_id         TEXT NOT NULL,
-    kind                 TEXT NOT NULL,
-    source_id            TEXT NOT NULL,
-    state                TEXT NOT NULL DEFAULT 'unread',
-    payload_json         TEXT NOT NULL DEFAULT '{}',
-    thread_key           TEXT,
-    attention_class      TEXT,
-    actions_json         TEXT NOT NULL DEFAULT '[]',
-    read_at              TEXT,
-    read_by_user_id      TEXT,
-    resolved_at          TEXT,
-    resolved_by_user_id  TEXT,
-    resolved_action      TEXT,
-    created_at           TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    updated_at           TEXT NOT NULL DEFAULT (datetime('now','subsec'))
-);
-
-CREATE TABLE IF NOT EXISTS inbox_item_reads (
-    inbox_item_id TEXT NOT NULL,
-    user_id       TEXT NOT NULL,
-    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    PRIMARY KEY (inbox_item_id, user_id)
-);
-
--- pipeline_schedules mirrors the real migration shape (see
--- internal/pipeline/schedules_test.go's scheduleSchemaSQL). The delete
--- handler's cascade (#2573) writes here in the same transaction as the
--- pipeline soft-delete, so a rig without the table turns every Delete
--- into a 500 that production could never produce.
-CREATE TABLE IF NOT EXISTS pipeline_schedules (
-chat_origin_id TEXT,
-    id                      TEXT PRIMARY KEY,
-    workspace_id            TEXT NOT NULL,
-    name                    TEXT NOT NULL,
-    target_pipeline_id      TEXT NOT NULL,
-    target_pipeline_version INTEGER,
-    cron_expr               TEXT NOT NULL,
-    timezone                TEXT NOT NULL DEFAULT 'UTC',
-    inputs_json             TEXT NOT NULL DEFAULT '{}',
-    enabled                 INTEGER NOT NULL DEFAULT 1,
-    last_run_at             TEXT,
-    last_status             TEXT,
-    last_run_id             TEXT,
-    next_run_at             TEXT,
-    created_at              TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    updated_at              TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    deleted_at              TEXT,
-    wake_pipeline_id        TEXT,
-    wake_inputs_json        TEXT NOT NULL DEFAULT '{}',
-    wake_check_count        INTEGER NOT NULL DEFAULT 0,
-    wake_fire_count         INTEGER NOT NULL DEFAULT 0,
-    last_wake_at            TEXT,
-    last_wake_status        TEXT,
-    wake_fail_closed        INTEGER NOT NULL DEFAULT 0,
-    catchup_policy          TEXT NOT NULL DEFAULT 'once',
-    last_missed_count       INTEGER NOT NULL DEFAULT 0,
-    consecutive_failures    INTEGER NOT NULL DEFAULT 0,
-    max_consecutive_failures INTEGER NOT NULL DEFAULT 5,
-    disabled_reason         TEXT,
-    activation              TEXT
-);
-
-`
-
+// openSmokeDB uses the actual migrated schema and fixture-owned cleanup.
+// Detached handler writes drain before the test database is closed.
 func openSmokeDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	// :memory: is per-connection — pin the pool to one connection so
-	// schemata stays visible across queries.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if _, err := db.ExecContext(context.Background(), pipelineSmokeSchema); err != nil {
-		_ = db.Close()
-		t.Fatalf("schema: %v", err)
-	}
-	// Seed every authenticated user the suite uses through withAuthCtx
-	// so author_user_id can satisfy the FK in pipelines / pipeline_runs.
-	// Without this, the happy-path tests only work because SQLite skips
-	// the FK enforcement; turning foreign_keys=ON would silently flip
-	// these to "constraint failed".
-	for _, uid := range []string{"user_1", "user_42", "admin_user", "u"} {
-		if _, err := db.ExecContext(context.Background(),
-			`INSERT INTO users(id) VALUES(?)`, uid); err != nil {
-			_ = db.Close()
-			t.Fatalf("seed user %q: %v", uid, err)
+	db := setupTestDB(t)
+	must := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.ExecContext(t.Context(), q, args...); err != nil {
+			t.Fatal(err)
 		}
 	}
+	must(`INSERT INTO workspaces(id,name,slug) VALUES('ws_smoke','Smoke','smoke')`)
+	for _, id := range []string{"user_1", "user_42", "admin_user", "u", "u1"} {
+		must(`INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@smoke.example.test", id)
+	}
+	seedCrewRow(t, db, "crew_a", "ws_smoke", "A", "crew-a")
+	seedCrewRow(t, db, "crew_b", "ws_smoke", "B", "crew-b")
+	seedAgentRow(t, db, "agent_lead", "ws_smoke", "crew_a", "Lead", "agent_lead", "LEAD")
 	return db
 }
 
@@ -279,25 +62,50 @@ func withWorkspaceCtx(req *http.Request, workspaceID string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-// seedSmokePipeline inserts a single passable pipeline directly so
-// list/get/run tests don't need to round-trip through Save (which
-// would require a wired runner for the test_run gate).
-func seedSmokePipeline(t *testing.T, db *sql.DB, slug string) {
+// seedArchivedAPIFixture creates real history with the production Store. It
+// is synthetic in-process setup, not evidence of an authenticated test-run.
+func seedArchivedAPIFixture(t *testing.T, db *sql.DB, workspace, slug, definition string, author pipeline.AuthorMeta) *pipeline.Pipeline {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	def := `{"name":"` + slug + `","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
-	_, err := db.ExecContext(context.Background(), `
-INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, ephemeral, workspace_visible, author_crew_id, author_agent_id, authored_via, last_test_run_at, last_test_run_passed, created_at, updated_at)
-VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_call', ?, 1, ?, ?)`,
-		"pln_test_"+slug, slug, slug, def, "hash_"+slug, now, now, now)
+	now := time.Now().UTC()
+	saved, err := pipeline.NewStore(db).Save(t.Context(), pipeline.SaveInput{
+		WorkspaceID: workspace, Slug: slug, Name: slug, DefinitionJSON: definition,
+		Author: author, LastTestRunAt: &now, LastTestRunPassed: true,
+	})
 	if err != nil {
-		t.Fatalf("seed: %v", err)
+		t.Fatalf("real fixture Store.Save(%s): %v", slug, err)
 	}
+	head := apiFixtureHeadVersion(t, db, saved.ID)
+	archived, err := pipeline.NewStore(db).GetVersion(t.Context(), saved.ID, head)
+	if err != nil || archived.DefinitionJSON != definition || archived.DefinitionHash != pipeline.DefinitionHash([]byte(definition)) {
+		t.Fatalf("fixture archive differs from input: %v", err)
+	}
+	return saved
+}
+
+// apiFixtureHeadVersion reads the real stored HEAD without exporting a
+// production field just for tests. Missing/zero HEAD is not a legacy fallback.
+func apiFixtureHeadVersion(t *testing.T, db *sql.DB, id string) int {
+	t.Helper()
+	var head int
+	if err := db.QueryRowContext(t.Context(), `SELECT head_version FROM pipelines WHERE id=?`, id).Scan(&head); err != nil {
+		t.Fatalf("fixture HEAD lookup: %v", err)
+	}
+	if head < 1 {
+		t.Fatalf("fixture lacks real archived HEAD: id=%s head=%d", id, head)
+	}
+	return head
+}
+
+// seedSmokePipeline retains the original author, slug/name and visibility;
+// callers needing a FK use the immutable ID actually generated by Store.Save.
+func seedSmokePipeline(t *testing.T, db *sql.DB, slug string) *pipeline.Pipeline {
+	t.Helper()
+	definition := `{"name":"` + slug + `","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	return seedSmokePipelineDef(t, db, slug, definition)
 }
 
 func TestPipelinesAPI_List_HappyPath(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "first")
 	seedSmokePipeline(t, db, "second")
 
@@ -328,7 +136,6 @@ func TestPipelinesAPI_List_HappyPath(t *testing.T) {
 
 func TestPipelinesAPI_List_PaginatesWithStableOffset(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "first")
 	seedSmokePipeline(t, db, "second")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
@@ -361,7 +168,6 @@ func TestPipelinesAPI_List_PaginatesWithStableOffset(t *testing.T) {
 
 func TestPipelinesAPI_Get_IncludesDefinition(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
@@ -387,7 +193,6 @@ func TestPipelinesAPI_Get_IncludesDefinition(t *testing.T) {
 
 func TestPipelinesAPI_Get_NotFound(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), "ws_smoke")
 	req.SetPathValue("slug", "ghost")
@@ -400,7 +205,6 @@ func TestPipelinesAPI_Get_NotFound(t *testing.T) {
 
 func TestPipelinesAPI_Run_Returns503WithoutRunner(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", nil), "ws_smoke")
@@ -414,7 +218,6 @@ func TestPipelinesAPI_Run_Returns503WithoutRunner(t *testing.T) {
 
 func TestPipelinesAPI_Run_HappyPath(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 	runner := &stubRunner{output: "hello from stub"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
@@ -447,7 +250,6 @@ func TestPipelinesAPI_Run_HappyPath(t *testing.T) {
 
 func TestPipelinesAPI_DryRun_NoRunnerInvocation(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 	runner := &stubRunner{output: "should-not-be-seen"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
@@ -468,7 +270,6 @@ func TestPipelinesAPI_DryRun_NoRunnerInvocation(t *testing.T) {
 
 func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "doomed")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	// canRole(role, "delete") gate added per audit M2-promoted -- the
@@ -497,20 +298,19 @@ func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 // those inbox items in the same operation, instead of orphaning them forever.
 func TestPipelinesAPI_Delete_ResolvesInboxEscalations(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
-	seedSmokePipeline(t, db, "doomed-esc")
-	pipelineID := "pln_test_doomed-esc"
+	saved := seedSmokePipeline(t, db, "doomed-esc")
+	pipelineID := saved.ID
 
 	// Proposed-review escalation tied to this routine (mirrors proposeRoutineInbox:
 	// kind=escalation, source_id=routineprop:<ws>:<slug>, payload pipeline_id).
-	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
-		VALUES ('ibx_escalation_routineprop:ws_smoke:doomed-esc', 'ws_smoke', 'escalation', 'routineprop:ws_smoke:doomed-esc', 'unread', ?)`,
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, state, payload_json)
+		VALUES ('ibx_escalation_routineprop:ws_smoke:doomed-esc', 'ws_smoke', 'escalation', 'routineprop:ws_smoke:doomed-esc', 'Routine review', 'unread', ?)`,
 		`{"pipeline_id":"`+pipelineID+`","slug":"doomed-esc"}`); err != nil {
 		t.Fatalf("seed escalation: %v", err)
 	}
 	// A scheduled failed-run alert carrying the same pipeline_id (payload sweep).
-	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
-		VALUES ('ibx_failed_run_run-x', 'ws_smoke', 'failed_run', 'run-x', 'unread', ?)`,
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, state, payload_json)
+		VALUES ('ibx_failed_run_run-x', 'ws_smoke', 'failed_run', 'run-x', 'Failed run', 'unread', ?)`,
 		`{"pipeline_id":"`+pipelineID+`"}`); err != nil {
 		t.Fatalf("seed failed_run: %v", err)
 	}
@@ -544,7 +344,6 @@ func TestPipelinesAPI_Delete_ResolvesInboxEscalations(t *testing.T) {
 // finding root cause.
 func TestPipelinesAPI_Delete_MEMBER_Forbidden(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "doomed-member")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	req := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), "u1", "ws_smoke", "MEMBER")
@@ -561,7 +360,6 @@ func TestPipelinesAPI_Delete_MEMBER_Forbidden(t *testing.T) {
 // an invalid DSL with 422 before reaching the runner.
 func TestPipelinesAPI_InternalTestRun_RejectsBadDSL(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	runner := &stubRunner{output: "x"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
 
@@ -592,7 +390,6 @@ func withAuthCtx(req *http.Request, userID, role string) *http.Request {
 
 func TestPipelinesAPI_Save_RequiresManagerRole(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -616,7 +413,6 @@ func TestPipelinesAPI_Save_RequiresManagerRole(t *testing.T) {
 
 func TestPipelinesAPI_Save_HappyPathManager(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
 	// MANAGER cannot skip the test-gate (OWNER/ADMIN only), so a MANAGER save
@@ -659,7 +455,6 @@ func TestPipelinesAPI_Save_HappyPathManager(t *testing.T) {
 
 func TestPipelinesAPI_Save_SkipTestGateForbiddenForManager(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
 	body := []byte(`{
@@ -684,7 +479,6 @@ func TestPipelinesAPI_Save_SkipTestGateForbiddenForManager(t *testing.T) {
 
 func TestPipelinesAPI_Save_SkipTestGateAllowedForAdmin(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
 	body := []byte(`{
@@ -706,7 +500,6 @@ func TestPipelinesAPI_Save_SkipTestGateAllowedForAdmin(t *testing.T) {
 
 func TestPipelinesAPI_Save_RejectsBadDSL(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
 	body := []byte(`{
@@ -728,7 +521,6 @@ func TestPipelinesAPI_Save_RejectsBadDSL(t *testing.T) {
 
 func TestPipelinesAPI_ListRunRecords_503WithoutStore(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	// Note: SetRunStore NOT called — the handler should 503.
@@ -746,17 +538,16 @@ func TestPipelinesAPI_ListRunRecords_503WithoutStore(t *testing.T) {
 
 func TestPipelinesAPI_ListRunRecords_HappyPath(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
-	seedSmokePipeline(t, db, "demo")
+	saved := seedSmokePipeline(t, db, "demo")
 	store := pipeline.NewRunStore(db)
 	now := time.Now().UTC()
 	// Seed three runs: one running, one completed, one failed.
 	for _, r := range []*pipeline.RunRecord{
-		{ID: "run_a", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "run_a", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusRunning, StartedAt: now.Add(-1 * time.Minute)},
-		{ID: "run_b", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "run_b", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusCompleted, StartedAt: now.Add(-2 * time.Minute), Output: "ok"},
-		{ID: "run_c", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "run_c", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusFailed, StartedAt: now.Add(-3 * time.Minute), ErrorMessage: "boom"},
 	} {
 		if err := store.Insert(context.Background(), r); err != nil {
@@ -802,16 +593,15 @@ func TestPipelinesAPI_ListRunRecords_HappyPath(t *testing.T) {
 
 func TestPipelinesAPI_ListRunRecords_FilterByStatus(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
-	seedSmokePipeline(t, db, "demo")
+	saved := seedSmokePipeline(t, db, "demo")
 	store := pipeline.NewRunStore(db)
 	now := time.Now().UTC()
 	for _, r := range []*pipeline.RunRecord{
-		{ID: "r1", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "r1", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusRunning, StartedAt: now},
-		{ID: "r2", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "r2", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusCompleted, StartedAt: now},
-		{ID: "r3", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+		{ID: "r3", WorkspaceID: "ws_smoke", PipelineID: saved.ID, PipelineSlug: "demo",
 			Status: pipeline.RunStatusCompleted, StartedAt: now},
 	} {
 		if err := store.Insert(context.Background(), r); err != nil {
@@ -845,7 +635,6 @@ func TestPipelinesAPI_ListRunRecords_FilterByStatus(t *testing.T) {
 
 func TestPipelinesAPI_ListRunRecords_NotFoundOnUnknownSlug(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	store := pipeline.NewRunStore(db)
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	h.SetRunStore(store)

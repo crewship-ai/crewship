@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // cov2PCRig mirrors covPCHandler but also exposes the db handle so tests
@@ -131,8 +133,8 @@ func TestCov2PCImport_ResurrectsSoftDeleted(t *testing.T) {
 	// upsert lookup now finds it and resurrects via the UPDATE path rather
 	// than tripping the constraint — so re-importing a previously-deleted
 	// slug succeeds (this is what makes `seed --nuke` re-imports work).
-	covPCInsertPipeline(t, db, wsID, "p-exists", "takenpipe", crewID, 0, 1, 0)
-	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-exists'`); err != nil {
+	saved := seedArchivedAPIFixture(t, db, wsID, "takenpipe", covPCDef("takenpipe"), pipeline.AuthorMeta{CrewID: crewID, Via: pipeline.AuthoredViaUser})
+	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = ?`, saved.ID); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	rr := httptest.NewRecorder()
@@ -140,6 +142,8 @@ func TestCov2PCImport_ResurrectsSoftDeleted(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
+	assertCov2PCArchivedResurrection(t, db, wsID, "takenpipe", saved.ID)
+
 }
 
 // --- ListVersions / GetVersion / Rollback: versions-table failures ---
@@ -234,8 +238,8 @@ func TestCov2PCSave_ResurrectsSoftDeleted(t *testing.T) {
 	// Soft-deleted row still holds the UNIQUE(workspace_id, slug) slot; the
 	// upsert lookup finds it and resurrects via the UPDATE path, so saving a
 	// previously-deleted slug succeeds (idempotent re-seed contract).
-	covPCInsertPipeline(t, db, wsID, "p-c1", "clashslug", crewID, 0, 1, 0)
-	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-c1'`); err != nil {
+	saved := seedArchivedAPIFixture(t, db, wsID, "clashslug", covPCDef("clashslug"), pipeline.AuthorMeta{CrewID: crewID, Via: pipeline.AuthoredViaUser})
+	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = ?`, saved.ID); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(covPCSaveBody("clashslug", crewID, nil)))
@@ -245,6 +249,8 @@ func TestCov2PCSave_ResurrectsSoftDeleted(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
+	assertCov2PCArchivedResurrection(t, db, wsID, "clashslug", saved.ID)
+
 }
 
 func TestCov2PCSave_StoreInsertBlocked500(t *testing.T) {
@@ -328,8 +334,8 @@ func TestCov2PCInternalSave_TestGateFailed422(t *testing.T) {
 
 func TestCov2PCInternalSave_ResurrectsSoftDeleted(t *testing.T) {
 	h, db, _, wsID, crewID := cov2PCRig(t)
-	covPCInsertPipeline(t, db, wsID, "p-ic", "ip5", crewID, 0, 1, 0)
-	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = 'p-ic'`); err != nil {
+	saved := seedArchivedAPIFixture(t, db, wsID, "ip5", covPCDef("ip5"), pipeline.AuthorMeta{CrewID: crewID, Via: pipeline.AuthoredViaUser})
+	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE id = ?`, saved.ID); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	rr := httptest.NewRecorder()
@@ -337,6 +343,8 @@ func TestCov2PCInternalSave_ResurrectsSoftDeleted(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (resurrected), body=%s", rr.Code, rr.Body.String())
 	}
+	assertCov2PCArchivedResurrection(t, db, wsID, "ip5", saved.ID)
+
 }
 
 func TestCov2PCInternalSave_StoreInsertBlocked500(t *testing.T) {
@@ -368,5 +376,20 @@ func TestCov2PCInternalSave_CycleDetected422(t *testing.T) {
 	h.InternalSave(rr, httptest.NewRequest("POST", "/x", strings.NewReader(body)))
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422 (cycle), body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// Positive resurrection must keep the actually archived identity, not merely
+// return 201 for another row. This does not alter the other raw-parent rigs.
+func assertCov2PCArchivedResurrection(t *testing.T, db *sql.DB, workspace, slug, originalID string) {
+	t.Helper()
+	var id string
+	var deleted sql.NullString
+	var head int
+	if err := db.QueryRow(`SELECT id,deleted_at,head_version FROM pipelines WHERE workspace_id=? AND slug=?`, workspace, slug).Scan(&id, &deleted, &head); err != nil {
+		t.Fatal(err)
+	}
+	if id != originalID || deleted.Valid || head < 1 {
+		t.Fatalf("resurrection identity/liveness: id=%s deleted=%v head=%d", id, deleted, head)
 	}
 }

@@ -34,3 +34,19 @@ or establish runtime readiness. Those integrations remain separate work.
 Existing [member resource policy](member-resource-policy.md) and
 [restricted workflow](restricted-workflows.md) checks remain additional
 boundaries. A provenance record alone grants no execution or result access.
+
+
+### Pipeline API fixture history
+
+Pipeline API smoke fixtures use the real migrated test database and `Store.Save`
+so immutable archive/HEAD identities exist. Fixture consumers use the returned
+pipeline ID instead of fabricating a historical bootstrap receipt or archive hash.
+Raw malformed DSL fixtures keep their exact bytes for best-effort dry-run tests;
+this test setup does not relax production validation or prove authenticated authoring.
+Fixture-owned cleanup drains detached handler work before closing the database.
+
+Historical API display fixtures retain a genuinely absent legacy run version pin;
+they archive old content through the Store and verify that removing that archive
+never falls back to current HEAD. Upsert/resurrection success fixtures also begin
+with a real archived routine and assert its generated identity survives the action.
+These fixture repairs add no HEAD0/schema fallback or production authorization.
