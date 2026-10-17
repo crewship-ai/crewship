@@ -175,9 +175,13 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   // failure means we can't tell yet; surface the original 401 to
   // the caller and let the page recover when the backend comes back,
   // rather than evicting valid sessions on every blip.
-  const refreshResult = await tryRefresh()
+  const { result: refreshResult, reason: refreshReason } = await refreshShared()
   if (refreshResult === "auth_failed") {
-    emitSessionExpired(reason ?? "session_expired")
+    // The refresh's own reason decides what happened to the session: a
+    // dropped access cookie (no_credentials on the request) over a dead
+    // refresh token is still an expired session, and no refresh cookie at
+    // all (no_credentials from the refresh) is a visitor who never had one.
+    emitSessionExpired(refreshReason ?? reason ?? "session_expired")
     return res
   }
   if (refreshResult === "retryable_failed") {
@@ -251,7 +255,13 @@ function bearerHeaders(headers?: HeadersInit): Headers {
  */
 export type RefreshResult = "ok" | "auth_failed" | "retryable_failed"
 
-let refreshInflight: Promise<RefreshResult> | null = null
+/** One refresh round-trip: its outcome and, for a 401, the server's reason. */
+interface RefreshOutcome {
+  result: RefreshResult
+  reason: string | null
+}
+
+let refreshInflight: Promise<RefreshOutcome> | null = null
 
 /** tryRefresh dedupes concurrent refresh attempts. The first call wins
  *  the network round-trip; followers await its result without firing
@@ -274,8 +284,12 @@ let refreshInflight: Promise<RefreshResult> | null = null
 const REFRESH_TIMEOUT_MS = 10_000
 
 export async function tryRefresh(): Promise<RefreshResult> {
+  return (await refreshShared()).result
+}
+
+function refreshShared(): Promise<RefreshOutcome> {
   if (refreshInflight) return refreshInflight
-  const promise = (async (): Promise<RefreshResult> => {
+  const promise = (async (): Promise<RefreshOutcome> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     try {
@@ -288,18 +302,18 @@ export async function tryRefresh(): Promise<RefreshResult> {
         headers: { Accept: "application/json" },
         signal: controller.signal,
       })
-      if (r.ok) return "ok"
+      if (r.ok) return { result: "ok", reason: null }
       // Only a 401 from the refresh endpoint is "your session is gone".
       // 5xx / 502 / 503 / 504 / 429 / anything else means the server
       // is temporarily unhappy; the user's cookies are still valid in
       // principle, just not actionable until the backend recovers.
-      if (r.status === 401) return "auth_failed"
-      return "retryable_failed"
+      if (r.status === 401) return { result: "auth_failed", reason: await peekReason(r) }
+      return { result: "retryable_failed", reason: null }
     } catch {
       // Network rejection / abort (timeout) / DNS / etc. — transient.
       // Includes the abort our own setTimeout fires when the backend
       // hangs past REFRESH_TIMEOUT_MS.
-      return "retryable_failed"
+      return { result: "retryable_failed", reason: null }
     } finally {
       clearTimeout(timer)
     }

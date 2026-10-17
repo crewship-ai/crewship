@@ -186,7 +186,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (typeof window === "undefined") return
 
     let redirected = false
-    const goLoginExpired = () => {
+    const goLoginExpired = (reason?: string) => {
       if (redirected) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
@@ -198,7 +198,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       purgeOtherE2Recovery(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
-      const params = new URLSearchParams({ reason: "expired" })
+      // no_credentials: the browser never had a session (or its cookies
+      // were cleared) — send it to sign in without saying anything expired.
+      const params = new URLSearchParams(reason === "no_credentials" ? {} : { reason: "expired" })
       // Don't append ?redirect for /login itself or unsafe absolute URLs.
       // The check uses pathname (not pathname+search) so /login?reason=expired
       // — the URL we're about to redirect TO — is recognised as the
@@ -216,7 +218,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.location.replace("/login")
     }
 
-    const expiredHandler = () => goLoginExpired()
+    const expiredHandler = (e: Event) => goLoginExpired((e as CustomEvent<{ reason?: string }>).detail?.reason)
     window.addEventListener(AUTH_EVENT, expiredHandler)
 
     let channel: BroadcastChannel | null = null
@@ -224,7 +226,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
-          if (ev.data?.type === "session-expired") goLoginExpired()
+          if (ev.data?.type === "session-expired") goLoginExpired(ev.data?.reason)
           else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
         }
       } catch {
