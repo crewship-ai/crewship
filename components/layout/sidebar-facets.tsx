@@ -70,6 +70,16 @@ export function useSidebarFacets({ defaultOpen = false }: { defaultOpen?: boolea
       "aria-expanded": open,
       "aria-controls": open ? id : undefined,
       onClick: () => setOpen((o) => !o),
+      // Filter keeps focus after it opens the block, so the first Escape
+      // comes from here; it closes the block the button controls (as the
+      // popover this replaced did) and focus stays on the button. One Escape
+      // closes one layer: the floating tablet panel around it stays open.
+      onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (e.key !== "Escape" || !open) return
+        e.preventDefault()
+        e.stopPropagation()
+        setOpen(false)
+      },
     },
     blockProps: { id, open, onClose },
   }
@@ -88,7 +98,7 @@ export function SidebarFacetBlock({
 }: {
   id?: string
   open: boolean
-  /** Escape inside the block; `true` asks to return focus to the trigger. */
+  /** Escape inside the block (the trigger handles its own); `true` asks to return focus to the trigger. */
   onClose?: (returnFocus: boolean) => void
   /** Accessible name, e.g. "Filter routines". */
   label: string

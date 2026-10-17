@@ -484,15 +484,21 @@ export function ActivityStreamView({
   }, [peekId, peekItem, chainsSettled, chainsQ.loading, journal.loading, journal.entries])
 
   // `?entry=<id>`: a change opens in the Peek, any other record as its page.
+  // The journal hook reads "not loading, no entries" until its first request
+  // starts, which is not an answer: the link waits for one (as the chain
+  // index does above) instead of being dropped on the first render.
+  const journalAsked = React.useRef(false)
   React.useEffect(() => {
+    if (journal.loading) journalAsked.current = true
     if (!pendingEntryId || journal.loading) return
+    if (!journalAsked.current && journal.entries.length === 0 && !journal.error) return
     const hit = journal.entries.find((e) => e.id === pendingEntryId)
     if (hit) {
       if (changeKindOf(hit.entry_type)) setPeekId(hit.id)
       else setRecord(hit)
     }
     setPendingEntryId(undefined)
-  }, [pendingEntryId, journal.loading, journal.entries])
+  }, [pendingEntryId, journal.loading, journal.entries, journal.error])
 
   const peekIndex = peekItem ? flat.findIndex((x) => x.id === peekItem.id) : -1
   const step = React.useCallback(

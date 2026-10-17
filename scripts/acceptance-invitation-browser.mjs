@@ -53,7 +53,7 @@ try {
       expect(workspaces.some(w => w.id === fixture.workspace&&w.currentUserAccessMode==='restricted')).toBe(true)
       expect(workspaces.every(w=>w.restricted_session===true)).toBe(true)
       await page.goto(fixture.server+'/credentials')
-      await expect(page.getByText('Not available with your access',{exact:true})).toBeVisible()
+      await expect(page.getByText(/ isn’t part of your access$/)).toBeVisible()
       await expect(page.getByRole('link',{name:'Settings',exact:true}).first()).toBeVisible()
       await page.screenshot({path:join(output,`${kind}-guest-access.png`),fullPage:true})
       console.log(`PASS ${kind} Guest invitation -> sign in -> explicit acceptance -> initial grants/account ceiling; screenshot ${join(output,`${kind}-guest-access.png`)}`)

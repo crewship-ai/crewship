@@ -190,7 +190,8 @@ for (const width of [1280, 390]) {
 
     // A screen outside the surfaces is never mounted, so it sends nothing.
     await page.goto("/issues")
-    await expect(page.getByText("Not available with your access")).toBeVisible()
+    // Harbor 2 G03: the No-access state names the screen and offers one way on.
+    await expect(page.getByRole("heading", { name: "Issues isn’t part of your access" })).toBeVisible()
     await page.waitForTimeout(1_000)
     expect(forbidden).toEqual([])
   })

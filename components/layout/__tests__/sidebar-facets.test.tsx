@@ -183,4 +183,20 @@ describe("sidebar facet block (COM-01)", () => {
     expect(screen.queryByRole("group", { name: "Filter routines" })).toBeNull()
     expect(document.activeElement).toBe(trigger)
   })
+
+  // ACT-06 / RT-02 (#3481): Filter opens the block and keeps focus on itself,
+  // so Escape right after opening it comes from the trigger. The popover it
+  // replaced closed on Escape from anywhere; the block must close from its
+  // own trigger too.
+  it("Escape on the Filter button closes the open block and keeps focus there", () => {
+    render(<Harness />)
+    const trigger = screen.getByRole("button", { name: /^Filter/ })
+    fireEvent.click(trigger)
+    trigger.focus()
+    expect(screen.getByRole("group", { name: "Filter routines" })).toBeInTheDocument()
+    fireEvent.keyDown(trigger, { key: "Escape" })
+    expect(screen.queryByRole("group", { name: "Filter routines" })).toBeNull()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(document.activeElement).toBe(trigger)
+  })
 })

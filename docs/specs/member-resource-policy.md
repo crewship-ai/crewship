@@ -199,8 +199,9 @@ navigation. Account security remains available without resource grants. A truste
 account's rows carry neither field.
 
 The web app shows only those screens in the sidebar, the phone menu and the phone
-tab bar. Any other URL shows "Not available with your access" without mounting
-the screen, so none of its requests are sent. `/` goes to the first available
+tab bar. Any other URL shows "<Screen> isn’t part of your access" (the screen
+named by its navigation label) with one way on to the first available surface,
+without mounting the screen, so none of its requests are sent. `/` goes to the first available
 surface (Chat when authorized). Selection uses the current workspace row, never
 another membership's projection. Settings shows
 only account security: password, browser sessions, revoking CLI tokens and
