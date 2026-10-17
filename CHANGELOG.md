@@ -424,6 +424,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
 
 - **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+- Cap shared issue search limiter memory globally at 32768 lazy audiences, retaining active budgets and reclaiming only safely expired entries.
 
 ### Fixed
 

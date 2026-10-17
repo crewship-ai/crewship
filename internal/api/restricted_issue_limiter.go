@@ -13,6 +13,7 @@ import (
 )
 
 const sharedSearchAccounts = 4096
+const sharedSearchTotalAudiences = 32768
 const sharedSearchAudiences = 257 // 256 valid project rights plus the all-project sentinel.
 const sharedSearchIdle = 5 * time.Minute
 
@@ -32,10 +33,11 @@ type sharedSearchLimiter struct {
 	accounts                  map[sharedSearchKey]*sharedSearchAccount
 	now                       func() time.Time
 	maxAccounts, maxAudiences int
+	maxTotal, total           int
 }
 
 func newSharedSearchLimiter() *sharedSearchLimiter {
-	return &sharedSearchLimiter{accounts: make(map[sharedSearchKey]*sharedSearchAccount), now: time.Now, maxAccounts: sharedSearchAccounts, maxAudiences: sharedSearchAudiences}
+	return &sharedSearchLimiter{accounts: make(map[sharedSearchKey]*sharedSearchAccount), now: time.Now, maxAccounts: sharedSearchAccounts, maxAudiences: sharedSearchAudiences, maxTotal: sharedSearchTotalAudiences}
 }
 
 // take is called only after authentication, input checks and explicit project List.
@@ -52,18 +54,14 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 	key := sharedSearchIdentity(user, workspace)
 	account := s.accounts[key]
 	if account != nil && now.Sub(account.used) >= idle {
-		delete(s.accounts, key)
+		s.removeAccount(key)
 		account = nil
 	}
 	if account == nil {
-		if len(s.accounts) >= s.maxAccounts {
-			for k, a := range s.accounts {
-				if now.Sub(a.used) >= idle {
-					delete(s.accounts, k)
-				}
-			}
+		if len(s.accounts) >= s.maxAccounts || s.total >= s.maxTotal {
+			s.expire(now, idle)
 		}
-		if len(s.accounts) >= s.maxAccounts {
+		if len(s.accounts) >= s.maxAccounts || s.total >= s.maxTotal {
 			return false, time.Minute
 		}
 		account = &sharedSearchAccount{aggregate: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchAccount), 15), audiences: make(map[sharedSearchAudience]*sharedSearchBucket)}
@@ -74,21 +72,20 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 	bucket := account.audiences[audienceKey]
 	if bucket != nil && now.Sub(bucket.used) >= idle {
 		delete(account.audiences, audienceKey)
+		s.total--
+		compactSharedSearchAudiences(account)
 		bucket = nil
 	}
 	if bucket == nil {
-		if len(account.audiences) >= s.maxAudiences {
-			for k, b := range account.audiences {
-				if now.Sub(b.used) >= idle {
-					delete(account.audiences, k)
-				}
-			}
+		if len(account.audiences) >= s.maxAudiences || s.total >= s.maxTotal {
+			s.expire(now, idle)
 		}
-		if len(account.audiences) >= s.maxAudiences {
+		if len(account.audiences) >= s.maxAudiences || s.total >= s.maxTotal {
 			return false, time.Minute
 		}
 		bucket = &sharedSearchBucket{limiter: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchProject), 5)}
 		account.audiences[audienceKey] = bucket
+		s.total++
 	}
 	bucket.used = now
 	account.aggregate.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchAccount))
@@ -103,6 +100,41 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 	}
 	return true, 0
 }
+
+// Capacity cleanup never evicts an active entry or grants a premature refill.
+func (s *sharedSearchLimiter) expire(now time.Time, idle time.Duration) {
+	for key, account := range s.accounts {
+		if now.Sub(account.used) >= idle {
+			s.removeAccount(key)
+			continue
+		}
+		removed := false
+		for audience, bucket := range account.audiences {
+			if now.Sub(bucket.used) >= idle {
+				delete(account.audiences, audience)
+				s.total--
+				removed = true
+			}
+		}
+		if removed {
+			compactSharedSearchAudiences(account)
+		}
+	}
+}
+
+// Go maps retain backing storage after deletion; compact only after safe expiry.
+func compactSharedSearchAudiences(account *sharedSearchAccount) {
+	next := make(map[sharedSearchAudience]*sharedSearchBucket, len(account.audiences))
+	for key, bucket := range account.audiences {
+		next[key] = bucket
+	}
+	account.audiences = next
+}
+func (s *sharedSearchLimiter) removeAccount(key sharedSearchKey) {
+	s.total -= len(s.accounts[key].audiences)
+	delete(s.accounts, key)
+}
+
 func searchRate(key string) rate.Limit {
 	return rate.Limit(float64(max(1, ratelimitcfg.Int(key))) / 60)
 }
