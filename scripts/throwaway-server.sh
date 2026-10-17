@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # throwaway-server.sh — a disposable Crewship server that cleans up after itself.
 #
-#   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] -- CMD [ARGS...]
-#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]]
+#   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents] -- CMD [ARGS...]
+#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents]
 #   scripts/throwaway-server.sh stop  NAME
 #   scripts/throwaway-server.sh list
 #
 # `--env` accepts only optional feature settings (see THROWAWAY_ENV_ALLOWLIST)
 # and `--page-projects` configures Page project storage under this instance's
 # own state dir, so teardown removes it with everything else.
+# `--documents` creates private authority/service socket paths and a mode-0600
+# service-token file under that state dir. Go receives paths only; CMD owns any
+# Node child. `run` passes CREWSHIP_THROWAWAY_MANIFEST to CMD; its JSON fields
+# documents_authority_socket, documents_service_socket and
+# documents_service_token_file contain owned paths, never the secret value.
+# Use a short absolute CREWSHIP_THROWAWAY_STATE when needed for Unix sockets.
 #
 # `run` starts the server, runs CMD with CREWSHIP_SERVER/CREWSHIP_CONFIG
 # pointing at it, and tears everything down when CMD ends — success, failure
@@ -109,12 +115,13 @@ THROWAWAY_ENV_ALLOWLIST=(
 
 cmd_start() {
   local name="$1"; shift
-  local binary="" port="" page_projects=""
+  local binary="" port="" page_projects="" documents=0
   local -a extra_env=()
   while (($#)); do
     case "$1" in
       --binary) binary="$2"; shift 2 ;;
       --port) port="$2"; shift 2 ;;
+      --documents) documents=1; shift ;;
       # Pass one optional feature setting to the server process. The key
       # must be on the allowlist above (see its comment for why anything
       # else is refused). Repeatable; NAME=VALUE form only.
@@ -165,6 +172,19 @@ cmd_start() {
   if [[ -z "$port" ]]; then
     port="$(free_port)" || die "no free port in $PORT_RANGE_START-$PORT_RANGE_END"
   fi
+  local documents_authority="" documents_service="" documents_token=""
+  if ((documents)); then
+    [[ "$page_projects" != documents ]] || die "--page-projects conflicts with the owned documents directory"
+    documents_authority="$dir/documents/authority.sock"
+    documents_service="$dir/documents/service.sock"
+    documents_token="$dir/documents/service-token"
+    python3 - "$documents_authority" "$documents_service" "$documents_token" <<'PYDOC' || die "invalid --documents paths"
+import os, sys
+for path in sys.argv[1:]:
+    if not os.path.isabs(path) or os.path.normpath(path) != path or len(os.fsencode(path)) > 100:
+        raise SystemExit('throwaway-server: --documents requires clean absolute owned paths <=100 bytes; use a shorter CREWSHIP_THROWAWAY_STATE')
+PYDOC
+  fi
   local suffix; suffix="$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
   local prefix="crewship-tw-$name-$suffix"
 
@@ -177,6 +197,20 @@ cmd_start() {
     chmod 700 "$dir/$page_projects"
     extra_env+=("CREWSHIP_PAGE_PROJECTS_PATH=$dir/$page_projects")
   fi
+  if ((documents)); then
+    mkdir "$dir/documents" || die "could not create private documents directory"
+    chmod 700 "$dir/documents" || die "could not protect private documents directory"
+    python3 - "$documents_token" <<'PYDOC' || die "could not create private documents token file"
+import os, secrets, sys
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as stream:
+    stream.write(secrets.token_hex(32))
+PYDOC
+    extra_env+=("CREWSHIP_DOCUMENTS_ENABLED=true"
+      "CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET=$documents_authority"
+      "CREWSHIP_DOCUMENTS_SERVICE_SOCKET=$documents_service"
+      "CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE=$documents_token")
+  fi
   cat >"$dir/manifest.json" <<EOF
 {
   "name": "$name",
@@ -188,6 +222,9 @@ cmd_start() {
   "data_dir": "$dir/data",
   "database": "$dir/data/crewship.db",
   "page_projects_dir": "${page_projects:+$dir/$page_projects}",
+  "documents_authority_socket": "$documents_authority",
+  "documents_service_socket": "$documents_service",
+  "documents_service_token_file": "$documents_token",
   "pid": "",
   "instance_id": ""
 }
@@ -338,7 +375,8 @@ cmd_run() {
   trap "cmd_stop '$name'" EXIT
   trap 'exit 130' INT TERM
   local port; port="$(manifest_get "$(dir_for "$name")" port)"
-  CREWSHIP_SERVER="http://127.0.0.1:$port" CREWSHIP_CONFIG="$(dir_for "$name")/cli-config.yaml" "$@"
+  CREWSHIP_SERVER="http://127.0.0.1:$port" CREWSHIP_CONFIG="$(dir_for "$name")/cli-config.yaml" \
+    CREWSHIP_THROWAWAY_MANIFEST="$(dir_for "$name")/manifest.json" "$@"
   : "$env_line"
 }
 

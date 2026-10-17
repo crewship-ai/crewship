@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
@@ -66,6 +66,8 @@ vi.mock("@/components/features/pages/page-application", () => ({
     return <div data-testid="application">Running application</div>
   },
 }))
+
+vi.mock("@/components/features/pages/page-document",()=>({PageDocument:({pageId,workspaceId}:{pageId:string;workspaceId:string})=><div data-testid="native-document">Native document {workspaceId}:{pageId}</div>}))
 
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
@@ -166,14 +168,14 @@ describe("PagesLayout", () => {
 
   it("writes the header line as '<n> pages · <n> stale'", async () => {
     renderLayout([FLEET, CLOSE])
-    const header = screen.getByLabelText("Pages")
+    const header = screen.getByLabelText("Artifacts")
     await waitFor(() => expect(header.textContent).toContain("2 pages"))
     expect(header.textContent).toContain("· 1 stale")
   })
 
   it("says 'all fresh' rather than '0 stale' when nothing has gone quiet", async () => {
     renderLayout([CLOSE])
-    const header = screen.getByLabelText("Pages")
+    const header = screen.getByLabelText("Artifacts")
     await waitFor(() => expect(header.textContent).toContain("· all fresh"))
   })
 
@@ -181,7 +183,7 @@ describe("PagesLayout", () => {
     // A count is not a verdict. "all fresh" over an index that reported
     // nothing is exactly the lie §4 exists to prevent.
     renderLayout([{ id: "p", slug: "p", name: "P", panels: 2 }])
-    const header = screen.getByLabelText("Pages")
+    const header = screen.getByLabelText("Artifacts")
     await waitFor(() => expect(header.textContent).toContain("1 page"))
     const text = header.textContent ?? ""
     expect(text).toContain("1 page")
@@ -308,4 +310,72 @@ describe("the STATUS facet covers the closed vocabulary", () => {
     // failure is invisible at runtime.
     expect([...PAGE_STATE_ORDER].sort()).toEqual([...PANEL_STATES].sort())
   })
+})
+
+
+it("dispatches a native descriptor to the Document editor through the existing Page URL",async()=>{
+  cleanup();window.history.replaceState(null,"","/pages");renderLayout([{id:"native-id",slug:"notes",name:"Notes",has_document:true}],"notes")
+  expect(await screen.findByTestId("native-document")).toHaveTextContent("ws-1:native-id")
+  expect(screen.queryByTestId("application")).toBeNull()
+})
+
+
+it("clears cached native catalog entries when an authorized refresh denies access",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages")
+ const {qc,mockFetch}=renderLayout([{id:"private-native",slug:"private-notes",name:"Private notes",has_document:true}])
+ await screen.findByRole("button",{name:"Private notes Doc"})
+ mockFetch.mockResolvedValue({ok:false,status:403,json:async()=>({error:"access revoked"})} as Response)
+ await act(async()=>{await qc.invalidateQueries()})
+ await waitFor(()=>expect(screen.getByText("access revoked")).toBeInTheDocument())
+ expect(screen.queryByRole("button",{name:"Private notes Doc"})).toBeNull()
+ expect(screen.queryByText("Private notes")).toBeNull()
+})
+
+
+it("keeps native Docs out of the HTML editor even through a manual edit URL",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages/notes?mode=edit&section=access")
+ renderLayout([{id:"native-id",slug:"notes",name:"Notes",has_document:true}],"notes")
+ await screen.findByTestId("native-document")
+ expect(screen.queryByTestId("section-content")).toBeNull()
+ expect(screen.queryByTestId("section-history")).toBeNull()
+ expect(screen.queryByTestId("section-access")).toBeNull()
+ expect(screen.queryByRole("button",{name:"Share"})).toBeNull()
+ expect(screen.queryByRole("button",{name:"Ask about this Page"})).toBeNull()
+})
+
+it("shows unavailable for a native descriptor without inventing its stable Page identity",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages/notes?mode=edit")
+ renderLayout([{slug:"notes",name:"Notes",has_document:true}],"notes")
+ expect(await screen.findByText("The original Page identity is unavailable.")).toBeInTheDocument()
+ expect(screen.queryByTestId("native-document")).toBeNull()
+ expect(screen.queryByTestId("section-content")).toBeNull()
+ expect(screen.queryByTestId("section-access")).toBeNull()
+ expect(screen.queryByTestId("application")).toBeNull()
+})
+
+it.each([false,true])("keeps native Docs out of the legacy panel overview (mixed: %s)",async(mixed)=>{
+ cleanup();window.history.replaceState(null,"","/pages")
+ renderLayout([{id:"native-id",slug:"notes",name:"Notes",has_document:true},...(mixed?[FLEET]:[])])
+ await screen.findByRole("button",{name:"Notes Doc"})
+ if(mixed) {
+   expect(screen.getByText("1 page in this workspace")).toBeInTheDocument()
+   expect(screen.getByText("Flotila .201")).toBeInTheDocument()
+ } else {
+   expect(screen.queryByRole("heading",{name:"Overview"})).toBeNull()
+   expect(screen.queryByText("no panels declared")).toBeNull()
+   expect(screen.queryByText("No pages yet")).toBeNull()
+ }
+})
+
+it("explains an empty filtered Docs-only list and restores the card when cleared",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages")
+ renderLayout([{id:"native-id",slug:"notes",name:"Notes",has_document:true}])
+ await screen.findByRole("button",{name:"Notes Doc"})
+ fireEvent.change(screen.getByLabelText("Search pages"),{target:{value:"unmatched"}})
+ expect(await screen.findByRole("status")).toHaveTextContent("No documents match these filters.")
+ expect(screen.queryByRole("button",{name:"Notes Doc"})).toBeNull()
+ expect(screen.queryByRole("heading",{name:"Overview"})).toBeNull()
+ fireEvent.change(screen.getByLabelText("Search pages"),{target:{value:""}})
+ expect(await screen.findByRole("button",{name:"Notes Doc"})).toBeInTheDocument()
+ expect(screen.queryByText("No documents match these filters.")).toBeNull()
 })

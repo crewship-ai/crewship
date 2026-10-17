@@ -128,6 +128,7 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  has_document?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -469,6 +470,8 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  /** Confirmed native Document descriptor; missing means a legacy Page. */
+  hasDocument?: boolean
   id: string
   slug: string
   name: string
@@ -614,6 +617,7 @@ export function toPageView(raw: WirePage): PageView {
   const slug = trimmed(raw.slug) ?? ""
   return {
     id: trimmed(raw.id) ?? slug,
+    hasDocument: raw.has_document === true,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
@@ -1087,7 +1091,8 @@ export function usePages(workspaceId: string | null | undefined): UsePagesResult
 
   usePagesRealtime(workspaceId)
 
-  const pages = useMemo(() => (query.data ?? []).map(toPageView), [query.data])
+  const denied = query.error instanceof PagesRequestError && [401,403,404].includes(query.error.status)
+  const pages = useMemo(() => (denied ? [] : query.data ?? []).map(toPageView), [query.data,denied])
 
   return {
     pages,
@@ -1114,6 +1119,8 @@ export interface UsePageResult {
   raw: WirePage | null
   loading: boolean
   error: string | null
+  /** An explicit authorization or missing-resource refusal, unlike a transient metadata failure. */
+  accessDenied: boolean
   /** True for a 404 — a slug that names nothing gets its own empty state. */
   notFound: boolean
   /**
@@ -1154,6 +1161,7 @@ export function usePage(
     raw: query.data ?? null,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
+    accessDenied: err instanceof PagesRequestError && [401,403,404].includes(err.status),
     notFound: err instanceof PagesRequestError && err.status === 404,
     live: pageLiveness(status, channel),
   }
