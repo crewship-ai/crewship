@@ -31,7 +31,6 @@ import { IssueWorkCard } from "./issue-work-card"
 import { IssueWorkDialogs } from "./issue-work-dialogs"
 import { sessionState } from "./issue-session"
 import { useIssueWork, type IssueWork, type IssueWorkflowAction } from "@/hooks/use-issue-work"
-import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
@@ -96,6 +95,8 @@ interface Props {
   feedback?: React.ReactNode
   /** Initial for the comment composer's author bubble. */
   viewerInitial?: string
+  /** The signed-in user's id, so the work block can say "You". */
+  viewerId?: string | null
   /** The host's list needs to know when a write landed. */
   onChanged?: () => void
   /** Called once when the identifier resolves to nothing. */
@@ -117,6 +118,7 @@ export function IssueDetailSurface({
   editable = true,
   actions, executionActions = true, authorizationKey, rechecking, onUnauthorized, write, feedback,
   viewerInitial,
+  viewerId = null,
   onChanged,
   onNotFound,
 }: Props) {
@@ -132,7 +134,7 @@ export function IssueDetailSurface({
   const can = React.useCallback((action: IssueAction) => allowed ? allowed.includes(action) : editable, [allowed, editable])
   // Embedded hosts (chat) keep work execution on the canonical issue page.
   const workCan = React.useCallback((action: string) => executionActions && can(action as IssueAction), [executionActions, can])
-  const meId = useSessionSafe().data?.user.id ?? null
+  const meId = viewerId
 
   const [commentsHasMore, setCommentsHasMore] = React.useState(false)
   const [olderBusy, setOlderBusy] = React.useState(false)
