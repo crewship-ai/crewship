@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { CalendarPanel } from "../calendar-panel"
 import { EMPTY_CALENDAR_FILTERS, type CalendarFilters } from "@/lib/calendar/model"
@@ -38,12 +38,40 @@ describe("calendar-panel", () => {
     expect(screen.getByRole("button", { name: /^Ops/ })).toHaveTextContent("2")
 
     fireEvent.click(screen.getByRole("button", { name: "Filter" }))
-    expect(screen.getByRole("button", { name: "Any status" })).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(screen.getByRole("button", { name: /At risk/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Waiting for someone/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Status" }))
+    const status = screen.getByRole("group", { name: "Status" })
+    for (const b of within(status).getAllByRole("button")) expect(b).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(within(status).getByRole("button", { name: /At risk/ }))
+    fireEvent.click(within(status).getByRole("button", { name: /Waiting for someone/ }))
     expect(state().statuses).toEqual(["risk", "waiting"])
-    // The panel stays open and neither pick zeroed the other's count.
-    expect(screen.getByRole("button", { name: /Planned/ })).toHaveTextContent("1")
+    // The block stays open and neither pick zeroed the other's count.
+    expect(within(status).getByRole("button", { name: /Planned/ })).toHaveTextContent("1")
+  })
+
+  // CAL-03 (#3495, PRD PNL-02 / COM-01): Filter opens the facets INSIDE the
+  // panel, under the toolbar — the kit facet block — never a floating popover.
+  it("Filter opens the facet block inside the panel, not a popover", () => {
+    const { container } = render(<Harness />)
+    const filter = screen.getByRole("button", { name: "Filter" })
+    expect(filter).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(filter)
+    expect(filter).toHaveAttribute("aria-expanded", "true")
+    const block = screen.getByRole("group", { name: "Filter calendar" })
+    expect(block).toHaveAttribute("data-slot", "facet-block")
+    // Rendered in the panel's own tree, not portalled to the body.
+    expect(container.contains(block)).toBe(true)
+    expect(document.querySelector("[data-radix-popper-content-wrapper]")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    // Picking a status names it in the facet header and offers its clear.
+    fireEvent.click(screen.getByRole("button", { name: "Status" }))
+    fireEvent.click(within(block).getByRole("button", { name: /At risk/ }))
+    expect(within(block).getByRole("button", { name: "Clear Status" })).toBeInTheDocument()
+    fireEvent.click(within(block).getByRole("button", { name: "Clear all filters" }))
+    expect(state().statuses).toEqual([])
+    // Escape closes the block and returns focus to Filter.
+    fireEvent.keyDown(within(block).getByRole("button", { name: "Status" }), { key: "Escape" })
+    expect(screen.queryByRole("group", { name: "Filter calendar" })).toBeNull()
+    expect(document.activeElement).toBe(filter)
   })
 
   it("shows active filters as chips whose × names what it removes", () => {

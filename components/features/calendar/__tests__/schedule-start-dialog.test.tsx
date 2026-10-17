@@ -50,14 +50,35 @@ describe("schedule a start · one time", () => {
 })
 
 describe("schedule a start · repeating", () => {
+  // CAL-02 (#3495, calendar.md CAL-07): without the right, Repeating is a
+  // disabled segment of the kit Segmented with its reason — on hover and in a
+  // note under the choice — instead of a choice that opens a form with no
+  // button.
   it("Repeating disabled with reason without routine.create", async () => {
     fetcher.mockResolvedValue({ ok: true, json: async () => ({ definition: { inputs: [] } }) })
     render(<ScheduleStartDialog workspaceId="ws" routines={routines} date={new Date(2030, 0, 4, 9)} canRepeat={false} onClose={vi.fn()} onScheduled={vi.fn()} />)
     await screen.findByRole("button", { name: "Schedule" })
-    fireEvent.click(screen.getByRole("radio", { name: "Repeating" }))
+    const group = screen.getByRole("radiogroup", { name: "How often" })
+    expect(group).toHaveAttribute("data-slot", "segmented")
+    const repeat = screen.getByRole("radio", { name: "Repeating" })
+    expect(repeat).toBeDisabled()
+    expect(repeat).toHaveAttribute("title", expect.stringContaining("Managers and above"))
+    // The reason is on screen before anyone tries, not only after a click.
     expect(screen.getByTestId("repeat-blocked")).toHaveTextContent("Managers and above")
+    fireEvent.click(repeat)
+    expect(screen.getByRole("radio", { name: "One time" })).toHaveAttribute("aria-checked", "true")
+    // One time stays fully usable.
+    expect(screen.getByRole("button", { name: "Schedule" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Add schedule" })).toBeNull()
     expect(fetcher.mock.calls.some(([u]) => String(u).includes("/pipeline-schedules"))).toBe(false)
+  })
+
+  it("Repeating is an enabled segment with the right, and shows no reason", async () => {
+    fetcher.mockResolvedValue({ ok: true, json: async () => ({ definition: { inputs: [] } }) })
+    render(<ScheduleStartDialog workspaceId="ws" routines={routines} date={new Date(2030, 0, 4, 9)} canRepeat onClose={vi.fn()} onScheduled={vi.fn()} />)
+    await screen.findByRole("button", { name: "Schedule" })
+    expect(screen.getByRole("radio", { name: "Repeating" })).toBeEnabled()
+    expect(screen.queryByTestId("repeat-blocked")).toBeNull()
   })
 
   it("previews the next three starts on the server and adds the schedule", async () => {

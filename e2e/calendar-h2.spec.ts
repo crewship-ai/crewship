@@ -137,6 +137,55 @@ test.describe("desktop", () => {
     await expect(dialog.getByLabel("Start time")).toHaveValue("14:00")
   })
 
+  // CAL-02 (#3495): One time / Repeating is the kit Segmented. Without the
+  // right to add schedules Repeating is a disabled segment with its reason on
+  // screen; with it, Repeating is enabled and no reason shows. The E2E user's
+  // role decides which branch runs — both are the contract.
+  test("CAL-07 Repeating is a kit segment, disabled with its reason without the right", async ({ page }) => {
+    await seed(page, PINNED)
+    await fixtures(page)
+    await page.goto("/calendar?view=week")
+    await workspaceScope(page)
+    await page.getByRole("button", { name: /^Schedule a start on .* at 14:00$/ }).last().click()
+    const dialog = page.getByRole("dialog", { name: /Schedule a start/ })
+    const group = dialog.getByRole("radiogroup", { name: "How often" })
+    await expect(group).toHaveAttribute("data-slot", "segmented")
+    const repeat = group.getByRole("radio", { name: "Repeating" })
+    if (await repeat.isDisabled()) {
+      await expect(repeat).toHaveAttribute("title", /Managers and above/)
+      await expect(dialog.getByTestId("repeat-blocked")).toBeVisible()
+      await expect(group.getByRole("radio", { name: "One time" })).toHaveAttribute("aria-checked", "true")
+    } else {
+      await expect(dialog.getByTestId("repeat-blocked")).toHaveCount(0)
+      await repeat.click()
+      await expect(repeat).toHaveAttribute("aria-checked", "true")
+    }
+  })
+
+  // CAL-03 (#3495, PNL-02): Filter opens the facets inside the secondary
+  // panel, under the toolbar, not in a floating popover.
+  test("CAL-01 Filter opens the facet block inside the panel", async ({ page }) => {
+    await seed(page, PINNED)
+    await fixtures(page)
+    await page.goto("/calendar?view=week")
+    await workspaceScope(page)
+    const panel = page.locator("[data-slot=secondary-panel]")
+    const filter = panel.getByRole("button", { name: "Filter" })
+    await filter.click()
+    await expect(filter).toHaveAttribute("aria-expanded", "true")
+    const block = panel.getByRole("group", { name: "Filter calendar" })
+    await expect(block).toBeVisible()
+    await expect(page.locator("[data-radix-popper-content-wrapper]")).toHaveCount(0)
+    await block.getByRole("button", { name: "Status" }).click()
+    await block.getByRole("button", { name: /At risk/ }).click()
+    await expect(block.getByRole("button", { name: "Clear Status" })).toBeVisible()
+    // The week below stays in view while the block is open.
+    await expect(page.getByRole("grid", { name: "Week" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(block).toBeHidden()
+    await expect(filter).toBeFocused()
+  })
+
   test("CAL-08 route abort shows Retry and keeps the view", async ({ page }) => {
     await seed(page, PINNED)
     await fixtures(page, { failCalendar: true })

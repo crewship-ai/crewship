@@ -9,7 +9,6 @@ import {
   CREATE_SURFACE_INPUT,
   CreateSurface,
   CreateSurfaceBody,
-  CreateSurfaceChoice,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
@@ -17,12 +16,16 @@ import {
 import { InputsForm, inputsSubmitContent, submitInputsForm } from "@/components/features/routines/routine-run-inputs-dialog"
 import { RoutineDateTimePicker } from "@/components/features/routines/routine-date-time-picker"
 import { RoutineRecurrenceFields } from "@/components/features/routines/routine-recurrence-fields"
+import { Segmented } from "@/components/ui/segmented"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { dateKey, scheduledInstant } from "@/lib/routine-calendar"
 import { formatRoutineTime, routineTimeZone } from "@/lib/routine-time"
 import { cn } from "@/lib/utils"
 
 type Mode = "once" | "repeat"
+
+/** Why Repeating is off for someone who may not add schedules (v67 D-RTSCHED). */
+export const REPEAT_BLOCKED_REASON = "Managers and above can add repeating schedules."
 
 const pad = (n: number) => String(n).padStart(2, "0")
 /** A slot on Fri 14:00 suggests "every Friday at 14:00". */
@@ -166,6 +169,11 @@ export function ScheduleStartDialog({
     }
   }
 
+  // The right can go while the dialog is open (a role change); fall back to
+  // One time rather than leave a Repeating form without a button.
+  useEffect(() => {
+    if (!canRepeat && mode === "repeat") setMode("once")
+  }, [canRepeat, mode])
   const blocked = mode === "repeat" && !canRepeat
   const formReady = !blocked && specs !== null && loadedSlug === slug
   const submitLabel = mode === "once" ? "Schedule" : "Add schedule"
@@ -193,15 +201,25 @@ export function ScheduleStartDialog({
             ))}
           </select>
         </CreateSurfaceField>
-        <CreateSurfaceChoice<Mode>
-          ariaLabel="How often"
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: "once", label: "One time" },
-            { value: "repeat", label: "Repeating", hint: canRepeat ? undefined : "Managers and above can add repeating schedules." },
-          ]}
-        />
+        {/* Without the right to add schedules, Repeating is a disabled
+            segment: the reason is its hover title and the note under it, so
+            nobody picks a choice that ends in a form without a button. */}
+        <div className="space-y-1.5">
+          <Segmented<Mode>
+            ariaLabel="How often"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "once", label: "One time" },
+              { value: "repeat", label: "Repeating", disabled: !canRepeat, title: canRepeat ? undefined : REPEAT_BLOCKED_REASON },
+            ]}
+          />
+          {!canRepeat && (
+            <p role="note" data-testid="repeat-blocked" className="text-label text-muted-foreground">
+              You can add one-time starts here. {REPEAT_BLOCKED_REASON} Members allowed to create schedules can too.
+            </p>
+          )}
+        </div>
         {mode === "once" ? (
           <>
             <CreateSurfaceField label="When" hint={`${routineTimeZone()} · your browser's time zone`}>
@@ -209,10 +227,6 @@ export function ScheduleStartDialog({
             </CreateSurfaceField>
             <p className="text-label text-muted-foreground">Shows on the calendar and in the routine&apos;s Plan. Uses the published version.</p>
           </>
-        ) : blocked ? (
-          <p role="note" data-testid="repeat-blocked" className="rounded-md border border-border bg-muted/40 px-3 py-2 text-label text-muted-foreground">
-            You can add one-time starts here. Repeating schedules are added by Managers and above, or by members allowed to create schedules.
-          </p>
         ) : (
           <>
             <RoutineRecurrenceFields cron={cron} timezone={timezone} onCronChange={setCron} onTimezoneChange={setTimezone} />
