@@ -46,6 +46,7 @@ interface NeedWaitpoint {
   kind: string
   prompt?: string
   timeout_at?: string
+  created_at?: string
   decision_form?: unknown
 }
 interface NeedSchedule {
