@@ -147,7 +147,10 @@ describe("write affordances gated by role", () => {
     expect(screen.queryByRole("tab", { name: /value history/i })).not.toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /pays for/i })).toBeInTheDocument()
     expect(screen.getByText("Connection health")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
+    // Revoke is in Settings, behind the confirm dialog — not in the header.
+    expect(screen.queryByRole("button", { name: /^revoke/i })).not.toBeInTheDocument()
+    openSettingsTab()
+    expect(screen.getByRole("button", { name: /^revoke…$/i })).toBeInTheDocument()
   })
 
   it("OWNER sees replace and delete", () => {
@@ -712,11 +715,19 @@ describe("Header and settings actions fire with the right credential", () => {
     expect(onRotate).toHaveBeenCalledWith(credential, "rotate")
   })
 
-  it("Give to agents opens the Access tab", () => {
+  it("Give to agents opens the picker for a role that may assign", () => {
     h.role = "OWNER"
     renderSheet()
     fireEvent.click(screen.getByRole("button", { name: /give to agents/i }))
+    expect(screen.getByRole("dialog", { name: /Give to agents/ })).toBeInTheDocument()
+  })
+
+  it("Give to agents opens the Access tab for a role that may not assign", () => {
+    h.role = "MANAGER"
+    renderSheet()
+    fireEvent.click(screen.getByRole("button", { name: /give to agents/i }))
     expect(screen.getByRole("tab", { name: /^access$/i })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("dialog", { name: /Give to agents/ })).not.toBeInTheDocument()
   })
 })
 

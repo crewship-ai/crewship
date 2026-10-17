@@ -259,6 +259,7 @@ export function SecretSettings({
   onRefresh,
   onDeleted,
   dependents,
+  onSignInAgain,
 }: {
   workspaceId: string
   credential: SettingsCredential
@@ -271,6 +272,8 @@ export function SecretSettings({
   onRefresh: () => void
   onDeleted: () => void
   dependents: { routines: { slug: string; name: string }[] } | null | "error"
+  /** AI provider accounts: replace the token without changing who it pays for. */
+  onSignInAgain?: () => void
 }) {
   const [confirm, setConfirm] = React.useState(false)
   const quoted = JSON.stringify(credential.name)
@@ -304,6 +307,17 @@ export function SecretSettings({
           <SettingsCard title="Fields">
             <div className="p-4">
               <CredentialExtraFieldsEditor fields={fields} credentialId={credential.id} workspaceId={workspaceId} onDirtyChange={() => {}} onSaved={onRefresh} />
+            </div>
+          </SettingsCard>
+        )}
+        {isLogin && onSignInAgain && (
+          <SettingsCard title="Sign-in">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <b className="text-control font-medium">Sign in again</b>
+                <p className="text-label text-muted-foreground">Replace the token without changing who it pays for.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={onSignInAgain}>Sign in again</Button>
             </div>
           </SettingsCard>
         )}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { applyCredentialFilters, type CredentialLike } from "../facets"
-import { buildVaultQuery, parseVaultUrl, resolveCrewTokens } from "../vault-url-state"
+import { buildVaultQuery, hasExplicitVaultState, parseVaultUrl, resolveCrewTokens } from "../vault-url-state"
 
 const NOW = Date.parse("2026-10-17T12:00:00Z")
 const DAY = 24 * 3600 * 1000
@@ -66,6 +66,32 @@ describe("vault URL state", () => {
     expect(s.filters.tier).toBeNull()
     expect(s.group).toBe("none")
     expect(buildVaultQuery(s)).toBe("")
+  })
+
+  it("reads the AI providers space: views, facets, layout, grouping and the group page", () => {
+    const s = parseVaultUrl(new URLSearchParams("space=providers&view=attention&provider=anthropic&mode=api_key&mode=bogus&owner=jana@acme.dev&layout=list&group=owner&q=max"))
+    expect(s.space).toBe("providers")
+    expect(s.providers.filters).toMatchObject({ status: "attention", provider: ["ANTHROPIC"], mode: ["api_key"], owner: ["jana@acme.dev"], search: "max" })
+    expect(s.providers).toMatchObject({ layout: "list", group: "owner", pool: null })
+    // A secrets view name means nothing here.
+    expect(parseVaultUrl(new URLSearchParams("space=providers&view=recent")).providers.filters.status).toBe("all")
+    const again = parseVaultUrl(new URLSearchParams(buildVaultQuery(s).slice(1)))
+    expect(again).toEqual(s)
+
+    const pool = parseVaultUrl(new URLSearchParams("pool=p1&tab=order"))
+    expect(pool).toMatchObject({ space: "providers", id: null, tab: null, providers: { pool: "p1", poolTab: "order" } })
+    expect(buildVaultQuery(pool)).toBe("?space=providers&pool=p1&tab=order")
+    // An account page inside the space keeps its own tab.
+    const acc = parseVaultUrl(new URLSearchParams("space=providers&id=c1&tab=access"))
+    expect(acc).toMatchObject({ id: "c1", tab: "access" })
+    expect(buildVaultQuery(acc)).toBe("?space=providers&id=c1&tab=access")
+  })
+
+  it("a bare address names nothing, so the remembered space may apply", () => {
+    expect(hasExplicitVaultState(new URLSearchParams(""))).toBe(false)
+    expect(hasExplicitVaultState(new URLSearchParams("space=secrets"))).toBe(true)
+    expect(hasExplicitVaultState(new URLSearchParams("id=c1"))).toBe(true)
+    expect(hasExplicitVaultState(new URLSearchParams("crew=research"))).toBe(true)
   })
 
   it("resolves a crew slug from an entity link to the crew id", () => {
