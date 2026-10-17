@@ -229,10 +229,32 @@ purpose, since a failure is not the same thing as the work being finished.
 
 ## The layout
 
+`/issues/<id>` has the Issues panel on its left, as `/issues` does. On this
+page the panel takes you somewhere: a view, a project, a facet or a search
+opens `/issues` with it. The top bar has **Back** (to wherever you came from),
+**Previous issue / Next issue** (through the list you came from, in your
+grouping and order; the origin is kept), **Copy link**, a **⋯** menu and
+**Back to list**. The menu has Copy link, **Move to project…**, **Cancel
+issue…** (asks first) and **Delete issue…** (red confirmation; only Backlog and
+Cancelled issues can be deleted, as the server allows). On a phone the bar is
+Back, the ID and ⋯.
+
 The page is two columns from `xl` up: the main column (ID, status, project,
-title, session, brief, sub-issues, relations, pull requests, runs, timeline)
-and a 320 px side column (Work & control, properties, files, related links,
+title, session, brief, sub-issues, relations, pull requests, timeline) and a
+320 px side column (Work & control, properties, files, related links,
 technical details). Below `xl` the side column follows the main one.
+
+The **Timeline** is one card with a segment: **All** (comments, activity and
+runs, newest first; a run is one line), **Comments**, **Activity** and
+**Runs** (every run with its result, a link to the run and the journal).
+**Relations › Add** and **Pull requests › Attach PR URL** open popovers at
+their field: Add relation has the four kinds (Blocks, Blocked by, Related,
+Duplicate of) and an Issue field that searches the workspace; Attach a pull
+request takes the URL and reads its state with your stored GitHub or GitLab
+credential. **Owner** (the accountable person) is a people picker next to
+Delegate; the change waits for Save like the other properties. There is no
+"nobody" owner: the API clears owner and delegate together when it is asked to
+unassign.
 
 Everything on the surface is a card, including **Run activity** — it used to
 render bare, a heading and a list of steps sitting on the page background in
@@ -251,14 +273,16 @@ exactly as before.
 ## Finding issues: the panel
 
 The left panel of `/issues` holds **Views** (My work, All issues), **Projects**
-and **Saved views**, and a **Filter** menu with Status, Priority, Delegate,
-Owner, Who holds the work, Labels and Crew. The facets **combine** —
+and **Saved views**, and a **Filter** button that opens the facets inside the
+panel, under its toolbar: Status, Priority, Delegate, Owner, Who holds the
+work, Labels and Crew. Each facet folds and names its current choice; it lists
+at most six values and the rest under **All N…**. The facets **combine** —
 "Engineering crew, high priority, still in Backlog" is one selection — and each
-pick changes only its own facet. The menu stays open while you pick.
+pick changes only its own facet.
 
 | Where | What it is |
 | --- | --- |
-| **Filter** in the panel's toolbar | Every facet, with counts from the loaded issues. The badge counts the active ones. |
+| **Filter** in the panel's toolbar | Opens the facets in the panel, with counts from the loaded issues. The badge counts the active ones. |
 | **Chips** under the toolbar | One per active facet; its × removes just that one. |
 | **Status chips** over the list | All, In progress, In review, Todo, Backlog — the same status selection, one click each. |
 
@@ -267,7 +291,7 @@ so a filtered list can be shared and a link from another page lands filtered.
 Changing a filter replaces the URL rather than adding a history entry.
 
 - Click an active value again to drop **that** facet.
-- **Any status / Any priority / All crews …** resets one facet and leaves the others.
+- A facet's **×** resets that facet and leaves the others.
 - **Clear all** drops every facet, as does `Esc` outside a text field.
 - **Saved views ›  +** keeps the current filters and layout under a name, optionally shared with the workspace.
 - Keys **1–9** select Views, then saved views, then projects; **C** opens New issue, **/** focuses search, **⇧V** opens Display options.
@@ -306,7 +330,11 @@ minus the editing, which is the defect this replaced.
 description, status, health, lead, crews) and the tabs **Overview** (done of
 total, issues by status, milestones, team), **Tree** (milestone → issue →
 sub-issue), **Issues** (the project's rows; a row opens the peek), **Files**
-(project files with their revision, and a download) and **Settings**
+(project files with their revision and a download; **Upload file** adds a
+file, or the next revision of a file with the same name, up to 1 MB; a row's
+⋯ › **Retire file…** removes it for new runs, and runs that already started
+keep the revision they read; a change that raced another is refused with a
+reason rather than overwriting) and **Settings**
 (properties, Access with Share, and — for admins and owners — Delete, behind a
 red confirmation; the issues stay, without a project). The tab is in the URL
 as `?tab=`, so a link can open Settings and a refresh keeps Files. A
