@@ -100,6 +100,8 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"workspace_artifact_creation_policy",
+	"workspace_artifact_creation_crews",
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
