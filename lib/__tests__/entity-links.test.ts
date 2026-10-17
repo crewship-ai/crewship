@@ -12,8 +12,8 @@ describe("entityHref", () => {
   })
 
   it("scopes issues to a crew or assignee on the issues page, not /orchestration", () => {
-    expect(entityHref({ kind: "issues", assigneeSlug: "alex" })).toBe("/issues?assignee=alex")
-    expect(entityHref({ kind: "issues", crewSlug: "engineering", status: "IN_PROGRESS" })).toBe("/issues?crew=engineering&status=IN_PROGRESS")
+    expect(entityHref({ kind: "issues", assigneeId: "agt_1" })).toBe("/issues?assignee_id=agt_1")
+    expect(entityHref({ kind: "issues", crewId: "crw_1", status: "IN_PROGRESS" })).toBe("/issues?crew_id=crw_1&status=IN_PROGRESS")
     expect(entityHref({ kind: "issue", identifier: "ENG-48" })).toBe("/issues/ENG-48")
   })
 
