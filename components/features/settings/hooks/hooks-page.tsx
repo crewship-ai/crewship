@@ -615,7 +615,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
             })}
           </ul>
         )}
-        <Link href="/journal?q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Journal →</Link>
+        <Link href="/activity?section=log&q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Activity →</Link>
       </section>
 
       {canChange && (

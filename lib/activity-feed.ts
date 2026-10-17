@@ -252,7 +252,34 @@ export interface ChangeItem {
   entry: JournalEntry
 }
 
-export type FeedItem = WorkItem | ChangeItem
+/**
+ * Several updates to one issue or one page on one day, as one row (v67
+ * `acstory`): "CRW-142 · 4 updates — Created → Assigned → In review".
+ */
+export interface StoryItem {
+  type: "story"
+  id: string
+  /** The last update: the time the row is sorted and grouped by. */
+  ts: number
+  /** The first update. */
+  first: number
+  objectKind: "issue" | "artifact"
+  /** The object, in words: "CRW-1 Fix flaky login", "Weekly report". */
+  title: string
+  missionId?: string
+  /** The updates, newest first like the list. */
+  items: (WorkItem | ChangeItem)[]
+  /** Who made them, newest first, once each. */
+  who: string[]
+  /** The agents among them, for the row's avatars. */
+  agents: { id: string; name: string }[]
+  /** The first three steps in the order they happened: "Todo → In progress → …". */
+  flow: string
+  /** The last update's before → after, when it says. */
+  diff?: string
+}
+
+export type FeedItem = WorkItem | ChangeItem | StoryItem
 
 export interface WorkContext {
   routineName?: (slug: string) => string | undefined
@@ -459,6 +486,103 @@ function bundleOf(runs: WorkItem[]): WorkItem {
 }
 
 /* ------------------------------------------------------------------ *
+ *  Change stories
+ * ------------------------------------------------------------------ */
+
+/** Fewer updates than this stay rows of their own. */
+export const STORY_MIN = 3
+
+/**
+ * What a story is about: an issue (its changes, and finished agent work on
+ * it that no routine started) or a page, on one day. Nothing that is still
+ * going on or needs a person folds: it must stay a row the reader sees.
+ */
+function storyKey(x: FeedItem, now: number): { key: string; kind: StoryItem["objectKind"] } | null {
+  if (x.type === "story") return null
+  const day = daysAgo(x.ts, now)
+  if (x.type === "work") {
+    if (x.runs || x.active || x.routineSlug || x.status !== "completed" || !x.issues[0]) return null
+    return { key: `issue:${x.issues[0].id}:${day}`, kind: "issue" }
+  }
+  if (x.kind === "issue" && x.missionId) return { key: `issue:${x.missionId}:${day}`, kind: "issue" }
+  if (x.kind === "artifact") {
+    const page = str(x.entry.payload?.["page_id"]) ?? x.object
+    return { key: `artifact:${page}:${day}`, kind: "artifact" }
+  }
+  return null
+}
+
+/** One step of a story, in a few words: where an issue went, or who worked on it. */
+function storyStep(x: WorkItem | ChangeItem): string {
+  if (x.type === "work") return `${x.agents[0]?.name ?? "An agent"} worked on it`
+  const to = x.diff?.split(" → ")[1]
+  return to ?? x.action
+}
+
+function storyOf(key: string, kind: StoryItem["objectKind"], items: (WorkItem | ChangeItem)[]): StoryItem {
+  const last = items[0]
+  const oldest = items[items.length - 1]
+  const change = items.find((x): x is ChangeItem => x.type === "change")
+  const issueId = kind === "issue" ? (change?.missionId ?? (items.find((x) => x.type === "work") as WorkItem | undefined)?.issues[0]?.id) : undefined
+  const title =
+    change?.object ?? (items.find((x) => x.type === "work") as WorkItem | undefined)?.issues[0]?.label ?? key
+  const steps = items.slice().reverse().map(storyStep)
+  const who: string[] = []
+  const agents: { id: string; name: string }[] = []
+  for (const x of items) {
+    const name = x.type === "work" ? (x.agents[0]?.name ?? "An agent") : x.who
+    if (!who.includes(name)) who.push(name)
+    const agent = x.type === "work" ? x.agents[0] : x.agentId ? { id: x.agentId, name: x.who } : undefined
+    if (agent && !agents.some((a) => a.id === agent.id)) agents.push(agent)
+  }
+  return {
+    type: "story",
+    id: `story:${key}`,
+    ts: last.ts,
+    first: oldest.ts,
+    objectKind: kind,
+    title,
+    missionId: issueId,
+    items,
+    who,
+    agents,
+    flow: (steps.length > 3 ? [...steps.slice(0, 3), "…"] : steps).join(" → "),
+    diff: last.type === "change" ? last.diff : undefined,
+  }
+}
+
+/**
+ * Three or more updates to one issue or one page on one day become one row
+ * (v67 `bundle()` / `mkStory`), at the place of the newest. The list reads
+ * "CRW-1 · 4 updates" once instead of four times; the story's Peek lists
+ * them in order. Input and output are newest first.
+ */
+export function foldStories(items: FeedItem[], now: number): FeedItem[] {
+  const groups = new Map<string, { kind: StoryItem["objectKind"]; items: (WorkItem | ChangeItem)[] }>()
+  for (const x of items) {
+    const k = storyKey(x, now)
+    if (!k) continue
+    const g = groups.get(k.key) ?? { kind: k.kind, items: [] }
+    g.items.push(x as WorkItem | ChangeItem)
+    groups.set(k.key, g)
+  }
+  const done = new Set<string>()
+  const out: FeedItem[] = []
+  for (const x of items) {
+    const k = storyKey(x, now)
+    const g = k ? groups.get(k.key) : undefined
+    if (!k || !g || g.items.length < STORY_MIN) {
+      out.push(x)
+      continue
+    }
+    if (done.has(k.key)) continue
+    done.add(k.key)
+    out.push(storyOf(k.key, g.kind, g.items))
+  }
+  return out
+}
+
+/* ------------------------------------------------------------------ *
  *  Groups
  * ------------------------------------------------------------------ */
 
@@ -492,22 +616,27 @@ export function groupFeed(items: FeedItem[], by: GroupBy, now: number, ctx: Grou
     if (by === "time") {
       if (x.type === "work" && x.active) add("now", "Active now", x)
       else add(`d${daysAgo(x.ts, now)}`, dayLabel(x.ts, now), x)
-    } else if (by === "what") {
-      if (x.type === "work") add("work", "Runs and agent work", x)
-      else add(x.kind, CHANGE_KIND_LABEL[x.kind], x)
+      continue
+    }
+    // Stories fold under Group by Time only; anywhere else one sits where its
+    // newest update would.
+    const y = x.type === "story" ? x.items[0] : x
+    if (by === "what") {
+      if (y.type === "work") add("work", "Runs and agent work", x)
+      else add(y.kind, CHANGE_KIND_LABEL[y.kind], x)
     } else if (by === "who") {
-      if (x.type === "work") {
-        const a = x.agents[0]
+      if (y.type === "work") {
+        const a = y.agents[0]
         add(a ? `a:${a.id}` : "nobody", a ? a.name : "No agent", x)
-      } else add(x.agentId ? `a:${x.agentId}` : `w:${x.who}`, x.who, x)
+      } else add(y.agentId ? `a:${y.agentId}` : `w:${y.who}`, y.who, x)
     } else {
-      if (x.type === "work") {
-        if (x.routineSlug) add(`r:${x.routineSlug}`, ctx.routineName?.(x.routineSlug) ?? x.routineSlug, x)
-        else if (x.issues[0]) add(`i:${x.issues[0].id}`, x.issues[0].label, x)
+      if (y.type === "work") {
+        if (y.routineSlug) add(`r:${y.routineSlug}`, ctx.routineName?.(y.routineSlug) ?? y.routineSlug, x)
+        else if (y.issues[0]) add(`i:${y.issues[0].id}`, y.issues[0].label, x)
         else add("other", "Other work", x)
-      } else if (x.missionId) add(`i:${x.missionId}`, x.object, x)
-      else if (x.routineSlug) add(`r:${x.routineSlug}`, x.object, x)
-      else add(`o:${x.object}`, x.object, x)
+      } else if (y.missionId) add(`i:${y.missionId}`, y.object, x)
+      else if (y.routineSlug) add(`r:${y.routineSlug}`, y.object, x)
+      else add(`o:${y.object}`, y.object, x)
     }
   }
   const groups = order.map((k) => map.get(k)!)
@@ -695,6 +824,22 @@ export function rangeDates(r: TimeRange, now: number): string {
   return `${dm(b.since)} – ${dm(end)}`
 }
 
+/**
+ * The range a link to one item should show, so the item is in the list and
+ * not only in the Peek (`?run=` outside the window): the range itself when it
+ * already holds the item, else the shortest step that holds both the item and
+ * everything the range held, else a custom range from the item's day to now.
+ */
+export function rangeIncluding(r: TimeRange, ts: number, now: number): TimeRange {
+  if (inRange(ts, r, now)) return r
+  const since = rangeBounds(r, now).since
+  for (const key of RANGE_STEPS) {
+    const b = rangeBounds({ key }, now)
+    if (b.since <= since && inRange(ts, { key }, now)) return { key }
+  }
+  return { key: "custom", from: startOfDay(ts), to: now }
+}
+
 /** The next range one step shorter (-1) or longer (+1), or null at the end. */
 export function stepRange(key: RangeKey, dir: -1 | 1): RangeKey | null {
   let i = RANGE_STEPS.indexOf(key)
@@ -859,7 +1004,7 @@ function csvCell(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 
-/** The rows on screen as CSV — one line per run or change; bundles unfold. */
+/** The rows on screen as CSV — one line per run or change; bundles and stories unfold. */
 export function feedCsv(items: FeedItem[]): string {
   const lines = [["started", "type", "status", "title", "origin", "agents", "duration_ms", "id"].join(",")]
   const work = (w: WorkItem) =>
@@ -868,12 +1013,14 @@ export function feedCsv(items: FeedItem[]): string {
         .map(csvCell)
         .join(","),
     )
-  for (const x of items) {
-    if (x.type === "work") (x.runs ?? [x]).forEach(work)
+  const row = (x: FeedItem) => {
+    if (x.type === "story") x.items.forEach(row)
+    else if (x.type === "work") (x.runs ?? [x]).forEach(work)
     else
       lines.push(
         [new Date(x.ts).toISOString(), `change:${x.kind}`, x.action, x.object, x.who, "", "", x.id].map(csvCell).join(","),
       )
   }
+  items.forEach(row)
   return lines.join("\n") + "\n"
 }

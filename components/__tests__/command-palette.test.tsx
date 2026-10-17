@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, within, cleanup } from "@testing-library/react"
+import { render, screen, within, cleanup, fireEvent, waitFor } from "@testing-library/react"
 
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -58,6 +58,20 @@ describe("CommandPalette — feature coverage", () => {
       expect(screen.getByText(label)).toBeInTheDocument()
     },
   )
+
+  // F-02: the Journal is Activity now. The palette goes straight there
+  // instead of through the /journal redirect (ACT-05).
+  it("never links the old Journal; Runs opens Activity's work, and 'journal' finds Activity", async () => {
+    openPalette()
+    await group(/navigation/i)
+    const hrefs = [...document.body.querySelectorAll("[data-href]")].map((el) => el.getAttribute("data-href") ?? "")
+    expect(hrefs.filter((h) => h.startsWith("/journal"))).toEqual([])
+    expect(document.body.querySelector("[data-href='/activity?what=work']")).toHaveTextContent("Runs")
+    // Someone who still types "journal" lands on Activity.
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "journal" } })
+    await waitFor(() => expect(document.body.querySelector("[data-href='/activity']")).not.toBeNull())
+    expect(document.body.querySelector("[data-href='/activity']")).toHaveTextContent("Activity")
+  })
 
   it("drops Marketplace, which has no page and 404s", () => {
     openPalette()

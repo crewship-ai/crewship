@@ -295,7 +295,6 @@
   "components/features/issues/tiptap-editor-toolbar.tsx": 4,
   "components/features/journal/journal-entry-card.tsx": 13,
   "components/features/journal/journal-saved-views.tsx": 6,
-  "components/features/journal/journal-spend-view.tsx": 2,
   "components/features/journal/runs-view.tsx": 34,
   "components/features/journal/spend-view.tsx": 22,
   "components/features/logs/chat-jump-link.tsx": 1,

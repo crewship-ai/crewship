@@ -18,19 +18,12 @@ describe("<InboxBanner>", () => {
     expect(screen.getByText(/3 items waiting/)).toBeInTheDocument()
   })
 
-  it("Open inbox link uses agent_id (the param /journal actually accepts)", () => {
+  it("opens the agent's waiting work in Activity, not the old Journal (F-02)", () => {
     // Regression: an earlier version linked to /orchestration?tab=approvals&agent=<slug>,
-    // but /orchestration ignores all query params and the link was a dead link.
-    // This test pins the working contract: deep-link to /journal with
-    // agent_id + entry_type filter (both of which /journal honors).
+    // which ignored its query; then to /journal, which only redirects now.
     render(<InboxBanner agentId="agent-uuid-123" count={2} summary="2 escalations" />)
-    const link = screen.getByRole("link", { name: /Open inbox/ })
-    const href = link.getAttribute("href")
-    expect(href).toMatch(/^\/journal\?/)
-    expect(href).toContain("agent_id=agent-uuid-123")
-    expect(href).toContain("entry_type=")
-    // Specifically NOT the dead orchestration deep-link:
-    expect(href).not.toContain("/orchestration")
+    const link = screen.getByRole("link", { name: "Open in Activity" })
+    expect(link).toHaveAttribute("href", "/activity?view=need&agent=agent-uuid-123")
   })
 
   it("renders summary when provided", () => {

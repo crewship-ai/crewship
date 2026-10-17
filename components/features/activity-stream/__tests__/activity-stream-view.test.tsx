@@ -204,6 +204,24 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("")
   })
 
+  it("?run=<id> outside the range widens the list range so the run is in the list", async () => {
+    const old = chain("run_old", { routine_slug: "digest", first_activity: ago(10 * 24 * 60), last_activity: ago(10 * 24 * 60 - 1) })
+    mock.chains.mockReturnValue(chainsState({ chains: [...CHAINS, old] }))
+    window.history.replaceState(null, "", "/activity?run=run_old")
+    show()
+    expect(await screen.findByTestId("activity-peek-work")).toBeInTheDocument()
+    await waitFor(() => expect(table().querySelector("[data-row-id=run_old]")).not.toBeNull())
+    expect(window.location.search).toContain("range=30d")
+    expect(window.location.search).toContain("run=run_old")
+  })
+
+  it("?run=<id> inside the range keeps the default range", async () => {
+    window.history.replaceState(null, "", "/activity?run=run_bad")
+    show()
+    await screen.findByTestId("activity-peek-work")
+    expect(window.location.search).not.toContain("range=")
+  })
+
   it("Open run walks to the run's page", async () => {
     window.history.replaceState(null, "", "/activity?run=run_bad")
     show()
@@ -213,6 +231,60 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toContain("walk=workflow%3Arun_bad")
     fireEvent.click(screen.getByRole("button", { name: /Back to activity/ }))
     expect(await screen.findByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+  })
+
+  it("a run page keeps one h1: its own title, not the top-bar path", async () => {
+    mock.run.mockImplementation(() => <h1>Nightly triage</h1>)
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_bad")
+    show()
+    await screen.findByText("Nightly triage")
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^Nightly triage$/)
+  })
+
+  it("while a run page loads, the top bar is the one h1 until the page names itself", async () => {
+    let reveal = () => {}
+    function LoadingRun() {
+      const [ready, setReady] = React.useState(false)
+      reveal = () => setReady(true)
+      return ready ? <h1>Nightly triage</h1> : <div role="status">Loading run…</div>
+    }
+    mock.run.mockImplementation(() => <LoadingRun />)
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_bad")
+    show()
+    await screen.findByText("Loading run…")
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1))
+    act(() => reveal())
+    await screen.findByText("Nightly triage")
+    await waitFor(() => {
+      const h1s = screen.getAllByRole("heading", { level: 1 })
+      expect(h1s).toHaveLength(1)
+      expect(h1s[0]).toHaveTextContent(/^Nightly triage$/)
+    })
+  })
+
+  it("an unknown run that is still loading keeps exactly one h1", async () => {
+    mock.chains.mockReturnValue(chainsState({ chains: [], loading: true }))
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_gone")
+    show()
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1))
+  })
+
+  it("a record page keeps one h1: the record's own", async () => {
+    mock.detail.mockImplementation((p) => <h1>{p.entry.summary}</h1>)
+    window.history.replaceState(null, "", "/activity?entry=e1")
+    show()
+    await screen.findByTestId("activity-peek-change")
+    fireEvent.click(screen.getByRole("button", { name: "Open full record" }))
+    await screen.findByText("CRW-1 moved to In review", { selector: "h1" })
+    // Counted in the DOM: the closing Peek still hides the page from the
+    // accessibility tree for a moment, and every h1 counts, hidden or not.
+    await waitFor(() => {
+      const h1s = document.querySelectorAll("h1")
+      expect(h1s).toHaveLength(1)
+      expect(h1s[0]).toHaveTextContent(/^CRW-1 moved to In review$/)
+    })
   })
 
   it("keys 1–4 switch views and the view is written to the URL", async () => {
@@ -237,6 +309,40 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("?bundle=off")
   })
 
+  it("three updates to one issue on one day show as one story row with a story Peek", async () => {
+    const upd = (id: string, h: number, from: string, to: string): JournalEntry => ({ ...change, id, ts: yesterday(h), payload: { from, to } })
+    mock.list.mockReturnValue(listState({ entries: [upd("s3", 11, "In progress", "In review"), upd("s2", 10, "Todo", "In progress"), upd("s1", 9, "Backlog", "Todo")] }))
+    show()
+    const row = await within(table()).findByText("3 updates")
+    expect(within(table()).getByText("Todo → In progress → In review")).toBeVisible()
+    // One row for the three, not three rows.
+    expect(table().querySelectorAll("[data-row-id=s1],[data-row-id=s2],[data-row-id=s3]")).toHaveLength(0)
+    fireEvent.click(row)
+    const peek = await screen.findByTestId("activity-peek-story")
+    expect(peek).toHaveTextContent("What happened, in order")
+    expect(peek).toHaveTextContent("3 updates about one issue on one day")
+    const steps = within(peek).getAllByRole("button", { name: /Status changed/ })
+    expect(steps).toHaveLength(3)
+    // Oldest first, the way it happened.
+    expect(steps[0]).toHaveTextContent("Backlog → Todo")
+    expect(within(peek).getByRole("button", { name: /Everything about CRW-1 Fix flaky login/ })).toBeVisible()
+    // A step opens that change in the Peek.
+    fireEvent.click(steps[0])
+    expect(await screen.findByTestId("activity-peek-change")).toHaveTextContent("Backlog")
+    expect(window.location.search).toBe("?entry=s1")
+  })
+
+  it("Display › Group repeated runs off lists a story's updates one by one", async () => {
+    const upd = (id: string, h: number): JournalEntry => ({ ...change, id, ts: yesterday(h) })
+    mock.list.mockReturnValue(listState({ entries: [upd("s3", 11), upd("s2", 10), upd("s1", 9)] }))
+    show()
+    await within(table()).findByText("3 updates")
+    fireEvent.click(screen.getByRole("button", { name: /Display/ }))
+    fireEvent.click(await screen.findByRole("switch", { name: "Group repeated runs" }))
+    await waitFor(() => expect(within(table()).queryByText("3 updates")).toBeNull())
+    expect(table().querySelectorAll("[data-row-id=s1],[data-row-id=s2],[data-row-id=s3]")).toHaveLength(3)
+  })
+
   it("old lens links group the list", async () => {
     window.history.replaceState(null, "", "/activity?lens=agents")
     show()
@@ -252,6 +358,26 @@ describe("ActivityStreamView", () => {
     expect(screen.getByText(/Everything about this issue/)).toBeVisible()
     expect(screen.getByRole("link", { name: /Open issue/ })).toHaveAttribute("href", "/issues/CRW-1")
     expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
+  })
+
+  it("a link that names an agent or crew by slug, or an issue by identifier, narrows the list to it", async () => {
+    window.history.replaceState(null, "", "/activity?agent=scout")
+    const view = show()
+    await waitFor(() => expect(table().querySelectorAll("[data-row-id]")).toHaveLength(1))
+    expect(table().querySelector("[data-row-id=run_live]")).not.toBeNull()
+    expect(window.location.search).toBe("?agent=a1")
+    view.unmount()
+
+    window.history.replaceState(null, "", "/activity?crew=research")
+    const crew = show()
+    await waitFor(() => expect(window.location.search).toBe("?crew=c1"))
+    expect(table().querySelector("[data-row-id=run_live]")).not.toBeNull()
+    crew.unmount()
+
+    window.history.replaceState(null, "", "/activity?mission=CRW-1")
+    show()
+    expect(await screen.findByRole("heading", { level: 1, name: "CRW-1 Fix flaky login" })).toBeVisible()
+    expect(window.location.search).toBe("?mission=m1")
   })
 
   it("keeps work rows and changes live from one stream", async () => {
