@@ -97,7 +97,7 @@ test.describe("A. Top-level routes", () => {
     "/issues",
     "/runs",        // legacy redirect → /journal?tab=runs (still 200 after follow)
     "/journal",
-    "/approvals",
+    "/approvals",   // legacy redirect → /inbox?attention=approvals
     "/crows-nest",
     "/skills",
     "/credentials",
@@ -380,7 +380,7 @@ test.describe("G. No console errors on critical pages", () => {
     "/orchestration",
     "/issues",
     "/journal",
-    "/approvals",
+    "/inbox?attention=approvals",
   ]
 
   for (const path of criticalPages) {

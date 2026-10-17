@@ -234,7 +234,7 @@ updated.
 
 | Event | Why not yet |
 |---|---|
-| `chat_approval_shown` | the chat surface has no interactive approval card. `AskUserQuestion` renders deliberately inert — `assistant-turn.test.tsx` pins that it must not look clickable — and approvals are decided on `/approvals` |
+| `chat_approval_shown` | the chat surface has no interactive approval card. `AskUserQuestion` renders deliberately inert — `assistant-turn.test.tsx` pins that it must not look clickable — and approvals are decided in the Inbox |
 | `chat_approval_decided` | same: no approve/deny handler exists inside chat |
 
 Both are declared so that whoever builds the in-chat approval card emits the
