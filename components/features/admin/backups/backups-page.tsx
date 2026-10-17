@@ -14,7 +14,7 @@ import { TimeRangePicker, type TimeRange } from "@/components/features/logs/time
 import type { JournalEntry } from "@/lib/types/journal"
 import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import { initialBackupsSection, type BackupsSection } from "@/app/(dashboard)/admin/navigation"
-import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-console"
+import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-scope"
 import { describePlanWhen, formatAgo } from "./backups-model"
 import { useBackupRuns } from "./use-backup-runs"
 import { useBackupPlans } from "./use-backup-plans"

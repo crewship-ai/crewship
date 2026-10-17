@@ -11,7 +11,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.api(...a) }
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: null, loading: false }) }))
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }))
 import { RestoreWizard } from "../backups-recovery"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 
 const ctx: SectionCtx = {
   scope: "instance", selected: new Set(), workspaces: [], currentWorkspaceId: null, demo: false, go: vi.fn(),

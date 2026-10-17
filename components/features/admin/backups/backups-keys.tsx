@@ -21,7 +21,7 @@ import {
   useBackupSettings, useIncidents, useRecipients, useVaultKeys,
 } from "./use-backup-settings"
 import { perform, performConfirm, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Keys & alerts (instance setting): the AGE keys a backup is

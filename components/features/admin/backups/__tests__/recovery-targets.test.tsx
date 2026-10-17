@@ -23,7 +23,7 @@ vi.mock("../use-backup-settings", () => ({
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }))
 
 import { BackupsRecovery, RestoreWizard } from "../backups-recovery"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 import type { BackupRun } from "../backups-model"
 
 const json = (b: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(b), { status }))

@@ -29,7 +29,7 @@ import {
 } from "./use-backup-recovery"
 import { saveBackupSettings, useBackupSettings, useDestinations, useVaultKeys } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 import { BackupsUpload, type UploadReceipt } from "./backups-upload"
 
