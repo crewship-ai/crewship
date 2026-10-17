@@ -60,4 +60,32 @@ describe("Segmented", () => {
     expect(screen.getByRole("radiogroup")).toHaveClass("w-full")
     expect(screen.getByRole("radio", { name: "Week" })).toHaveClass("flex-1")
   })
+
+  // COM-02 (#3481): the one kit control replaces the local copies, so it
+  // carries what they needed — a count (Dashboard window filters) and a
+  // reason on a segment (Calendar's Repeating, Issues' display hints).
+  it("shows a count after the label without changing the segment's name", () => {
+    render(<Segmented ariaLabel="Show" value="all" options={[{ value: "all", label: "All", count: 12 }, { value: "failed", label: "Failed", count: 3 }]} onChange={() => {}} />)
+    const failed = screen.getByRole("radio", { name: "Failed" })
+    expect(failed).toHaveTextContent("Failed3")
+    expect(failed.querySelector("[data-slot=segmented-count]")).toHaveTextContent("3")
+  })
+
+  it("explains a segment with a title, also when it is disabled", () => {
+    render(
+      <Segmented
+        ariaLabel="When"
+        value="once"
+        options={[{ value: "once", label: "One time" }, { value: "repeat", label: "Repeating", disabled: true, title: "Managers and above can add repeating schedules." }]}
+        onChange={() => {}}
+      />,
+    )
+    expect(screen.getByRole("radio", { name: "Repeating" })).toHaveAttribute("title", "Managers and above can add repeating schedules.")
+  })
+
+  it("passes a stable test id and extra classes through", () => {
+    render(<Segmented ariaLabel="Range" value="w" options={[{ value: "w", label: "Week" }]} onChange={() => {}} className="ml-auto" />)
+    expect(screen.getByRole("radiogroup")).toHaveAttribute("data-slot", "segmented")
+    expect(screen.getByRole("radiogroup")).toHaveClass("ml-auto")
+  })
 })
