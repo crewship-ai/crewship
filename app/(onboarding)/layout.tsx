@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect } from "react"
-import { Spinner } from "@/components/ui/spinner"
 import { useSession } from "@/hooks/use-auth"
 import { useRouter } from "next/navigation"
+import { SetupCardSkeleton } from "@/components/features/onboarding/setup-card"
 
 export default function OnboardingLayout({
   children,
@@ -19,12 +19,10 @@ export default function OnboardingLayout({
     }
   }, [status, router])
 
+  // The same skeleton the page shows while it restores the setup, so the
+  // session check and the restore read as one load, not two spinners.
   if (status === "loading" || status === "unauthenticated") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Spinner className="h-8 w-8 text-muted-foreground" />
-      </div>
-    )
+    return <SetupCardSkeleton />
   }
 
   return <>{children}</>

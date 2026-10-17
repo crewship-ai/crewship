@@ -19,9 +19,6 @@ vi.mock("@/components/features/onboarding/setup-agent-api", () => ({
   updateOnboardingWorkspace: mocks.workspace, validateWorkspaceModelCredential: mocks.validate,
   createWorkspaceModelCredential: mocks.create, updateWorkspaceModelCredential: mocks.update,
 }))
-vi.mock("@/components/features/onboarding/onboarding-preview", async (original) => ({
-  ...await original<typeof import("@/components/features/onboarding/onboarding-preview")>(), OnboardingPreview: () => <div>Workspace preview</div>,
-}))
 vi.mock("@/components/features/onboarding/toolchain-picker", () => ({ ToolchainPicker: ({ onChange }: ComponentProps<typeof ToolchainPicker>) => <div><button onClick={() => onChange("CODEX")}>Select Codex</button><button onClick={() => onChange("CLAUDE_CODE")}>Select Claude</button></div> }))
 vi.mock("@/components/features/onboarding/onboarding-created-panel", () => ({ OnboardingCreatedPanel: ({ onCrewsFound }: ComponentProps<typeof OnboardingCreatedPanel>) => <button onClick={() => onCrewsFound?.(2)}>Restore existing crews</button> }))
 vi.mock("@/components/features/onboarding/onboarding-proposal-summary", () => ({ OnboardingProposalSummary: ({ created }: { created?: boolean }) => <div>{created ? "Created proposal" : "Prepared proposal"}</div> }))
@@ -43,7 +40,7 @@ async function open(step: 1 | 2 | 3 = 1) {
   resume(step); render(<Page />)
   await screen.findByRole("button", { name: step === 3 ? "Launch" : "Continue" })
 }
-async function template() { await open(3); fireEvent.click(screen.getByRole("button", { name: /Prefer to pick/ })); fireEvent.click(screen.getByRole("button", { name: /Software Development/ })) }
+async function template() { await open(3); fireEvent.click(screen.getByRole("button", { name: "Pick a template instead" })); fireEvent.click(screen.getByRole("button", { name: /Software Development/ })) }
 function token(value = "fixture-token-value") { fireEvent.change(screen.getByLabelText("Claude Code CLI token"), { target: { value } }) }
 function click(name: string) { fireEvent.click(screen.getByRole("button", { name })) }
 function posted(url: string) { const call = mocks.api.mock.calls.find(([path]) => path === url); expect(call).toBeDefined(); return JSON.parse(call![1].body) }
@@ -105,7 +102,7 @@ it.each([false, true])("blocks absent runtime (Docker available=%s) until re-che
   mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/runtime") ? { available, in_use: false } : {}))
   await open(2); token(); expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled()
   expect(screen.getByTestId("onboarding-runtime-blocker")).toHaveTextContent(available ? "Restart the server" : "Install or start Docker")
-  mocks.server.mockResolvedValue(reply({ available: true, in_use: true })); click("Re-check")
+  mocks.server.mockResolvedValue(reply({ available: true, in_use: true })); click("Check again")
   await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled())
 })
 it("explains experimental adapter and token type gates", async () => {
@@ -194,7 +191,10 @@ it.each(["workspace", "credential"])("disables navigation while %s is being pers
   if (kind === "workspace") mocks.workspace.mockReturnValueOnce(pending)
   else mocks.validate.mockReturnValueOnce(pending)
   await open(kind === "workspace" ? 1 : 2); if (kind === "credential") token(); click("Continue")
-  expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+  // Step 1 has no Back at all; step 2's is locked while the token is verified.
+  if (kind === "workspace") expect(screen.queryByRole("button", { name: "Back" })).toBeNull()
+  else expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: /Saving|Verifying token/ })).toBeDisabled()
   expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled()
   await act(async () => finish({ ok: true }))
   if (kind === "workspace") await screen.findByLabelText("Claude Code CLI token")
@@ -249,8 +249,8 @@ it.each(["consumed", "expired"])("observes a pairing code becoming %s", async (s
     expect(mocks.create).not.toHaveBeenCalled()
     expect(mocks.validate).not.toHaveBeenCalled()
   } else {
-    expect(screen.getByRole("button", { name: "get a new one" })).toBeInTheDocument()
-    await act(async () => { click("get a new one") })
+    expect(screen.getByText("The code expired.")).toBeInTheDocument()
+    await act(async () => { click("New code") })
     expect(mocks.server.mock.calls.filter(([path]) => path.endsWith("/pair/start"))).toHaveLength(2)
   }
 })
@@ -286,8 +286,8 @@ it("expires pairing locally, copies the complete command, and stops polling in b
   await act(async () => { click("Copy command") })
   expect(clipboard).toHaveBeenCalledWith(`crewship login --pair --code=SHORT-CODE --server=${window.location.origin}`)
   await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
-  expect(screen.getByRole("button", { name: "get a new one" })).toBeInTheDocument()
-  await act(async () => { click("get a new one") })
+  expect(screen.getByRole("button", { name: "New code" })).toBeInTheDocument()
+  await act(async () => { click("New code") })
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Chat in browser/ })) })
   const count = fetchMock.mock.calls.length
   await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
@@ -305,4 +305,131 @@ it("ignores a credential response after leaving CLI mode", async () => {
   await act(async () => { finish({ ok: true, state: { ...snapshot, savedCredential: { id: "late", provider: "ANTHROPIC" } } }) })
   expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled()
   expect(screen.queryByText("Your saved Anthropic credential will be reused.")).toBeNull()
+})
+
+// Harbor 2 (#3409): the setup card, its states and the kit pieces it uses.
+it("checking renders the wizard skeleton, no Spinner", async () => {
+  mocks.api.mockReturnValue(new Promise(() => {}))
+  const { container } = render(<Page />)
+  expect(screen.getByRole("status", { name: "Loading setup" })).toHaveAttribute("aria-busy", "true")
+  expect(screen.getByTestId("setup-skeleton")).toBeInTheDocument()
+  expect(container.querySelector(".animate-spin")).toBeNull()
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull()
+})
+it("resume failure renders error card with Retry; Retry calls bootstrapOnboarding again", async () => {
+  mocks.resume.mockResolvedValueOnce({ ok: false, error: "Workspace unavailable" })
+  const { container } = render(<Page />)
+  expect(await screen.findByText("We couldn't restore your setup")).toBeVisible()
+  expect(screen.getByText("Workspace unavailable")).toBeVisible()
+  expect(container.querySelector('[data-state="error"]')).not.toBeNull()
+  click("Retry")
+  await screen.findByRole("button", { name: "Continue" })
+  expect(mocks.resume).toHaveBeenCalledTimes(2)
+  expect(mocks.api.mock.calls.filter(([path]) => path === "/api/v1/onboarding/status")).toHaveLength(2)
+})
+it("step 1 is the setup card: kit step bar, title as h1, no Back", async () => {
+  await open()
+  expect(screen.getByRole("heading", { level: 1, name: "Set up Crewship" })).toBeVisible()
+  expect(screen.getByRole("navigation", { name: "Steps" })).toBeVisible()
+  expect(screen.getByText("Workspace").closest("li")).toHaveAttribute("data-state", "current")
+  expect(screen.queryByRole("button", { name: "Back" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Close" })).toBeNull()
+})
+it("Continue disabled under 2 chars and field error shown", async () => {
+  await open()
+  const name = screen.getByPlaceholderText("e.g. Acme Engineering")
+  fireEvent.change(name, { target: { value: "a" } })
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled()
+  expect(screen.getByText("At least 2 characters")).toBeVisible()
+  expect(name).toHaveAttribute("aria-invalid", "true")
+  fireEvent.change(name, { target: { value: "Ab" } })
+  expect(screen.queryByText("At least 2 characters")).toBeNull()
+  expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled()
+})
+it.each([
+  [true, "Docker detected", "success"],
+  [false, "Docker not reachable", "warn"],
+])("Docker pill reflects /system/runtime (available=%s)", async (available, label, tone) => {
+  mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/runtime") ? { available, in_use: available } : { enabled: false }))
+  await open()
+  await waitFor(() => expect(screen.getByTestId("onboarding-docker-pill")).toHaveTextContent(label))
+  expect(screen.getByTestId("onboarding-docker-pill")).toHaveAttribute("data-tone", tone)
+})
+it("pair pending renders the waiting note with the code's countdown", async () => {
+  mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/pair/start") ? { code: "PAIR-CODE", expires_at: new Date(Date.now() + 581000).toISOString() } : { available: true, in_use: true }))
+  vi.stubGlobal("fetch", vi.fn(async () => reply({ status: "pending" })))
+  await open(2); click("Also pair my CLI Optional — signs your terminal in too.")
+  await waitFor(() => expect(screen.getByText(/Waiting for the CLI/)).toHaveTextContent(/code expires in 9:\d\d/))
+  expect(screen.getByRole("button", { name: "Copy command" })).toHaveTextContent("Copy")
+})
+it("runtimeInUse=false disables Continue and names the wait in the footer", async () => {
+  mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/runtime") ? { available: false, in_use: false } : {}))
+  await open(2); token()
+  await screen.findByRole("button", { name: "Check again" })
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled()
+  expect(screen.getByTestId("onboarding-blocking-reason")).toHaveTextContent("Waiting for a container runtime")
+})
+it("unavailable switches to template mode with banner; credential_required keeps Guide link", async () => {
+  await open(3); click("Guide offline")
+  expect(await screen.findByTestId("onboarding-guide-unavailable")).toHaveTextContent("can't be reached")
+  expect(screen.queryByRole("button", { name: /Talk to Crewship Guide/ })).toBeNull()
+  cleanup()
+  await open(3); click("Guide needs credential")
+  expect(await screen.findByTestId("onboarding-guide-needs-token")).toHaveTextContent("model token from step 2")
+  expect(screen.getByRole("button", { name: /Talk to Crewship Guide/ })).toBeVisible()
+  click("Back to step 2"); await screen.findByLabelText("Claude Code CLI token")
+})
+it("template step lists five tiles and what the picked one brings and needs", async () => {
+  await open(3); click("Pick a template instead")
+  expect(screen.getAllByRole("button", { pressed: false })).toHaveLength(5)
+  expect(screen.getByText(/Pick a template to see its agents/)).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: /DevOps \/ SRE/ }))
+  expect(screen.getByRole("button", { name: /DevOps \/ SRE/ })).toHaveAttribute("aria-pressed", "true")
+  expect(screen.getAllByTestId("onboarding-template-agent")).toHaveLength(4)
+  expect(screen.getByText("From step 2")).toBeVisible()
+  expect(screen.getByRole("button", { name: "Launch" })).toBeEnabled()
+})
+it("crew step grows the card to XL; the form steps stay L", async () => {
+  const { container } = (resume(3), render(<Page />))
+  await screen.findByRole("button", { name: "Launch" })
+  expect(container.querySelector('[data-slot="setup-card"]')).toHaveAttribute("data-size", "xl")
+  click("Back"); await screen.findByLabelText("Claude Code CLI token")
+  expect(container.querySelector('[data-slot="setup-card"]')).toHaveAttribute("data-size", "lg")
+})
+it("Skip asks for confirmation; Keep going is the default focus; Skip anyway calls /onboarding/complete skip", async () => {
+  await open(); click("Skip setup")
+  const keep = await screen.findByRole("button", { name: "Keep going" })
+  expect(screen.getByText(/this setup does not open again/)).toBeVisible()
+  await waitFor(() => expect(keep).toHaveFocus())
+  click("Skip anyway")
+  await waitFor(() => expect(posted("/api/v1/onboarding/complete")).toEqual({ skipped: true }))
+  await waitFor(() => expect(mocks.router.push).toHaveBeenCalledWith("/"))
+})
+it("launch summary with 0 created crews says Setup is complete, no empty list", async () => {
+  mocks.api.mockImplementation(async (path: string) => reply(path.endsWith("/setup") ? {} : { completed: false }))
+  await template(); click("Launch")
+  await screen.findByRole("heading", { name: "Your crew is ready" })
+  expect(screen.getByText(/Setup is complete/)).toBeVisible()
+  expect(document.querySelector('[data-slot="setup-card-body"] ul')).toBeNull()
+  expect(screen.queryByRole("button", { name: "Skip setup" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Back" })).toBeNull()
+  expect(screen.getAllByRole("button", { name: "Go to dashboard" })).toHaveLength(1)
+})
+it("resume with credential lands on step 3, steps 1–2 marked done and clickable", async () => {
+  await open(3)
+  const one = screen.getByRole("button", { name: "Step 1: Workspace" })
+  expect(screen.getByRole("button", { name: "Step 2: Model" })).toBeVisible()
+  expect(one.closest("li")).toHaveAttribute("data-state", "done")
+  fireEvent.click(one)
+  expect(await screen.findByPlaceholderText("e.g. Acme Engineering")).toHaveValue("Example")
+})
+it("a saved token reads Token saved with Replace and is never shown", async () => {
+  await open(3); click("Step 2: Model")
+  const field = await screen.findByLabelText("Claude Code CLI token")
+  expect(field).toBeDisabled(); expect(field).toHaveValue("")
+  expect(field).toHaveAttribute("placeholder", "Token saved — encrypted on the server")
+  expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled()
+  click("Replace")
+  expect(screen.getByLabelText("Claude Code CLI token")).toBeEnabled()
+  expect(screen.getByLabelText("Claude Code CLI token")).toHaveAttribute("placeholder", "Saved token — leave blank to reuse")
 })
