@@ -2308,7 +2308,9 @@ jobs:
       # inner deadline is the one that names the linter that hung.
       - name: Run golangci-lint
         timeout-minutes: 8
-        run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
+        run: |
+          lint_package=scripts/golangci-shards
+          go run "./$lint_package" "${{ steps.gopath.outputs.bin }}/golangci-lint"
 
       # tsformat proximity lint (#990, #1073c): flags any RFC3339Nano
       # token added within `window` lines of an ExecContext/QueryContext
