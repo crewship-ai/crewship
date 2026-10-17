@@ -145,3 +145,15 @@ describe("unsaved editor navigation", () => {
     })
   })
 })
+
+describe("the in-page question", () => {
+  it("uses a leading question of the message as its title instead of repeating it", async () => {
+    window.__crewshipHistoryGuards = new Set()
+    render(<ConfirmHost />)
+    renderHook(() => useUnsavedNavigationGuard(true, "Leave without saving? Your unsaved changes will be lost."))
+    act(() => { navigationAllowed(vi.fn()) })
+    const dialog = await screen.findByRole("alertdialog", { name: "Leave without saving?" })
+    expect(dialog.textContent?.match(/Leave without saving\?/g)).toHaveLength(1)
+    expect(dialog).toHaveTextContent("Your unsaved changes will be lost.")
+  })
+})

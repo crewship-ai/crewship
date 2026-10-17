@@ -7,6 +7,13 @@ import { askConfirm, confirmHostMounted } from "@/components/ui/confirm-host"
 
 const HISTORY_INDEX_KEY = "__crewshipHistoryIndex"
 
+/** Editors pass one confirm() sentence; a leading question becomes the title. */
+function splitQuestion(message: string): { title: string; description?: string } {
+  const m = /^([^?]{1,120}\?)\s*(.*)$/s.exec(message.trim())
+  if (!m) return { title: "Leave without saving?", description: message }
+  return { title: m[1], description: m[2] || undefined }
+}
+
 /**
  * Protect an editor's unsaved input across links, workspace changes and history.
  *
@@ -23,9 +30,10 @@ export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
   const ask = useCallback(
     (retry: () => void): boolean => {
       if (!confirmHostMounted()) return window.confirm(message)
+      const { title, description } = splitQuestion(message)
       void askConfirm({
-        title: "Leave without saving?",
-        description: message,
+        title,
+        description,
         confirmLabel: "Leave",
         cancelLabel: "Keep editing",
         destructive: true,
