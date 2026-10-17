@@ -133,7 +133,7 @@
 
   --border: #E4E6EA;
   --input: #E4E6EA;
-  --control-border: #8792AB;
+  --control-border: #7C879F;
   --ring: var(--brand);
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
@@ -252,6 +252,8 @@
   --typo-heading-lh: 1.75rem;
   --typo-title: 1.4rem;             /* 21px at Compact, 22px at Standard – page titles (Harbor 2) */
   --typo-title-lh: 2rem;
+  --typo-title-phone: 1.2115rem;    /* 18px at Small – page titles on a phone (owner decision 2026-10-17) */
+  --typo-title-phone-lh: 1.6rem;
   --typo-display: 1.875rem;         /* 30px – hero/stat numbers */
   --typo-display-lh: 2.25rem;
 
@@ -635,6 +637,8 @@
   --text-heading--line-height: var(--typo-heading-lh);
   --text-title: var(--typo-title);
   --text-title--line-height: var(--typo-title-lh);
+  --text-title-phone: var(--typo-title-phone);
+  --text-title-phone--line-height: var(--typo-title-phone-lh);
   --text-display: var(--typo-display);
   --text-display--line-height: var(--typo-display-lh);
 }

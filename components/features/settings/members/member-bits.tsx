@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ElementType } from "react"
 
-import { Briefcase, Crown, Eye, FileText, Lock, LockOpen, MessageSquare, RotateCcw, Shield, User, type LucideIcon } from "lucide-react"
+import { Briefcase, Crown, Eye, FileText, Lock, LockOpen, MessageSquare, RotateCcw, Save, Shield, User, Zap, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Capability, hasCapability } from "@/lib/capabilities"
@@ -39,6 +39,25 @@ export function RolePill({ role, className }: { role: string; className?: string
       {Icon && <Icon className="h-3 w-3 text-muted-foreground" aria-hidden />}
       {ROLE_LABEL[role] ?? role}
     </span>
+  )
+}
+
+/**
+ * When a confirmed change lands, said the same way on every Members
+ * confirmation (Harbor 2 catalogue `st-highstakes`): a role change is
+ * written the moment you confirm; a capability, a preset or a bulk grant goes
+ * into the page's draft and lands on Save. The two dialogs looked identical
+ * before, and only one of them wrote at once.
+ */
+export function ConfirmWhen({ when, className }: { when: "now" | "save"; className?: string }) {
+  const now = when === "now"
+  const Icon = now ? Zap : Save
+  return (
+    <p data-when={when} className={cn("inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-label font-medium",
+      now ? "bg-chip-warn-bg text-chip-warn-fg" : "bg-chip-info-bg text-chip-info-fg", className)}>
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      {now ? "Applies now — written as soon as you confirm" : "Takes effect when you save the page"}
+    </p>
   )
 }
 

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { motion, useReducedMotion } from "motion/react"
-import { ArrowRight, Download, Eye, Grid3x3, Link2, List, Plus, Settings as SettingsIcon, ShieldCheck, Users, X } from "lucide-react"
+import { ArrowRight, Download, Eye, Grid3x3, Link2, List, Plus, ShieldCheck, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -11,13 +11,14 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
-import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
+import { SidebarFilterButton, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 
 import {
   DEFAULT_CREW_LINK_FILTERS,
   FILE_LABELS,
-  activeFacetCount,
   agentCount,
   byName,
   combinePair,
@@ -39,7 +40,9 @@ import {
 } from "./crew-links-model"
 import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
-import { SettingsPageHead, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
+import { SettingsSpaces } from "@/components/features/settings/settings-spaces"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageEmpty, PageError } from "@/components/layout/page-state"
 
@@ -107,6 +110,9 @@ export function CrewLinksPage() {
   const setView = (v: View) => update({ view: v })
   const selectCrew = (slug: string) => update({ view: "crew", crew: slug })
   const setFilters = (next: Partial<CrewLinkFilters>) => update({ filters: { ...filters, ...next } })
+  // The one direction open in the link dialog (v67 `cldir`), from any view.
+  const [editing, setEditing] = React.useState<{ from: Crew; to: Crew } | null>(null)
+  const edit = (from: Crew, to: Crew) => setEditing({ from, to })
 
   const dirs = React.useMemo(() => directionsOf(connections), [connections])
   const dups = React.useMemo(() => duplicateNames(crews), [crews])
@@ -124,6 +130,7 @@ export function CrewLinksPage() {
   const insOf = (id: string) => sorted.filter((c) => dirs.has(dirKey(c.id, id)))
   const facetCount = (key: CrewLinkFilters["links"]) => sorted.filter((c) => crewMatches(c, { ...filters, links: key }, linkedIds.has(c.id), agentsOf(c))).length
   const popoverCount = Number(Boolean(filters.agents)) + Number(Boolean(filters.net))
+  const facets = useSidebarFacets()
   const countWhere = (f: (c: Crew) => boolean) => crews.filter(f).length
 
   const crewItem = (c: Crew, i: number) => (
@@ -137,37 +144,41 @@ export function CrewLinksPage() {
   const toolbar = (
     <>
       <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search crews, agents…" />
-      <SidebarFilterPopover label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} panelClassName="min-w-[220px]">
-        <SidebarFacet label="Agents" resetLabel="Any crew" resetActive={!filters.agents} onReset={() => setFilters({ agents: "" })} first>
-          <SidebarFacetOption active={filters.agents === "with"} onToggle={() => setFilters({ agents: filters.agents === "with" ? "" : "with" })}>
-            With agents<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0)}</span>
-          </SidebarFacetOption>
-          <SidebarFacetOption active={filters.agents === "none"} onToggle={() => setFilters({ agents: filters.agents === "none" ? "" : "none" })}>
-            No agents (collectors)<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => agentCount(c, agentsOf(c)) === 0)}</span>
-          </SidebarFacetOption>
-        </SidebarFacet>
-        <SidebarFacet label="Network" resetLabel="Any network" resetActive={!filters.net} onReset={() => setFilters({ net: "" })}>
-          <SidebarFacetOption active={filters.net === "restricted"} onToggle={() => setFilters({ net: filters.net === "restricted" ? "" : "restricted" })}>
-            Restricted<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => c.network_mode != null && !isOpenNetwork(c))}</span>
-          </SidebarFacetOption>
-          <SidebarFacetOption active={filters.net === "open"} onToggle={() => setFilters({ net: filters.net === "open" ? "" : "open" })}>
-            Open<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere(isOpenNetwork)}</span>
-          </SidebarFacetOption>
-        </SidebarFacet>
-      </SidebarFilterPopover>
+      <SidebarFilterButton activeCount={popoverCount} {...facets.triggerProps}>Filter crews</SidebarFilterButton>
     </>
   )
 
   const nav = (
     <>
-      <div className="mx-2 mt-1 grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label="View">
-        {VIEWS.map((v) => (
-          <button key={v.key} type="button" aria-pressed={view === v.key} onClick={() => setView(v.key)} data-drill-close
-            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-label font-medium transition-colors", view === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-            <v.icon className="h-3.5 w-3.5" />{v.label}
-          </button>
-        ))}
-      </div>
+      {/* The facets open here, inside the panel under the toolbar (kit
+          COM-01, v67 panel() → pk-fx), never as a floating popover. */}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} className="mt-2">
+        <SidebarInlineFacet
+          label="Agents"
+          values={[
+            { value: "with", label: "With agents", count: countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0) },
+            { value: "none", label: "No agents (collectors)", count: countWhere((c) => agentCount(c, agentsOf(c)) === 0) },
+          ]}
+          selected={filters.agents || null}
+          onToggle={(v) => setFilters({ agents: filters.agents === v ? "" : v as CrewLinkFilters["agents"] })}
+          onClear={() => setFilters({ agents: "" })}
+        />
+        <SidebarInlineFacet
+          label="Network"
+          values={[
+            { value: "restricted", label: "Restricted", count: countWhere((c) => c.network_mode != null && !isOpenNetwork(c)) },
+            { value: "open", label: "Open", count: countWhere(isOpenNetwork) },
+          ]}
+          selected={filters.net || null}
+          onToggle={(v) => setFilters({ net: filters.net === v ? "" : v as CrewLinkFilters["net"] })}
+          onClear={() => setFilters({ net: "" })}
+        />
+      </SidebarFacetBlock>
+      <SettingsSpaces
+        spaces={VIEWS.map((v) => ({ ...v, count: v.key === "crew" ? crews.length : v.key === "all" ? stats.directions : undefined }))}
+        value={view}
+        onChange={setView}
+      />
       <DrillNavSection label="Links" count={crews.length}>
         {LINK_FACETS.map((f, i) => {
           const n = facetCount(f.key)
@@ -214,22 +225,20 @@ export function CrewLinksPage() {
   if (filters.net) chips.push({ key: "net", label: filters.net === "open" ? "Open network" : "Restricted network", clear: { net: "" } })
 
   return (
-    <DrillPage
-      parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+    <SettingsDrillPage
       panelId="drill-crew-links"
       title="Crew links"
       icon={Link2}
-      description="Who hands work to whom, and whose shared files they see"
+      description="Who hands work to whom, and whose shared files they see."
+      note="Managers and up change links"
       toolbar={toolbar}
       nav={nav}
       mobileNav={mobileNav}
-      filterCount={activeFacetCount(filters) + Number(Boolean(filters.q.trim()))}
     >
       {loading ? (
         <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-10 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
       ) : (
         <div className="space-y-4 p-4 md:p-6">
-          <SettingsPageHead icon={Link2} title="Crew links" description="Which crew may hand work to which, and share files. Managers and up change links." />
           {crews.length === 0 && !loadError && (
             <PageEmpty
               className="max-w-none px-0 py-0"
@@ -282,8 +291,8 @@ export function CrewLinksPage() {
                 agentsByCrew={agentsByCrew} onSelect={(c) => selectCrew(c.slug)} compact={isMobile} />
             </motion.div>
           )}
-          {view === "all" && <AllLinks crews={crews} shown={shown} dirs={dirs} dups={dups} links={links} isMobile={isMobile} />}
-          {view === "matrix" && <Matrix crews={shown} dirs={dirs} dups={dups} links={links} />}
+          {view === "all" && <AllLinks crews={crews} shown={shown} dirs={dirs} dups={dups} isMobile={isMobile} onEdit={edit} />}
+          {view === "matrix" && <Matrix crews={shown} dirs={dirs} dups={dups} onEdit={edit} />}
 
           <Legend />
         </div>
@@ -302,7 +311,8 @@ export function CrewLinksPage() {
         destructive
         onConfirm={links.confirmUnlink}
       />
-    </DrillPage>
+      <DirectionDialog pair={editing} dirs={dirs} links={links} onClose={() => setEditing(null)} />
+    </SettingsDrillPage>
   )
 }
 
@@ -359,7 +369,7 @@ function FilesControl({ from, to, files, links }: { from: Crew; to: Crew; files:
       {(["none", "read", "read_write"] as const).map((k) => (
         <button key={k} type="button" role="radio" aria-checked={files === k} disabled={links.pending}
           onClick={() => { if (files !== k) void links.setFileAccess(from, to, k) }}
-          className={cn("inline-flex h-7 items-center gap-1 rounded px-2 text-xs transition-colors", files === k ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+          className={cn("inline-flex h-[var(--control-xs)] items-center gap-1 rounded px-2 text-xs transition-colors", files === k ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
           {FILE_ICON[k]}{k === "none" ? "None" : k === "read" ? "View" : "Deliver"}
         </button>
       ))}
@@ -458,64 +468,83 @@ function AddCrewPicker({ label, candidates, dups, disabled, onPick }: { label: s
   )
 }
 
-/** One direction: may `from` hand work to `to`, and what may it do with `to`'s files. */
-function DirectionEditor({ from, to, dirs, links, children }: { from: Crew; to: Crew; dirs: Map<string, Direction>; links: Links; children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(false)
-  const current = dirs.get(dirKey(from.id, to.id))
-  const [work, setWork] = React.useState(Boolean(current))
-  const [files, setFiles] = React.useState<FileAccess>(current?.files ?? "none")
+/**
+ * One direction in a small dialog (v67 `cldir`, size S): may `from` hand
+ * work to `to`, and what may it do with `to`'s shared files. Opened from the
+ * All links table and the matrix; nothing is written until Apply.
+ */
+function DirectionDialog({ pair, dirs, links, onClose }: { pair: { from: Crew; to: Crew } | null; dirs: Map<string, Direction>; links: Links; onClose: () => void }) {
+  const current = pair ? dirs.get(dirKey(pair.from.id, pair.to.id)) : undefined
+  const [work, setWork] = React.useState(false)
+  const [files, setFiles] = React.useState<FileAccess>("none")
+  // Start from what the server holds each time a direction opens.
+  const opened = pair ? dirKey(pair.from.id, pair.to.id) : ""
   React.useEffect(() => {
-    if (open) { setWork(Boolean(current)); setFiles(current?.files ?? "none") }
-  }, [open, current])
+    if (!opened) return
+    setWork(Boolean(current))
+    setFiles(current?.files ?? "none")
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened])
   const filesKnown = !current || current.files !== null
+  const dirty = Boolean(pair) && (work !== Boolean(current) || (filesKnown && work && files !== (current?.files ?? "none")))
   const apply = async () => {
+    if (!pair || links.pending) return
+    const { from, to } = pair
     const { in: back } = splitPair(stateOf(connectionBetween(links.connections, from.id, to.id), from.id))
-    const ok = await links.setPair(from, to, combinePair(work, back))
+    let ok = true
+    if (work !== Boolean(current)) ok = await links.setPair(from, to, combinePair(work, back))
     if (ok && work && filesKnown && files !== (current?.files ?? "none")) await links.setFileAccess(from, to, files)
-    setOpen(false)
+    onClose()
   }
+  const title = pair ? `${pair.from.name} → ${pair.to.name}` : "Link"
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className="w-80 space-y-3 p-3.5" aria-label={`${from.name} to ${to.name}`}>
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <span className="min-w-0 truncate">{from.name}</span><ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">{to.name}</span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-xs"><div>Can hand work to {to.name}</div><div className="text-muted-foreground">Tasks and messages from {from.name}’s agents</div></div>
-          <Switch checked={work} onCheckedChange={setWork} disabled={!links.canManage} aria-label="Can hand work" />
-        </div>
-        {filesKnown && (
-          <div className={cn("flex items-center justify-between gap-3", !work && "pointer-events-none opacity-45")}>
-            <div className="text-xs"><div>Shared files</div><div className="text-muted-foreground">{to.name}’s /crew/shared</div></div>
-            <div role="radiogroup" aria-label="Shared files" className="inline-flex gap-0.5 rounded-md border border-border bg-surface-subtle p-0.5">
-              {(["none", "read", "read_write"] as const).map((k) => (
-                <button key={k} type="button" role="radio" aria-checked={files === k} disabled={!links.canManage} onClick={() => setFiles(k)}
-                  className={cn("h-7 rounded px-2 text-xs", files === k ? "bg-card font-medium shadow-xs" : "text-muted-foreground")}>
-                  {k === "none" ? "None" : k === "read" ? "View" : "Deliver"}
-                </button>
-              ))}
+    <CreateSurface open={pair !== null} onOpenChange={(o) => { if (!o) onClose() }} size="sm" dirty={dirty} ariaLabel={title}
+      onSubmit={links.canManage ? () => void apply() : undefined}>
+      {pair && (
+        <>
+          <CreateSurfaceHeader icon={Link2} title={title} onClose={onClose} />
+          <CreateSurfaceBody className="flex flex-col gap-3" data-slot="crew-link-dialog">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 text-control">
+                <div className="font-medium">Can hand work to {pair.to.name}</div>
+                <div className="text-label text-muted-foreground">Tasks and messages from {pair.from.name}’s agents</div>
+              </div>
+              <Switch checked={work} onCheckedChange={setWork} disabled={!links.canManage || links.pending} aria-label="Can hand work" />
             </div>
-          </div>
-        )}
-        <p className="rounded-lg border border-border/60 bg-surface-subtle px-2.5 py-2 text-xs text-muted-foreground">
-          {work ? directionSentence(from.name, to.name, filesKnown ? files : null) : `${from.name} cannot hand work to ${to.name}`}.
-          {dirs.has(dirKey(to.id, from.id)) ? " The other direction is set separately." : ""}
-        </p>
-        {links.canManage ? (
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button size="sm" className="h-8 text-xs" disabled={links.pending} onClick={() => void apply()}>Apply</Button>
-          </div>
-        ) : (
-          <p className="text-label text-muted-foreground">Only Managers and up change links.</p>
-        )}
-      </PopoverContent>
-    </Popover>
+            {filesKnown && (
+              <div className={cn("flex items-center justify-between gap-3", !work && "pointer-events-none opacity-45")}>
+                <div className="min-w-0 text-control">
+                  <div className="font-medium">Shared files</div>
+                  <div className="text-label text-muted-foreground">{pair.to.name}’s /crew/shared</div>
+                </div>
+                <div role="radiogroup" aria-label="Shared files" className="inline-flex shrink-0 gap-0.5 rounded-md border border-border bg-surface-subtle p-0.5">
+                  {(["none", "read", "read_write"] as const).map((k) => (
+                    <button key={k} type="button" role="radio" aria-checked={files === k} disabled={!links.canManage || !work} onClick={() => setFiles(k)}
+                      className={cn("inline-flex h-[var(--control-xs)] items-center gap-1 rounded px-2 text-xs transition-colors", files === k ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+                      {FILE_ICON[k]}{k === "none" ? "None" : k === "read" ? "View" : "Deliver"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="text-label text-muted-foreground">
+              {work ? directionSentence(pair.from.name, pair.to.name, filesKnown ? files : null) : `${pair.from.name} cannot hand work to ${pair.to.name}`}.
+              {" "}The other direction is set separately.
+            </p>
+            {!links.canManage && <p className="text-label text-muted-foreground">Only Managers and up change links.</p>}
+          </CreateSurfaceBody>
+          {links.canManage ? (
+            <CreateSurfaceFooter onCancel={onClose} primaryLabel="Apply" onPrimary={() => void apply()} busy={links.pending} />
+          ) : (
+            <CreateSurfaceFooter onCancel={onClose} cancelLabel="Close" hint={null} />
+          )}
+        </>
+      )}
+    </CreateSurface>
   )
 }
 
-function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]; shown: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links; isMobile: boolean }) {
+function AllLinks({ crews, shown, dirs, dups, isMobile, onEdit }: { crews: Crew[]; shown: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; isMobile: boolean; onEdit: (from: Crew, to: Crew) => void }) {
   const byId = new Map(crews.map((c) => [c.id, c]))
   const visible = new Set(shown.map((c) => c.id))
   const filtered = shown.length !== crews.length
@@ -535,12 +564,10 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
       {rows.length > 0 && (isMobile ? (
         <div>
           {rows.map(({ d, from, to }) => (
-            <DirectionEditor key={dirKey(d.from, d.to)} from={from} to={to} dirs={dirs} links={links}>
-              <button type="button" className="flex w-full flex-col gap-1.5 border-b border-border/40 px-4 py-3 text-left last:border-b-0">
+              <button key={dirKey(d.from, d.to)} type="button" onClick={() => onEdit(from, to)} className="flex w-full flex-col gap-1.5 border-b border-border/40 px-4 py-3 text-left last:border-b-0">
                 <span className="flex items-center gap-2 text-control"><CrewChip crew={from} dup={dups.has(from.name)} /><ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /><CrewChip crew={to} dup={dups.has(to.name)} /></span>
                 <span className="flex items-center gap-2 pl-9"><FilesChip files={d.files} /></span>
               </button>
-            </DirectionEditor>
           ))}
         </div>
       ) : (
@@ -553,15 +580,14 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
             </thead>
             <tbody>
               {rows.map(({ d, from, to }) => (
-                <DirectionEditor key={dirKey(d.from, d.to)} from={from} to={to} dirs={dirs} links={links}>
-                  <tr tabIndex={0} className={settingsTableRowLink}>
+                  <tr key={dirKey(d.from, d.to)} tabIndex={0} className={settingsTableRowLink} aria-label={`Edit ${from.name} to ${to.name}`}
+                    onClick={() => onEdit(from, to)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(from, to) } }}>
                     <td className={settingsTd}><CrewChip crew={from} dup={dups.has(from.name)} /></td>
                     <td className={cn(settingsTd, "px-1 text-muted-foreground")}><ArrowRight className="h-3.5 w-3.5" /></td>
                     <td className={settingsTd}><CrewChip crew={to} dup={dups.has(to.name)} /></td>
                     <td className={settingsTd}><FilesChip files={d.files} /></td>
                     <td className={cn(settingsTd, "text-muted-foreground")}>{directionSentence(from.name, to.name, d.files)}</td>
                   </tr>
-                </DirectionEditor>
               ))}
             </tbody>
           </table>
@@ -571,7 +597,7 @@ function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]
   )
 }
 
-function Matrix({ crews, dirs, dups, links }: { crews: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links }) {
+function Matrix({ crews, dirs, dups, onEdit }: { crews: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; onEdit: (from: Crew, to: Crew) => void }) {
   const [hover, setHover] = React.useState<{ r: number; c: number } | null>(null)
   if (crews.length < 2) return <p className="rounded-card border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground">A link joins two crews; there are not enough to draw a matrix.</p>
   return (
@@ -608,11 +634,9 @@ function Matrix({ crews, dirs, dups, links }: { crews: Crew[]; dirs: Map<string,
                   const label = d ? `${directionSentence(row.name, col.name, d.files)}. Edit` : `${row.name} cannot hand work to ${col.name}. Edit`
                   return (
                     <td key={col.id} className={cn("h-11 border-b border-border/40 text-center", on && "bg-[var(--row-hover-bg)]")} onMouseEnter={() => setHover({ r: i, c: j })}>
-                      <DirectionEditor from={row} to={col} dirs={dirs} links={links}>
-                        <button type="button" aria-label={label} title={label} className={cn("inline-grid h-8 w-11 place-items-center rounded-md transition-colors", tone)}>
+                        <button type="button" aria-label={label} title={label} onClick={() => onEdit(row, col)} className={cn("inline-grid h-8 w-11 place-items-center rounded-md transition-colors coarse:h-11", tone)}>
                           {d ? <span className="inline-flex items-center gap-0.5"><ArrowRight className="h-3 w-3" />{d.files ? FILE_ICON[d.files] : null}</span> : "·"}
                         </button>
-                      </DirectionEditor>
                     </td>
                   )
                 })}

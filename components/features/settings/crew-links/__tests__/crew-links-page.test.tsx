@@ -82,7 +82,7 @@ describe("Crew links page", () => {
   it("switches to the matrix and records the view in the URL", async () => {
     render(<CrewLinksPage />)
     await screen.findByRole("region", { name: "Hands work to" })
-    fireEvent.click(screen.getByRole("button", { name: "Matrix" }))
+    fireEvent.click(screen.getByRole("tab", { name: /Matrix/ }))
     expect(await screen.findByRole("button", { name: /Engineering can hand work to Ops and read its shared files\. Edit/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Quality cannot hand work to Engineering\. Edit/ })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get("view")).toBe("matrix")
@@ -164,12 +164,36 @@ describe("Crew links side panel and profile", () => {
     expect(within(panel()).queryByRole("button", { name: /^Engineering/ })).toBeNull()
     expect(within(panel()).getByRole("button", { name: /^Collector/ })).toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
+    // The facets open inside the panel, each folded until picked (COM-01).
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Agents/ }))
     fireEvent.click(screen.getByRole("button", { name: /With agents/ }))
     expect(within(panel()).queryByRole("button", { name: /^Collector/ })).toBeNull()
     expect(new URLSearchParams(window.location.search).get("agents")).toBe("with")
     fireEvent.click(screen.getByRole("button", { name: "Remove filter No links" }))
     expect(within(panel()).getByRole("button", { name: /^Engineering/ })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get("links")).toBeNull()
+  })
+
+  // #3487 SET-10 (PRD PNL-02, kit COM-01): Filter opens the facets INSIDE
+  // the panel, under the toolbar — not a floating popover.
+  it("opens the Agents and Network facets inside the panel, each clearing alone", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Engineering profile" })
+    const filter = within(panel()).getByRole("button", { name: /Filter/ })
+    expect(filter).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(filter)
+    expect(filter).toHaveAttribute("aria-expanded", "true")
+    const block = within(panel()).getByRole("group", { name: "Filter crews" })
+    expect(block).toHaveAttribute("data-slot", "facet-block")
+    expect(document.querySelector("[data-slot=popover-content]")).toBeNull()
+    fireEvent.click(within(block).getByRole("button", { name: /^Network/ }))
+    fireEvent.click(within(block).getByRole("button", { name: /^Restricted/ }))
+    expect(new URLSearchParams(window.location.search).get("net")).toBe("restricted")
+    expect(within(panel()).queryByRole("button", { name: /^Ops/ })).toBeNull()
+    expect(within(block).getByRole("button", { name: /^Network/ })).toHaveTextContent("Restricted")
+    fireEvent.click(within(block).getByRole("button", { name: "Clear Network" }))
+    expect(new URLSearchParams(window.location.search).get("net")).toBeNull()
+    expect(within(panel()).getByRole("button", { name: /^Ops/ })).toBeInTheDocument()
   })
 
   it("the link map shows who hands work in and out, and a node opens that crew", async () => {
@@ -185,9 +209,85 @@ describe("Crew links side panel and profile", () => {
   it("heads the matrix columns with the crews' icons, named on hover", async () => {
     render(<CrewLinksPage />)
     await screen.findByRole("region", { name: "Engineering profile" })
-    fireEvent.click(screen.getByRole("button", { name: "Matrix" }))
+    fireEvent.click(screen.getByRole("tab", { name: /Matrix/ }))
     const grid = await screen.findByRole("grid", { name: "Rows hand work to columns" })
     expect(within(grid).getByRole("columnheader", { name: "Engineering (engineering)" })).toHaveAttribute("title", "Engineering (engineering)")
     expect(within(grid).getByRole("columnheader", { name: "Collector (collector)" })).toBeInTheDocument()
+  })
+})
+
+// Harbor 2 (#3487 SET-02): a direction is edited in a small dialog (v67
+// `cldir`, size S) rather than a popover, and the three views are the panel's
+// spaces — By crew, All links, Matrix — on keys 1–3.
+describe("Crew links — the link dialog and the panel's spaces", () => {
+  const panel = () => screen.getByRole("complementary", { name: "Crew links navigation" })
+
+  it("edits a direction from All links in a small dialog and applies it", async () => {
+    window.history.replaceState(null, "", "/settings/crew-links?view=all")
+    render(<CrewLinksPage />)
+    const table = await screen.findByRole("region", { name: "All links" })
+    const row = within(table).getByText("Engineering can hand work to Ops and read its shared files").closest("tr")!
+    fireEvent.click(row)
+    const dialog = await screen.findByRole("dialog", { name: "Engineering → Ops" })
+    expect(dialog).toHaveAttribute("data-slot", "dialog-content")
+    expect(within(dialog).getByRole("switch", { name: "Can hand work" })).toBeChecked()
+    expect(dialog).toHaveTextContent("Can hand work to Ops")
+    expect(dialog).toHaveTextContent("The other direction is set separately.")
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Shared files" })).getByRole("radio", { name: "Deliver" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    const [url, init] = writes()[0] as [string, RequestInit]
+    expect(url).toContain("/crew-connections/c1/file-access")
+    expect(JSON.parse(String(init.body))).toMatchObject({ level: "read_write" })
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Engineering → Ops" })).toBeNull())
+  })
+
+  it("opens the same dialog from an empty matrix cell", async () => {
+    window.history.replaceState(null, "", "/settings/crew-links?view=matrix")
+    render(<CrewLinksPage />)
+    fireEvent.click(await screen.findByRole("button", { name: /Quality cannot hand work to Engineering\. Edit/ }))
+    const dialog = await screen.findByRole("dialog", { name: "Quality → Engineering" })
+    expect(within(dialog).getByRole("switch", { name: "Can hand work" })).not.toBeChecked()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Quality → Engineering" })).toBeNull())
+    expect(writes()).toHaveLength(0)
+  })
+
+  it("lists the three views as the panel's spaces, each on its number key", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Hands work to" })
+    const spaces = within(panel()).getByRole("tablist", { name: "Spaces" })
+    const tabs = within(spaces).getAllByRole("tab")
+    expect(tabs.map((t) => t.getAttribute("aria-keyshortcuts"))).toEqual(["1", "2", "3"])
+    expect(within(spaces).getByRole("tab", { name: /By crew/ })).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(window, { key: "2" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("view")).toBe("all"))
+    expect(within(spaces).getByRole("tab", { name: /All links/ })).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(window, { key: "3" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("view")).toBe("matrix"))
+    fireEvent.keyDown(window, { key: "1" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("view")).toBeNull())
+  })
+
+  it("does not switch spaces while typing in the search", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Hands work to" })
+    const search = within(panel()).getByPlaceholderText("Search crews, agents…")
+    fireEvent.keyDown(search, { key: "2" })
+    expect(new URLSearchParams(window.location.search).get("view")).toBeNull()
+  })
+})
+
+// Harbor 2 (#3487 SET-07): the section head is drawn once, by the Settings
+// drill-page frame, and the top bar does not repeat its sentence.
+describe("Crew links — one section head", () => {
+  it("says what the page is once, in the section head, with who may change it", async () => {
+    render(<CrewLinksPage />)
+    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    expect(within(head).getByRole("heading", { level: 2, name: "Crew links" })).toBeInTheDocument()
+    expect(head).toHaveTextContent("Who hands work to whom, and whose shared files they see.")
+    expect(head).toHaveTextContent("Managers and up change links")
+    expect(screen.getAllByText(/Who hands work to whom/)).toHaveLength(1)
+    await screen.findByRole("region", { name: "Hands work to" })
   })
 })

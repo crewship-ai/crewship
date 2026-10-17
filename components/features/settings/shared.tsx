@@ -41,7 +41,7 @@ export const settingsControl = cn(controlHeight, "w-full sm:w-64")
  * Outside a SettingsRow, a form uses `controlHeight` and the primitive's
  * text-control size; a dialog keeps the primitive's default.
  */
-export const inlineControl = "h-7 text-xs coarse:h-[2.75rem]"
+export const inlineControl = "h-[var(--control-sm)] text-xs coarse:h-[2.75rem]"
 /**
  * The one table style for Settings and Admin: a 12px sentence-case header in
  * the muted ink, 13px cells, 16px side padding, hairlines between rows and
@@ -116,7 +116,7 @@ export function SettingsCard({
       id={settingsCardId(title)}
       data-slot="settings-card"
       aria-labelledby={titleId}
-      className={cn("scroll-mt-4 overflow-hidden rounded-card border border-border bg-card transition-shadow duration-500 data-[focused=true]:ring-2 data-[focused=true]:ring-primary/50", className)}
+      className={cn("scroll-mt-4 overflow-hidden rounded-card border border-border bg-card transition-[outline-color] duration-300 data-[focused=true]:outline-2 data-[focused=true]:outline-offset-2 data-[focused=true]:outline-solid data-[focused=true]:outline-ring", className)}
     >
       {hideHeader ? (
         <h3 id={titleId} className="sr-only">{title}</h3>
@@ -382,7 +382,7 @@ export function SettingsDangerCard({
       id={settingsCardId(title)}
       data-slot="settings-card"
       aria-labelledby={titleId}
-      className="scroll-mt-4 overflow-hidden rounded-card border border-destructive/30 bg-card transition-shadow duration-500 data-[focused=true]:ring-2 data-[focused=true]:ring-destructive/50"
+      className="scroll-mt-4 overflow-hidden rounded-card border border-destructive/30 bg-card transition-[outline-color] duration-300 data-[focused=true]:outline-2 data-[focused=true]:outline-offset-2 data-[focused=true]:outline-solid data-[focused=true]:outline-destructive"
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} danger />
       <PageSaveLabel label={title}>{children}</PageSaveLabel>
