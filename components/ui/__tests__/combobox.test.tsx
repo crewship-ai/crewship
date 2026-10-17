@@ -2,26 +2,12 @@ import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
 
-import * as ComboboxKit from "../combobox"
+import { Combobox } from "../combobox"
 
 // COM-13 (#3481): one searchable picker for dialogs — the Hand off "Who"
 // list (Issues), the routine dialogs' native <select>s — instead of local
 // copies. A button that names the choice, a searchable list in a popover.
 type Opt = { value: string; label: string; description?: string; keywords?: string[]; disabled?: boolean }
-type Props = {
-  value: string | null
-  onChange: (value: string) => void
-  options: Opt[]
-  ariaLabel: string
-  placeholder?: string
-  searchPlaceholder?: string
-  emptyText?: string
-}
-function Combobox(props: Props) {
-  const C = (ComboboxKit as unknown as { Combobox?: React.ComponentType<Props> }).Combobox
-  if (!C) throw new Error("Combobox is not exported")
-  return <C {...props} />
-}
 
 const PEOPLE: Opt[] = [
   { value: "u1", label: "Alex Novak", description: "Owner", keywords: ["alex@acme.test"] },
