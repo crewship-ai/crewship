@@ -52,9 +52,12 @@ export async function copy(value: string) {
 function RevealBody({
   reveal,
   onClose,
+  footerDone = false,
 }: {
   reveal: Reveal
   onClose: () => void
+  /** Done lives in the surface's footer instead. */
+  footerDone?: boolean
 }) {
   return (
     <div className="space-y-4">
@@ -93,7 +96,7 @@ function RevealBody({
           recover a lost URL.
         </p>
       )}
-      <Button onClick={onClose}>Done</Button>
+      {!footerDone && <Button onClick={onClose}>Done</Button>}
     </div>
   )
 }
@@ -224,7 +227,9 @@ export function IncomingCreateDialog({
     <CreateSurface
       open
       onOpenChange={(open) => {
-        if (!open) finish()
+        // The URL and secret are shown once: Esc or a click outside must not
+        // throw them away. Done (footer) or the header's × closes on purpose.
+        if (!open && !reveal) finish()
       }}
       size="md"
       dirty={!reveal && !!name}
@@ -234,13 +239,13 @@ export function IncomingCreateDialog({
       <CreateSurfaceHeader
         concept="integrations"
         context="Integrations"
-        title="Add incoming webhook"
-        description="Choose where an external HTTP event should arrive."
+        title="New trigger"
+        description="Something outside that starts work. Pick what it starts first."
         onClose={finish}
       />
       <CreateSurfaceBody className="space-y-4">
         {reveal ? (
-          <RevealBody reveal={reveal} onClose={finish} />
+          <RevealBody reveal={reveal} onClose={finish} footerDone />
         ) : (
           <>
             <CreateSurfaceField label="Target kind">
@@ -373,6 +378,9 @@ export function IncomingCreateDialog({
         )}
       </CreateSurfaceBody>
       <CreateSurfaceRefusal message={error} onDismiss={() => setError(null)} />
+      {reveal && (
+        <CreateSurfaceFooter onCancel={finish} guardCancel={false} cancelLabel="Close" primaryLabel="Done" onPrimary={finish} hint="Copy the URL and the secret before you close" />
+      )}
       {!reveal && (
         <CreateSurfaceFooter
           onCancel={onClose}

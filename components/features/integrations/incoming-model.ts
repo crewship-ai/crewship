@@ -1,7 +1,4 @@
-import { createElement } from "react"
-import { IncomingTargetAvatar } from "./incoming-target-avatar"
-import { ArrowDownToLine, Bot, FileText, Workflow } from "lucide-react"
-import type { ExplorerItem, ExplorerSection } from "./explorer"
+import { Bot, FileText, Workflow } from "lucide-react"
 import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
 
 export type IncomingKind = "routine" | "agent" | "page"
@@ -94,52 +91,6 @@ export function incomingRows(
     })
   return rows
 }
-export function incomingExplorer(
-  targets: IncomingTarget[],
-  rows: IncomingEndpoint[],
-  section: IncomingSection,
-  search: string,
-) {
-  const sections: ExplorerSection<IncomingSection>[] = [
-    {
-      key: "endpoints",
-      label: "Endpoints",
-      icon: ArrowDownToLine,
-      count: rows.length,
-      hint: "Known routine and agent endpoints; Pages are listed per Page.",
-    },
-    ...INCOMING_KINDS.map((k) => ({
-      ...k,
-      count:
-        k.key === "page"
-          ? "per Page"
-          : new Set(
-              rows
-                .filter((r) => r.target.kind === k.key)
-                .map((r) => r.target.id),
-            ).size,
-    })),
-  ]
-  const items: ExplorerItem[] = targets
-    .filter(
-      (t) =>
-        (section === "endpoints" || t.kind === section) &&
-        `${t.name} ${t.slug}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .map((t) => ({
-      id: `${t.kind}:${t.id}`,
-      label: t.name,
-      leading: createElement(IncomingTargetAvatar, { target: t }),
-      sublabel: `${t.kind} · ${t.slug}`,
-      dot: rows.some(
-        (r) => r.target.id === t.id && r.target.kind === t.kind && r.enabled,
-      )
-        ? "bg-success"
-        : "bg-muted-foreground/40",
-    }))
-  return { sections, items }
-}
-
 // Accept old slug links, but canonicalize selection to the persistent row ID.
 export function resolveIncomingTarget(targets: IncomingTarget[], kind: IncomingSection, value: string | null) {
   return targets.find(t => t.kind === kind && t.id === value)

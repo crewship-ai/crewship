@@ -1,204 +1,76 @@
 "use client"
 
 import * as React from "react"
-import { AnimatePresence, motion } from "motion/react"
-import {
-  Bell,
-  ArrowDownToLine,
-  Blocks,
-  CircleHelp,
-  Clock,
-  KeyRound,
-  Layers,
-  Link2,
-  Plug,
-  Plus,
-  RefreshCw,
-  SlidersHorizontal,
-  Users,
-  Wrench,
-  Zap,
-} from "lucide-react"
+import { Plug, Plus, Terminal } from "lucide-react"
 import { toast } from "@/lib/toast"
 
-import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
-import { Switch } from "@/components/ui/switch"
-import { invalidate } from "@/lib/stale-cache"
+import { SubBar, SubBarIconButton, SubBarPrimary } from "@/components/layout/sub-bar"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { useAbilities } from "@/hooks/use-abilities"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useSession } from "@/hooks/use-auth"
-import { useNotificationChannels } from "@/hooks/use-notification-channels"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { useUserPreference } from "@/hooks/use-user-preference"
+import { useNotificationChannels, type ChannelPatchBody } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { NotificationPrefsSection } from "./notification-prefs-section"
 import { ComposioIntegrations, type ComposioStatus } from "./composio-integrations"
-import { brandLogo } from "./composio/shared"
-import type { TabKey } from "./composio/types"
-
-import {
-  applyFilters,
-  channelKind,
-  deriveStatus,
-  EMPTY_FILTERS,
-  isForeignPersonal,
-  rowMatches,
-  type ConnectionFilters,
-  type ConnectionRow,
-} from "./connection-model"
-import { IntegrationsExplorer, type ExplorerSection } from "./explorer"
-import { mcpFacets, notificationFacets } from "./facets"
-import { EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-filters"
-import { ConnectionsView } from "./views/connections-view"
+import { McpEndpointsTab } from "./composio/mcp-endpoints-tab"
+import { channelKind, deriveStatus, isForeignPersonal, rowMatches, type ConnectionRow } from "./connection-model"
 import { CrewToolsView } from "./views/crew-tools-view"
-import { ConnectionDetail } from "./views/connection-detail"
-import { ToolAccountDetail } from "./views/tool-account-detail"
-import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
-import { DeliveriesView } from "./views/deliveries-view"
-import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
 import { IncomingWebhooksView } from "./views/incoming-webhooks-view"
 import { IncomingCreateDialog } from "./views/incoming-credentials"
 import { useIncomingEndpoints } from "./use-incoming-endpoints"
-import { resolveIncomingTarget, incomingExplorer, incomingSection as readIncomingSection, type IncomingSection, type IncomingTarget } from "./incoming-model"
-import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
+import type { IncomingKind, IncomingTarget } from "./incoming-model"
+import { AddChannelDialog, type AddChannelMode } from "./add-channel-dialog"
+import { ChannelsList, DeliveriesLog, matchesView, type ChannelsView } from "./channels-space"
+import { ChannelPage, CHANNEL_PANES, type ChannelPane } from "./channel-page"
+import { TriggerPage, TriggersList, TRIGGER_PANES, type TriggerPane } from "./triggers-space"
+import { filterTriggers, triggerRows, type TriggerView } from "./triggers-model"
+import { AppAccountPage, APP_PANES, CatalogAppPage, CatalogView, ToolsList, type AppPane } from "./tools-space"
+import { accountRows, filterAccounts, type ToolsListView } from "./tools-model"
+import { EMPTY_PANEL_FILTERS, IntegrationsPanel, SPACE_META, SpaceSwitcher, type PanelFilters } from "./integrations-panel"
+import { CliLines, SpaceHead } from "./integrations-ui"
+import { defaultView, integrationsSearch, parseIntegrationsRoute, SPACES, type IntegrationsRoute, type IntegrationsSpace } from "./spaces"
 
 /**
- * /integrations — three tabs, one shared explorer and content skeleton.
- * Outgoing reaches people; Incoming accepts direct HTTP events; Tools owns
- * managed app capabilities and subscriptions. Each tab supplies sections,
- * items and content to the same collapsible/mobile rail and animated panel.
+ * /integrations — four spaces in the shared SecondaryPanel (Harbor 2):
+ * Tools, Triggers, Channels, Webhooks. Each has its views, one primary action
+ * in the top bar, and object pages at `?id=` with tabs at `&pane=`. Old
+ * `?tab=&section=` links are read by spaces.ts.
  */
 
-const TABS = [
-  { id: "notifications" as const, label: "Outgoing notifications", icon: Bell },
-  { id: "incoming" as const, label: "Incoming webhooks", icon: ArrowDownToLine },
-  { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
-] as const
+/** Kept for links and tests that still import it: the old three-tab route, now a space route. */
+export { parseIntegrationsRoute as initialIntegrationsRoute } from "./spaces"
 
-/** Sections inside the Notifications tab. */
-type NotifySection = "connections" | "preferences" | "deliveries"
-
-const NOTIFY_SECTIONS: ExplorerSection<NotifySection>[] = [
-  {
-    key: "connections",
-    label: "Connections",
-    icon: Link2,
-    hint: "What is hooked up, and is it working",
-  },
-  {
-    key: "preferences",
-    label: "My preferences",
-    icon: SlidersHorizontal,
-    hint: "Which categories reach you, on which connection",
-  },
-  {
-    key: "deliveries",
-    label: "Deliveries",
-    icon: Clock,
-    hint: "Why a notification did or did not arrive",
-  },
-]
-
-/** Sections inside the Tools (MCP) tab — Composio's six views. */
-const MCP_SECTIONS: Omit<ExplorerSection<TabKey>, "count">[] = [
-  { key: "catalog", label: "App catalog", icon: Blocks, hint: "Every app Composio can connect" },
-  {
-    key: "accounts",
-    label: "Connected accounts",
-    icon: Users,
-    hint: "Which apps are connected, and by whom",
-  },
-  {
-    key: "agents",
-    label: "Agent access",
-    icon: Layers,
-    hint: "Which agents may call which toolkits",
-  },
-  { key: "tools", label: "Tools", icon: Wrench, hint: "Individual callable tools, per toolkit" },
-  { key: "triggers", label: "Triggers", icon: Zap, hint: "Fire a routine on an app event" },
-  {
-    key: "mcp",
-    label: "MCP endpoints",
-    icon: CircleHelp,
-    hint: "One endpoint per agent that has access",
-  },
-]
-
-type IntegrationsTab = (typeof TABS)[number]["id"]
-
-/** The Tools tab's sections: Composio's six views plus the crew-scoped MCP
- *  servers, which lived on neither tab until #2303. */
-type ToolsSection = TabKey | "crew-tools"
-
-const CREW_TOOLS_SECTION: ExplorerSection<ToolsSection> = {
-  key: "crew-tools",
-  label: "Crew tools",
-  icon: Wrench,
-  hint: "MCP servers a crew's agents call, and whether each has a credential",
-}
-
-/**
- * Where a `?tab=&section=` link opens.
- *
- * This page is the single home for notification channels, the preference
- * matrix and Composio's tool views, which only works if a link can name a
- * section: /settings forwards two retired tabs here, and the docs point at
- * individual views. Unknown or cross-tab values fall back to the defaults
- * rather than leaving a panel selecting a section its tab does not own.
- */
-export function initialIntegrationsRoute(search: string): {
-  tab: IntegrationsTab
-  notifySection: NotifySection
-  mcpSection: ToolsSection
-  /** `?server=`: the crew tool a "Connect" link elsewhere points at. */
-  server: string | null
-  incomingSection: IncomingSection
-  target: string | null
-} {
-  const p = new URLSearchParams(search)
-  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : p.get("tab") === "incoming" ? "incoming" : "notifications"
-  const section = p.get("section")
-
-  const notifyMatch = NOTIFY_SECTIONS.find((s) => s.key === section)
-  const mcpMatch = section === "crew-tools" ? CREW_TOOLS_SECTION : MCP_SECTIONS.find((s) => s.key === section)
-  const server = p.get("server")
-
-  return {
-    tab,
-    incomingSection: tab === "incoming" ? readIncomingSection(section) : "endpoints",
-    target: tab === "incoming" && readIncomingSection(section) !== "endpoints" ? p.get("target") : null,
-    notifySection: tab === "notifications" && notifyMatch ? notifyMatch.key : "connections",
-    mcpSection: tab === "tools" && mcpMatch ? (mcpMatch.key as ToolsSection) : "accounts",
-    server: tab === "tools" && server ? server : null,
-  }
-}
-
-/**
- * What the Tools panel shows before a key is saved. Offering the six real
- * sections would be six dead ends; one row that says what to do is not.
- */
-const SETUP_ONLY_SECTION: ExplorerSection<ToolsSection>[] = [
-  { key: "catalog", label: "Setup", icon: KeyRound, hint: "Add a Composio API key" },
-]
-
-/** Dot colour per connection status, shared by the list and the facets. */
-const STATUS_DOT: Record<string, string> = {
-  delivering: "bg-success",
-  failing: "bg-destructive",
-  never_used: "bg-warn",
-  disabled: "bg-muted-foreground/40",
-  unknown: "bg-info",
-}
-
-/** How far back the "Sent · 24h" column and the status column look. */
-const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000
-/** Enough rows for the log view without paging; the API caps server-side too. */
+/** How far back "Sent today" and a channel's state look. */
 const DELIVERY_LIMIT = 200
 
+const EMPTY_STATUS: ComposioStatus = {
+  loading: true,
+  configured: false,
+  keyLabel: null,
+  counts: { apps: 0, accounts: 0, users: 0, agentsBound: 0, agentsTotal: 0, endpoints: 0 },
+  toolkits: [],
+  users: [],
+  accounts: [],
+  agents: [],
+  bindings: {},
+}
+
+const CLI_LINES: [string, string][] = [
+  ["crewship integration composio toolkits", "Apps in Composio"],
+  ["crewship integration composio connect github --user <user>", "Connect an app"],
+  ["crewship integration composio bind <agent> --user <user> --app github:read", "Give an agent access"],
+  ["crewship routine webhooks list", "Triggers of routines"],
+  ["crewship routine webhooks create --slug <routine> --name github-prs --ingress-profile github", "New trigger"],
+  ["crewship notifychannel list", "Channels and webhooks"],
+  ["crewship notifychannel add --type webhook --url https://…", "New webhook"],
+]
+
 export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
-  // Dialogs, selection and drafts belong to one workspace. Replacing that
-  // identity also replaces child forms and their local pending state.
+  // Dialogs, selection and drafts belong to one workspace.
   return <WorkspaceIntegrationsLayout key={workspaceId} workspaceId={workspaceId} />
 }
 
@@ -206,777 +78,459 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const { abilities } = useAbilities()
   const canManageWorkspace = abilities.can("manage", "Workspace")
   const currentUserId = useSession().data?.user.id ?? null
+  const isMobile = useIsMobile()
+  const [lastSpace, setLastSpace] = useUserPreference<IntegrationsSpace>("integrations.space", "tools")
 
-  // The admin overview used to be a separate screen ("All connections"),
-  // which put the same objects in two places — the exact failure this page is
-  // undoing. It is a toggle on the one list instead: an admin can widen it to
-  // include other members' personal connections, and those rows arrive with
-  // their destinations redacted and their actions off.
-  const [includeEveryone, setIncludeEveryone] = React.useState(false)
-
-  // This page is statically prerendered, so the first render must not read
-  // the URL: the served HTML was built without one, and a client that renders
-  // a different tab from it is a hydration mismatch. The URL is applied in a
-  // layout effect instead — before paint, so a deep link still opens on the
-  // section it named rather than flashing the default.
-  const [tab, setTab] = React.useState<IntegrationsTab>("notifications")
-  const [notifySection, setNotifySection] = React.useState<NotifySection>("connections")
-  // Which item the left panel has open — a connection, or a tool account.
-  // Selecting one takes over the main column, exactly as picking a routine
-  // does on /routines.
-  const [selectedConnectionId, setSelectedConnectionId] = React.useState<string | null>(null)
-  const [selectedAccountId, setSelectedAccountId] = React.useState<string | null>(null)
+  // Prerendered page: the first render must not read the URL. It is applied
+  // before paint instead, so a deep link never flashes the default.
+  const [route, setRouteState] = React.useState<IntegrationsRoute>(() => parseIntegrationsRoute("", "tools"))
   const [search, setSearch] = React.useState("")
-  // On a phone the panel is a sheet; a pick that opens something closes it.
-  const closePanelSheet = useCloseSecondaryPanelSheet()
-  const [filters, setFilters] = React.useState<ConnectionFilters>(EMPTY_FILTERS)
-  const [addTarget, setAddTarget] = React.useState<AddChannelTarget | null>(null)
-  const [addOpen, setAddOpen] = React.useState(false)
-  const [incomingSection, setIncomingSection] = React.useState<IncomingSection>("endpoints")
-  const [incomingTarget, setIncomingTarget] = React.useState<string | null>(null)
-  const [incomingCreate, setIncomingCreate] = React.useState<{target?: IncomingTarget} | null>(null)
-  const incoming = useIncomingEndpoints(workspaceId, true)
-  const incomingRail = incomingExplorer(incoming.targets, incoming.rows, incomingSection, search)
-  React.useEffect(() => {
-    const target = resolveIncomingTarget(incoming.targets, incomingSection, incomingTarget)
-    if (target && target.id !== incomingTarget) setIncomingTarget(target.id)
-  }, [incoming.targets, incomingSection, incomingTarget])
-  const selectIncoming = (target: IncomingTarget) => {
-    setIncomingSection(target.kind); setIncomingTarget(target.id)
-    closePanelSheet()
-  }
+  const [filters, setFilters] = React.useState<PanelFilters>(EMPTY_PANEL_FILTERS)
+  const lastSpaceRef = React.useRef(lastSpace)
+  lastSpaceRef.current = lastSpace
 
-  // Tools tab: which of Composio's six views is showing, and the facets that
-  // narrow it. Held here because the left panel renders them and the main
-  // column obeys them — the same split every other tab already uses.
-  const [mcpSection, setMcpSection] = React.useState<ToolsSection>("accounts")
-  const [linkedServerId, setLinkedServerId] = React.useState<string | null>(null)
-  const [mcpFilters, setMcpFilters] = React.useState<McpFilters>(EMPTY_MCP_FILTERS)
-  const [apiKeyOpen, setApiKeyOpen] = React.useState(false)
-  const [composioStatus, setComposioStatus] = React.useState<ComposioStatus>({
-    loading: true,
-    configured: false,
-    keyLabel: null,
-    counts: { apps: 0, accounts: 0, users: 0, agentsBound: 0, agentsTotal: 0, endpoints: 0 },
-    toolkits: [],
-    users: [],
-    accounts: [],
-    agents: [],
-    bindings: {},
-  })
-
-  // Apply the incoming ?tab=&section= once, before paint.
   React.useLayoutEffect(() => {
-    const r = initialIntegrationsRoute(window.location.search)
-    setTab(r.tab)
-    setNotifySection(r.notifySection)
-    setMcpSection(r.mcpSection)
-    setLinkedServerId(r.server)
-    setIncomingSection(r.incomingSection)
-    setIncomingTarget(r.target)
+    const read = () => setRouteState(parseIntegrationsRoute(window.location.search, SPACES.includes(lastSpaceRef.current) ? lastSpaceRef.current : "tools"))
+    read()
+    // An old ?tab=&section= link is rewritten to the space it now names.
+    const first = parseIntegrationsRoute(window.location.search, SPACES.includes(lastSpaceRef.current) ? lastSpaceRef.current : "tools")
+    const q = integrationsSearch(window.location.search, first)
+    if (window.location.search.slice(1) !== q) window.history.replaceState(null, "", `${window.location.pathname}?${q}${window.location.hash}`)
+    window.addEventListener("popstate", read)
+    return () => window.removeEventListener("popstate", read)
   }, [])
 
-  // Keep the URL naming what is on screen, so any view here can be linked to —
-  // by /settings' retired tabs, by the docs, by a colleague pasting "look at
-  // Deliveries". replaceState, not a route push: this is the same page.
-  //
-  // Skips its first run: that one fires with the pre-URL defaults still in
-  // state and would overwrite the very link the layout effect just read.
-  const urlSynced = React.useRef(false)
+  /** Moves; a new object or space is a history entry, a view or tab change is not. */
+  const setRoute = React.useCallback((next: IntegrationsRoute) => {
+    setRouteState((prev) => {
+      const q = integrationsSearch(window.location.search, next)
+      const url = `${window.location.pathname}?${q}${window.location.hash}`
+      if (prev.space !== next.space || prev.id !== next.id) window.history.pushState(null, "", url)
+      else window.history.replaceState(null, "", url)
+      return next
+    })
+  }, [])
+  const goSpace = React.useCallback(
+    (space: IntegrationsSpace) => {
+      setSearch("")
+      setFilters(EMPTY_PANEL_FILTERS)
+      setLastSpace(space)
+      setRoute({ space, view: defaultView(space), id: null, pane: null, server: null, starts: null, target: null })
+    },
+    [setRoute, setLastSpace],
+  )
+  const goView = (view: string) => setRoute({ ...route, view, id: null, pane: null })
+  const open = (id: string, view = route.view) => setRoute({ ...route, view, id, pane: null })
+  const back = () => setRoute({ ...route, id: null, pane: null })
+  const setPane = (pane: string) => setRoute({ ...route, pane })
+
+  // 1–4 switch spaces, as the panel's hints say.
   React.useEffect(() => {
-    if (typeof window === "undefined") return
-    if (!urlSynced.current) {
-      urlSynced.current = true
-      return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (document.querySelector("[role=dialog],[role=alertdialog]")) return
+      const i = ["1", "2", "3", "4"].indexOf(e.key)
+      if (i >= 0) goSpace(SPACES[i])
     }
-    const url = new URL(window.location.href)
-    url.searchParams.set("tab", tab)
-    url.searchParams.set("section", tab === "incoming" ? incomingSection : tab === "notifications" ? notifySection : mcpSection)
-    if (tab === "incoming" && incomingTarget) url.searchParams.set("target", incomingTarget)
-    else url.searchParams.delete("target")
-    window.history.replaceState(null, "", url.toString())
-  }, [tab, notifySection, mcpSection, incomingSection, incomingTarget])
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [goSpace])
 
-  const {
-    channels,
-    loading: channelsLoading,
-    error: channelsError,
-    refresh: refreshChannels,
-    create,
-    remove,
-    sendTest,
-    sendDraftTest,
-    patch,
-  } = useNotificationChannels(workspaceId, {
-    includeEveryone: includeEveryone && canManageWorkspace,
-  })
-
-  const {
-    providers,
-    categories: providerCategories,
-    refresh: refreshProviders,
-  } = useNotificationProviders(workspaceId)
-
-  // The delivery log is ADMIN-only. Asking for it as a MEMBER is not an
-  // error — the hook reports `forbidden` separately, and every consumer
-  // treats that as "cannot know" rather than "nothing happened".
-  const {
-    deliveries,
-    loading: deliveriesLoading,
-    error: deliveriesError,
-    forbidden: deliveriesForbidden,
-    refresh: refreshDeliveries,
-  } = useNotificationDeliveries(workspaceId, { limit: DELIVERY_LIMIT })
-
-  const providerCategoryOf = React.useCallback(
-    (name: string) => providers.find((p) => p.provider === name)?.category,
-    [providers],
-  )
-  const providerLabelOf = React.useCallback(
-    (name: string) => providers.find((p) => p.provider === name)?.label ?? name,
-    [providers],
-  )
-
+  // ---- data ----------------------------------------------------------------
+  const includeEveryone = filters.whose === "everyone" && canManageWorkspace
+  const { channels, loading: channelsLoading, error: channelsError, refresh: refreshChannels, create, remove, sendTest, sendDraftTest, patch } = useNotificationChannels(workspaceId, { includeEveryone })
+  const { providers } = useNotificationProviders(workspaceId)
+  const { deliveries, loading: deliveriesLoading, error: deliveriesError, forbidden: deliveriesForbidden, refresh: refreshDeliveries } = useNotificationDeliveries(workspaceId, { limit: DELIVERY_LIMIT })
   const canSeeDeliveries = !deliveriesForbidden
+  const incoming = useIncomingEndpoints(workspaceId, true)
+  const [composio, setComposio] = React.useState<ComposioStatus>(EMPTY_STATUS)
+  const [apiKeyOpen, setApiKeyOpen] = React.useState(false)
+  const [connectRequest, setConnectRequest] = React.useState<{ toolkit?: { slug: string; name: string } } | null>(null)
+  const [composioRefresh, setComposioRefresh] = React.useState(0)
+  const clearConnectRequest = React.useCallback(() => setConnectRequest(null), [])
 
-  // ---- normalise both backends into one row list -------------------------
+  const providerOf = React.useCallback((name: string) => providers.find((p) => p.provider === name), [providers])
+
   const rows = React.useMemo<ConnectionRow[]>(() => {
-    const since = Date.now() - DELIVERY_WINDOW_MS
     const byChannel = new Map<string, typeof deliveries>()
-    for (const d of deliveries) {
-      const list = byChannel.get(d.channel_id) ?? []
-      list.push(d)
-      byChannel.set(d.channel_id, list)
-    }
-
-    const channelRows: ConnectionRow[] = channels.map((ch) => {
+    for (const d of deliveries) byChannel.set(d.channel_id, [...(byChannel.get(d.channel_id) ?? []), d])
+    return channels.map((ch) => {
       const mine = byChannel.get(ch.id) ?? []
-      const recent = mine.filter((d) => Date.parse(d.created_at) >= since)
       const provider = ch.type === "shoutrrr" ? (ch.provider ?? "unknown") : ch.type
-      const target = ch.type === "email" ? ch.to : ch.type === "webhook" ? ch.url : ch.provider
-      const lastSent = mine
-        .map((d) => d.created_at)
-        .sort()
-        .at(-1)
+      const target = ch.type === "email" ? ch.to : ch.type === "webhook" ? ch.url : undefined
       const foreign = isForeignPersonal(ch, currentUserId)
+      const label = ch.type === "shoutrrr" ? (providerOf(provider)?.label ?? provider) : ch.type === "email" ? "Email" : "Webhook"
       return {
         id: ch.id,
-        kind: channelKind(ch, providerCategoryOf),
-        // A channel has no user-given name in the data model, so the
-        // destination IS the name; inventing "Discord channel #1" would read
-        // as a label someone chose. On the admin overview another member's
-        // destination is a blank string (redacted server-side) — say whose it
-        // is rather than rendering an empty cell that looks like a bug.
-        name: foreign
-          ? `${providerLabelOf(provider)} — another member's`
-          : target || providerLabelOf(provider),
+        kind: channelKind(ch, (n) => providerOf(n)?.category),
+        name: foreign ? `${label} — another member's` : ch.type === "webhook" ? (target ?? label).replace(/^https?:\/\//, "") : target || label,
         detail: `${provider}${ch.scope === "user" ? " · personal" : ""}`,
         provider,
-        providerLabel: ch.type === "shoutrrr" ? providerLabelOf(provider) : titleCase(ch.type),
+        providerLabel: label,
         scope: ch.scope === "user" ? "personal" : "workspace",
         enabled: ch.enabled,
         categories: ch.categories ?? [],
         status: deriveStatus(ch.enabled, canSeeDeliveries ? mine : null),
-        sent24h: canSeeDeliveries ? recent.filter((d) => d.status === "sent").length : null,
-        lastDelivery: lastSent ?? null,
+        sent24h: null,
+        lastDelivery: mine.map((d) => d.created_at).sort().at(-1) ?? null,
         source: "channel",
         readOnly: foreign,
         channel: ch,
-      }
+      } satisfies ConnectionRow
     })
+  }, [channels, deliveries, canSeeDeliveries, currentUserId, providerOf])
 
-    // Composio accounts are deliberately NOT in this list any more. They were,
-    // and it was the single most confusing thing on the page: a Discord webhook
-    // and a Gmail tool account sat in one table under one word, with different
-    // owners, different lifecycles and different meanings of "connected". They
-    // live under Tools, where their own six views already describe them.
-    return channelRows
-  }, [channels, deliveries, canSeeDeliveries, currentUserId, providerCategoryOf, providerLabelOf])
-
-  const visibleRows = React.useMemo(
-    () => applyFilters(rows, filters).filter((r) => rowMatches(r, search)),
-    [rows, filters, search],
+  const channelRows = React.useMemo(() => rows.filter((r) => r.kind !== "webhook"), [rows])
+  const webhookRows = React.useMemo(() => rows.filter((r) => r.kind === "webhook"), [rows])
+  const spaceRows = route.space === "webhooks" ? webhookRows : channelRows
+  const channelView = (route.space === "webhooks" || route.space === "channels") && ["all", "failing", "paused", "mine"].includes(route.view) ? (route.view as ChannelsView) : "all"
+  const visibleChannels = spaceRows.filter(
+    (r) =>
+      matchesView(r, channelView, currentUserId) &&
+      (route.space !== "channels" || !filters.kind || r.kind === filters.kind) &&
+      (route.space !== "channels" || !filters.whose || (filters.whose === "everyone" ? r.readOnly : r.scope === filters.whose)) &&
+      rowMatches(r, search),
   )
 
-  /** Connections per provider, for the catalog's "already in use" badge. */
-  const usage = React.useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const r of rows) out[r.provider] = (out[r.provider] ?? 0) + 1
-    return out
-  }, [rows])
+  const tRows = React.useMemo(() => triggerRows(incoming.rows), [incoming.rows])
+  const triggerView = (["all", "failing", "off"].includes(route.view) ? route.view : "all") as TriggerView
+  const visibleTriggers = filterTriggers(tRows, { view: triggerView, starts: route.starts, target: route.target, checks: filters.checks, search })
+  const pageTargets = incoming.targets.filter((t) => t.kind === "page" && (!route.target || t.id === route.target || t.slug === route.target) && `${t.name} ${t.slug}`.toLowerCase().includes(search.trim().toLowerCase()))
 
-  /** Catalog hits for the current search — powers the empty-state hint. */
-  const catalogMatches = React.useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return 0
-    return providers.filter(
-      (p) =>
-        p.label.toLowerCase().includes(q) ||
-        p.provider.toLowerCase().includes(q) ||
-        p.blurb.toLowerCase().includes(q),
-    ).length
-  }, [providers, search])
+  const aRows = React.useMemo(() => accountRows(composio.accounts, composio.agents, composio.bindings), [composio.accounts, composio.agents, composio.bindings])
+  const toolsView = (["connected", "attention", "idle"].includes(route.view) ? route.view : "connected") as ToolsListView
+  const visibleAccounts = filterAccounts(aRows, toolsView, search, null)
+  const connectedSlugs = React.useMemo(() => new Set(composio.accounts.map((a) => a.toolkit.slug)), [composio.accounts])
 
-  // ---- actions ------------------------------------------------------------
-  const refreshIncoming = incoming.refresh
-  const refreshAll = React.useCallback(() => {
-    refreshIncoming()
-    void refreshChannels()
-    void refreshProviders()
-    void refreshDeliveries()
-    // Composio is only mounted on its own tab, so there is nothing to call —
-    // dropping its cache is what makes the next visit fetch rather than paint
-    // what this button was pressed to replace.
-    if (workspaceId) invalidate(`composio:${workspaceId}:`)
-  }, [refreshChannels, refreshProviders, refreshDeliveries, workspaceId, refreshIncoming])
-
+  // ---- actions ---------------------------------------------------------------
   const active = React.useRef(true)
-  const handleToggle = async (row: ConnectionRow, next: boolean) => {
-    try {
-      await patch(row.id, { enabled: next })
-    } catch (e) {
-      if (active.current) toast.error(e instanceof Error ? e.message : "Failed to update the connection")
-    }
+  React.useEffect(() => () => void (active.current = false), [])
+  const onPatch = async (id: string, body: ChannelPatchBody) => {
+    await patch(id, body)
   }
-
-  const handleTest = async (row: ConnectionRow) => {
+  const onTest = async (row: ConnectionRow) => {
     try {
       await sendTest(row.id)
       if (active.current) toast.success("Test sent", { description: `to ${row.name}` })
     } catch (e) {
-      if (active.current) toast.error("Test send failed", {
-        description: e instanceof Error ? e.message : undefined,
-      })
+      if (active.current) toast.error("Test send failed", { description: e instanceof Error ? e.message : undefined })
     }
   }
-
-  // The dialog decides; handleDelete resolves true only once the connection
-  // is gone, so a caller that closes a detail view afterwards does not do it
-  // under the open dialog, nor after a Cancel.
-  const [pendingDelete, setPendingDelete] = React.useState<{ row: ConnectionRow; resolve: (deleted: boolean) => void } | null>(null)
-  const pendingDeleteRef = React.useRef<typeof pendingDelete>(null)
-  React.useEffect(() => {
-    active.current = true
-    return () => {
-      active.current = false
-      pendingDeleteRef.current?.resolve(false)
-    }
-  }, [])
-  const handleDelete = (row: ConnectionRow) =>
-    new Promise<boolean>((resolve) => {
-      const pending = { row, resolve }
-      pendingDeleteRef.current = pending
-      setPendingDelete(pending)
-    })
-  const deleteConnection = async (row: ConnectionRow) => {
+  const onRemove = async (row: ConnectionRow) => {
     try {
       await remove(row.id)
-      if (active.current) toast.success("Connection deleted")
     } catch (e) {
-      if (active.current) toast.error(e instanceof Error ? e.message : "Failed to delete the connection")
+      toast.error(e instanceof Error ? e.message : "The channel was not removed")
       throw e
     }
+    toast.success(row.kind === "webhook" ? "Webhook removed" : "Channel removed")
+    back()
   }
 
-  const handlePickService = (service: ServiceOption) => {
-    setAddTarget(
-      service.key === "email" || service.key === "webhook"
-        ? { kind: service.key, label: service.label }
-        : { kind: "shoutrrr", provider: service.key, label: service.label },
-    )
+  const [addMode, setAddMode] = React.useState<AddChannelMode | null>(null)
+  const [incomingCreate, setIncomingCreate] = React.useState<{ target?: IncomingTarget } | null>(null)
+  const [cliOpen, setCliOpen] = React.useState(false)
+  const [pageTarget, setPageTarget] = React.useState<IncomingTarget | null>(null)
+
+  const primary = () => {
+    if (route.space === "tools") {
+      if (composio.configured) setConnectRequest({})
+      else setApiKeyOpen(true)
+    } else if (route.space === "triggers") setIncomingCreate({})
+    else setAddMode(route.space === "webhooks" ? "webhook" : "channel")
   }
 
-  /**
-   * Tools chosen in the wizard. Composio owns its own connect flow (OAuth per
-   * toolkit), so this is a doorway rather than a form — straight to the app
-   * catalog, or to the key dialog when there is no key yet, because browsing
-   * a catalog you cannot connect from is a dead end.
-   */
-  const handlePickTools = () => {
-    setTab("tools")
-    if (composioStatus.configured) {
-      setMcpSection("catalog")
+  // ---- main column -------------------------------------------------------------
+  let main: React.ReactNode
+  let objectName: string | null = null
+  if (route.space === "channels" || route.space === "webhooks") {
+    const row = route.id ? rows.find((r) => r.id === route.id) ?? null : null
+    if (route.id) {
+      objectName = row?.name ?? null
+      main = row ? (
+        <ChannelPage
+          workspaceId={workspaceId}
+          row={row}
+          pane={(CHANNEL_PANES as readonly string[]).includes(route.pane ?? "") ? (route.pane as ChannelPane) : "overview"}
+          onPane={setPane}
+          deliveries={canSeeDeliveries ? deliveries.filter((d) => d.channel_id === row.id) : null}
+          providerOff={row.channel?.type === "shoutrrr" && providerOf(row.provider)?.enabled === false}
+          canEdit={!row.readOnly && (row.scope === "personal" || canManageWorkspace)}
+          onBack={back}
+          onPatch={onPatch}
+          onTest={onTest}
+          onRemove={onRemove}
+        />
+      ) : (
+        <ChannelsList webhooks={route.space === "webhooks"} rows={[]} allRows={channelsLoading ? [] : spaceRows} view="all" kind={null} whose={null} search="" deliveries={[]} canSeeDeliveries={false} currentUserId={currentUserId} loading={channelsLoading} error={channelsError} onRetry={() => void refreshChannels()} onOpen={open} onAdd={primary} onView={goView} onClearFilters={back} />
+      )
+    } else if (route.space === "channels" && route.view === "preferences") {
+      main = (
+        <div className="grid min-w-0 gap-3.5">
+          <SpaceHead title="My notifications" description="Which kinds of events reach you, and on which of your channels." />
+          <NotificationPrefsSection workspaceId={workspaceId} />
+        </div>
+      )
+    } else if (route.space === "channels" && route.view === "deliveries") {
+      main = <DeliveriesLog deliveries={deliveries} rows={rows} loading={deliveriesLoading} error={deliveriesError} forbidden={deliveriesForbidden} onRetry={() => void refreshDeliveries()} onOpenChannel={(id) => setRoute({ ...route, space: rows.find((r) => r.id === id)?.kind === "webhook" ? "webhooks" : "channels", view: "all", id, pane: "deliveries" })} />
     } else {
-      setApiKeyOpen(true)
+      main = (
+        <ChannelsList
+          webhooks={route.space === "webhooks"}
+          rows={visibleChannels}
+          allRows={spaceRows}
+          view={channelView}
+          kind={route.space === "channels" ? filters.kind : null}
+          whose={route.space === "channels" && filters.whose !== "everyone" ? filters.whose : null}
+          search={search}
+          deliveries={deliveries}
+          canSeeDeliveries={canSeeDeliveries}
+          currentUserId={currentUserId}
+          loading={channelsLoading}
+          error={channelsError}
+          onRetry={() => void refreshChannels()}
+          onOpen={(id) => open(id)}
+          onAdd={primary}
+          onView={goView}
+          onClearFilters={() => {
+            setSearch("")
+            setFilters(EMPTY_PANEL_FILTERS)
+            goView("all")
+          }}
+        />
+      )
+    }
+  } else if (route.space === "triggers") {
+    if (pageTarget) {
+      main = <IncomingWebhooksView workspaceId={workspaceId} data={incoming} section="page" search="" targetId={pageTarget.id} onSelect={setPageTarget} onBack={() => setPageTarget(null)} onAdd={(t) => setIncomingCreate({ target: t })} />
+    } else if (route.id) {
+      const row = tRows.find((r) => r.id === route.id) ?? null
+      objectName = row?.name ?? null
+      main = (
+        <TriggerPage
+          workspaceId={workspaceId}
+          row={row}
+          data={incoming}
+          pane={(TRIGGER_PANES as readonly string[]).includes(route.pane ?? "") ? (route.pane as TriggerPane) : "overview"}
+          onPane={setPane}
+          canEdit={canManageWorkspace}
+          onBack={back}
+          onDeleted={back}
+        />
+      )
+    } else {
+      main = (
+        <TriggersList
+          rows={visibleTriggers}
+          allRows={tRows}
+          pages={pageTargets}
+          view={triggerView}
+          starts={route.starts}
+          filtered={triggerView !== "all" || route.starts !== null || filters.checks !== null || search.trim() !== ""}
+          loading={incoming.loading}
+          error={incoming.error}
+          onRetry={incoming.refresh}
+          onOpen={(id) => open(id)}
+          onOpenTarget={setPageTarget}
+          onAdd={primary}
+          onView={goView}
+          onClearFilters={() => {
+            setSearch("")
+            setFilters(EMPTY_PANEL_FILTERS)
+            setRoute({ ...route, view: "all", starts: null, target: null, id: null })
+          }}
+        />
+      )
+    }
+  } else {
+    if (route.view === "catalog" && route.id) {
+      const app = composio.catalog?.find((t) => t.slug === route.id)
+      objectName = app?.name ?? route.id
+      main = (
+        <CatalogAppPage
+          app={app}
+          slug={route.id}
+          connectedAccountId={composio.accounts.find((a) => a.toolkit.slug === route.id)?.id ?? null}
+          canManage={canManageWorkspace}
+          configured={composio.configured}
+          onBack={back}
+          onConnect={() => setConnectRequest({ toolkit: { slug: route.id!, name: app?.name ?? route.id! } })}
+          onOpenConnected={(id) => open(id, "connected")}
+        />
+      )
+    } else if (route.view === "catalog") {
+      main = <CatalogView catalog={composio.catalog ?? []} loading={composio.catalogLoading ?? composio.loading} total={composio.counts.apps} connected={connectedSlugs} configured={composio.configured} canManage={canManageWorkspace} onOpen={(slug) => open(slug)} onAddKey={() => setApiKeyOpen(true)} />
+    } else if (route.view === "crew-tools") {
+      main = (
+        <div className="grid min-w-0 gap-3.5">
+          <SpaceHead title="Crew MCP servers" description="MCP servers a crew's agents call, and whether each has a credential." />
+          <CrewToolsView workspaceId={workspaceId} search={search} initialServerId={route.server} onServerConsumed={() => setRoute({ ...route, server: null })} canManage={canManageWorkspace} />
+        </div>
+      )
+    } else if (route.view === "mcp") {
+      main = (
+        <div className="grid min-w-0 gap-3.5">
+          <SpaceHead title="MCP endpoints" description="How each agent with an app reaches Composio. For diagnosis." />
+          <McpEndpointsTab agents={composio.agents} bindings={composio.bindings} loading={composio.loading} />
+        </div>
+      )
+    } else if (route.id) {
+      const row = aRows.find((r) => r.account.id === route.id) ?? null
+      objectName = row ? row.slug : null
+      main = (
+        <AppAccountPage
+          workspaceId={workspaceId}
+          row={row}
+          status={composio}
+          pane={(APP_PANES as readonly string[]).includes(route.pane ?? "") ? (route.pane as AppPane) : "overview"}
+          onPane={setPane}
+          canManage={canManageWorkspace}
+          onBack={back}
+          onChanged={() => setComposioRefresh((n) => n + 1)}
+          onGone={back}
+          onTriggers={() => goSpace("triggers")}
+        />
+      )
+    } else {
+      main = (
+        <ToolsList
+          rows={visibleAccounts}
+          allRows={aRows}
+          view={toolsView}
+          status={composio}
+          filtered={toolsView !== "connected" || search.trim() !== ""}
+          canManage={canManageWorkspace}
+          onOpen={(id) => open(id)}
+          onConnect={primary}
+          onView={goView}
+          onAddKey={() => setApiKeyOpen(true)}
+          onClearFilters={() => {
+            setSearch("")
+            goView("connected")
+          }}
+        />
+      )
     }
   }
 
-  const services = React.useMemo(
-    () => buildServiceOptions(providers, usage),
-    [providers, usage],
-  )
-  const serviceSections = React.useMemo(
-    () => catalogSections(providerCategories),
-    [providerCategories],
-  )
-
-  // ── explorer wiring ─────────────────────────────────────────────────────
-  const notifySections: ExplorerSection<NotifySection>[] = React.useMemo(
-    () =>
-      NOTIFY_SECTIONS.map((sec) => ({
-        ...sec,
-        count:
-          sec.key === "connections"
-            ? rows.length || undefined
-            : sec.key === "deliveries"
-              ? canSeeDeliveries
-                ? deliveries.length || undefined
-                : undefined
-              : undefined,
-      })),
-    [rows.length, deliveries.length, canSeeDeliveries],
-  )
-
-  const mcpSections: ExplorerSection<ToolsSection>[] = React.useMemo(() => {
-    const c = composioStatus.counts
-    const counts: Partial<Record<TabKey, React.ReactNode>> = {
-      catalog: c.apps || undefined,
-      accounts: c.accounts || undefined,
-      agents: c.agentsTotal ? `${c.agentsBound}/${c.agentsTotal}` : undefined,
-      mcp: c.endpoints || undefined,
-    }
-    // Crew tools first: they exist on every instance, Composio only with a key.
-    const composio: ExplorerSection<ToolsSection>[] = composioStatus.configured
-      ? MCP_SECTIONS.map((sec) => ({ ...sec, count: counts[sec.key] }))
-      : SETUP_ONLY_SECTION
-    return [CREW_TOOLS_SECTION, ...composio]
-  }, [composioStatus.counts, composioStatus.configured])
-
-  const notifyFacetGroups = React.useMemo(
-    () => notificationFacets(rows, filters, setFilters),
-    [rows, filters],
-  )
-  const mcpFacetGroups = React.useMemo(
-    () => mcpFacets(composioStatus, mcpFilters, setMcpFilters),
-    [composioStatus, mcpFilters],
-  )
-
-  // The panel lists the actual connections, not just section links — the
-  // /routines rail lists routines for the same reason. Search and the Filter
-  // popover narrow this list, so what you see on the left is what the main
-  // column is showing.
-  const connectionItems = React.useMemo(
-    () =>
-      visibleRows.map((r) => ({
-        id: r.id,
-        label: r.name,
-        sublabel: r.providerLabel,
-        mark: r.provider,
-        dot: STATUS_DOT[r.status],
-      })),
-    [visibleRows],
-  )
-
-  const accountItems = React.useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return composioStatus.accounts
-      .filter((a) => {
-        if (mcpFilters.toolkit && a.toolkit.slug !== mcpFilters.toolkit) return false
-        if (mcpFilters.user && a.user_id !== mcpFilters.user) return false
-        if (q && !a.toolkit.slug.toLowerCase().includes(q) && !a.user_id.toLowerCase().includes(q))
-          return false
-        return true
-      })
-      .map((a) => ({
-        id: a.id,
-        label: a.toolkit.slug,
-        sublabel: a.user_id,
-        mark: a.toolkit.slug,
-        // Composio serves artwork for its whole catalog; without it these rows
-        // fall back to two-letter tiles while the column beside them shows the
-        // real icon for the same account.
-        logoUrl: a.toolkit.logo || brandLogo(a.toolkit.slug),
-        dot: a.status.toUpperCase() === "ACTIVE" ? "bg-success" : "bg-warn",
-      }))
-  }, [composioStatus.accounts, mcpFilters, search])
-
-  const selectedConnection = React.useMemo(
-    () => rows.find((r) => r.id === selectedConnectionId) ?? null,
-    [rows, selectedConnectionId],
-  )
-  const selectedAccount = React.useMemo(
-    () => composioStatus.accounts.find((a) => a.id === selectedAccountId) ?? null,
-    [composioStatus.accounts, selectedAccountId],
-  )
-
-  /** This connection's slice of the log; null when the caller may not read it. */
-  const selectedDeliveries = React.useMemo(() => {
-    if (!canSeeDeliveries || !selectedConnectionId) return null
-    return deliveries.filter((d) => d.channel_id === selectedConnectionId)
-  }, [canSeeDeliveries, deliveries, selectedConnectionId])
-
-  const notifySearchPlaceholder =
-    notifySection === "deliveries" ? "Search deliveries…" : "Search connections…"
-
-  const failing = rows.filter((r) => r.status === "failing").length
-  // The number the Add-integration wizard will offer — see catalogSize.
-  const serviceCount = providers.length > 0 ? catalogSize(providers.length) : 0
-  const toolCount = composioStatus.counts.accounts
+  const meta = SPACE_META[route.space]
+  const startsCounts: Partial<Record<IncomingKind, number>> = {
+    routine: tRows.filter((r) => r.kind === "routine").length,
+    agent: tRows.filter((r) => r.kind === "agent").length,
+    page: incoming.targets.filter((t) => t.kind === "page").length,
+  }
+  const checksOptions = ["GitHub signature", "Crewship signature"].map((label) => ({ label, count: tRows.filter((r) => r.checks === label).length })).filter((o) => o.count > 0)
 
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
-      <SubBar<IntegrationsTab>
+      <SubBar
         icon={Plug}
         title="Integrations"
-        description={
-          tab === "incoming" ? <>{incoming.error ? "Endpoints unavailable" : incoming.loading ? "Refreshing endpoints…" : `${incoming.rows.length} endpoints · ${incoming.targets.length} targets`} · Pages per Page</> : tab === "tools" ? (
-            composioStatus.configured ? (
-              <>
-                {composioStatus.counts.accounts} connected ·{" "}
-                {composioStatus.counts.apps || "…"} apps available
-                {composioStatus.keyLabel && ` · key ${composioStatus.keyLabel}`}
-              </>
-            ) : (
-              <>Tools (MCP) — not configured</>
-            )
-          ) : (
-            <>
-              {rows.length} {rows.length === 1 ? "connection" : "connections"} ·{" "}
-              {serviceCount} {serviceCount === 1 ? "service" : "services"} available
-              {failing > 0 && ` · ${failing} failing`}
-            </>
-          )
-        }
+        section={objectName ? `${meta.label} › ${objectName}` : meta.label}
+        heading={false}
         ariaLabel="Integrations"
-        tabs={TABS.map((t) => ({
-          id: t.id,
-          label: t.label,
-          icon: t.icon,
-          badge:
-            t.id === "notifications"
-              ? rows.length || undefined
-              : t.id === "tools" ? toolCount || undefined : incoming.error || incoming.loading ? "—" : incoming.rows.length,
-        }))}
-        activeTab={tab}
-        onTabChange={setTab}
-        tools={
-          canManageWorkspace && tab === "notifications" && notifySection === "connections" ? (
-            <label className="flex cursor-pointer items-center gap-1.5 pr-1 text-[11px] text-muted-foreground">
-              <Switch
-                size="sm"
-                checked={includeEveryone}
-                onCheckedChange={setIncludeEveryone}
-                aria-label="Include everyone's personal connections"
-              />
-              <span className="hidden sm:inline">Everyone&apos;s connections</span>
-            </label>
-          ) : undefined
-        }
         actions={
           <>
-            <SubBarSecondary icon={RefreshCw} onClick={refreshAll} title="Reload every list">
-              Refresh
-            </SubBarSecondary>
-            <SubBarPrimary
-              icon={Plus}
-              onClick={() => setAddOpen(true)}
-              title="Add incoming webhooks, outgoing notifications or agent tools"
-            >
-              Add integration
+            <SubBarIconButton icon={Terminal} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
+            <SubBarPrimary icon={Plus} onClick={primary} aria-label={meta.add}>
+              <span className="max-sm:sr-only">{meta.add}</span>
             </SubBarPrimary>
           </>
         }
       />
 
       <div className="relative flex flex-1 overflow-hidden">
-        {/* The one SecondaryPanel (Harbor 2): 272 px, collapse remembered per
-            user; on a phone a sheet from the top bar. The explorer's own
-            toolbar becomes the panel toolbar. */}
         <SecondaryPanel id="integrations" label="Integrations">
-          {tab === "incoming" ? (
-            <IntegrationsExplorer<IncomingSection>
-              sectionsLabel="Incoming" sections={incomingRail.sections} section={incomingSection}
-              onSectionChange={next=>{setIncomingSection(next);setIncomingTarget(null);closePanelSheet()}}
-              search={search} onSearchChange={setSearch} searchPlaceholder="Search targets…" searchAriaLabel="Search incoming targets"
-              facets={[]} onClearFilters={()=>setSearch("")} items={incomingRail.items} itemsLabel="Targets"
-              selectedItemId={incomingTarget ? `${incomingSection}:${incomingTarget}` : null}
-              onItemSelect={id=>{if(!id){setIncomingTarget(null);return}const target=incoming.targets.find(t=>`${t.kind}:${t.id}`===id);if(target)selectIncoming(target)}}
-              itemsEmpty={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">{incoming.loading ? "Loading targets…" : incoming.error ? "Targets unavailable. Use Refresh to retry." : "No matching targets. Create a routine, agent or Page first."}</p>}
-              footer={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">Page endpoints are listed per Page. Gray means no known enabled endpoint, not a delivery failure.</p>}
-            />
-          ) : tab === "tools" ? (
-            /* Same component, different inputs. The facets differ because
-               Kind/Status/Scope/Service filter nothing here — but the toolbar,
-               the Filter popover and the section rows are identical. */
-            <IntegrationsExplorer<ToolsSection>
-              sectionsLabel="Tools (MCP)"
-              sections={mcpSections}
-              section={composioStatus.configured || mcpSection === "crew-tools" ? mcpSection : "catalog"}
-              onSectionChange={(next) => {
-                if (next === "crew-tools" || composioStatus.configured) {
-                  setMcpSection(next)
-                  setSelectedAccountId(null)
-                  closePanelSheet()
-                } else {
-                  setApiKeyOpen(true)
-                }
-              }}
-              search={search}
-              onSearchChange={setSearch}
-              searchPlaceholder="Search apps, tools, agents…"
-              searchAriaLabel="Search apps, tools and agents"
-              facets={composioStatus.configured ? mcpFacetGroups : []}
-              onClearFilters={() => setMcpFilters(EMPTY_MCP_FILTERS)}
-              items={composioStatus.configured ? accountItems : []}
-              itemsLabel="Connected accounts"
-              selectedItemId={selectedAccountId}
-              onItemSelect={(id) => {
-                setSelectedAccountId(id)
-                if (id) closePanelSheet()
-              }}
-              itemsEmpty={
-                <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                  {composioStatus.configured
-                    ? "No accounts match. Connect one from the app catalog."
-                    : "The sections and accounts appear once an API key is saved."}
-                </p>
-              }
-              footer={
-                /* The API key configures the instance; it is not something you
-                   reach for beside "Add integration". It sits at the foot of
-                   the panel it configures, showing its state rather than just
-                   a button. */
-                composioStatus.configured ? (
-                  <button
-                    type="button"
-                    onClick={() => setApiKeyOpen(true)}
-                    className="mx-1.5 mt-2 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.03] hover:text-foreground"
-                  >
-                    <KeyRound className="h-3 w-3 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">
-                      API key{composioStatus.keyLabel ? ` · ${composioStatus.keyLabel}` : ""}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/50">change</span>
-                  </button>
-                ) : undefined
-              }
-            />
-          ) : (
-            <IntegrationsExplorer<NotifySection>
-              sectionsLabel="Notifications"
-              sections={notifySections}
-              section={notifySection}
-              onSectionChange={setNotifySection}
-              search={search}
-              onSearchChange={setSearch}
-              searchPlaceholder={notifySearchPlaceholder}
-              searchAriaLabel="Search connections and deliveries"
-              facets={notifyFacetGroups}
-              onClearFilters={() => setFilters(EMPTY_FILTERS)}
-              items={connectionItems}
-              itemsLabel="Connections"
-              selectedItemId={selectedConnectionId}
-              onItemSelect={(id) => {
-                setSelectedConnectionId(id)
-                // A connection's detail belongs to the Connections view; picking
-                // one while the preference matrix is showing should take you to
-                // the thing you picked.
-                if (id) {
-                  setNotifySection("connections")
-                  closePanelSheet()
-                }
-              }}
-              itemsEmpty={
-                <p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
-                  {rows.length === 0
-                    ? "Nothing connected yet. Use Add integration to see every service this instance can reach."
-                    : "Nothing matches the current search and filters."}
-                </p>
-              }
-            />
-          )}
+          <IntegrationsPanel
+            space={route.space}
+            view={route.view}
+            hasObject={route.id !== null || pageTarget !== null}
+            starts={route.starts}
+            search={search}
+            onSearch={setSearch}
+            onSpace={goSpace}
+            onView={(v) => {
+              setPageTarget(null)
+              goView(v)
+            }}
+            onStarts={(k) => {
+              setPageTarget(null)
+              setRoute({ ...route, view: "all", id: null, pane: null, starts: k, target: null })
+            }}
+            filters={filters}
+            onFilters={setFilters}
+            spaceCounts={{ tools: composio.configured ? aRows.length : undefined, triggers: incoming.error ? undefined : tRows.length, channels: channelRows.length, webhooks: webhookRows.length }}
+            viewCounts={
+              route.space === "tools"
+                ? { connected: aRows.length, attention: aRows.filter((r) => r.signedOut).length, idle: aRows.filter((r) => r.agents.length === 0).length, catalog: composio.counts.apps || undefined }
+                : route.space === "triggers"
+                  ? { all: tRows.length, failing: tRows.filter((r) => r.failing).length, off: tRows.filter((r) => !r.enabled).length }
+                  : { all: spaceRows.length, failing: spaceRows.filter((r) => r.status === "failing").length, paused: spaceRows.filter((r) => !r.enabled).length, mine: spaceRows.filter((r) => matchesView(r, "mine", currentUserId)).length }
+            }
+            kindCounts={{ chat: channelRows.filter((r) => r.kind === "chat").length, email: channelRows.filter((r) => r.kind === "email").length, push: channelRows.filter((r) => r.kind === "push").length, incident: channelRows.filter((r) => r.kind === "incident").length }}
+            startsCounts={startsCounts}
+            checksOptions={checksOptions}
+            isAdmin={canManageWorkspace}
+            canSeeDeliveries={canSeeDeliveries}
+            onComposioKey={() => (canManageWorkspace ? setApiKeyOpen(true) : toast.info("Ask an admin to change the Composio key"))}
+            composioKeyLabel={composio.keyLabel}
+          />
         </SecondaryPanel>
 
-        <div className="relative flex-1 overflow-y-auto bg-background">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={
-                tab === "incoming" ? `incoming:${incomingTarget ?? incomingSection}` : tab === "tools"
-                  ? `tools:${selectedAccountId ?? mcpSection}`
-                  : `notify:${selectedConnectionId ?? notifySection}`
-              }
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-            >
-              {tab === "incoming" && <IncomingWebhooksView key={workspaceId} workspaceId={workspaceId} data={incoming} section={incomingSection} search={search} targetId={incomingTarget} onSelect={selectIncoming} onBack={()=>{setIncomingTarget(null);setIncomingSection("endpoints")}} onAdd={target=>setIncomingCreate({target})}/>}
-              {tab === "notifications" &&
-                notifySection === "connections" &&
-                selectedConnection && (
-                  <ConnectionDetail
-                    workspaceId={workspaceId}
-                    row={selectedConnection}
-                    deliveries={selectedDeliveries}
-                    onBack={() => setSelectedConnectionId(null)}
-                    onToggleEnabled={handleToggle}
-                    onTest={handleTest}
-                    onDelete={async (row) => {
-                      if (!(await handleDelete(row))) return
-                      setSelectedConnectionId(null)
-                    }}
-                  />
-                )}
-
-              {tab === "notifications" &&
-                notifySection === "connections" &&
-                !selectedConnection && (
-                <ConnectionsView
-                  rows={visibleRows}
-                  totalRows={rows.length}
-                  loading={channelsLoading && channels.length === 0}
-                  error={channelsError}
-                  canSeeDeliveries={canSeeDeliveries}
-                  canManageWorkspace={canManageWorkspace}
-                  search={search}
-                  catalogMatches={catalogMatches}
-                  onOpenAdd={() => setAddOpen(true)}
-                  onToggleEnabled={handleToggle}
-                  onTest={handleTest}
-                  onDelete={async (row) => { await handleDelete(row) }}
-                  onSelect={setSelectedConnectionId}
-                />
-              )}
-
-              {tab === "tools" && selectedAccount && (
-                <ToolAccountDetail
-                  account={selectedAccount}
-                  agents={composioStatus.agents}
-                  bindings={composioStatus.bindings}
-                  onBack={() => setSelectedAccountId(null)}
-                />
-              )}
-
-              {tab === "tools" && !selectedAccount && mcpSection === "crew-tools" && (
-                <CrewToolsView
-                  workspaceId={workspaceId}
-                  search={search}
-                  initialServerId={linkedServerId}
-                  onServerConsumed={() => setLinkedServerId(null)}
-                  canManage={canManageWorkspace}
-                />
-              )}
-
-              {tab === "tools" && !selectedAccount && mcpSection !== "crew-tools" && (
-                <div className="space-y-4 p-4 md:p-6">
-                  {composioStatus.configured && (
-                    <>
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <h2 className="text-sm font-medium text-foreground/90">
-                          {MCP_SECTIONS.find((x) => x.key === mcpSection)?.label ?? "Tools"}
-                        </h2>
-                        <span className="text-xs text-muted-foreground">
-                          {MCP_SECTIONS.find((x) => x.key === mcpSection)?.hint}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                        <KpiCard
-                          label="Connectable apps"
-                          value={composioStatus.counts.apps || "—"}
-                          subtitle="Composio catalog"
-                        />
-                        <KpiCard
-                          label="Connected"
-                          value={composioStatus.counts.accounts}
-                          valueColor={
-                            composioStatus.counts.accounts > 0 ? "rgb(52, 211, 153)" : undefined
-                          }
-                          subtitle={`across ${composioStatus.counts.users} ${composioStatus.counts.users === 1 ? "user" : "users"}`}
-                        />
-                        <KpiCard
-                          label="Agents bound"
-                          value={composioStatus.counts.agentsBound}
-                          subtitle={`of ${composioStatus.counts.agentsTotal} agents`}
-                        />
-                        <KpiCard
-                          label="MCP endpoints"
-                          value={composioStatus.counts.endpoints}
-                          subtitle="one per bound agent"
-                        />
-                      </div>
-                    </>
-                  )}
-                  <ComposioIntegrations
-                    embedded
-                    section={composioStatus.configured ? (mcpSection as TabKey) : undefined}
-                    search={search}
-                    apiKeyOpen={apiKeyOpen}
-                    onApiKeyOpenChange={setApiKeyOpen}
-                    onStatus={setComposioStatus}
-                  />
-                </div>
-              )}
-
-              {tab === "notifications" && notifySection === "preferences" && (
-                <div className="p-4 md:p-6">
-                  <NotificationPrefsSection workspaceId={workspaceId} />
-                </div>
-              )}
-
-              {tab === "notifications" && notifySection === "deliveries" && (
-                <DeliveriesView
-                  deliveries={deliveries}
-                  rows={rows}
-                  loading={deliveriesLoading}
-                  error={deliveriesError}
-                  forbidden={deliveriesForbidden}
-                />
-              )}
-            </motion.div>
-          </AnimatePresence>
+        <div className="relative min-w-0 flex-1 overflow-y-auto bg-background" data-slot="integrations-main">
+          <div className="mx-auto grid w-full max-w-[1240px] min-w-0 gap-3.5 px-4 py-4 md:px-7 md:py-6">
+            {isMobile && <SpaceSwitcher segmented space={route.space} counts={{}} onSpace={goSpace} />}
+            {main}
+          </div>
         </div>
       </div>
 
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            pendingDelete?.resolve(false)
-            pendingDeleteRef.current = null
-            setPendingDelete(null)
-          }
-        }}
-        title={pendingDelete ? `Delete the connection to ${pendingDelete.row.name}?` : ""}
-        consequences={[
-          { tone: "lost", text: "Nothing is delivered there any more; routines that notify through it report a delivery failure" },
-          { tone: "kept", text: "The delivery log keeps what was already sent" },
-          { tone: "kept", text: "Add integration recreates it" },
-        ]}
-        confirmLabel="Delete connection"
-        destructive
-        onConfirm={async () => {
-          if (!pendingDelete) return
-          await deleteConnection(pendingDelete.row)
-          pendingDelete.resolve(true)
-        }}
-      />
-      <AddIntegrationDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        services={services}
-        sections={serviceSections}
-        onPickService={handlePickService}
-        onPickIncoming={() => {setTab("incoming");setIncomingCreate({})}}
-        onPickTools={handlePickTools}
-        toolsConfigured={composioStatus.configured}
+      {/* Composio loads here for every space (counts, the catalog) and hosts
+          its own dialogs: the API key and Connect with its sign-in popup. */}
+      <ComposioIntegrations
+        embedded
+        headless
+        search={route.space === "tools" && route.view === "catalog" ? search : ""}
+        apiKeyOpen={apiKeyOpen}
+        onApiKeyOpenChange={setApiKeyOpen}
+        onStatus={setComposio}
+        connectRequest={connectRequest}
+        onConnectRequestHandled={clearConnectRequest}
+        refreshKey={composioRefresh}
       />
 
-      {incomingCreate && <IncomingCreateDialog key={workspaceId} workspaceId={workspaceId} data={incoming} initialTarget={incomingCreate.target} onClose={()=>setIncomingCreate(null)} onCreated={selectIncoming}/>}
       <AddChannelDialog
-        target={addTarget}
-        onClose={() => {
-          setAddTarget(null)
-          void refreshChannels()
-        }}
+        mode={addMode}
+        onClose={() => setAddMode(null)}
         providers={providers}
         canCreateWorkspace={canManageWorkspace}
         create={create}
         sendDraftTest={sendDraftTest}
+        onCreated={(id, webhook) => setRoute({ ...route, space: webhook ? "webhooks" : "channels", view: "all", id, pane: null })}
       />
+      {incomingCreate && (
+        <IncomingCreateDialog
+          key={workspaceId}
+          workspaceId={workspaceId}
+          data={incoming}
+          initialTarget={incomingCreate.target}
+          onClose={() => setIncomingCreate(null)}
+          onCreated={(t) => {
+            if (t.kind === "page") setPageTarget(t)
+            else setRoute({ ...route, space: "triggers", view: "all", id: null, starts: t.kind, target: t.id })
+          }}
+        />
+      )}
+      {cliOpen && (
+        <CreateSurface open onOpenChange={(o) => !o && setCliOpen(false)} size="md">
+          <CreateSurfaceHeader icon={Terminal} title="Integrations from the command line" onClose={() => setCliOpen(false)} />
+          <CreateSurfaceBody>
+            <CliLines lines={CLI_LINES} />
+          </CreateSurfaceBody>
+        </CreateSurface>
+      )}
     </div>
   )
-}
-
-function titleCase(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
 }
