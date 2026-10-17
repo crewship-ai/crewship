@@ -43,8 +43,8 @@ export interface NavSection {
  * Inbox, Chat, Activity); then **Work** (what gets done) and **Build** (who
  * does it and with what). Settings and Admin live in the sidebar footer with
  * the sidebar mode and the user menu. Marketplace — announced, never built —
- * is gone. Journal stays an admin-only row beside Activity until it is merged
- * into it. "Vault" is the label of Credentials (same route); "Pages" keeps its
+ * is gone. The Journal is part of Activity (F-02): its admin-only views are
+ * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); "Pages" keeps its
  * name until the Artifacts delivery renames it.
  */
 export const navSections: NavSection[] = [
@@ -57,7 +57,6 @@ export const navSections: NavSection[] = [
       // which agent, and the index is what answers that.
       { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
       { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
-      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal, minRole: "ADMIN" },
     ],
   },
   {
