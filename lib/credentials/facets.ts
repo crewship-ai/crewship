@@ -38,6 +38,9 @@ export interface CredentialLike {
    *  server (see splitAgentRefs in internal/api/credentials.go). */
   agent_ids?: string[] | null
   agent_names?: string[] | null
+  /** Reveal classification — STANDARD / RESTRICTED / SEALED. The server
+   *  COALESCEs a missing one to STANDARD, so absent reads the same way. */
+  sensitivity?: string | null
 }
 
 /**
@@ -270,7 +273,90 @@ export function buildScopeFacet(
   return out
 }
 
-export type CredentialStatusFilter = "all" | "attention" | "missing-tool"
+/**
+ * The Vault's views (Harbor 2). `all`, `attention`, `recent`, `unused` and
+ * `missing-tool` are the panel's rows; `rejected` and `expiring` are what the
+ * health tiles above the table open — narrower slices of "Needs attention".
+ */
+export type CredentialStatusFilter =
+  | "all"
+  | "attention"
+  | "missing-tool"
+  | "recent"
+  | "unused"
+  | "rejected"
+  | "expiring"
+
+/** "Recently used" and "Not used" split at this many days. */
+export const UNUSED_AFTER_DAYS = 30
+/** The health tile counts what expires within this many days. */
+export const EXPIRING_WITHIN_DAYS = 14
+
+/** The value was refused or is past its date: runs that use it stop. */
+export function isRejected(c: CredentialLike, now = Date.now()): boolean {
+  if (c.status === "EXPIRED" || c.status === "REVOKED" || c.status === "ERROR") return true
+  const expires = ms(c.token_expires_at)
+  return expires !== null && expires < now
+}
+
+/** Expires within EXPIRING_WITHIN_DAYS and has not expired yet. */
+export function isExpiringSoon(c: CredentialLike, now = Date.now()): boolean {
+  const expires = ms(c.token_expires_at)
+  if (expires === null || expires < now) return false
+  return expires - now <= EXPIRING_WITHIN_DAYS * DAY_MS
+}
+
+/** Used by an agent within UNUSED_AFTER_DAYS. A junk timestamp is "no use". */
+export function isRecentlyUsed(c: CredentialLike, now = Date.now()): boolean {
+  const used = ms(c.last_used_at)
+  return used !== null && now - used <= UNUSED_AFTER_DAYS * DAY_MS
+}
+
+/** Every crew a credential reaches: the crews it is linked to and the crews of
+ *  the agents holding it. `agentCrew` maps agent id → crew id. */
+export function credentialCrewIds(c: CredentialLike, agentCrew?: ReadonlyMap<string, string>): Set<string> {
+  const out = new Set<string>(c.crew_ids ?? [])
+  if (agentCrew) {
+    for (const id of c.agent_ids ?? []) {
+      const crew = agentCrew.get(id)
+      if (crew) out.add(crew)
+    }
+  }
+  return out
+}
+
+export const CLASSIFICATIONS = ["STANDARD", "RESTRICTED", "SEALED"] as const
+
+/** STANDARD when the server sent nothing — the column's own default. */
+export function classificationOf(c: CredentialLike): string {
+  const v = (c.sensitivity ?? "").toUpperCase()
+  return v === "RESTRICTED" || v === "SEALED" ? v : "STANDARD"
+}
+
+/** One view against one credential — the panel counts and the table read this. */
+export function matchesView(
+  c: CredentialLike,
+  view: CredentialStatusFilter,
+  missingToolIds: ReadonlySet<string>,
+  now = Date.now(),
+): boolean {
+  switch (view) {
+    case "attention":
+      return needsAttention(c)
+    case "missing-tool":
+      return missingToolIds.has(c.id)
+    case "recent":
+      return isRecentlyUsed(c, now)
+    case "unused":
+      return !isRecentlyUsed(c, now)
+    case "rejected":
+      return isRejected(c, now)
+    case "expiring":
+      return isExpiringSoon(c, now)
+    default:
+      return true
+  }
+}
 
 /**
  * The facets behind the rail's Filter button.
@@ -303,6 +389,11 @@ export interface CredentialFilters {
   tier: string | null
   /** Agent ids — "show me what these agents can read". Empty means every agent. */
   agentId: string[]
+  /** Crew ids — "Used by crew": linked to the crew, or held by one of its
+   *  agents (needs the agent → crew map passed to applyCredentialFilters). */
+  crew: string[]
+  /** Classifications — STANDARD / RESTRICTED / SEALED. */
+  classification: string[]
   search: string
 }
 
@@ -314,6 +405,8 @@ export const EMPTY_CREDENTIAL_FILTERS: CredentialFilters = {
   tag: [],
   tier: null,
   agentId: [],
+  crew: [],
+  classification: [],
   search: "",
 }
 
@@ -339,11 +432,19 @@ export function applyCredentialFilters<T extends CredentialLike>(
   credentials: T[],
   filters: CredentialFilters,
   missingToolIds: ReadonlySet<string>,
+  opts: { agentCrew?: ReadonlyMap<string, string>; now?: number } = {},
 ): T[] {
   const q = filters.search.trim().toLowerCase()
+  const now = opts.now ?? Date.now()
+  const crews = filters.crew ?? []
+  const classes = filters.classification ?? []
   return credentials.filter((c) => {
-    if (filters.status === "attention" && !needsAttention(c)) return false
-    if (filters.status === "missing-tool" && !missingToolIds.has(c.id)) return false
+    if (!matchesView(c, filters.status, missingToolIds, now)) return false
+    if (crews.length > 0) {
+      const reach = credentialCrewIds(c, opts.agentCrew)
+      if (!crews.some((id) => reach.has(id))) return false
+    }
+    if (classes.length > 0 && !classes.includes(classificationOf(c))) return false
     // Values inside a facet OR; the facets AND. `some` over an empty list is
     // false, so each of these is guarded on the list being non-empty — an
     // untouched facet must narrow nothing.
@@ -385,4 +486,19 @@ export function applyCredentialFilters<T extends CredentialLike>(
     }
     return true
   })
+}
+
+/** The State column: one word and a tone, worst first. */
+export interface SecretState {
+  key: "rejected" | "pending" | "expiring" | "unused" | "ready"
+  label: string
+  tone: "success" | "warn" | "danger" | "muted" | "blue"
+}
+
+export function deriveSecretState(c: CredentialLike, now = Date.now()): SecretState {
+  if (isRejected(c, now)) return { key: "rejected", label: "Rejected", tone: "danger" }
+  if (c.status === "PENDING_APPROVAL" || c.status === "PENDING") return { key: "pending", label: "Waiting for approval", tone: "blue" }
+  if (isExpiringSoon(c, now)) return { key: "expiring", label: "Expires soon", tone: "warn" }
+  if (!isRecentlyUsed(c, now)) return { key: "unused", label: "Not used", tone: "muted" }
+  return { key: "ready", label: "Ready", tone: "success" }
 }

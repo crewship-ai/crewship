@@ -10,7 +10,15 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import * as React from "react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
+import type { SecretTab } from "@/lib/credentials/vault-url-state"
+
+/** The page keeps the tab in the URL; here it lives in state so tabs can be clicked. */
+function Harness(props: React.ComponentProps<typeof CredentialDetailSheet>) {
+  const [tab, setTab] = React.useState<SecretTab | null>(props.tab ?? null)
+  return <CredentialDetailSheet {...props} tab={tab} onTabChange={setTab} />
+}
 
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
@@ -111,14 +119,14 @@ function renderSheet(
   h.sensitivity = typeof overrides.sensitivity === "string" ? overrides.sensitivity : "STANDARD"
   h.isLogin = Boolean(overrides.login)
   render(
-    <CredentialDetailSheet
+    <Harness
       workspaceId="ws1"
       credential={{ ...credential, ...overrides }}
       open
       onOpenChange={() => {}}
       onRefresh={() => {}}
       onRotate={onRotate}
-      onEdit={() => {}}
+
       onBack={onBack}
     />,
   )
@@ -131,8 +139,9 @@ function renderSheet(
  * from ~40 call sites: what each test asserts is unchanged, and the name still
  * marks WHICH section it is about.
  */
-function openTab(_name: RegExp) {
-  /* no tabs: the section is already rendered */
+function openTab(name: RegExp) {
+  fireEvent.click(screen.getByRole("tab", { name }))
+
 }
 
 beforeEach(() => {
@@ -145,14 +154,14 @@ beforeEach(() => {
 describe("rotate is the primary path, reveal the secondary one (§2.6 L8)", () => {
   it("offers rotation on Overview to a rotate-capable role", () => {
     renderSheet()
-    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^replace value$/i })).toBeInTheDocument()
   })
 
   it("hands the current credential to the rotation flow", () => {
     const onRotate = vi.fn()
     renderSheet({}, onRotate)
-    fireEvent.click(screen.getByRole("button", { name: /^replace value…$/i }))
-    expect(onRotate).toHaveBeenCalledWith(expect.objectContaining({ id: "cred_1" }))
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(expect.objectContaining({ id: "cred_1" }), "rotate")
   })
 
   it("never shows a masked value as if it were the real one", () => {
@@ -170,7 +179,7 @@ describe("reveal needs all four layers, not any of them", () => {
     h.capabilities = ["chat", "credentials:reveal"]
     route(enabled)
     renderSheet()
-    expect(await screen.findByRole("button", { name: /reveal the existing value/i })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: /^reveal…$/i })).toBeInTheDocument()
   })
 
   // The one people get wrong. credentials:reveal is in no bundle — not even
@@ -179,7 +188,7 @@ describe("reveal needs all four layers, not any of them", () => {
     route(enabled)
     renderSheet()
     expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("is withheld while the workspace switch is off, capability or not", async () => {
@@ -187,7 +196,7 @@ describe("reveal needs all four layers, not any of them", () => {
     route({ revealEnabled: false })
     renderSheet()
     expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("is withheld from a MEMBER below the MANAGER role floor", async () => {
@@ -195,7 +204,7 @@ describe("reveal needs all four layers, not any of them", () => {
     h.capabilities = ["chat", "credentials:reveal"]
     route(enabled)
     renderSheet()
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("does not even ask for the reveal policy below the role that may read it", async () => {
@@ -210,7 +219,7 @@ describe("reveal needs all four layers, not any of them", () => {
     route(enabled)
     renderSheet({ sensitivity: "SEALED" })
     expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("treats an unreachable policy endpoint as 'off' rather than 'on'", async () => {
@@ -218,7 +227,7 @@ describe("reveal needs all four layers, not any of them", () => {
     h.apiFetch.mockRejectedValue(new TypeError("offline"))
     renderSheet()
     for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5))
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("opens the ceremony, which offers rotation as the way out", async () => {
@@ -226,8 +235,8 @@ describe("reveal needs all four layers, not any of them", () => {
     route(enabled)
     const onRotate = vi.fn()
     renderSheet({}, onRotate)
-    fireEvent.click(await screen.findByRole("button", { name: /reveal the existing value/i }))
-    expect(await screen.findByText(/already have a replacement/i)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("button", { name: /^reveal…$/i }))
+    expect(await screen.findByText(/already have a new value/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /replace value instead/i }))
     expect(onRotate).toHaveBeenCalled()
   })
@@ -242,7 +251,7 @@ describe("Fields tab", () => {
       ],
     })
     renderSheet()
-    openTab(/fields/i)
+
 
     expect(await screen.findByText("passphrase")).toBeInTheDocument()
     expect(screen.getByText("secret")).toBeInTheDocument()
@@ -253,13 +262,13 @@ describe("Fields tab", () => {
     // the same page now, and that one is a deliberate placeholder for a value
     // the reveal ceremony can produce. A field's secret half has no such
     // ceremony and no bytes to stand in for.
-    const fieldsCard = screen.getByText("passphrase").closest<HTMLElement>("[data-slot='detail-card']")!
+    const fieldsCard = screen.getByLabelText("Fields")
     expect(within(fieldsCard).queryByText(/•/)).not.toBeInTheDocument()
   })
 
   it("does not add an empty Fields card for a single-value credential", async () => {
     await act(async () => { renderSheet() })
-    openTab(/fields/i)
+
     await waitFor(() => expect(screen.queryByText(/single value — no extra parts/i)).not.toBeInTheDocument())
   })
 
@@ -269,7 +278,7 @@ describe("Fields tab", () => {
       return ok([])
     })
     await act(async () => { renderSheet() })
-    openTab(/fields/i)
+
     await waitFor(() => expect(screen.queryByText(/single value — no extra parts/i)).not.toBeInTheDocument())
   })
 })
@@ -285,7 +294,7 @@ describe("Used by — slots and grant provenance", () => {
       ],
     })
     renderSheet()
-    openTab(/used by/i)
+    openTab(/^access$/i)
 
     expect(await screen.findByText("CREW")).toBeInTheDocument()
     expect(screen.getByText("GH_TOKEN", { selector: "span.font-mono" })).toBeInTheDocument()
@@ -306,7 +315,7 @@ describe("Used by — slots and grant provenance", () => {
       },
     })
     renderSheet()
-    openTab(/used by/i)
+    openTab(/^access$/i)
 
     // Wait on the provenance badge, not on the name: the name is already on
     // screen from the fallback list, and asserting on it would pass before the
@@ -328,14 +337,14 @@ describe("Used by — slots and grant provenance", () => {
       },
     })
     renderSheet()
-    openTab(/used by/i)
+    openTab(/^access$/i)
     expect(await screen.findAllByText("lease expired").then((rows) => rows[0])).toBeInTheDocument()
   })
 
   it("falls back to the names on the payload when provenance cannot be resolved", async () => {
     route({ agents: [] })
     renderSheet()
-    openTab(/used by/i)
+    openTab(/^access$/i)
     expect(await screen.findAllByText("sam").then((rows) => rows[0])).toBeInTheDocument()
     expect(screen.queryByText("explicit")).not.toBeInTheDocument()
   })
@@ -344,6 +353,7 @@ describe("Used by — slots and grant provenance", () => {
 describe("classification control", () => {
   it("says the current classification is unknown when the API does not report one", () => {
     renderSheet()
+    openTab(/^access$/i)
     expect(screen.getByText(/not reported by the credentials api/i)).toBeInTheDocument()
   })
 
@@ -357,21 +367,23 @@ describe("classification control", () => {
       return ok([])
     })
     renderSheet()
+    openTab(/^access$/i)
 
-    fireEvent.click(screen.getByRole("button", { name: "RESTRICTED" }))
+    fireEvent.click(screen.getByRole("radio", { name: "RESTRICTED" }))
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true"),
+      expect(screen.getByRole("radio", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true"),
     )
     // …and the header badge now carries it.
-    expect(screen.getByRole("button", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("radio", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true")
   })
 
   // SetSensitivity re-checks with "manage" on the lowering branch only.
   it("blocks a MANAGER from lowering a classification, which the server would refuse", async () => {
     h.role = "MANAGER"
     renderSheet({ sensitivity: "SEALED" })
-    expect(screen.getByRole("button", { name: "STANDARD" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "RESTRICTED" })).toBeDisabled()
+    openTab(/^access$/i)
+    expect(screen.getByRole("radio", { name: "STANDARD" })).toBeDisabled()
+    expect(screen.getByRole("radio", { name: "RESTRICTED" })).toBeDisabled()
   })
 
   it("surfaces the server's refusal rather than silently keeping the old value", async () => {
@@ -382,14 +394,16 @@ describe("classification control", () => {
       return ok([])
     })
     renderSheet()
-    fireEvent.click(screen.getByRole("button", { name: "SEALED" }))
+    openTab(/^access$/i)
+    fireEvent.click(screen.getByRole("radio", { name: "SEALED" }))
     expect(await screen.findByText("Forbidden")).toBeInTheDocument()
   })
 
   it("is not offered at all to a role that cannot write it", () => {
     h.role = "VIEWER"
     renderSheet()
-    expect(screen.queryByRole("button", { name: "SEALED" })).not.toBeInTheDocument()
+    openTab(/^access$/i)
+    expect(screen.queryByRole("radio", { name: "SEALED" })).not.toBeInTheDocument()
   })
 })
 
@@ -418,7 +432,7 @@ describe("container", () => {
     h.role = "OWNER"
     const onBack = vi.fn()
     renderSheet({}, undefined, onBack)
-    fireEvent.click(screen.getByRole("button", { name: /back to credentials/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^secrets$/i }))
     expect(onBack).toHaveBeenCalled()
   })
 })

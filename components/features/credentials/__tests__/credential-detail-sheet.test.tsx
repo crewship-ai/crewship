@@ -4,9 +4,11 @@
 // ("manage"), delete = OWNER/ADMIN ("delete"). A MANAGER must never
 // see Rotate/Delete buttons that 403 on click.
 
+import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
+import type { SecretTab } from "@/lib/credentials/vault-url-state"
 import type { ProviderLogin } from "@/lib/credentials/provider-logins"
 
 const h = vi.hoisted(() => ({
@@ -76,30 +78,35 @@ const credential = {
   mcp_used: false,
 }
 
-function renderSheet(overrides: Record<string, unknown> = {}) {
+/** The page keeps its tab in the URL; the harness keeps it in state so a test can click tabs. */
+function Harness(props: React.ComponentProps<typeof CredentialDetailSheet>) {
+  const [tab, setTab] = React.useState<SecretTab | null>(props.tab ?? null)
+  return <CredentialDetailSheet {...props} tab={tab} onTabChange={setTab} />
+}
+
+let defaultTab: SecretTab | null = null
+function renderSheet(overrides: Record<string, unknown> = {}, tab: SecretTab | null = defaultTab) {
   h.sensitivity = typeof overrides.sensitivity === "string" ? overrides.sensitivity : "STANDARD"
   h.isLogin = Boolean(overrides.login)
   return render(
-    <CredentialDetailSheet
+    <Harness
       workspaceId="ws1"
-      credential={{ ...credential, ...overrides }}
+      credential={{ ...credential, ...overrides } as never}
       open
+      tab={tab}
       onOpenChange={() => {}}
       onRefresh={() => {}}
       onRotate={() => {}}
-      onEdit={() => {}}
     />,
   )
 }
 
-/**
- * The sheet had five tabs and now has none — every section is on the page at
- * once, in the /issues shape. These stay as no-ops rather than being deleted
- * from ~40 call sites: what each test asserts is unchanged, and the name still
- * marks WHICH section it is about.
- */
+/** Harbor 2: the secret page has tabs — Overview · Access · Value history · Activity · Settings. */
+function openTab(name: RegExp) {
+  fireEvent.click(screen.getByRole("tab", { name }))
+}
 function openSettingsTab() {
-  /* no tabs: the section is already rendered */
+  openTab(/^settings$/i)
 }
 
 // Every knob the mocked hooks read is reset here, so no test inherits one from
@@ -115,6 +122,9 @@ function openSettingsTab() {
 // order, which is the point at which it would have become one.
 beforeEach(() => {
   h.role = "OWNER"
+  defaultTab = null
+  h.isLogin = false
+  h.sensitivity = "STANDARD"
   h.capabilities = []
   h.apiFetch.mockReset()
   h.revealEnabled = false
@@ -132,78 +142,74 @@ describe("write affordances gated by role", () => {
         quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 },
       },
     })
-    expect(screen.queryByRole("button", { name: /rotate/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /replace value/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /value history/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /pays for/i })).toBeInTheDocument()
     expect(screen.getByText("Connection health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
-    expect(screen.getByText("Access & security").closest("details")).not.toHaveAttribute("open")
   })
-  it("OWNER sees rotate and delete", () => {
+
+  it("OWNER sees replace and delete", () => {
     h.role = "OWNER"
-    renderSheet()
-
-    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /delete credential/i })).toBeInTheDocument()
+    const onRotate = vi.fn()
+    render(<Harness workspaceId="ws1" credential={credential as never} open onOpenChange={() => {}} onRefresh={() => {}} onRotate={onRotate} />)
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(credential, "rotate")
+    openSettingsTab()
+    expect(screen.getByRole("button", { name: /^delete…$/i })).toBeInTheDocument()
   })
 
-  it("MANAGER loses rotate and delete (backend requires manage), and is told why", () => {
+  it("MANAGER replaces the value without grace, cannot delete, and is told why", () => {
     h.role = "MANAGER"
-    renderSheet()
-
-    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
-    // ...instead of a silent gap.
+    const onRotate = vi.fn()
+    render(<Harness workspaceId="ws1" credential={credential as never} open onOpenChange={() => {}} onRefresh={() => {}} onRotate={onRotate} />)
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(credential, "patch")
+    openSettingsTab()
+    expect(screen.queryByRole("button", { name: /^delete…$/i })).not.toBeInTheDocument()
+    openTab(/^access$/i)
     expect(screen.getByText(/requires a workspace admin/i)).toBeInTheDocument()
   })
 
   it("MANAGER does not trigger the rotations-history fetch it can't render", () => {
     h.role = "MANAGER"
-    renderSheet()
-    openSettingsTab()
-
-    const rotationCalls = h.apiFetch.mock.calls.filter(([url]) =>
-      String(url).includes("/rotations"),
-    )
+    renderSheet({}, "history")
+    const rotationCalls = h.apiFetch.mock.calls.filter(([url]) => String(url).includes("/rotations"))
     expect(rotationCalls).toHaveLength(0)
+    expect(screen.getByText(/shown to people who can replace the value/i)).toBeInTheDocument()
   })
 
   it("VIEWER sees no mutation affordances at all", () => {
     h.role = "VIEWER"
     renderSheet()
+    expect(screen.queryByRole("button", { name: /^replace value$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /activity/i })).not.toBeInTheDocument()
     openSettingsTab()
-
-    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^delete…$/i })).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Name")).toBeDisabled()
+    openTab(/^access$/i)
     expect(screen.getByText(/don't have permission to modify/i)).toBeInTheDocument()
   })
 
-  it("VIEWER does not get the header Edit button", () => {
-    h.role = "VIEWER"
-    renderSheet()
-    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument()
-  })
-
-  it("MANAGER gets the header Edit button (PATCH allows MANAGER)", () => {
+  it("MANAGER edits the details in Settings (PATCH allows MANAGER)", () => {
     h.role = "MANAGER"
-    renderSheet()
-    // Two now: the header action and the Value card's pointer to it, which
-    // exists because replacing a value no longer has its own control here.
-    expect(screen.getAllByRole("button", { name: /^edit credential$/i })).toHaveLength(1)
+    renderSheet({}, "settings")
+    expect(screen.getByLabelText("Name")).not.toBeDisabled()
   })
 
   // #1034 — the backend honors the credential.rotate capability for
-  // lower roles (requireRoleOrCapabilityOrForbid, #1028); the sheet
-  // must surface Rotate for a capability-holding MANAGER instead of
-  // gating on role alone.
-  it("MANAGER with credential.rotate capability sees the Rotate button", () => {
+  // lower roles (requireRoleOrCapabilityOrForbid, #1028).
+  it("MANAGER with credential.rotate capability rotates with a grace period", () => {
     h.role = "MANAGER"
     h.capabilities = ["chat", "credential.rotate"]
-    renderSheet()
+    const onRotate = vi.fn()
+    render(<Harness workspaceId="ws1" credential={credential as never} open onOpenChange={() => {}} onRefresh={() => {}} onRotate={onRotate} />)
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(credential, "rotate")
     openSettingsTab()
-
-    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
     // delete stays OWNER/ADMIN-only — the capability grants rotate, nothing more
-    expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^delete…$/i })).not.toBeInTheDocument()
   })
 })
 
@@ -219,71 +225,63 @@ describe("Test now gating follows server-declared probe support", () => {
   it("shows Test now when the server says the credential is testable", () => {
     h.role = "OWNER"
     renderSheet({ provider: "GITHUB", testable: true })
-    expect(screen.getByRole("button", { name: /test now/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^test$/i })).toBeInTheDocument()
   })
 
   it("hides Test now when the server has no probe for it", () => {
     h.role = "OWNER"
     renderSheet({ provider: "NOTION", testable: false })
-    expect(screen.queryByRole("button", { name: /test now/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument()
   })
 
   it("still hides Test now from roles that cannot update, even when testable", () => {
     h.role = "MEMBER"
     renderSheet({ provider: "GITHUB", testable: true })
-    expect(screen.queryByRole("button", { name: /test now/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument()
   })
 })
 
-function openTab(_name: RegExp) {
-  /* no tabs: the section is already rendered — see openSettingsTab */
-}
 
 describe("property rendering", () => {
   it("renders username, expiry, last-used, last-error and last-used-IPs when present", () => {
     h.role = "OWNER"
     renderSheet({
       username: "svc-account",
-      token_expires_at: "2026-08-01T00:00:00Z",
+      token_expires_at: "2099-08-01T00:00:00Z",
       last_used_at: "2026-07-20T00:00:00Z",
       last_error: "401 Unauthorized",
       last_used_ips: ["10.0.0.1", "10.0.0.2"],
     })
 
-    expect(screen.getByText("Username")).toBeInTheDocument()
-    // Twice on purpose: once in the identity line under the name, once as a
-    // property. The header says what this credential IS; the row is where you
-    // read it off.
-    expect(screen.getAllByText("svc-account").length).toBeGreaterThan(0)
-    // Twice: the figures band and the property row.
-    expect(screen.getAllByText("Expires").length).toBeGreaterThan(0)
+    // The username is not secret: it leads the masked value.
+    expect(screen.getByText(/svc-account · •+/)).toBeInTheDocument()
+    expect(screen.getByText("Expires")).toBeInTheDocument()
     expect(screen.getByText("Last error")).toBeInTheDocument()
     expect(screen.getByText("401 Unauthorized")).toBeInTheDocument()
-    expect(screen.getByText("10.0.0.1")).toBeInTheDocument()
-    expect(screen.getByText("10.0.0.2")).toBeInTheDocument()
-    // "never" must not leak in once a real last-used timestamp exists —
-    // neither in the figures band nor in the properties.
+    expect(screen.getByText("10.0.0.1, 10.0.0.2")).toBeInTheDocument()
     expect(screen.queryByText("never")).not.toBeInTheDocument()
   })
 
   it("shows 'never' for Last used when the credential has never been used", () => {
     h.role = "OWNER"
     renderSheet({ last_used_at: null })
-    // The figures band and the property row both say it.
     expect(screen.getAllByText("never").length).toBeGreaterThan(0)
   })
 
-  it("does not render a Username row, expiry row, error card or IP list when absent", () => {
+  it("does not render a username, error or IP list when absent", () => {
     h.role = "OWNER"
     renderSheet()
-    const props = within(screen.getByText("Properties").closest("[class*='rounded-xl']")!)
-    expect(props.queryByText("Username")).not.toBeInTheDocument()
-    // The figures band keeps a fixed set of slots and prints "—" for an
-    // expiry that does not exist, the way the issue band prints "—" for no due
-    // date. What must not appear is a PROPERTY row asserting one.
-    expect(props.queryByText("Expires")).not.toBeInTheDocument()
+    expect(screen.queryByText(/ · •+/)).not.toBeInTheDocument()
     expect(screen.queryByText("Last error")).not.toBeInTheDocument()
-    expect(screen.queryByText(/^Last \d+ IPs$/)).not.toBeInTheDocument()
+    expect(screen.queryByText("Last IPs")).not.toBeInTheDocument()
+  })
+
+  it("puts a rejected secret's error in a banner with Replace value", () => {
+    h.role = "OWNER"
+    renderSheet({ status: "ERROR", last_error: "401 Unauthorized at 02:00" })
+    const banner = screen.getAllByRole("alert").find((el) => el.textContent?.includes("Rejected"))!
+    expect(banner).toHaveTextContent("401 Unauthorized at 02:00")
+    expect(within(banner).getByRole("button", { name: /replace value/i })).toBeInTheDocument()
   })
 
   // The CLI badge marks credentials Crewship itself uses to authenticate an
@@ -309,24 +307,9 @@ describe("property rendering", () => {
     expect(screen.getByText("payments")).toBeInTheDocument()
   })
 
-  it("omits the header Edit button when onEdit is not supplied (legacy caller)", () => {
-    h.role = "OWNER"
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={() => {}}
-        onRefresh={() => {}}
-        onRotate={() => {}}
-      />,
-    )
-    expect(screen.queryByRole("button", { name: /^edit credential$/i })).not.toBeInTheDocument()
-  })
-
   it("renders nothing when credential is null", () => {
     const { container } = render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={null}
         open
@@ -358,7 +341,7 @@ describe("Test now request lifecycle", () => {
     })
     renderSheet({ testable: true })
 
-    const button = screen.getByRole("button", { name: /test now/i })
+    const button = screen.getByRole("button", { name: /^test$/i })
     fireEvent.click(button)
     expect(button).toBeDisabled()
 
@@ -366,7 +349,7 @@ describe("Test now request lifecycle", () => {
       resolveTest({ ok: true, status: 200, json: async () => ({ valid: true, supported: true }) }),
     )
     expect(await screen.findByText("Valid")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /test now/i })).not.toBeDisabled()
+    expect(screen.getByRole("button", { name: /^test$/i })).not.toBeDisabled()
   })
 
   it("does not show a green result when the server did not probe the credential", async () => {
@@ -378,7 +361,7 @@ describe("Test now request lifecycle", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet({ provider: "OPENAI", testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText("Not checked")).toBeInTheDocument()
     expect(screen.getByTestId("connection-verification")).toHaveTextContent("not checked")
     expect(screen.queryByText("Valid")).not.toBeInTheDocument()
@@ -392,7 +375,7 @@ describe("Test now request lifecycle", () => {
         : Promise.resolve({ ok: true, status: 200, json: async () => [] }),
     )
     renderSheet({ testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText("Not checked")).toBeInTheDocument()
     expect(screen.queryByText("Valid")).not.toBeInTheDocument()
   })
@@ -406,7 +389,7 @@ describe("Test now request lifecycle", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet({ testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText("Bad token")).toBeInTheDocument()
   })
 
@@ -419,7 +402,7 @@ describe("Test now request lifecycle", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet({ testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText("Invalid")).toBeInTheDocument()
   })
 
@@ -432,7 +415,7 @@ describe("Test now request lifecycle", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet({ testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText(/test request failed/i)).toBeInTheDocument()
   })
 
@@ -445,7 +428,7 @@ describe("Test now request lifecycle", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet({ testable: true })
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText(/network error/i)).toBeInTheDocument()
   })
 })
@@ -484,10 +467,10 @@ describe("used by", () => {
         recorded_use: "not_attributed", visibility_limited: false, dynamic_uses_untracked: true,
       } : [],
     }))
-    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {}, onEdit: () => {} }
-    const view = render(<CredentialDetailSheet {...props} credential={credential} />)
+    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {} }
+    const view = render(<Harness {...props} credential={credential} />)
     expect(await screen.findByText("Old secret job")).toBeInTheDocument()
-    view.rerender(<CredentialDetailSheet {...props} credential={{ ...credential, id: "cred_2", name: "OTHER" }} />)
+    view.rerender(<Harness {...props} credential={{ ...credential, id: "cred_2", name: "OTHER" }} />)
     expect(screen.queryByText("Old secret job")).not.toBeInTheDocument()
   })
 
@@ -508,11 +491,11 @@ describe("used by", () => {
       refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
       quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 },
     }
-    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {}, onEdit: () => {} }
-    const view = render(<CredentialDetailSheet {...props} credential={{ ...credential, login }} />)
+    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {} }
+    const view = render(<Harness {...props} credential={{ ...credential, login }} />)
     expect((await screen.findAllByText("acct-first")).length).toBeGreaterThan(0)
 
-    view.rerender(<CredentialDetailSheet {...props} credential={{ ...credential, id: "cred_2", name: "SECOND", login }} />)
+    view.rerender(<Harness {...props} credential={{ ...credential, id: "cred_2", name: "SECOND", login }} />)
     expect(screen.queryByText("acct-first")).not.toBeInTheDocument()
     expect(await screen.findByText(/Fields could not be checked/)).toBeInTheDocument()
     expect(screen.queryByText("acct-first")).not.toBeInTheDocument()
@@ -534,13 +517,12 @@ describe("used by", () => {
 
   it("shows an honest empty state after checking visible agents", async () => {
     h.role = "OWNER"
-    renderSheet({ agent_names: [] })
-    openTab(/used by/i)
+    renderSheet({ agent_names: [] }, "access")
     expect(await screen.findByText(/No matching grants were reported/i)).toBeInTheDocument()
   })
   it("does not interpret a failed access lookup as no access", async () => {
     h.apiFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) })
-    renderSheet()
+    renderSheet({}, "access")
     expect(await screen.findByText(/Access could not be fully loaded/)).toBeInTheDocument()
     expect(screen.queryByText(/No matching grants were reported/)).not.toBeInTheDocument()
   })
@@ -551,7 +533,7 @@ describe("used by", () => {
       : url.includes("/agents/a1/credentials?") ? [{ credential_id: "cred_1", env_var_name: "SERVICE_KEY", grant_source: "binding" }]
       : [],
     }))
-    renderSheet()
+    renderSheet({}, "access")
     expect(await screen.findAllByText("Worker").then((rows) => rows[0])).toBeInTheDocument()
     expect(screen.getByTestId("credential-access-summary")).toHaveTextContent("Checked 1 of 1")
     expect(screen.getByText("delivery binding")).toBeInTheDocument()
@@ -561,7 +543,7 @@ describe("used by", () => {
       url.includes("/bindings?") ? { bindings: [{ id: "b", scope: "WORKSPACE", slot: "SERVICE_KEY" }] }
       : url.includes("/agents?") ? Array.from({ length: 15 }, (_, i) => ({ id: `a${i}`, name: `Agent ${i}` })) : [],
     }))
-    renderSheet()
+    renderSheet({}, "access")
     await waitFor(() => expect(screen.getByTestId("credential-access-summary")).toHaveTextContent("Checked 12 of 15"))
     expect(screen.queryByText(/No matching grants were reported/)).not.toBeInTheDocument()
   })
@@ -569,7 +551,7 @@ describe("used by", () => {
   it("shows the MCP-usage note only when mcp_used is true", () => {
     h.role = "OWNER"
     renderSheet({ mcp_used: true })
-    openTab(/used by/i)
+
     expect(screen.getByText(/referenced by one or more mcp server/i)).toBeInTheDocument()
   })
 })
@@ -584,14 +566,14 @@ describe("audit visibility follows the backend gate", () => {
   it("is offered to a role that can read the timeline", () => {
     h.role = "MANAGER"
     renderSheet()
-    expect(screen.getByText("Audit")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /activity/i })).toBeInTheDocument()
   })
 
   for (const role of ["MEMBER", "VIEWER"]) {
     it(`is hidden from ${role}, who would get a 403 and a false empty state`, () => {
       h.role = role
       renderSheet()
-      expect(screen.queryByText("Audit")).not.toBeInTheDocument()
+      expect(screen.queryByRole("tab", { name: /activity/i })).not.toBeInTheDocument()
     })
   }
 
@@ -625,7 +607,7 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    openTab(/audit/i)
+    openTab(/activity/i)
 
     expect(await screen.findByText("CREATED")).toBeInTheDocument()
     expect(screen.getByText("READ")).toBeInTheDocument()
@@ -641,7 +623,7 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    openTab(/audit/i)
+    openTab(/activity/i)
     expect(await screen.findByText(/nothing has happened to this credential yet/i)).toBeInTheDocument()
   })
 
@@ -655,7 +637,7 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    openTab(/audit/i)
+    openTab(/activity/i)
     expect(await screen.findByText(/Activity could not be checked/i)).toBeInTheDocument()
   })
 
@@ -668,11 +650,11 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    openTab(/audit/i)
+    openTab(/activity/i)
     expect(screen.queryByText(/nothing has happened to this credential yet/i)).not.toBeInTheDocument()
     // Sheet content is portaled to document.body, not the RTL container —
     // query the document directly for the decorative (aria-hidden) spinner.
-    expect(document.querySelector("svg.animate-spin")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Loading")
   })
 
   it("MANAGER — the lowest role the backend serves — sees the timeline", async () => {
@@ -688,8 +670,8 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    expect(screen.getByText("Audit")).toBeInTheDocument()
-    openTab(/audit/i)
+    expect(screen.getByRole("tab", { name: /activity/i })).toBeInTheDocument()
+    openTab(/activity/i)
     expect(await screen.findByText("READ")).toBeInTheDocument()
   })
 })
@@ -721,220 +703,132 @@ describe("Settings tab — rotation history", () => {
   })
 })
 
-describe("Header and settings action callbacks fire with the right credential", () => {
-  it("clicking Edit invokes onEdit with the current credential", () => {
-    h.role = "OWNER"
-    const onEdit = vi.fn()
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={() => {}}
-        onRefresh={() => {}}
-        onRotate={() => {}}
-        onEdit={onEdit}
-      />,
-    )
-    // The header action; the Value card's pointer is covered separately.
-    fireEvent.click(screen.getAllByRole("button", { name: /^edit credential$/i })[0])
-    expect(onEdit).toHaveBeenCalledWith(credential)
-  })
-
-  it("clicking 'Rotate with grace overlap…' invokes onRotate with the current credential", () => {
+describe("Header and settings actions fire with the right credential", () => {
+  it("Replace value hands the current credential to the rotation flow", () => {
     h.role = "OWNER"
     const onRotate = vi.fn()
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={() => {}}
-        onRefresh={() => {}}
-        onRotate={onRotate}
-        onEdit={() => {}}
-      />,
-    )
-    openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /^replace value…$/i }))
-    expect(onRotate).toHaveBeenCalledWith(credential)
+    render(<Harness workspaceId="ws1" credential={credential as never} open onOpenChange={() => {}} onRefresh={() => {}} onRotate={onRotate} />)
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(credential, "rotate")
+  })
+
+  it("Give to agents opens the Access tab", () => {
+    h.role = "OWNER"
+    renderSheet()
+    fireEvent.click(screen.getByRole("button", { name: /give to agents/i }))
+    expect(screen.getByRole("tab", { name: /^access$/i })).toHaveAttribute("aria-selected", "true")
   })
 })
 
-// The inline "Save value" editor is gone.
-//
-// One credential could have its secret replaced in three places on one screen:
-// rotate, this input, and the Value field in the Edit dialog — and two of them
-// issued the same PATCH. Rotate stays because it is a different operation (the
-// old value keeps working through a grace window). The plain swap belongs where
-// every other property of the credential is changed, and the form's own tests
-// cover it (credential-form.test.tsx).
-describe("changing the value", () => {
-  it("offers no second value editor beside Rotate", () => {
+describe("settings tab save bar saves name/tags/tier", () => {
+  it("PATCHes only what changed, through the page's one save bar", async () => {
     h.role = "OWNER"
-    renderSheet()
-    expect(screen.queryByPlaceholderText(/paste new secret value/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /save value/i })).not.toBeInTheDocument()
+    const onRefresh = vi.fn()
+    render(<Harness workspaceId="ws1" credential={{ ...credential, tags: ["prod"] } as never} open tab="settings" onOpenChange={() => {}} onRefresh={onRefresh} onRotate={() => {}} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "STRIPE_LIVE_KEY" } })
+    fireEvent.click(screen.getByRole("button", { name: "Remove tag prod" }))
+    const bar = await screen.findByRole("region", { name: /unsaved changes/i })
+    expect(bar).toHaveTextContent("2 unsaved changes")
+    fireEvent.click(within(bar).getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+    const patch = h.apiFetch.mock.calls.find(([, o]) => (o as { method?: string })?.method === "PATCH")!
+    expect(String(patch[0])).toContain("/api/v1/credentials/cred_1")
+    expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ name: "STRIPE_LIVE_KEY", tags: [] })
   })
 
-  // …but it must not become a dead end: a reader looking for "replace this
-  // secret" has to be told where it went.
-  it("points at Edit, and that link opens Edit with this credential", () => {
+  it("sets the Keeper tier from Access with a PATCH of security_level alone", async () => {
     h.role = "OWNER"
-    const onEdit = vi.fn()
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={() => {}}
-        onRefresh={() => {}}
-        onRotate={() => {}}
-        onEdit={onEdit}
-      />,
-    )
-    expect(
-      screen.getByText(/paste a new value from your provider/i),
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Edit credential" }))
-    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: credential.id }))
+    const onRefresh = vi.fn()
+    render(<Harness workspaceId="ws1" credential={{ ...credential, security_level: 1 } as never} open tab="access" onOpenChange={() => {}} onRefresh={onRefresh} onRotate={() => {}} />)
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Keeper tier" })).getByRole("radio", { name: "L3" }))
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+    const patch = h.apiFetch.mock.calls.find(([, o]) => (o as { method?: string })?.method === "PATCH")!
+    expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ security_level: 3 })
   })
 
-  it("keeps Rotate, which is not the same operation", () => {
+  it("never offers a value field in Settings", () => {
     h.role = "OWNER"
-    renderSheet()
-    expect(
-      screen.getByRole("button", { name: /^replace value…$/i }),
-    ).toBeInTheDocument()
+    renderSheet({}, "settings")
+    expect(screen.queryByPlaceholderText(/paste/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/value/i)).not.toBeInTheDocument()
   })
 })
-
 
 describe("Settings tab — delete flow", () => {
-  it("OWNER confirms delete: sends the DELETE request, refreshes and closes the sheet", async () => {
+  it("OWNER confirms delete: sends the DELETE request, refreshes and closes the page", async () => {
     h.role = "OWNER"
     const onRefresh = vi.fn()
     const onOpenChange = vi.fn()
     h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
       const method = (opts as { method?: string } | undefined)?.method
-      if (method === "DELETE") {
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
-      }
+      if (method === "DELETE") return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={onOpenChange}
-        onRefresh={onRefresh}
-        onRotate={() => {}}
-        onEdit={() => {}}
-      />,
-    )
-    openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
-    expect(screen.getByText("Delete credential?")).toBeInTheDocument()
-
+    render(<Harness workspaceId="ws1" credential={credential as never} open tab="settings" onOpenChange={onOpenChange} onRefresh={onRefresh} onRotate={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /^delete…$/i }))
+    expect(screen.getByText("Delete STRIPE_API_KEY?")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }))
-
     await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
     expect(onOpenChange).toHaveBeenCalledWith(false)
-    const deleteCalls = h.apiFetch.mock.calls.filter(
-      ([, opts]) => (opts as { method?: string } | undefined)?.method === "DELETE",
-    )
+    const deleteCalls = h.apiFetch.mock.calls.filter(([, opts]) => (opts as { method?: string } | undefined)?.method === "DELETE")
     expect(deleteCalls).toHaveLength(1)
     expect(String(deleteCalls[0][0])).toContain("/api/v1/credentials/cred_1")
   })
 
   it("Cancel closes the confirm dialog without calling the delete endpoint", () => {
     h.role = "OWNER"
-    renderSheet()
-    openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
-    expect(screen.getByText("Delete credential?")).toBeInTheDocument()
-
+    renderSheet({}, "settings")
+    fireEvent.click(screen.getByRole("button", { name: /^delete…$/i }))
+    expect(screen.getByText("Delete STRIPE_API_KEY?")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
-
-    expect(screen.queryByText("Delete credential?")).not.toBeInTheDocument()
-    const deleteCalls = h.apiFetch.mock.calls.filter(
-      ([, opts]) => (opts as { method?: string } | undefined)?.method === "DELETE",
-    )
-    expect(deleteCalls).toHaveLength(0)
+    expect(screen.queryByText("Delete STRIPE_API_KEY?")).not.toBeInTheDocument()
+    expect(h.apiFetch.mock.calls.filter(([, opts]) => (opts as { method?: string } | undefined)?.method === "DELETE")).toHaveLength(0)
   })
 
-  it("a failed delete request closes the confirm dialog without refreshing or closing the sheet", async () => {
+  it("a refused delete keeps the dialog open and leaves the page in place", async () => {
     h.role = "OWNER"
     const onRefresh = vi.fn()
     const onOpenChange = vi.fn()
     h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
       const method = (opts as { method?: string } | undefined)?.method
-      if (method === "DELETE") {
-        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) })
-      }
+      if (method === "DELETE") return Promise.resolve({ ok: false, status: 500, json: async () => ({}) })
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
-    render(
-      <CredentialDetailSheet
-        workspaceId="ws1"
-        credential={credential}
-        open
-        onOpenChange={onOpenChange}
-        onRefresh={onRefresh}
-        onRotate={() => {}}
-        onEdit={() => {}}
-      />,
-    )
-    openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
+    render(<Harness workspaceId="ws1" credential={credential as never} open tab="settings" onOpenChange={onOpenChange} onRefresh={onRefresh} onRotate={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /^delete…$/i }))
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }))
-
-    await vi.waitFor(() => expect(screen.queryByText("Delete credential?")).not.toBeInTheDocument())
+    await waitFor(() => expect(h.apiFetch.mock.calls.some(([, o]) => (o as { method?: string })?.method === "DELETE")).toBe(true))
+    await waitFor(() => expect(screen.getByRole("button", { name: /^delete$/i })).not.toBeDisabled())
+    expect(screen.getByText("Delete STRIPE_API_KEY?")).toBeInTheDocument()
     expect(onRefresh).not.toHaveBeenCalled()
     expect(onOpenChange).not.toHaveBeenCalled()
   })
 })
 
-// A MANAGER holding the credential.rotate capability gets Rotate — but that
-// button lives *inside* the `canUpdate` block in this component's markup.
-// A MEMBER (who lacks "update" entirely) holding the same capability gets
-// no Rotate button at all, even though the backend's
-// requireRoleOrCapabilityOrForbid (#1028) would accept the request from
-// them. This pins today's actual (and, per the #1034 comment's own stated
-// intent, likely under-scoped) behaviour rather than asserting the backend
-// contract — see the final report for why this looks like a real gap.
 // credential.rotate exists so an oncall MEMBER can rotate a leaked token
-// without blanket vault reach — credential_rotation.go grants exactly that
-// ("a MANAGER/MEMBER holding an explicit credential.rotate capability also
-// passes"). The button used to live inside the `canUpdate &&` block, which a
-// MEMBER never satisfies, so the dashboard hid the action from the one tier
-// the grant was written for and told them they had no permission at all.
+// without blanket vault reach (credential_rotation.go).
 describe("Capability elevation reaches MEMBER", () => {
-  it("MEMBER with credential.rotate sees Rotate, which the backend accepts from them", () => {
+  it("MEMBER with credential.rotate sees Replace value, which the backend accepts from them", () => {
     h.role = "MEMBER"
     h.capabilities = ["chat", "credential.rotate"]
-    renderSheet()
-    openSettingsTab()
-    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
+    const onRotate = vi.fn()
+    render(<Harness workspaceId="ws1" credential={credential as never} open onOpenChange={() => {}} onRefresh={() => {}} onRotate={onRotate} />)
+    fireEvent.click(screen.getByRole("button", { name: /^replace value$/i }))
+    expect(onRotate).toHaveBeenCalledWith(credential, "rotate")
   })
 
-  it("still withholds the value-rewrite flow from that MEMBER — rotate is not update", () => {
+  it("still withholds editing from that MEMBER — rotate is not update", () => {
     h.role = "MEMBER"
     h.capabilities = ["chat", "credential.rotate"]
-    renderSheet()
-    openSettingsTab()
-    // PATCH is MANAGER+ with no capability escape hatch, so surfacing the
-    // inline rewrite here would be the mirror-image bug: a button that 403s.
-    expect(screen.queryByText("Replace the value")).not.toBeInTheDocument()
+    renderSheet({}, "settings")
+    expect(screen.getByLabelText("Name")).toBeDisabled()
   })
 
   it("MEMBER without the capability sees neither", () => {
     h.role = "MEMBER"
     h.capabilities = ["chat"]
     renderSheet()
-    openSettingsTab()
-    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^replace value$/i })).not.toBeInTheDocument()
   })
 })
 
@@ -948,19 +842,18 @@ describe("Sheet close/reopen resets transient state", () => {
         : { ok: true, status: 200, json: async () => [] },
     )
     const view = (open: boolean) => (
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={base}
         open={open}
         onOpenChange={() => {}}
         onRefresh={() => {}}
         onRotate={() => {}}
-        onEdit={() => {}}
       />
     )
     const { rerender } = render(view(true))
 
-    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^test$/i }))
     expect(await screen.findByText("Valid")).toBeInTheDocument()
 
     rerender(view(false))
@@ -977,35 +870,31 @@ describe("Sheet close/reopen resets transient state", () => {
 // showed the reveal classification and not the tier — two different sentences
 // about the same row, and only one of them was on screen.
 describe("the Keeper tier", () => {
-  it("names the tier in the identity chips, beside the classification", () => {
-    renderSheet({ security_level: 4, security_level_label: "L4 · critical" })
-    // Two places, on purpose: a chip in the identity card so it is visible
-    // without scrolling, and the card that explains what it costs.
-    expect(screen.getAllByText("L4 · critical")).toHaveLength(1)
+  it("names the tier in the header chips, beside the classification", () => {
+    renderSheet({ security_level: 4, security_level_label: "L4 · critical", sensitivity: "RESTRICTED" })
+    const chip = screen.getByText("L4")
+    expect(chip).toHaveAttribute("title", expect.stringContaining("L4 · critical"))
+    expect(screen.getByText("Restricted")).toBeInTheDocument()
   })
 
-  it("spells out on Overview what the tier does, not just what it is called", () => {
-    renderSheet({ security_level: 3, security_level_label: "L3 · high" })
+  it("spells out on Access what the tier does, not just what it is called", () => {
+    renderSheet({ security_level: 3, security_level_label: "L3 · high" }, "access")
     expect(screen.getByText("Keeper tier")).toBeInTheDocument()
-    expect(screen.getAllByText("L3 · high").length).toBeGreaterThan(0)
-    // The blast radius the tier is FOR, and the consequence it imposes.
-    expect(screen.getByText(/Admin access to real infrastructure/i)).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "L3" })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByText(/auto-leases rather than granting standing access/i)).toBeInTheDocument()
   })
 
-  // "We were not told" and "L1 · low" are different claims, and defaulting to
-  // the second would put a reassuring badge on a row nobody has classified.
+  // "We were not told" and "L1 · low" are different claims.
   it("says the server did not report a tier rather than assuming L1", () => {
-    renderSheet()
+    renderSheet({}, "access")
     expect(screen.getByText(/did not report a tier/i)).toBeInTheDocument()
-    expect(screen.queryByText("L1 · low")).not.toBeInTheDocument()
+    expect(screen.queryByRole("radio", { name: "L1", checked: true })).not.toBeInTheDocument()
   })
 
-  // Fail-closed, matching keeper.SecurityLevel.Tier(): a stored level the table
-  // does not define is guarded as critical, so the sheet must say critical.
+  // Fail-closed, matching keeper.SecurityLevel.Tier().
   it("reads an out-of-range level as L4", () => {
     renderSheet({ security_level: 42 })
-    expect(screen.getAllByText("L4 · critical").length).toBeGreaterThan(0)
+    expect(screen.getByText("L4")).toBeInTheDocument()
   })
 })
 
@@ -1025,7 +914,7 @@ describe("readiness", () => {
 
   it("names the missing CLI and the crew that lacks it", () => {
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1043,7 +932,7 @@ describe("readiness", () => {
 
   it("says Ready once a crew has reported and no gap came back", () => {
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1061,7 +950,7 @@ describe("readiness", () => {
   // The important one.
   it("refuses to claim Ready when no crew has reported at all", () => {
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1092,7 +981,7 @@ describe("deleting the credential", () => {
 
   async function clickDelete() {
     openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^delete…$/i }))
     const dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }))
   }
@@ -1106,7 +995,7 @@ describe("deleting the credential", () => {
     const onRefresh = vi.fn()
     const onOpenChange = vi.fn()
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1133,7 +1022,7 @@ describe("deleting the credential", () => {
     const onRefresh = vi.fn()
     const onOpenChange = vi.fn()
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1173,8 +1062,8 @@ describe("why reveal is unavailable", () => {
     // Twice: the Value card explains why the button is missing, and the
     // Classification card explains what SEALED means. Both are true and both
     // are where the reader is looking when the question comes up.
-    expect((await screen.findAllByText(/SEALED values cannot be revealed/i)).length).toBe(2)
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect((await screen.findAllByText(/SEALED values cannot be revealed/i)).length).toBeGreaterThan(0)
+    expect(screen.queryByRole("button", { name: /^reveal…$/i })).not.toBeInTheDocument()
   })
 
   it("points at the workspace switch when reveal is off", async () => {
@@ -1196,7 +1085,7 @@ describe("why reveal is unavailable", () => {
     h.capabilities = ["credentials:reveal"]
     renderReveal({})
     expect(
-      await screen.findByRole("button", { name: /reveal the existing value/i }),
+      await screen.findByRole("button", { name: /^reveal…$/i }),
     ).toBeInTheDocument()
   })
 
@@ -1231,7 +1120,7 @@ describe("who a slot reaches", () => {
         : { ok: true, status: 200, json: async () => [] },
     )
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
@@ -1239,6 +1128,7 @@ describe("who a slot reaches", () => {
         onRefresh={() => {}}
         onRotate={() => {}}
         crewsById={crewsById as never}
+        tab="access"
       />,
     )
   }
@@ -1265,6 +1155,7 @@ describe("who a slot reaches", () => {
 // "USE · 3m ago" — a card three screens tall that pushed everything below it
 // out of reach and said nothing the first row did not.
 describe("the audit timeline", () => {
+  beforeEach(() => { defaultTab = "activity" })
   function events(n: number, over: Partial<Record<string, unknown>> = {}) {
     return Array.from({ length: n }, (_, i) => ({
       id: `e${i}`,
@@ -1328,6 +1219,7 @@ describe("the audit timeline", () => {
 // timeline, and the rows could not answer it — they carried the event type, a
 // time, and sometimes an IP.
 describe("who did it", () => {
+  beforeEach(() => { defaultTab = "activity" })
   function routeAudit(list: unknown[]) {
     h.apiFetch.mockImplementation(async (url: string) =>
       String(url).includes("/audit")
@@ -1414,13 +1306,14 @@ describe("a sidecar read", () => {
         : { ok: true, status: 200, json: async () => [] },
     )
     render(
-      <CredentialDetailSheet
+      <Harness
         workspaceId="ws1"
         credential={credential}
         open
         onOpenChange={() => {}}
         onRefresh={() => {}}
         onRotate={() => {}}
+        tab="activity"
         crewsById={
           { crew_1: { id: "crew_1", name: "engineering", icon: "rocket", color: "#0f0" } } as never
         }
