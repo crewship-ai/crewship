@@ -214,6 +214,41 @@ env:
     e2e/visual.spec.ts
     e2e/onboarding-wizard.spec.ts
     e2e/pr-contract.spec.ts
+  # HARBOR2: the Harbor 2 redesign's acceptance specs (#3350 / #3366). Hard
+  # gate in their own job, `e2e-harbor2`, because they were written against
+  # the RBAC demo seed rather than this workflow's demo-only one: they sign
+  # in as an ADMIN that is not the workspace owner (settings-h2 asserts the
+  # owner-only Danger zone is absent), switch to MEMBER and ADMIN baseline
+  # accounts, need an instance administrator (admin-h2), and create crews,
+  # routines and webhook channels on a disposable workspace (E2E_ALLOW_WRITES).
+  # The job seeds with `--with-users` and provides exactly those, so a
+  # role-dependent step runs instead of skipping. Sharing the GATE job would
+  # change the account its measured specs run as.
+  #
+  # The subset of these that holds on a demo-only seed with no writes also
+  # runs on every PR: playwright.pr.config.ts lists it in HARBOR2_PR_SPECS.
+  # Membership here is still required for those — the PR run signs in as the
+  # owner, so their role-dependent steps skip there and only run here.
+  HARBOR2_SPECS: >-
+    e2e/harbor2-shell.spec.ts
+    e2e/harbor2-dashboard.spec.ts
+    e2e/harbor2-onboarding.spec.ts
+    e2e/harbor2-auth.spec.ts
+    e2e/harbor2-legacy-links.spec.ts
+    e2e/chrome-states.spec.ts
+    e2e/vault-h2.spec.ts
+    e2e/calendar-h2.spec.ts
+    e2e/admin-h2.spec.ts
+    e2e/issues-h2.spec.ts
+    e2e/harbor2-inbox.spec.ts
+    e2e/harbor2-activity.spec.ts
+    e2e/harbor2-journal-redirect.spec.ts
+    e2e/settings-h2.spec.ts
+    e2e/skills-h2.spec.ts
+    e2e/integrations-h2.spec.ts
+    e2e/crews-h2.spec.ts
+    e2e/routines-h2.spec.ts
+    e2e/routines-new-wizard.spec.ts
 
 jobs:
   build-tools:
@@ -259,21 +294,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Assert GATE + DRIFT + EXCLUDED covers e2e/*.spec.ts
+      - name: Assert GATE + DRIFT + HARBOR2 + EXCLUDED covers e2e/*.spec.ts
         # Without this, adding e2e/new-thing.spec.ts means it runs in the PR
         # suite and in neither nightly bucket — i.e. it silently loses its
         # nightly coverage, which is the failure mode this whole workflow
         # exists to end. Fails loudly and names the offenders.
         run: |
           set -euo pipefail
-          declared=$(printf '%s\n%s\n%s\n' "$GATE_SPECS" "$DRIFT_SPECS" "$EXCLUDED_SPECS" \
+          declared=$(printf '%s\n%s\n%s\n%s\n' "$GATE_SPECS" "$DRIFT_SPECS" "$HARBOR2_SPECS" "$EXCLUDED_SPECS" \
             | tr ' ' '\n' | sed 's/[[:space:]]//g' | grep -v '^$' | sort -u)
           actual=$(find e2e -maxdepth 1 -name '*.spec.ts' | sort -u)
           missing=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
           phantom=$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
           rc=0
           if [ -n "$missing" ]; then
-            echo "::error::spec(s) in no nightly bucket — add to GATE_SPECS or DRIFT_SPECS (or EXCLUDED_SPECS with a reason in the header):"
+            echo "::error::spec(s) in no nightly bucket — add to GATE_SPECS, DRIFT_SPECS or HARBOR2_SPECS (or EXCLUDED_SPECS with a reason in the header):"
             printf '%s\n' "$missing" | sed 's/^/  /'
             rc=1
           fi
@@ -407,6 +442,142 @@ jobs:
             playwright-nightly-report.json
             drift-summary.json
             test-results/
+          retention-days: 14
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
+  # ── Harbor 2 gate: the redesign's specs on the RBAC demo seed ──
+  # Same instance as e2e-gate (fresh DB, full seed, embedded UI) plus what the
+  # HARBOR2_SPECS header lists: baseline role accounts, a non-owner ADMIN as
+  # the suite's session who is also an instance administrator, and permission
+  # to write into this throwaway workspace. Hard-fails like the gate.
+  e2e-harbor2:
+    needs: [build-tools]
+    name: E2E Harbor 2 gate (RBAC seed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Download shared test binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+      - run: chmod +x crewship crewship-sidecar
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      # Same as the gate job — see .github/actions/setup-playwright-browser.
+      - name: Install Playwright browsers (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
+
+      - name: Start crewship server in background
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server failed to start"
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Seed the workspace with the RBAC baseline users
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        # Full seed (issues, projects, routines) as in e2e-gate, plus
+        # --with-users: admin-/manager-/member-/viewer-baseline@crewship.local
+        # (cmd/crewship/cmd_seed_data_users.go). Retried for the same cold
+        # runtime-image validation reason as the gate.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "--- seed attempt $attempt ---"
+            if ./crewship seed --offline-demo --with-users --server "$CREWSHIP_SERVER"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::seed failed after 3 attempts"
+          tail -100 /tmp/crewship.log >&2
+          exit 1
+
+      - name: Make the baseline ADMIN an instance administrator
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        # admin-h2.spec.ts drives /admin and skips without an instance
+        # administrator in E2E_EMAIL. The seed's owner (demo@crewship.ai) is
+        # one already; the CLI is still signed in as that owner after seeding.
+        run: ./crewship admin instance add-admin admin-baseline@crewship.local --server "$CREWSHIP_SERVER"
+
+      - name: Run Harbor 2 specs
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+          # Seeded by --with-users above; rbac-demo-1234 is the fixture's
+          # documented password, not a secret.
+          E2E_EMAIL: admin-baseline@crewship.local
+          E2E_PASSWORD: rbac-demo-1234
+          E2E_MEMBER_EMAIL: member-baseline@crewship.local
+          E2E_MEMBER_PASSWORD: rbac-demo-1234
+          E2E_RBAC_PASSWORD: rbac-demo-1234
+          # The DB is created and discarded by this job.
+          E2E_ALLOW_WRITES: "1"
+          CREWSHIP_INSTANCE_ID: nightly-e2e-harbor2
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # word-splitting the spec list is intended
+          pnpm exec playwright test --config=playwright.nightly.config.ts \
+            --output=harbor2-test-results $HARBOR2_SPECS
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: playwright-nightly-harbor2
+          path: |
+            playwright-report/
+            playwright-nightly-report.json
+            harbor2-test-results/
           retention-days: 14
 
       - name: Dump server log on failure
@@ -657,7 +828,7 @@ jobs:
     name: Nightly E2E alert
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [coverage-guard, e2e-gate, e2e-drift]
+    needs: [coverage-guard, e2e-gate, e2e-harbor2, e2e-drift]
     if: always() && github.event_name == 'schedule'
     permissions:
       contents: read
@@ -677,6 +848,7 @@ jobs:
           RESULTS: |
             coverage-guard=${{ needs.coverage-guard.result }}
             e2e-gate=${{ needs.e2e-gate.result }}
+            e2e-harbor2=${{ needs.e2e-harbor2.result }}
             e2e-drift=${{ needs.e2e-drift.result }}
         run: |
           set -euo pipefail
@@ -733,7 +905,8 @@ jobs:
           Run: $RUN_URL
 
           - **e2e-gate** red = a real regression in a spec that was verified green. Download the \`playwright-nightly-gate\` artifact for the HTML report, traces and failure screenshots.
-          - **coverage-guard** red = a spec was added or renamed and now belongs to no nightly bucket. Add it to \`GATE_SPECS\` or \`DRIFT_SPECS\` in this workflow.
+          - **e2e-harbor2** red = a Harbor 2 acceptance spec failed against the RBAC demo seed. The \`playwright-nightly-harbor2\` artifact has the report, traces and screenshots.
+          - **coverage-guard** red = a spec was added or renamed and now belongs to no nightly bucket. Add it to \`GATE_SPECS\`, \`DRIFT_SPECS\` or \`HARBOR2_SPECS\` in this workflow.
           - **e2e-drift** red = the drift job's own scaffolding broke (server never came up, JSON report never written). New outcomes outside the measured baseline also fail this job; known debt remains in the separate \`e2e-drift\` tracking issue.
 
           This issue auto-closes when the nightly is green again."
