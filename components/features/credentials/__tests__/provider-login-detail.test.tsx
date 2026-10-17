@@ -120,7 +120,7 @@ describe("Validity & refresh", () => {
   it("needs re-login: the error, the sentence, the red tone", () => {
     renderCards(seat({ refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: "invalid_grant" } }))
     expect(screen.getByText("invalid_grant")).toBeInTheDocument()
-    expect(screen.getByText(/Use Re-login to reconnect it; existing assignments stay unchanged/i)).toBeInTheDocument()
+    expect(screen.getByText(/Use Sign in again to reconnect it; existing assignments stay unchanged/i)).toBeInTheDocument()
     expect(screen.getByTestId("login-status-needs_relogin")).toBeInTheDocument()
   })
 
@@ -168,7 +168,7 @@ describe("Delivered to the agent as", () => {
 
 describe("actions", () => {
   function renderActions(credential = seat(), over: Partial<React.ComponentProps<typeof ProviderLoginActions>> = {}) {
-    const fns = { onAssign: vi.fn(), onTest: vi.fn(), onRelogin: vi.fn(), onRevoke: vi.fn() }
+    const fns = { onPayFor: vi.fn(), onTest: vi.fn(), onRelogin: vi.fn() }
     render(
       <ProviderLoginActions
         credential={credential}
@@ -176,7 +176,6 @@ describe("actions", () => {
         testing={false}
         canUpdate
         canBind
-        canDelete
         {...fns}
         {...over}
       />,
@@ -184,15 +183,21 @@ describe("actions", () => {
     return fns
   }
 
-  it("Assign · Re-login · Revoke, and no Test for a subscription", () => {
+  it("a working account: Pay for agents is the primary, and no Test for a subscription", () => {
     const fns = renderActions()
-    fireEvent.click(screen.getByRole("button", { name: /assign to agent/i }))
-    fireEvent.click(screen.getByRole("button", { name: /re-login/i }))
-    fireEvent.click(screen.getByRole("button", { name: /revoke/i }))
-    expect(fns.onAssign).toHaveBeenCalled()
-    expect(fns.onRelogin).toHaveBeenCalled()
-    expect(fns.onRevoke).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: /pay for agents/i }))
+    expect(fns.onPayFor).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /sign in again/i })).not.toBeInTheDocument()
+    // Revoke lives in Settings, behind the confirm dialog.
+    expect(screen.queryByRole("button", { name: /revoke/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument()
+  })
+
+  it("a signed-out account: Sign in again is the primary", () => {
+    const fns = renderActions(seat({ refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: "invalid_grant" } }))
+    fireEvent.click(screen.getByRole("button", { name: /sign in again/i }))
+    expect(fns.onRelogin).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /pay for agents/i })).not.toBeInTheDocument()
   })
 
   it("Test appears for a metered key the server can probe", () => {
@@ -202,10 +207,9 @@ describe("actions", () => {
   })
 
   it("each verb follows its own gate", () => {
-    renderActions(seat({ mode: "api_key" }), { canBind: false, canDelete: false, canUpdate: false })
-    expect(screen.queryByRole("button", { name: /assign to agent/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /revoke/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /re-login/i })).not.toBeInTheDocument()
+    renderActions(seat({ mode: "api_key", refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: null } }), { canBind: false, canUpdate: false })
+    expect(screen.queryByRole("button", { name: /pay for agents/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /sign in again/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument()
   })
 })

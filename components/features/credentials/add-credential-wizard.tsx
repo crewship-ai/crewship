@@ -42,6 +42,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
 import { detectPastedValue } from "@/lib/credentials/paste-detect"
 import { loginProvider } from "@/lib/credentials/login-providers"
+import { runnerFits } from "@/lib/credentials/provider-logins"
 import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
 import {
@@ -105,6 +106,12 @@ const FIELD = "h-10 sm:h-9"
 const MONO_AREA = "font-mono text-xs coarse:text-base"
 
 interface Crew { id: string; name: string }
+
+/** GET /agents — the runner decides which provider an agent can pay with. */
+interface AgentOption { id: string; name: string; cli_adapter?: string | null }
+
+/** GET /provider-logins/pools — the groups a new account can join. */
+interface PoolOption { id: string; name: string; provider: string; mode: string }
 
 /** GET /workspaces/{id}/members — the people a seat can belong to. */
 interface Member { id: string; user: { id: string; email: string; full_name: string | null } }
@@ -190,7 +197,7 @@ export function AddCredentialWizard({
   const [attempted, setAttempted] = React.useState(false)
   const [assignNow, setAssignNow] = React.useState(false)
   const [agentIds, setAgentIds] = React.useState<string[]>([])
-  const [agents, setAgents] = React.useState<Crew[]>([])
+  const [agents, setAgents] = React.useState<AgentOption[]>([])
   const [savedId, setSavedId] = React.useState<string | null>(null)
   const [uncertainSave, setUncertainSave] = React.useState(false)
   const completedWrites = React.useRef(new Set<string>())
@@ -240,6 +247,9 @@ export function AddCredentialWizard({
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [warning, setWarning] = React.useState<string | null>(null)
+  // Provider login only: the account group the new account joins, if any.
+  const [poolId, setPoolId] = React.useState("")
+  const [pools, setPools] = React.useState<PoolOption[]>([])
 
   const itemType = getItemType(itemTypeKey)
   const ItemIcon = TYPE_ICON[itemTypeKey]
@@ -357,6 +367,19 @@ export function AddCredentialWizard({
     setDeviceBusy(false)
     setSignIn(key === "OPENAI" ? "device" : "paste")
   }
+
+  // The groups a new account could join — only on the last step, only for
+  // the roles that may manage groups (OWNER/ADMIN), once per workspace.
+  const poolsFetchedFor = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!login || !canBind || step !== "scope" || initial?.credentialId || poolsFetchedFor.current === workspaceId) return
+    poolsFetchedFor.current = workspaceId
+    apiFetch("/api/v1/provider-logins/pools", { headers: { "X-Workspace-ID": workspaceId } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { items?: PoolOption[] } | null) => setPools(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setPools([]))
+  }, [login, canBind, step, initial?.credentialId, workspaceId])
+  const matchingPools = pools.filter((p) => p.provider === provider.toUpperCase() && p.mode === loginMode)
 
   const missingRequired = React.useMemo(() => {
     // A provider login without a provider cannot be delivered anywhere — the
@@ -574,6 +597,30 @@ export function AddCredentialWizard({
         }
       }
 
+      // Joining an account group is a member list rewrite at the revision just
+      // read; a group that changed in between is reported, not overwritten.
+      if (credentialId && login && poolId && canBind && !completedWrites.current.has(`pool:${poolId}`)) {
+        try {
+          const path = `/api/v1/provider-logins/pools/${encodeURIComponent(poolId)}`
+          const gr = await apiFetch(path, { headers: { "X-Workspace-ID": workspaceId } })
+          if (!gr.ok) throw new Error(`HTTP ${gr.status}`)
+          const pool = (await gr.json()) as { name: string; revision: number; allow_cross_owner: boolean; members?: { credential_id: string; priority: number }[] }
+          const members = Array.isArray(pool.members) ? pool.members : []
+          if (!members.some((m) => m.credential_id === credentialId)) {
+            const next = members.length > 0 ? Math.max(...members.map((m) => m.priority)) + 1 : 0
+            const pr = await apiFetch(path, {
+              method: "PUT",
+              headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json", "If-Match": `"${pool.revision}"` },
+              body: JSON.stringify({ name: pool.name, allow_cross_owner: pool.allow_cross_owner, members: [...members, { credential_id: credentialId, priority: next }] }),
+            })
+            if (!pr.ok) throw new Error(pr.status === 412 ? "the group changed meanwhile" : `HTTP ${pr.status}`)
+          }
+          completedWrites.current.add(`pool:${poolId}`)
+        } catch (e) {
+          problems.push(`account group (${e instanceof Error ? e.message : "request failed"})`)
+        }
+      }
+
       if (problems.length > 0) {
         setWarning(
           `Saved “${name.trim()}”, but some parts did not land: ${problems.join("; ")}. ` +
@@ -635,7 +682,7 @@ export function AddCredentialWizard({
           renders the nav itself now, so the wrapper was a nested landmark. */}
       <CreateSurfaceSteps
         ariaLabel="Add credential steps"
-        steps={login ? [{ id: "type", label: "Provider" }, { id: "values", label: "Connect" }, { id: "scope", label: "Use" }] : STEPS}
+        steps={login ? [{ id: "type", label: "Provider" }, { id: "values", label: "Connect" }, { id: "scope", label: "Pays for" }] : STEPS}
         current={stepIndex}
         onJump={(i) => { if (!initial?.credentialId && !savedId && !deviceBusy && !deviceCredentialId) setStep(STEP_ORDER[i]) }}
       />
@@ -1037,13 +1084,29 @@ export function AddCredentialWizard({
               {login ? <BrandIcon className="size-5" /> : <ItemIcon className="size-5" />}
               <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : "Connection not tested · save does not verify access"}</p></div>
             </div>
-            <CreateSurfaceSection title="How will you use it?" icon={Users} accent="teal">
+            <CreateSurfaceSection title={login ? "Pays for" : "How will you use it?"} icon={Users} accent="teal">
               <div className="grid grid-cols-2 gap-2">
-                <ChoiceButton selected={!assignNow} onClick={() => setAssignNow(false)}>Save for later</ChoiceButton>
-                {canBind && <ChoiceButton selected={assignNow} onClick={() => { setAssignNow(true); setScope("AGENT") }}>Assign now</ChoiceButton>}
+                <ChoiceButton selected={!assignNow} onClick={() => setAssignNow(false)}>{login ? "Nobody yet" : "Save for later"}</ChoiceButton>
+                {canBind && <ChoiceButton selected={assignNow} onClick={() => { setAssignNow(true); setScope("AGENT") }}>{login ? "Choose now" : "Assign now"}</ChoiceButton>}
               </div>
-              <CardNote>{assignNow ? "Choose who will receive this credential. Runtime access still follows workspace policy." : "Save in the workspace vault without creating delivery assignments. You can assign it later."}</CardNote>
+              <CardNote>{login
+                ? (assignNow ? `Only agents whose runner can use ${loginProvider(provider)?.label ?? "this provider"} are offered.` : "Save the account now and choose the agents it pays for later.")
+                : (assignNow ? "Choose who will receive this credential. Runtime access still follows workspace policy." : "Save in the workspace vault without creating delivery assignments. You can assign it later.")}</CardNote>
             </CreateSurfaceSection>
+            {login && canBind && matchingPools.length > 0 && (
+              <CreateSurfaceField label="Account group" htmlFor="cred-pool">
+                <select
+                  id="cred-pool"
+                  value={poolId}
+                  onChange={(e) => setPoolId(e.target.value)}
+                  className={cn(FIELD, "w-full rounded-md border border-border/60 bg-background px-2.5 text-sm text-foreground outline-none focus:border-primary")}
+                >
+                  <option value="">None</option>
+                  {matchingPools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <CardNote>Switching to the next account in a group at a limit is not available yet.</CardNote>
+              </CreateSurfaceField>
+            )}
             {assignNow && <>
             <CreateSurfaceSection title="Assign to" icon={Users} accent="teal">
               <div className="space-y-3">
@@ -1064,7 +1127,7 @@ export function AddCredentialWizard({
 
                 {scope === "AGENT" && <div className="max-h-48 space-y-1 overflow-y-auto">
                   {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents available.</p>}
-                  {agents.map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
+                  {agents.filter((agent) => !login || runnerFits(agent.cli_adapter, provider)).map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
                 </div>}
                 {scope === "CREW" && (
                   <CreateSurfaceField label="Crews">

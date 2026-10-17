@@ -61,7 +61,8 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { hasLogin, paysForLabel, type ProviderLogin } from "@/lib/credentials/provider-logins"
 import { RevealDialog } from "./reveal-dialog"
-import { AssignLoginDialog } from "./assign-login-dialog"
+import { GiveToAgentsDialog } from "./give-to-agents-dialog"
+import { PaysForPanel } from "./pays-for-panel"
 import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
 import { CredentialTierBadge } from "./credential-tier-badge"
 import { BrandTile } from "./secrets-table"
@@ -236,15 +237,12 @@ export interface CredentialDetailSheetProps {
   /** Provider logins only: opens the wizard's sign-in step for this seat's
    *  provider and mode. Without it the Re-login action is not offered. */
   onRelogin?: (cred: CredentialSummary) => void
-  /** Provider logins only: open with the Assign dialog already up — the
-   *  Providers list's own Assign button lands here. */
-  assignOnOpen?: boolean
 }
 
 export function CredentialDetailSheet({
   workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onBack, backLabel = "Secrets",
   tab = null, onTabChange, knownTags = [],
-  toolGaps = [], crewsById = {}, onRelogin, assignOnOpen = false,
+  toolGaps = [], crewsById = {}, onRelogin,
 }: CredentialDetailSheetProps) {
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
@@ -272,6 +270,7 @@ export function CredentialDetailSheet({
   const [accessLoading, setAccessLoading] = React.useState(false)
   const [accessError, setAccessError] = React.useState(false)
   const [accessCoverage, setAccessCoverage] = React.useState({ checked: 0, total: 0, unavailable: 0 })
+  const [accessReload, setAccessReload] = React.useState(0)
   const [revealOpen, setRevealOpen] = React.useState(false)
   // The classification a PUT .../sensitivity last returned. Starts unset and
   // takes precedence over the value the list/get payload carried, so the pill
@@ -282,7 +281,7 @@ export function CredentialDetailSheet({
   // The `login` a Refresh-now returned. Wins over the list payload so the
   // status pill and the expiry follow the refresh without a page reload.
   const [loginOverride, setLoginOverride] = React.useState<ProviderLogin | null>(null)
-  const [assignOpen, setAssignOpen] = React.useState(false)
+  const [giveOpen, setGiveOpen] = React.useState(false)
 
   // The server answers each action using its own scope, role and capability
   // gates. Until that answer arrives (or if it fails), actions stay hidden.
@@ -333,13 +332,12 @@ export function CredentialDetailSheet({
       setSensitivity(null)
       setSensitivityError(null)
       setRevealOpen(false)
-      setAssignOpen(false)
+      setGiveOpen(false)
     }
     // A refresh's answer belongs to the seat it refreshed, not the next one
     // opened in the rail.
     setLoginOverride(null)
-    if (open && credential && assignOnOpen && hasLogin(credential)) setAssignOpen(true)
-  }, [open, credential, assignOnOpen])
+  }, [open, credential])
 
   // Every sub-resource, on open.
   //
@@ -403,7 +401,7 @@ export function CredentialDetailSheet({
     return () => {
       cancelled = true
     }
-  }, [open, credential, workspaceId, canRotate, canUpdate])
+  }, [open, credential, workspaceId, canRotate, canUpdate, accessReload])
 
   if (!credential) return null
 
@@ -593,6 +591,18 @@ export function CredentialDetailSheet({
         </div>
       )}
 
+      {seat && (seat.login.refresh.status === "needs_relogin" || state.key === "rejected") && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-card border border-destructive/30 bg-chip-danger-bg px-4 py-3">
+          <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <b className="text-control font-semibold text-foreground">Signed out</b>
+            <p className="text-label text-foreground/85">
+              {seat.login.refresh.error ? `${seat.login.refresh.error}. ` : ""}Agents that pay with it fall back to their crew&apos;s or the workspace account until someone signs in again.
+            </p>
+          </div>
+          {canUpdate && onRelogin && <Button size="sm" onClick={() => onRelogin(credential)}>Sign in again</Button>}
+        </div>
+      )}
       {seat && (
         <ProviderLoginCards
           workspaceId={workspaceId}
@@ -758,7 +768,7 @@ export function CredentialDetailSheet({
         <DetailCard
           title={seat ? "Pays for" : "Who gets it at run time"}
           icon={Users}
-          action={seat && canBind ? <Button size="sm" variant="outline" onClick={() => setAssignOpen(true)}>Assign to agent</Button> : undefined}
+          action={!seat && canBind ? <Button size="sm" variant="outline" onClick={() => setGiveOpen(true)}>Give to agents</Button> : undefined}
           footer={seat
             ? "Assignments decide which agents can use this account. Automatic account switching is not available yet."
             : "“See” and “get” are different: a crew can use a secret without anyone in it being able to reveal it."}
@@ -925,7 +935,10 @@ export function CredentialDetailSheet({
   )
 
   const body =
-    activeTab === "access" ? access
+    activeTab === "access" && seat ? (
+      <PaysForPanel workspaceId={workspaceId} credential={seat} canBind={canBind} crewsById={crewsById} onChanged={onRefresh} />
+    )
+      : activeTab === "access" ? access
       : activeTab === "history" ? (
         <SecretValueHistory workspaceId={workspaceId} credentialId={credential.id} canRotate={canRotate} onReplace={() => replaceValue()} revision={credential.updated_at ? Date.parse(credential.updated_at) : 0} />
       )
@@ -942,6 +955,7 @@ export function CredentialDetailSheet({
           fields={fields}
           onRefresh={onRefresh}
           onDeleted={() => { onRefresh(); onOpenChange(false) }}
+          onSignInAgain={seat && canUpdate && onRelogin ? () => onRelogin(credential) : undefined}
           dependents={dependentsError ? "error" : dependents ?? null}
         />
       )
@@ -992,11 +1006,9 @@ export function CredentialDetailSheet({
                     testing={testing}
                     canUpdate={canUpdate}
                     canBind={canBind}
-                    canDelete={canDelete}
-                    onAssign={() => setAssignOpen(true)}
+                    onPayFor={() => showTab("access")}
                     onTest={handleTest}
                     onRelogin={onRelogin ? () => onRelogin(credential) : undefined}
-                    onRevoke={() => showTab("settings")}
                   />
                 ) : (
                   <>
@@ -1005,7 +1017,7 @@ export function CredentialDetailSheet({
                         <RefreshCw className="size-3.5" aria-hidden /> Replace value
                       </Button>
                     )}
-                    <Button size="sm" onClick={() => showTab("access")}>
+                    <Button size="sm" onClick={() => (canBind ? setGiveOpen(true) : showTab("access"))}>
                       <Bot className="size-3.5" aria-hidden /> Give to agents
                     </Button>
                   </>
@@ -1022,14 +1034,16 @@ export function CredentialDetailSheet({
         </div>
       </div>
 
-      {seat && (
-        <AssignLoginDialog
+      {!seat && canBind && (
+        <GiveToAgentsDialog
           workspaceId={workspaceId}
-          credential={seat}
-          open={assignOpen}
-          onOpenChange={setAssignOpen}
-          onAssigned={(agent) => {
-            toast.success(`${agent.name} now pays with ${credential.name}`)
+          credential={credential}
+          open={giveOpen}
+          onOpenChange={setGiveOpen}
+          crewsById={crewsById}
+          onGiven={() => {
+            // The Access tab shows the new rows; the list's "Used by" follows the refresh.
+            setAccessReload((n) => n + 1)
             onRefresh()
           }}
         />

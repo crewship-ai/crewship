@@ -284,7 +284,12 @@ export function adapterLabel(cliAdapter: string | null | undefined): string {
 
 // ── The rail ────────────────────────────────────────────────────────────────
 
-export type LoginStatusFilter = "all" | "at_limit" | "expiring" | "needs_relogin" | "unassigned"
+/**
+ * The panel's views and the health tiles' doors. `attention` is anything a
+ * person has to act on (a new sign-in, a limit, an expiry); `mine` is the
+ * accounts the signed-in person owns.
+ */
+export type LoginStatusFilter = "all" | "attention" | "at_limit" | "expiring" | "needs_relogin" | "unassigned" | "mine"
 
 export interface LoginFilters {
   status: LoginStatusFilter
@@ -362,14 +367,47 @@ export function buildLoginOwnerFacet(logins: LoginCredential[]): LoginFacetOptio
   )
 }
 
-function ownerKey(c: LoginCredential): string {
+/** The Owner facet's key for a row: the owner's email, else their id, else "workspace". */
+export function loginOwnerKey(c: LoginCredential): string {
   return c.login?.owner_email || c.login?.owner_user_id || UNOWNED
 }
+const ownerKey = loginOwnerKey
 
-export function applyLoginFilters<T extends LoginCredential>(logins: T[], filters: LoginFilters, now = Date.now()): T[] {
+/** A seat a person has to act on: signed out, expired, at its limit or about to expire. */
+export function needsAttention(c: LoginCredential, now = Date.now()): boolean {
+  const s = deriveLoginStatus(c, now)
+  return s === "needs_relogin" || s === "expired" || s === "at_limit" || s === "expiring"
+}
+
+/** The signed-in person, as the "My accounts" view matches them. */
+export interface LoginMe {
+  id?: string | null
+  email?: string | null
+}
+
+/** True when the signed-in person (by id or email) owns the seat. */
+export function isOwnedBy(c: LoginCredential, me: LoginMe | null | undefined): boolean {
+  if (!me) return false
+  if (me.id && c.login?.owner_user_id === me.id) return true
+  const email = (me.email ?? "").toLowerCase()
+  return Boolean(email) && (c.login?.owner_email ?? "").toLowerCase() === email
+}
+
+/**
+ * The rows the filters leave. `me` is the signed-in person for the "My
+ * accounts" view; without it that view is empty, never "everything".
+ */
+export function applyLoginFilters<T extends LoginCredential>(
+  logins: T[],
+  filters: LoginFilters,
+  now = Date.now(),
+  me: LoginMe | null = null,
+): T[] {
   const q = filters.search.trim().toLowerCase()
   return logins.filter((c) => {
     const status = deriveLoginStatus(c, now)
+    if (filters.status === "attention" && !needsAttention(c, now)) return false
+    if (filters.status === "mine" && !isOwnedBy(c, me)) return false
     if (filters.status === "at_limit" && status !== "at_limit") return false
     if (filters.status === "needs_relogin" && status !== "needs_relogin") return false
     if (filters.status === "expiring") {
@@ -459,4 +497,81 @@ export function sortLogins<T extends LoginCredential>(logins: T[], now = Date.no
     if (ra !== rb) return ra - rb
     return a.name.localeCompare(b.name)
   })
+}
+
+// ── The AI providers space (Harbor 2) ───────────────────────────────────────
+
+/** The runners (CLI adapters) that can pay with a provider's accounts. OpenCode takes any provider's key. */
+export function providerRunners(provider: string | null | undefined): string[] {
+  switch ((provider ?? "").toUpperCase()) {
+    case "ANTHROPIC":
+      return ["Claude Code", "OpenCode"]
+    case "OPENAI":
+      return ["Codex CLI", "OpenCode"]
+    case "GOOGLE":
+      return ["Gemini CLI", "OpenCode"]
+    case "CURSOR":
+      return ["Cursor CLI"]
+    case "FACTORY":
+      return ["Factory Droid"]
+    default:
+      return ["OpenCode"]
+  }
+}
+
+/**
+ * Can an agent on this runner pay with this provider? A runner tied to one
+ * provider fits only that provider; OpenCode (and a runner the console does
+ * not know) is offered for every provider.
+ */
+export function runnerFits(cliAdapter: string | null | undefined, provider: string | null | undefined): boolean {
+  const own = adapterProvider(cliAdapter)
+  return own === null || own === (provider ?? "").toUpperCase()
+}
+
+export type AccountStateKey = "signin" | "limit" | "expiring" | "revoked" | "pending" | "idle" | "ready"
+
+/** What an account card's pill says: Sign in again, Not used, Ready, and the states in between. */
+export function accountState(c: LoginCredential, now = Date.now()): { key: AccountStateKey; label: string; tone: LoginStatusTone } {
+  const s = deriveLoginStatus(c, now)
+  if (s === "needs_relogin" || s === "expired") return { key: "signin", label: "Sign in again", tone: "destructive" }
+  if (s === "revoked") return { key: "revoked", label: "Revoked", tone: "default" }
+  if (s === "pending") return { key: "pending", label: "Pending", tone: "default" }
+  if (s === "at_limit") return { key: "limit", label: "At limit", tone: "warn" }
+  if (s === "expiring") return { key: "expiring", label: "Expires soon", tone: "warn" }
+  if (isUnassigned(c)) return { key: "idle", label: "Not used", tone: "default" }
+  return { key: "ready", label: "Ready", tone: "success" }
+}
+
+export interface ProviderHealthCounts {
+  accounts: number
+  subscriptions: number
+  apiKeys: number
+  /** Signed out or expired: a person has to sign in again. */
+  signIn: number
+  /** Pays for no agent and no crew. */
+  idle: number
+  /** Distinct owners. An account nobody owns counts as none. */
+  people: number
+}
+
+export function buildProviderHealth(logins: LoginCredential[], now = Date.now()): ProviderHealthCounts {
+  const owners = new Set<string>()
+  const out: ProviderHealthCounts = { accounts: logins.length, subscriptions: 0, apiKeys: 0, signIn: 0, idle: 0, people: 0 }
+  for (const c of logins) {
+    if (c.login?.mode === "api_key") out.apiKeys++
+    else out.subscriptions++
+    const s = deriveLoginStatus(c, now)
+    if (s === "needs_relogin" || s === "expired") out.signIn++
+    if (isUnassigned(c)) out.idle++
+    const owner = loginOwnerKey(c)
+    if (owner !== UNOWNED) owners.add(owner)
+  }
+  out.people = owners.size
+  return out
+}
+
+/** Whose account it is, as a card prints it: the owner's email, or "Workspace". */
+export function ownerLabel(c: LoginCredential): string {
+  return c.login?.owner_email || c.login?.owner_user_id || "Workspace"
 }

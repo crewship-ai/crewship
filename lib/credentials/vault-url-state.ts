@@ -11,8 +11,19 @@
  *   ?type= ?brand= ?crew= ?tier= ?class= ?scope= ?tag= ?agent=   facets
  *   ?q=                          search
  *   ?group=type                  table grouping
- *   ?id=<credential>             the secret page
+ *   ?id=<credential>             the secret page (or an AI provider account's page)
  *   ?tab=overview|access|…       its tab
+ *
+ * In the AI providers space (`?space=providers`) the same keys mean the
+ * providers' own things:
+ *
+ *   ?view=attention|unassigned|mine   the panel view or the health tile
+ *   ?provider= ?mode= ?owner=         facets; exactly one ?provider= is that
+ *                                     provider's page
+ *   ?q=                               search
+ *   ?layout=cards|list                the list's look (default: list from 13 accounts)
+ *   ?group=provider|owner|pool        list grouping
+ *   ?pool=<id>&tab=order|settings     an account group's page
  *
  * List facets repeat the key (`?type=API_KEY&type=SSH_KEY`); a comma-joined
  * value is read the same way so a hand-written link works too.
@@ -24,6 +35,7 @@ import {
   type CredentialFilters,
   type CredentialStatusFilter,
 } from "./facets"
+import { EMPTY_LOGIN_FILTERS, type LoginFilters, type LoginStatusFilter } from "./provider-logins"
 
 export type VaultSpace = "secrets" | "providers"
 export type VaultGroup = "none" | "type"
@@ -40,10 +52,37 @@ const VIEWS: readonly CredentialStatusFilter[] = [
   "expiring",
 ]
 
+export const PROVIDER_VIEWS: readonly LoginStatusFilter[] = ["all", "attention", "unassigned", "mine"]
+export type ProvidersLayout = "cards" | "list"
+export type ProvidersGroup = "none" | "provider" | "owner" | "pool"
+export const POOL_TABS = ["accounts", "order", "settings"] as const
+export type PoolTab = (typeof POOL_TABS)[number]
+
+export interface ProvidersUrlState {
+  filters: LoginFilters
+  /** null = the default for the list's size. */
+  layout: ProvidersLayout | null
+  group: ProvidersGroup
+  /** An account group's page. */
+  pool: string | null
+  /** Its tab; null = Accounts. */
+  poolTab: PoolTab | null
+}
+
+export const DEFAULT_PROVIDERS_STATE: ProvidersUrlState = {
+  filters: EMPTY_LOGIN_FILTERS,
+  layout: null,
+  group: "none",
+  pool: null,
+  poolTab: null,
+}
+
 export interface VaultUrlState {
   space: VaultSpace
   filters: CredentialFilters
   group: VaultGroup
+  /** The AI providers space's own state; the defaults unless `space` is providers. */
+  providers: ProvidersUrlState
   /** The open credential, if any. */
   id: string | null
   /** The secret page's tab; null = Overview. */
@@ -54,6 +93,7 @@ export const DEFAULT_VAULT_STATE: VaultUrlState = {
   space: "secrets",
   filters: EMPTY_CREDENTIAL_FILTERS,
   group: "none",
+  providers: DEFAULT_PROVIDERS_STATE,
   id: null,
   tab: null,
 }
@@ -77,15 +117,54 @@ function list(q: QueryLike, key: string, upper = false): string[] {
   return out
 }
 
+function parseTab(raw: string | null): SecretTab | null {
+  const tab = raw && (SECRET_TABS as readonly string[]).includes(raw) ? (raw as SecretTab) : null
+  return tab === "overview" ? null : tab
+}
+
+function parseProviders(q: QueryLike): ProvidersUrlState {
+  const viewRaw = q.get("view") as LoginStatusFilter | null
+  const layoutRaw = q.get("layout")
+  const groupRaw = q.get("group")
+  const pool = q.get("pool") || null
+  const tabRaw = q.get("tab")
+  return {
+    filters: {
+      ...EMPTY_LOGIN_FILTERS,
+      status: viewRaw && PROVIDER_VIEWS.includes(viewRaw) ? viewRaw : "all",
+      provider: list(q, "provider", true),
+      mode: list(q, "mode").filter((m) => m === "subscription" || m === "api_key"),
+      owner: list(q, "owner"),
+      search: q.get("q") ?? "",
+    },
+    layout: layoutRaw === "cards" || layoutRaw === "list" ? layoutRaw : null,
+    group: groupRaw === "provider" || groupRaw === "owner" || groupRaw === "pool" ? groupRaw : "none",
+    pool,
+    poolTab:
+      pool && tabRaw && tabRaw !== "accounts" && (POOL_TABS as readonly string[]).includes(tabRaw)
+        ? (tabRaw as PoolTab)
+        : null,
+  }
+}
+
 export function parseVaultUrl(q: QueryLike): VaultUrlState {
   const tabRaw = q.get("tab")
   const spaceRaw = q.get("space")
-  const space: VaultSpace = spaceRaw === "providers" || tabRaw === "providers" ? "providers" : "secrets"
+  const space: VaultSpace =
+    spaceRaw === "providers" || tabRaw === "providers" || Boolean(q.get("pool")) ? "providers" : "secrets"
+  if (space === "providers") {
+    return {
+      ...DEFAULT_VAULT_STATE,
+      space,
+      providers: parseProviders(q),
+      id: q.get("id") || null,
+      tab: parseTab(tabRaw),
+    }
+  }
   const viewRaw = q.get("view") as CredentialStatusFilter | null
   const view = viewRaw && VIEWS.includes(viewRaw) ? viewRaw : "all"
   const tierRaw = q.get("tier")
   const tier = tierRaw && /^(?:[1-4]|guarded|unclassified)$/.test(tierRaw) ? tierRaw : null
-  const tab = tabRaw && (SECRET_TABS as readonly string[]).includes(tabRaw) ? (tabRaw as SecretTab) : null
   return {
     space,
     filters: {
@@ -102,16 +181,40 @@ export function parseVaultUrl(q: QueryLike): VaultUrlState {
       search: q.get("q") ?? "",
     },
     group: q.get("group") === "type" ? "type" : "none",
+    providers: DEFAULT_PROVIDERS_STATE,
     id: q.get("id") || null,
-    tab: tab === "overview" ? null : tab,
+    tab: parseTab(tabRaw),
+  }
+}
+
+function buildProvidersQuery(state: VaultUrlState, p: URLSearchParams) {
+  p.set("space", "providers")
+  const pv = state.providers ?? DEFAULT_PROVIDERS_STATE
+  const f = pv.filters
+  if (f.status !== "all") p.set("view", f.status)
+  for (const v of f.provider) p.append("provider", v)
+  for (const v of f.mode) p.append("mode", v)
+  for (const v of f.owner) p.append("owner", v)
+  if (f.search.trim()) p.set("q", f.search)
+  if (pv.layout) p.set("layout", pv.layout)
+  if (pv.group !== "none") p.set("group", pv.group)
+  if (pv.pool) p.set("pool", pv.pool)
+  if (state.id) {
+    p.set("id", state.id)
+    if (state.tab) p.set("tab", state.tab)
+  } else if (pv.pool && pv.poolTab) {
+    p.set("tab", pv.poolTab)
   }
 }
 
 /** The query string for a state, defaults left out. Starts with "?" or is "". */
 export function buildVaultQuery(state: VaultUrlState): string {
   const p = new URLSearchParams()
+  if (state.space === "providers") {
+    buildProvidersQuery(state, p)
+    return `?${p.toString()}`
+  }
   const f = state.filters
-  if (state.space === "providers") p.set("space", "providers")
   if (f.status !== "all") p.set("view", f.status)
   for (const v of f.shape) p.append("type", v)
   for (const v of f.brand) p.append("brand", v)
@@ -129,6 +232,14 @@ export function buildVaultQuery(state: VaultUrlState): string {
   return s ? `?${s}` : ""
 }
 
+/** True when the address names a space, a filter or a page — a bare /credentials does not. */
+export function hasExplicitVaultState(q: QueryLike): boolean {
+  for (const key of ["space", "tab", "id", "pool", "view", "q", "type", "brand", "crew", "tier", "class", "scope", "tag", "agent", "provider", "mode", "owner"]) {
+    if (q.get(key) !== null) return true
+  }
+  return false
+}
+
 /** How many facets narrow the list (the view and the search are not facets). */
 export function activeFacetCount(f: CredentialFilters): number {
   return (
@@ -141,6 +252,11 @@ export function activeFacetCount(f: CredentialFilters): number {
     f.tag.length +
     f.agentId.length
   )
+}
+
+/** How many provider facets narrow the accounts (the view and the search are not facets). */
+export function activeLoginFacetCount(f: LoginFilters): number {
+  return f.provider.length + f.mode.length + f.owner.length
 }
 
 /** Resolve `?crew=` tokens — a link may carry a crew's slug or its id. */
