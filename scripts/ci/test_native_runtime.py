@@ -235,10 +235,20 @@ class NativeRuntimeTests(unittest.TestCase):
             started = time.monotonic()
             with self.assertRaises(subprocess.TimeoutExpired):
                 native.bounded_process([sys.executable, '-c', script, str(pidfile)], timeout=1)
-            self.assertLess(time.monotonic() - started, 7)
-            # An orphan can remain a zombie until the host init reaps it.
+            # SIGKILL delivery is asynchronous; an orphan can then remain a
+            # zombie until the host init reaps it. Observe only our own child.
             state = Path('/proc') / pidfile.read_text() / 'stat'
-            self.assertTrue(not state.exists() or state.read_text().split()[2] == 'Z')
+            deadline = time.monotonic() + 2
+            while True:
+                try:
+                    stopped = state.read_text().split()[2] == 'Z'
+                except (FileNotFoundError, ProcessLookupError):
+                    stopped = True
+                if stopped or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.01)
+            self.assertTrue(stopped, 'owned child remained live after SIGKILL')
+            self.assertLess(time.monotonic() - started, 7)
 
     def test_sigterm_cancels_and_restores_handlers(self):
         before = signal.getsignal(signal.SIGTERM)
