@@ -36,6 +36,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
+
+- **Shared issue searches explain temporary rate limits.** The browser keeps results and search drafts, pauses search polling and disables repeated requests until the retry interval ends. A definitive access denial discards old results so later throttled retries cannot restore them. CLI commands print retry guidance, exit 6 and require an explicit retry.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
