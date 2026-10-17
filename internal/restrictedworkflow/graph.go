@@ -182,7 +182,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		defer delete(path, recipeID)
 		r := &graphRecipe{ID: recipeID}
 		if err := s.db.QueryRowContext(ctx, `SELECT definition_json,author_crew_id FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND status='active'`, recipeID, workspace).Scan(&r.Raw, &r.Crew); err != nil {
-			return nil, ErrDenied
+			return nil, graphLookupError(err)
 		}
 		r.Hash = hash(r.Raw)
 		if !seenBytes[recipeID] {
@@ -205,7 +205,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 			if step.PipelineSlug != "" {
 				var childID string
 				if err = s.db.QueryRowContext(ctx, `SELECT id FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL AND status='active'`, workspace, step.PipelineSlug).Scan(&childID); err != nil {
-					return nil, ErrDenied
+					return nil, graphLookupError(err)
 				}
 				g.Child, err = visit(childID, depth+1)
 				if err != nil {
@@ -236,7 +236,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 				}
 				rows, err := s.db.QueryContext(ctx, `SELECT id,restricted_execution_profile FROM agents WHERE workspace_id=? AND slug=? AND deleted_at IS NULL AND (? IS NULL OR crew_id=?) LIMIT 2`, workspace, step.AgentSlug, r.Crew, r.Crew)
 				if err != nil {
-					return nil, ErrDenied
+					return nil, err
 				}
 				count := 0
 				for rows.Next() {
@@ -248,7 +248,13 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 				}
 				rowErr := rows.Err()
 				rows.Close()
-				if err != nil || rowErr != nil || count != 1 || !s.supportsProfile(g.Profile) || (g.Profile != "responses_text" && g.Profile != "native_api_key") {
+				if err != nil {
+					return nil, err
+				}
+				if rowErr != nil {
+					return nil, rowErr
+				}
+				if count != 1 || !s.supportsProfile(g.Profile) || (g.Profile != "responses_text" && g.Profile != "native_api_key") {
 					return nil, ErrDenied
 				}
 				g.ProviderHash, err = authority.ProviderDelegationHash(ctx, user, workspace, g.Agent)
@@ -267,7 +273,13 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 	}
 	var err error
 	graph.Root, err = visit(pipelineID, 1)
-	if err != nil || leaves == 0 {
+	if err != nil {
+		if errors.Is(err, ErrDenied) || errors.Is(err, access.ErrDenied) {
+			return frozenGraph{}, ErrDenied
+		}
+		return frozenGraph{}, err
+	}
+	if leaves == 0 {
 		return frozenGraph{}, ErrUnsupported
 	}
 	for target := range targets {
@@ -296,4 +308,13 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		return frozenGraph{}, ErrUnsupported
 	}
 	return graph, nil
+}
+
+// Missing graph dependencies remain opaque access refusals. Operational lookup
+// failures retain their error class so admission can report temporary unavailability.
+func graphLookupError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrDenied
+	}
+	return err
 }

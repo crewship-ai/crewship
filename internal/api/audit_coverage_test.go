@@ -178,6 +178,7 @@ func TestAuditCoverage_WorkspaceSettingsChange(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `UPDATE users SET instance_role='ADMIN' WHERE id=?`, userID)
 	h := NewWorkspaceHandler(db, newTestLogger())
 
 	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID,

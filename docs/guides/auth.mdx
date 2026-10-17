@@ -142,7 +142,9 @@ crewship workspace member invite them@example.com --role MEMBER
 They keep the same user account throughout — only the membership row is recreated.
 </Warning>
 
-Requires **ADMIN** or **OWNER**. The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
+Requires **ADMIN** or **OWNER**. Only an **OWNER** may provision an account with the **ADMIN** role, matching invitation and membership role assignment. An **ADMIN** may provision MANAGER, MEMBER and VIEWER accounts. A refused ADMIN assignment creates no account, membership or setup link and preserves an existing account's setup link.
+
+The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
 
 <Note>
 This is the one place the origin is *not* taken from `CREWSHIP_PUBLIC_URL` first, which is worth explaining because [the rule stated in the overview](#overview) is otherwise absolute.

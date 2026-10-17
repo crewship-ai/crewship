@@ -46,7 +46,7 @@ default selections are preserved.
 | `--with-memory` | `false` | Initialize all demo memory tiers through the target server's authenticated API before provisioning. Existing files and operator edits are preserved; a requested initialization failure stops the seed. No server memory is written on the CLI host. |
 | `--with-team-chat` | `false` | Add six fictional colleagues with actual workspace roles, bundled portraits, a shared Chat channel and separately authored DMs. Requires OWNER and current create-only provisioning support; signup is not required. |
 | `--state-dir <path>` | User configuration directory | Private owned-account state outside Git, separated by server/workspace. Passwords are random and never printed. |
-| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Uses authenticated member provisioning; public signup may remain disabled. New accounts redeem their setup token against the explicit target. Existing passwords are preserved. An incomplete four-role fixture fails. |
+| `--with-users` | `false` | Add 44 English baseline and capability accounts for `ADMIN`, `MANAGER`, `MEMBER` and `VIEWER`. Requires workspace OWNER because the roster includes ADMIN profiles. Uses authenticated provisioning; public signup may remain disabled. New accounts use `rbac-demo-1234`; existing passwords, roles and grants are preserved. An incomplete roster fails. |
 | `--codex-auth-file <path>` | `$SEED_CODEX_AUTH_FILE` | Absolute path to a private Codex `auth.json` (mode `0600`, outside the repo) holding a ChatGPT subscription login. Switches the demo agents from Claude Code to `CODEX_CLI` — see [below](#seed-codex-agents-with-a-chatgpt-login). The flag overrides the exported variable; `dev.sh` can supply it from `.env.local`. |
 
 ### Seed Codex agents with a ChatGPT login
@@ -394,3 +394,21 @@ only these auth requests retry, using the server's `Retry-After` (up to one minu
 per wait, at most three attempts). A normal six-person seed can therefore pause
 for about a minute. Cancellation stops the wait. Other writes are not silently
 replayed.
+
+## crewship seed rbac-matrix
+
+Add the 44 English demo RBAC accounts to an existing workspace without
+resetting crews, agents, Pages or other resources. Both target flags are
+required; provider credentials are not needed.
+
+```bash
+crewship seed rbac-matrix --server https://your-dev.example --workspace WORKSPACE_ID
+```
+
+The authenticated caller must be the workspace OWNER because the roster
+includes ADMIN profiles. Authority is checked before provisioning accounts.
+All new fixture accounts use `rbac-demo-1234`; bootstrap OWNER credentials do
+not change. Existing accounts must authenticate with their documented password;
+roles and capability edits are preserved, with visible failure on drift.
+See [the roster and profile table](/development/demo-rbac). Deployment alone
+does not provision accounts.
