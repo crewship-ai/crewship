@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, act, within } from "@testing-library/react"
 
 const api = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
@@ -32,10 +32,11 @@ afterEach(() => { cleanup(); vi.useRealTimers() })
 // The Audit log as a nested page: the side panel picks the trail, the time
 // range is the Crew Journal's picker on the sub-bar (a calendar behind
 // "Custom…"), the table is full width, and all of it lives in the URL.
-/** Open the sub-bar's range menu and choose an entry. */
+/** Pick a range on the top bar: a preset segment, or "Custom…" — the
+ *  calendar button beside them. */
 async function pickRange(label: string) {
-  fireEvent.keyDown(screen.getByRole("combobox", { name: "Time range" }), { key: "ArrowDown" })
-  fireEvent.click(await screen.findByRole("option", { name: label }))
+  if (label === "Custom…") fireEvent.click(screen.getByRole("button", { name: "Custom range" }))
+  else fireEvent.click(within(screen.getByRole("radiogroup", { name: "Time range" })).getByRole("radio", { name: label }))
 }
 
 describe("Audit log page", () => {
@@ -157,5 +158,86 @@ describe("Audit log page", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Audit log" })).toBeInTheDocument()
     expect(document.querySelector("[data-slot=journal-verify]")).not.toBeNull()
     expect(screen.getByRole("button", { name: "Verify now" })).toBeInTheDocument()
+  })
+})
+
+// Harbor 2 (#3487 SET-03): v67 S-AUDIT — the range is ONE control on the top
+// bar (1 h · 24 h · 7 d · 30 d · 90 d · All, and a calendar for a custom
+// range), the display switches sit above the table, each row opens its
+// detail, and the events page.
+describe("Audit log — range, display, detail and paging", () => {
+  const page = (rows: unknown[], p = 1, total = rows.length, pages = 1) =>
+    ok({ data: rows, pagination: { page: p, limit: 50, total, total_pages: pages } })
+  const event = (id: string, extra: Record<string, unknown> = {}) => ({
+    id, action: "crew.update", entity_type: "CREW", entity_id: `crew-${id}`, entity_name: `Crew ${id}`,
+    metadata: { field: "name" }, ip_address: "10.0.0.7", user_agent: "Mozilla/5.0 test",
+    user: { id: "u1", email: "ada@x.io", full_name: "Ada Admin" }, created_at: new Date().toISOString(), ...extra,
+  })
+
+  it("is one segmented range on the top bar, with the calendar beside it", async () => {
+    render(<AuditLogPage />)
+    const group = screen.getByRole("radiogroup", { name: "Time range" })
+    const radios = within(group).getAllByRole("radio")
+    expect(radios.map((r) => r.textContent)).toEqual(["1 h", "24 h", "7 d", "30 d", "90 d", "All"])
+    expect(within(group).getByRole("radio", { name: "Last 7 days" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.queryByRole("combobox", { name: "Time range" })).toBeNull()
+    fireEvent.click(within(group).getByRole("radio", { name: "Last 24 hours" }))
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("24h"))
+    expect(within(group).getByRole("radio", { name: "Last 24 hours" })).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Custom range" }))
+    await waitFor(() => expect(document.querySelector("[data-slot=audit-calendar]")).not.toBeNull())
+  })
+
+  it("keeps Group repeated events and Mark access changes above the table, not in the panel", async () => {
+    render(<AuditLogPage />)
+    const strip = document.querySelector<HTMLElement>("[data-slot=audit-display]")!
+    expect(strip).not.toBeNull()
+    const group = within(strip).getByRole("switch", { name: "Group repeated events" })
+    expect(group).toHaveAttribute("aria-checked", "true")
+    expect(within(strip).getByRole("switch", { name: "Mark access changes" })).toHaveAttribute("aria-checked", "true")
+    expect(within(screen.getByRole("complementary", { name: "Audit log navigation" })).queryByText("Group repeated events")).toBeNull()
+    fireEvent.click(group)
+    expect(group).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("opens a row's detail: action, entity, IP, user agent, details, immutable", async () => {
+    api.mockImplementation(async (u: string) => (u.includes("/members") ? ok([]) : page([event("e1")])))
+    render(<AuditLogPage />)
+    const row = await screen.findByRole("button", { name: /Crew e1/ })
+    expect(row).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(row)
+    expect(row).toHaveAttribute("aria-expanded", "true")
+    const detail = document.getElementById(row.getAttribute("aria-controls")!)!
+    expect(detail).toHaveTextContent("crew.update")
+    expect(detail).toHaveTextContent("CREW · crew-e1")
+    expect(detail).toHaveTextContent("10.0.0.7")
+    expect(detail).toHaveTextContent("Mozilla/5.0 test")
+    expect(detail).toHaveTextContent(/"field": "name"/)
+    expect(detail).toHaveTextContent("This record is immutable.")
+  })
+
+  it("pages through the events and starts again at page one when a panel filter changes", async () => {
+    api.mockImplementation(async (u: string) => {
+      if (u.includes("/members")) return ok([])
+      if (u.includes("limit=100")) return page([], 1, 0)
+      const p = Number(new URLSearchParams(u.split("?")[1]).get("page"))
+      return page([event(`p${p}`)], p, 120, 3)
+    })
+    render(<AuditLogPage />)
+    expect(await screen.findByText(/1–50 of 120 events/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Next/ }))
+    await waitFor(() => expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("page=2"))
+    expect(await screen.findByText(/51–100 of 120 events/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^Keeper/ }))
+    await waitFor(() => expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("source=keeper"))
+    expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("page=1")
+  })
+
+  // SET-07: one section head, drawn by the Settings drill frame.
+  it("says what the page is once, in the section head", () => {
+    render(<AuditLogPage />)
+    expect(screen.getAllByText(/Every state-changing action, immutably recorded/)).toHaveLength(1)
+    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    expect(head).toHaveTextContent("Admins and the owner")
   })
 })

@@ -507,3 +507,88 @@ describe("Members — pending invitations", () => {
     expect(await screen.findByText("No pending invitations.")).toBeInTheDocument()
   })
 })
+
+// Harbor 2 (#3487 SET-01): one person opens in the kit's Peek — 480 px from
+// the right, J / K to the next / previous person in the order the roster
+// shows them — and each confirmation says WHEN it lands: a role change is
+// written at once ("Applies now"), a capability is a draft until the page's
+// Save ("Takes effect when you save").
+describe("Members — the person peek", () => {
+  const peek = () => waitFor(() => {
+    const el = document.querySelector<HTMLElement>("[data-slot=peek]")
+    if (!el) throw new Error("no peek")
+    return el
+  })
+
+  it("opens the person in the shared 480 px Peek, not a 520 px sheet", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const p = await peek()
+    expect(p).toContainElement(await sheet())
+    expect(p.className).toContain("w-[480px]")
+    expect(document.querySelector("[data-slot=member-sheet]")).toBeNull()
+    expect(within(p).getByRole("heading", { name: "Mel Member" })).toBeInTheDocument()
+  })
+
+  it("moves to the next and previous person with J and K, in roster order", async () => {
+    renderPage("/settings/members?member=u-mel")
+    await table()
+    const p = await peek()
+    expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
+    fireEvent.keyDown(p, { key: "j" })
+    await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: vic@example.com"))
+    fireEvent.keyDown(p, { key: "k" })
+    fireEvent.keyDown(p, { key: "k" })
+    await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: Mo Manager"))
+    expect(within(p).getByRole("button", { name: "Previous (K)" })).toBeInTheDocument()
+    expect(within(p).getByRole("button", { name: "Next (J)" })).toBeInTheDocument()
+  })
+
+  it("says a role change applies now", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const d = await sheet()
+    fireEvent.click(within(d).getByRole("radio", { name: "Manager" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Applies now/)
+    expect(dialog).not.toHaveTextContent(/when you save/i)
+    expect(dialog.querySelector("[data-when=now]")).not.toBeNull()
+  })
+
+  it("says a high-stakes grant takes effect when you save", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const d = await sheet()
+    fireEvent.click(await within(d).findByRole("switch", { name: "Grant credentials:reveal to Mel Member" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Takes effect when you save/)
+    expect(dialog).not.toHaveTextContent(/Applies now/)
+    expect(dialog.querySelector("[data-when=save]")).not.toBeNull()
+  })
+
+  it("says a role change for many people applies now", async () => {
+    renderPage()
+    await table()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Select Mel Member" }))
+    const bar = await screen.findByRole("toolbar", { name: "Change the selected people" })
+    fireEvent.pointerDown(within(bar).getByRole("button", { name: /Role/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Viewer" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Applies now/)
+    expect(dialog.querySelector("[data-when=now]")).not.toBeNull()
+  })
+
+  // SET-07: the section head belongs to the Settings drill frame — drawn once,
+  // and already there while the roster loads.
+  it("says what the page is once, in the section head, even while loading", async () => {
+    api.mockImplementation(() => new Promise(() => {}))
+    renderPage()
+    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")
+    expect(head).not.toBeNull()
+    expect(within(head!).getByRole("heading", { level: 2, name: "Members" })).toBeInTheDocument()
+    expect(screen.getAllByText(/Who is in this workspace/)).toHaveLength(1)
+  })
+
+  it("names the CLI command for the person in the peek's footer", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const p = await peek()
+    expect(p).toHaveTextContent("crewship workspace member capabilities list u-mel")
+  })
+})

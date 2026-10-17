@@ -237,6 +237,24 @@ describe("acting on who may reveal", () => {
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
   })
 
+  // #3487 SET-05: the Vault reads ?class= (lib/credentials/vault-url-state.ts,
+  // PR #3402), so each count opens the Vault filtered to that class.
+  it("classification counts open the Vault filtered by that class", async () => {
+    route()
+    routeWith((url) => {
+      if (url.startsWith("/api/v1/credentials?")) return ok([
+        { id: "c1", name: "GITHUB_TOKEN", scope: "WORKSPACE", sensitivity: "STANDARD" },
+        { id: "c2", name: "PROD_DB", scope: "CREW", crew_ids: ["cr1"], sensitivity: "SEALED" },
+      ])
+      return undefined
+    })
+    renderSection("OWNER")
+    const classification = await screen.findByRole("region", { name: "Classification" })
+    await waitFor(() => expect(within(classification).getByRole("link", { name: /1\s*Standard/ })).toHaveAttribute("href", "/credentials?class=STANDARD"))
+    expect(within(classification).getByRole("link", { name: /0\s*Restricted/ })).toHaveAttribute("href", "/credentials?class=RESTRICTED")
+    expect(within(classification).getByRole("link", { name: /1\s*Sealed/ })).toHaveAttribute("href", "/credentials?class=SEALED")
+  })
+
   it("classification counts link to the Vault", async () => {
     route()
     routeWith((url) => {
@@ -250,7 +268,7 @@ describe("acting on who may reveal", () => {
     })
     renderSection("OWNER")
     const classification = await screen.findByRole("region", { name: "Classification" })
-    await waitFor(() => expect(within(classification).getByRole("link", { name: /2\s*Standard/ })).toHaveAttribute("href", "/credentials"))
+    await waitFor(() => expect(within(classification).getByRole("link", { name: /2\s*Standard/ })).toHaveAttribute("href", "/credentials?class=STANDARD"))
     expect(within(classification).getByRole("link", { name: /1\s*Restricted/ })).toBeInTheDocument()
     expect(within(classification).getByRole("link", { name: /1\s*Sealed/ })).toBeInTheDocument()
 
