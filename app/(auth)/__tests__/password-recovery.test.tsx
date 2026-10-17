@@ -27,12 +27,26 @@ describe("password recovery", () => {
     expect(screen.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/login")
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
     fireEvent.click(screen.getByRole("button", { name: "Send reset link" }))
-    expect(screen.getByRole("button", { name: "Sending..." })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled()
     expect(serverFetch).toHaveBeenCalledWith("/api/v1/auth/forgot", expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "reader@example.test" }) }))
     await act(async () => { finish(new Response(null, { status: 202 })) })
     expect(screen.getByRole("status")).toHaveTextContent("If an account exists")
     expect(screen.getByRole("status")).toHaveTextContent("crewship admin reset-password")
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/login")
+  })
+  it("submitted shows the same DOM for a known and an unknown address", async () => {
+    const html: string[] = []
+    for (const status of [202, 404]) {
+      vi.mocked(serverFetch).mockResolvedValueOnce(new Response(null, { status }))
+      const view = render(<ForgotPasswordPage />)
+      fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send reset link" })) })
+      // useId differs per mount; everything else must be identical.
+      html.push(view.container.innerHTML.replace(/_r_[0-9a-z]+_/g, "id"))
+      view.unmount()
+    }
+    expect(html[0]).toBe(html[1])
   })
   it.each(["server refusal", "network rejection", "synchronous transport error"])("preserves the same non-enumerating response after %s", async (failure) => {
     if (failure === "server refusal") vi.mocked(serverFetch).mockResolvedValue(new Response("private server detail", { status: 503 }))
@@ -41,7 +55,7 @@ describe("password recovery", () => {
     render(<ForgotPasswordPage />)
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send reset link" })) })
-    expect(screen.getByRole("status")).toHaveTextContent("Check your inbox.")
+    expect(screen.getByRole("status")).toHaveTextContent("Check your inbox")
     expect(screen.getByRole("status")).toHaveTextContent("If an account exists")
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(screen.queryByText(/private/)).not.toBeInTheDocument()
@@ -50,15 +64,23 @@ describe("password recovery", () => {
 
 describe("reset password", () => {
   it.each([
-    ["", "new-passphrase", "new-passphrase", "Missing or invalid reset link"],
-    ["token=synthetic-reset", "short", "short", "Password must be at least 8 characters"],
-    ["token=synthetic-reset", "new-passphrase", "different-passphrase", "Passwords don't match"],
-  ])("refuses invalid local input (%s / %s)", async (query, password, confirmation, message) => {
+    ["", "new-passphrase", "new-passphrase", "Missing or invalid reset link", null],
+    ["token=synthetic-reset", "short", "short", "Password must be at least 8 characters", "New password"],
+    ["token=synthetic-reset", "new-passphrase", "different-passphrase", "Passwords don't match", "Confirm new password"],
+  ])("refuses invalid local input (%s / %s)", async (query, password, confirmation, message, field) => {
     navigation.query = query
     render(<ResetPasswordPage />)
     fillReset(password, confirmation)
     await submitReset()
-    expect(screen.getByRole("alert")).toHaveTextContent(message)
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(message)
+    // A wrong value sits under its field; a broken link is the band above the footer.
+    if (field) {
+      expect(screen.getByLabelText(field)).toHaveAttribute("aria-invalid", "true")
+      expect(screen.getByLabelText(field)).toHaveAttribute("aria-describedby", alert.id)
+    } else {
+      expect(document.querySelector("[data-slot=auth-card-body]")!.contains(alert)).toBe(false)
+    }
     expect(serverFetch).not.toHaveBeenCalled()
     expect(navigation.router.push).not.toHaveBeenCalled()
   })
@@ -78,7 +100,7 @@ describe("reset password", () => {
     expect(screen.getByRole("button", { name: "Update password" })).toBeEnabled()
     expect(navigation.router.push).not.toHaveBeenCalled()
     await submitReset()
-    expect(screen.getByRole("status")).toHaveTextContent("Password updated.")
+    expect(screen.getByRole("status")).toHaveTextContent("Password updated")
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
   it.each([false, true])("redirects only a still-mounted successful reset (unmount=%s)", async (unmountBeforeRedirect) => {
@@ -88,10 +110,11 @@ describe("reset password", () => {
     const view = render(<ResetPasswordPage />)
     fillReset()
     await submitReset()
-    expect(screen.getByRole("button", { name: "Updating..." })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Updating…" })).toBeDisabled()
     expect(serverFetch).toHaveBeenCalledWith("/api/v1/auth/reset", expect.objectContaining({ method: "POST", body: JSON.stringify({ token: "synthetic-reset", new_password: "new-passphrase" }) }))
     await act(async () => { finish(Response.json({ ok: true })) })
     expect(screen.getByRole("status")).toHaveTextContent("All existing sessions have been signed out")
+    expect(screen.getByRole("link", { name: "Sign in now" })).toHaveAttribute("href", "/login")
     if (unmountBeforeRedirect) view.unmount()
     act(() => { vi.advanceTimersByTime(1999) })
     expect(navigation.router.push).not.toHaveBeenCalled()
