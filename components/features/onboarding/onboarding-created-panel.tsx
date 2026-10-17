@@ -153,12 +153,10 @@ export function OnboardingCreatedPanel({
   const Pages = CONCEPT_ICON.pages
 
   return (
-    <div
-      data-testid="onboarding-created-panel"
-      className="space-y-2 rounded-xl border border-border bg-card/60 p-3"
-    >
-      <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-        Built so far
+    <div data-testid="onboarding-created-panel" className="space-y-1.5">
+      {/* The page heads this column "Built so far"; this names the source. */}
+      <div className="text-micro font-semibold uppercase tracking-wider text-muted-foreground-soft">
+        In this workspace
       </div>
 
       {inv.crews.map((c) => (
@@ -219,7 +217,7 @@ function Row({
   return (
     <div
       data-testid={testid}
-      className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-xs"
+      className="flex items-center gap-2 rounded-lg border border-hairline bg-card px-2.5 py-2 text-label"
     >
       <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="min-w-0 flex-1 truncate">

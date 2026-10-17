@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 import { useSession } from "@/hooks/use-auth"
 import { useRouter } from "next/navigation"
-import { PageLoading, QUIET_LOAD_MS } from "@/components/layout/page-state"
+import { SetupCardSkeleton } from "@/components/features/onboarding/setup-card"
 import { loginRedirectUrl } from "@/lib/login-redirect"
 
 export default function OnboardingLayout({
@@ -22,14 +22,10 @@ export default function OnboardingLayout({
     }
   }, [status, router])
 
-  // Harbor 2: no full-page spinner. Onboarding has no app rail, so the wait
-  // is the page skeleton on the ground: nothing for a second, then the shape.
+  // The same skeleton the page shows while it restores the setup, so the
+  // session check and the restore read as one load, not two spinners.
   if (status === "loading" || status === "unauthenticated") {
-    return (
-      <div className="min-h-dvh bg-background">
-        <PageLoading delay={QUIET_LOAD_MS} rows={4} />
-      </div>
-    )
+    return <SetupCardSkeleton />
   }
 
   return <>{children}</>

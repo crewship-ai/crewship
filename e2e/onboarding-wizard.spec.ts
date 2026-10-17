@@ -233,7 +233,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     // the saved secret to the browser.
     await page.reload({ waitUntil: "networkidle" })
     await expect(page.locator("#workspace_name")).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /prefer to pick a template instead/i })).toBeVisible({
+    await expect(page.getByRole("button", { name: /^pick a template instead$/i })).toBeVisible({
       timeout: 20_000,
     })
 
@@ -242,12 +242,12 @@ test.describe("onboarding wizard — first-run flow", () => {
     // doesn't drive. AnimatePresence mounts only the active step, so visible
     // aria-pressed buttons are all crew cards — assert the exact count so
     // adding *or* removing a template trips the test.
-    await page.getByRole("button", { name: /prefer to pick a template instead/i }).click()
+    await page.getByRole("button", { name: /^pick a template instead$/i }).click()
     await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
     await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
     await page.getByRole("button", { name: /software development/i }).click()
-    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
-    expect(await page.locator('img[width="32"]').count()).toBe(4)
+    // The picked template's roster, in the "You get" panel beside the tiles.
+    await expect(page.getByTestId("onboarding-template-agent")).toHaveCount(4, { timeout: 10_000 })
 
     const launch = page.getByRole("button", { name: /launch/i })
     await expect(launch).toBeEnabled()
