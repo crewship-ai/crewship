@@ -10,6 +10,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 
+### Changed
+
+- OpenAPI administrative member-access documents reuse the existing agent-right shape as a named schema. Accepted operations and runtime permissions are unchanged.
+
 
 ### Added
 

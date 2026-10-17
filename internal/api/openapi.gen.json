@@ -7646,34 +7646,7 @@
             "items": {
               "oneOf": [
                 {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "agent"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "discover",
-                        "chat",
-                        "run",
-                        "delegate"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessAgentRight"
                 },
                 {
                   "additionalProperties": false,
@@ -7851,34 +7824,7 @@
             "items": {
               "oneOf": [
                 {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "agent"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "discover",
-                        "chat",
-                        "run",
-                        "delegate"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessAgentRight"
                 },
                 {
                   "additionalProperties": false,
@@ -9990,6 +9936,36 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "MemberAccessAgentRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "discover",
+              "chat",
+              "run",
+              "delegate"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
         "type": "object"
       },
       "MemoryHybridSearchRequest": {
@@ -145517,34 +145493,7 @@
                       "items": {
                         "oneOf": [
                           {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
+                            "$ref": "#/components/schemas/MemberAccessAgentRight"
                           },
                           {
                             "additionalProperties": false,
@@ -145624,34 +145573,7 @@
                       "items": {
                         "oneOf": [
                           {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
+                            "$ref": "#/components/schemas/MemberAccessAgentRight"
                           },
                           {
                             "additionalProperties": false,
@@ -145924,34 +145846,7 @@
                     "items": {
                       "oneOf": [
                         {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "agent"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "discover",
-                                "chat",
-                                "run",
-                                "delegate"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
+                          "$ref": "#/components/schemas/MemberAccessAgentRight"
                         },
                         {
                           "additionalProperties": false,
@@ -146031,34 +145926,7 @@
                     "items": {
                       "oneOf": [
                         {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "agent"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "discover",
-                                "chat",
-                                "run",
-                                "delegate"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
+                          "$ref": "#/components/schemas/MemberAccessAgentRight"
                         },
                         {
                           "additionalProperties": false,
@@ -146203,34 +146071,7 @@
                       "items": {
                         "oneOf": [
                           {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
+                            "$ref": "#/components/schemas/MemberAccessAgentRight"
                           },
                           {
                             "additionalProperties": false,
@@ -146310,34 +146151,7 @@
                       "items": {
                         "oneOf": [
                           {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
+                            "$ref": "#/components/schemas/MemberAccessAgentRight"
                           },
                           {
                             "additionalProperties": false,
