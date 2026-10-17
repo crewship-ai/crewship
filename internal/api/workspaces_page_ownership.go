@@ -79,7 +79,7 @@ func pageOwnershipRowsAfter(ctx context.Context, q pageAuthQueryer, ws, owner, p
 func (h *WorkspaceHandler) pageOwnershipActor(w http.ResponseWriter, r *http.Request, ph *PageHandler) (*AuthUser, bool) {
 	user := UserFromContext(r.Context())
 	agent, _ := pageGrantCallerIsAgent(r)
-	if user == nil || agent || projectAgentFrom(r.Context()) != nil {
+	if user == nil || agent || projectAgentFrom(r.Context()) != nil || r.Context().Value(artifactRunKey{}) != nil {
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
