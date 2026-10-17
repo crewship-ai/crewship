@@ -1287,6 +1287,74 @@ body {
   }
   .page-banner-warn { background: var(--chip-warn-bg); }
   .page-banner-warn > svg { color: var(--chip-warn-fg); }
+  /* Banner tones (components/layout/app-banners.tsx). The sentence stays in
+     --foreground on every tint; only the icon carries the tone. */
+  .page-banner-ok { background: var(--chip-ok-bg); }
+  .page-banner-ok > svg { color: var(--chip-ok-fg); }
+  .page-banner-info { background: var(--chip-info-bg); }
+  .page-banner-info > svg { color: var(--chip-info-fg); }
+  .page-banner-text { min-width: 0; }
+  .page-banner-spacer { flex: 1; }
+  .page-banner-dismiss { margin: -4px -6px -4px 0; color: var(--muted-foreground); }
+  @media (pointer: coarse) {
+    .page-banner .page-banner-action, .page-banner .page-banner-dismiss { min-height: 44px; min-width: 44px; }
+  }
+  @media (max-width: 767px) {
+    .page-banner-text { flex: 1 1 calc(100% - 60px); }
+    .page-banner-spacer { display: none; }
+  }
+  /* App banners sit under the top bar, inset like v67's .rt-banner. */
+  .app-banner-slot { padding: 12px 16px 0; }
+  .page-es-solid { border-style: solid; }
+  .page-ee footer { flex-wrap: wrap; }
+  .page-ee-actions { display: inline-flex; flex-wrap: wrap; gap: 12px; margin-left: auto; }
+  .page-link-btn {
+    padding: 0; border: 0; background: none; font: inherit; color: var(--brand-ink, var(--brand));
+    cursor: pointer; text-underline-offset: 2px;
+  }
+  .page-link-btn:hover { text-decoration: underline; }
+  @media (pointer: coarse) { .page-link-btn { min-height: 44px; } }
+  /* The app frame while the session or the workspaces load (app-frame.tsx):
+     the rail, top bar and phone tab bar drawn as skeletons, content empty. */
+  .app-frame { display: flex; min-height: 100dvh; background: var(--background); }
+  .app-frame-side {
+    display: flex; flex: none; flex-direction: column; gap: 6px; width: 240px; padding: 12px 10px;
+    border-right: 1px solid var(--border); background: var(--sidebar, var(--background));
+  }
+  .app-frame-ws { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .app-frame-tile { width: 34px; height: 34px; border-radius: 10px; flex: none; }
+  .app-frame-label { width: 60%; height: 12px; }
+  .app-frame-row { height: 30px; border-radius: 8px; }
+  .app-frame-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+  .app-frame-top {
+    display: flex; flex: none; align-items: center; gap: 12px; height: 48px; padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-frame-crumb { width: 22%; height: 14px; }
+  .app-frame-body { flex: 1; min-height: 0; overflow: auto; }
+  .app-frame-tabs { display: none; }
+  @media (min-width: 768px) and (max-width: 1279px) {
+    .app-frame-side { width: 56px; padding: 12px 8px; align-items: center; }
+    .app-frame-label { display: none; }
+    .app-frame-ws { margin-bottom: 10px; }
+    .app-frame-row { width: 36px; height: 36px; }
+  }
+  @media (max-width: 767px) {
+    .app-frame { flex-direction: column; }
+    .app-frame-side { display: none; }
+    .app-frame-top { height: 52px; }
+    .app-frame-crumb { width: 40%; }
+    .app-frame-tabs {
+      display: flex; flex: none; align-items: center; justify-content: space-around; height: 62px;
+      border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom);
+    }
+    .app-frame-tab { width: 28px; height: 28px; border-radius: 8px; }
+  }
+  /* Outside the app frame (404 signed out, a crashed root): the bare ground
+     with the lockup above the state card. */
+  .bare-state { display: grid; grid-template-columns: min(640px, 100%); place-content: center; gap: 20px; min-height: 100dvh; padding: 24px 16px; background: var(--background); }
+  .bare-state-lockup { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 650; color: var(--foreground); }
+  .bare-state > .page-state { padding: 0; }
   .page-stale { opacity: 0.55; filter: saturate(0.6); pointer-events: none; }
   .page-cf {
     border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));

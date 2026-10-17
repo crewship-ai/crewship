@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import * as React from "react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 let mobile = false
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
@@ -34,5 +35,27 @@ describe("Peek", () => {
     render(<Peek open onOpenChange={() => {}} title="Item" />)
     expect(screen.getByRole("dialog")).toHaveClass("rounded-t-xl")
     mobile = false
+  })
+
+  it("can open with focus on the sheet, on a given element, or left where it was", async () => {
+    const { unmount } = render(<Peek open onOpenChange={() => {}} title="Item" onNext={() => {}} initialFocus="content" />)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")))
+    unmount()
+
+    function WithRef() {
+      const ref = React.useRef<HTMLButtonElement>(null)
+      return <Peek open onOpenChange={() => {}} title="Item" onNext={() => {}} initialFocus={ref}><button ref={ref}>Approve</button></Peek>
+    }
+    const second = render(<WithRef />)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Approve" })))
+    second.unmount()
+
+    const outside = document.createElement("button")
+    document.body.appendChild(outside)
+    outside.focus()
+    render(<Peek open onOpenChange={() => {}} title="Item" onNext={() => {}} initialFocus="none" />)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(false)
+    outside.remove()
   })
 })

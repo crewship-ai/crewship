@@ -80,6 +80,47 @@ describe("page states", () => {
     expect(wrapper).toHaveAttribute("aria-disabled", "true")
   })
 
+  it("with a delay, loading renders nothing before 1 s, the skeleton after, Still loading + Retry after 10 s", () => {
+    vi.useFakeTimers()
+    const retry = vi.fn()
+    const { container } = render(<PageLoading delay={1000} onRetry={retry} />)
+    expect(screen.getByRole("status")).toHaveAttribute("data-quiet")
+    expect(container.querySelector(".page-sk")).toBeNull()
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(screen.getByRole("status")).not.toHaveAttribute("data-quiet")
+    expect(container.querySelectorAll(".page-sk-row")).toHaveLength(7)
+    expect(screen.queryByText("Still loading…")).toBeNull()
+    act(() => { vi.advanceTimersByTime(9000) })
+    expect(screen.getByText("Still loading…")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it("not-found variant has a solid border, a primary and a secondary, and no create action", () => {
+    const search = vi.fn()
+    const { container } = render(
+      <PageNotFound title="This page doesn’t exist" description="The link may be old." primary={{ label: "Go to Dashboard", href: "/" }} secondary={{ label: "Search", onClick: search }} />,
+    )
+    expect(container.querySelector(".page-es")).toHaveClass("page-es-solid")
+    expect(screen.getByRole("link", { name: "Go to Dashboard" })).toHaveAttribute("href", "/")
+    fireEvent.click(screen.getByRole("button", { name: "Search" }))
+    expect(search).toHaveBeenCalledOnce()
+    expect(container.querySelector(".lucide-plus")).toBeNull()
+  })
+
+  it("an error can carry an error id, its own retry label and quiet footer actions", () => {
+    render(<PageError title="This page hit an error" errorId="dig-7" retryLabel="Try again" onRetry={() => {}} actions={<button type="button">Copy details</button>} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Error ID dig-7")
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy details" }).closest("footer")).not.toBeNull()
+  })
+
+  it("no access can word its own title and sentence", () => {
+    render(<PageNoAccess area="Vault" title="Vault isn’t part of your access" description="You can open what was shared with you." />)
+    expect(screen.getByRole("heading", { name: "Vault isn’t part of your access" })).toBeInTheDocument()
+    expect(screen.queryByText(/Ask an admin/)).toBeNull()
+  })
+
   it("save conflict shows both versions and resolves either way", () => {
     const mine = vi.fn(), theirs = vi.fn()
     render(<SaveConflict theirs="Thursdays 08:00" yours="Thursdays 07:30" onKeepMine={mine} onTakeTheirs={theirs} />)
