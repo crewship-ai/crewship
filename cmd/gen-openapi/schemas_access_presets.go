@@ -15,6 +15,7 @@ func accessPresetSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"AccessPresetDefinition":   obj(map[string]any{"preset_id": nonempty(), "version": positive(), "kind": enum("project", "routine"), "managed_operations": strings(), "levels": array(ref("AccessPresetLevel"))}, "preset_id", "version", "kind", "managed_operations", "levels"),
 		"AccessPresetCatalogEntry": obj(map[string]any{"definition": ref("AccessPresetDefinition"), "definition_hash": nonempty()}, "definition", "definition_hash"),
 		"AccessPresetCatalog":      obj(map[string]any{"presets": array(ref("AccessPresetCatalogEntry"))}, "presets"),
+		"AccessPresetApplyRequest": obj(map[string]any{"selection": ref("AccessPresetRequest"), "confirmation_digest": map[string]any{"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"}}, "selection", "confirmation_digest"),
 		"AccessPresetRequest":      obj(map[string]any{"membership_id": nonempty(), "revision": positive(), "resource": obj(map[string]any{"kind": enum("project", "routine"), "id": nonempty()}, "kind", "id"), "preset_id": nonempty(), "preset_version": positive(), "level": nonempty(), "reissue": map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": ref("MemberAccessRight")}}, "membership_id", "revision", "resource", "preset_id", "preset_version", "level"),
 		"AccessPresetChange":       obj(map[string]any{"right": ref("MemberAccessRight"), "action": enum("add", "remove", "retain", "reissue"), "issuer_id": nonempty(), "created_at": str(), "live": scalar("boolean")}, "right", "action", "issuer_id", "live"),
 		"AccessPresetWarning":      obj(map[string]any{"code": nonempty(), "message": nonempty(), "before_eligible": scalar("boolean"), "after_eligible": scalar("boolean")}, "code", "message"),
@@ -24,6 +25,7 @@ func accessPresetSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	base := "/api/v1/workspaces/{workspaceId}"
 	return map[string]DomainSchema{
 		"GET " + base + "/access/presets":                             {Response: ref("AccessPresetCatalog"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "500"}, SuccessHeaders: headers},
+		"POST " + base + "/members/{memberId}/access/presets/apply":   {Request: ref("AccessPresetApplyRequest"), RequestRequired: true, Response: ref("MemberAccessPolicy"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500"}, SuccessHeaders: headers},
 		"POST " + base + "/members/{memberId}/access/presets/preview": {Request: ref("AccessPresetRequest"), RequestRequired: true, Response: ref("AccessPresetPreview"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500"}, SuccessHeaders: headers},
 	}, components
 }

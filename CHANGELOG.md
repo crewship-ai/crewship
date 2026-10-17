@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
+
 - Transactional audit appends reject ignored journal inserts and withhold notifications so the owning business transaction can roll back.
 
 - Applying a resource preset preserves every unrelated canonical grant row, including inactive historical grants whose resources are unavailable; ordinary complete-document policy updates retain their existing validation.
@@ -17,6 +19,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Preset CLI document decoding shares the existing bounded, strict file/stdin contract without changing supported consent fields or refreshing revisions.
 
 - OpenAPI administrative member-policy reads and replacements reuse a named complete policy document; accepted fields, CAS requirements and permissions are unchanged.
+
+- Explicit resource-preset application in the API recomputes reviewed consent atomically with canonical grants, audit and saved selection. Retained issuers and unrelated rights are preserved; stale consent requires a new preview and never triggers automatic reissue.
 
 - Read-only resource-preset previews in the administrative API and CLI show exact managed changes, retained provenance, Results disclosure and independent destructive consequences. Confirmation digests bind live state without granting authority or changing permissions.
 

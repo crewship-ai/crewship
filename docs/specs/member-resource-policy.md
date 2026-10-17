@@ -146,9 +146,7 @@ operations, retained issuer/timestamp provenance, deliberate reissue intent and
 independent Results, execution, destructive and file-role consequences. Its
 confirmation digest binds the current member incarnation/revision, caller and
 issuer authority, resource state and immutable definition in one snapshot.
-The selected resource is validated live; FK-valid historical grants for unrelated unavailable resources remain in the canonical before/after plan without regaining resource authority. The planner performs no writes and the digest supplies no authority. No public
-preset preview or application endpoint, CLI command or selector is enabled by
-this internal slice; transport and atomic application remain follow-up work.
+The selected resource is validated live; FK-valid historical grants for unrelated unavailable resources remain in the canonical before/after plan without regaining resource authority. The planner performs no writes and the digest supplies no authority. Administrative preview API/CLI and the confirmed apply API expose these contracts; application recomputes the same snapshot inside its writer transaction. The administrative apply CLI submits the same confirmed selection once; the selector remains follow-up work.
 An empty starting grant collection serializes as `before: []`, including in the
 canonical confirmation fingerprint; preview collections remain JSON arrays.
 
@@ -539,7 +537,7 @@ OpenAPI also names `MemberAccessProjectRight`, `MemberAccessRoutineRight` and th
 
 Administrative member-policy GET/PUT responses include `preset_selections`, a complete array of informational saved intent. An empty array means no saved preset choice; matching permission bits alone never fabricate a choice. Every item carries the immutable definition reference, saved level/hash/time and optional historical selecting actor. `selected` describes supported saved intent, while `custom` marks unsupported definitions or inconsistent managed bits; neither state grants effective authority. The grant issuer and original creation time remain canonical in `grant_details`.
 
-Only a current trusted workspace administrator can read these choices. Personal `OwnPolicy` responses omit the field. The manual policy PUT accepts the read-only field when round-tripping a GET but ignores its contents: it changes only the explicitly supplied canonical rights, and returns freshly computed selection metadata. Managed-grant changes invalidate the saved choice; unrelated rights and issuer liveness do not rewrite intent. No preset application endpoint or automatic backfill is introduced by this read-only slice.
+Only a current trusted workspace administrator can read these choices. Personal `OwnPolicy` responses omit the field. The manual policy PUT accepts the read-only field when round-tripping a GET but ignores its contents: it changes only the explicitly supplied canonical rights, and returns freshly computed selection metadata. Managed-grant changes invalidate the saved choice; unrelated rights and issuer liveness do not rewrite intent. Reading metadata performs no application or automatic backfill; application uses the separate confirmed endpoint.
 
 OpenAPI names the unchanged `MemberAccessGrant` provenance shape for reuse. This retains every original issuer, timestamp and liveness field and changes no policy inputs or effective authority.
 
@@ -557,4 +555,8 @@ The preset CLI uses one shared bounded decoder for explicit JSON documents. File
 
 Preset application uses a transaction-scoped managed-subset writer. It validates the selected resource and fresh operator/member authority, changes only the immutable definition’s managed operations, and leaves orthogonal grant IDs, issuers and creation timestamps untouched even for FK-valid inactive historical resources. It neither revives unavailable resources nor changes ordinary complete-document PUT validation. Failed audit or selection writes roll back managed changes and revision together.
 
-This prerequisite introduces no apply endpoint. The managed-subset writer remains an internal caller-transaction seam; the existing complete-document policy API is unchanged. Transactional journal acknowledgement requires one inserted row before any post-commit notification is available.
+The managed-subset writer is used by the confirmed apply API; the existing complete-document policy API is unchanged. Transactional journal acknowledgement requires one inserted row before any post-commit notification is available.
+
+### Explicit preset application
+
+The administrative apply endpoint takes only the preview’s exact normalized selection and digest. Current operator authority, membership incarnation/revision, immutable definition, resource/issuer state and consequences are recomputed in one writer transaction. The digest is confirmation data, never authorization. Managed replacement preserves unrelated rights and unchanged rows, including historical unavailable resources; deliberate retained managed reissue uses the authenticated actor. Audit records exact before/after provenance, preset ID/version/level/hash and reissue intent. Selection metadata is written last; all writes roll back together. Conflicts require a new reviewed preview, with no silent retries or account conversion. The administrative `workspace member access preset apply MEMBER --file confirmed.json` command submits this consent once and does not refresh or retry it. The selector follows separately.
