@@ -209,7 +209,7 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	stamp := tsformat.Format(time.Now())
-	if _, err = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, pageID, a.WorkspaceID, request.Slug, request.Name, a.HumanUserID, string(spec), stamp, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,created_by_agent_id,spec_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, pageID, a.WorkspaceID, request.Slug, request.Name, a.HumanUserID, a.AgentID, string(spec), stamp, stamp); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, 409, "a Page with this slug already exists")
 		} else {
