@@ -356,6 +356,26 @@ describe("ActivityStreamView", () => {
     expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
   })
 
+  it("a link that names an agent or crew by slug, or an issue by identifier, narrows the list to it", async () => {
+    window.history.replaceState(null, "", "/activity?agent=scout")
+    const view = show()
+    await waitFor(() => expect(table().querySelectorAll("[data-row-id]")).toHaveLength(1))
+    expect(table().querySelector("[data-row-id=run_live]")).not.toBeNull()
+    expect(window.location.search).toBe("?agent=a1")
+    view.unmount()
+
+    window.history.replaceState(null, "", "/activity?crew=research")
+    const crew = show()
+    await waitFor(() => expect(window.location.search).toBe("?crew=c1"))
+    expect(table().querySelector("[data-row-id=run_live]")).not.toBeNull()
+    crew.unmount()
+
+    window.history.replaceState(null, "", "/activity?mission=CRW-1")
+    show()
+    expect(await screen.findByRole("heading", { level: 1, name: "CRW-1 Fix flaky login" })).toBeVisible()
+    expect(window.location.search).toBe("?mission=m1")
+  })
+
   it("keeps work rows and changes live from one stream", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     show()

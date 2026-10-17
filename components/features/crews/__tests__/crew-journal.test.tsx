@@ -34,7 +34,7 @@ it("loads a scoped 24-hour window, shares stable stream filters and renders live
   expect(vi.mocked(useJournalStream).mock.lastCall![0].params).toBe(stream.params)
   act(() => stream.onEntry({ ...entry, id: "new", summary: "Live update" }))
   expect(screen.getByText("Live update")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: "View full journal" })).toHaveAttribute("href", "/journal?crew_id=crew%20one")
+  expect(screen.getByRole("link", { name: "Open in Activity" })).toHaveAttribute("href", "/activity?crew=crew%20one")
 })
 it("distinguishes initial loading from an empty window", async () => {
   const list = deferred<Response>()
