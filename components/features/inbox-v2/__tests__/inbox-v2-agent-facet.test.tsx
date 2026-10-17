@@ -82,8 +82,8 @@ function approval(o: Partial<ApprovalRow>): ApprovalRow {
 }
 
 // Scout asks twice (an escalation by slug, an approval by id), Riley once.
-const SCOUT_ESC = item({ id: "e1", title: "Scout needs a key", sender_type: "agent", sender_name: "scout" })
-const RILEY_ESC = item({ id: "e2", title: "Riley needs a key", sender_type: "agent", sender_name: "riley" })
+const SCOUT_ESC = item({ id: "e1", title: "Scout needs a key", sender_type: "agent", sender_name: "scout", payload: { escalation_type: "GENERAL" } })
+const RILEY_ESC = item({ id: "e2", title: "Riley needs a key", sender_type: "agent", sender_name: "riley", payload: { escalation_type: "GENERAL" } })
 const SCOUT_APPROVAL = approval({ id: "ap1", agent_id: "ag_scout", payload: { tool: "github.merge_pr" } })
 
 describe("filterInboxEntries — the agent facet", () => {
