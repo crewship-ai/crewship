@@ -1,120 +1,79 @@
 import { test, expect } from "./fixtures/auth"
+import type { Page } from "@playwright/test"
 
-test.describe("Crews Unification", () => {
-  test("legacy /agents redirects to /crews/agents", async ({ page }) => {
+// /crews is the one place crews and agents live (Harbor 2, #3398): the old
+// /agents entry point redirects here keeping its query, a crew and an agent
+// are pages of /crews selected by ?crew= / ?agent=, each with its tab set,
+// and the dock under them is the crew container's Terminal and Files.
+
+test.use({ viewport: { width: 1440, height: 1000 } })
+
+async function firstCrew(page: Page): Promise<string | null> {
+  await page.goto("/crews")
+  const row = page.locator("[data-crew-row]").first()
+  if (!(await row.isVisible({ timeout: 10_000 }).catch(() => false))) return null
+  return row.getAttribute("data-crew-row")
+}
+
+test.describe("Crews unification", () => {
+  test("legacy /agents redirects to /crews", async ({ page }) => {
     await page.goto("/agents")
-    await page.waitForURL(/\/crews\/agents/, { timeout: 10_000 })
-    expect(page.url()).toContain("/crews/agents")
-  })
-
-  test("legacy /fleet redirects to /crews", async ({ page }) => {
-    await page.goto("/fleet")
     await page.waitForURL(/\/crews(\?|$)/, { timeout: 10_000 })
-    expect(page.url()).toMatch(/\/crews(\?|$)/)
   })
 
-  test("/crews renders explorer and 3 top-level tabs (exact so Bottom Drawer labels don't match)", async ({ page }) => {
-    await page.goto("/crews")
-    await page.waitForLoadState("networkidle")
-    await expect(page.getByRole("button", { name: "Overview", exact: true })).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Health", exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Connections", exact: true })).toHaveCount(0)
+  test("legacy /agents?agent=<slug> keeps the agent", async ({ page }) => {
+    await page.goto("/agents?agent=some-agent")
+    await page.waitForURL(/\/crews\?agent=some-agent/, { timeout: 10_000 })
   })
 
-  test("clicking a crew card navigates to the full crew page", async ({ page }) => {
-    await page.goto("/crews")
-    await page.waitForLoadState("networkidle")
-    // AllCrewsOverview renders crew cards as <button>s; click now drills
-    // into /crews/<id> rather than setting a preview query param, because
-    // crew config (network, runtime, containers, MCP, avatar) warrants the
-    // full tabbed page.
-    const crewItem = page.locator("button").filter({ hasText: /Research|DevOps|Quality|Engineering/ }).first()
-    if (await crewItem.count() === 0) {
-      test.skip(true, "no seeded crews in dev workspace")
-      return
-    }
-    await crewItem.click()
-    await page.waitForURL(/\/crews\/[a-zA-Z0-9]+(\?|$)/, { timeout: 5_000 })
-    expect(page.url()).toMatch(/\/crews\/[a-zA-Z0-9]+/)
+  test("/crews shows the panel and a crew page, not a catalogue", async ({ page }) => {
+    const crew = await firstCrew(page)
+    test.skip(!crew, "no seeded crews")
+    await expect(page.locator("[data-slot=secondary-panel][data-panel-id=crews]")).toBeVisible()
+    await expect(page).toHaveURL(/[?&]crew=/)
+    await expect(page.getByTestId("crew-header")).toBeVisible()
   })
 
-  test("agent full page has 7-tab rail", async ({ page }) => {
-    // Go to /crews/agents list where agent cards are real <a> links.
-    await page.goto("/crews/agents")
-    await page.waitForLoadState("networkidle")
-    const agentLink = page
-      .locator("a[href^='/crews/agents/']:not([href$='/new']):not([href*='/agents/new'])")
-      .first()
-    if (await agentLink.count() === 0) {
-      test.skip(true, "no seeded agents in dev workspace")
-      return
-    }
-    await agentLink.click()
-    await page.waitForURL(/\/crews\/agents\/[^/]+/, { timeout: 10_000 })
+  test("clicking a crew in the panel opens it on Overview", async ({ page }) => {
+    const crew = await firstCrew(page)
+    test.skip(!crew, "no seeded crews")
+    const rows = page.locator("[data-crew-row]")
+    const target = (await rows.count()) > 1 ? rows.nth(1) : rows.first()
+    const slug = (await target.getAttribute("data-crew-row"))!
+    await target.locator("[role=button]").first().click()
+    await expect(page).toHaveURL(new RegExp(`crew=${slug}`))
+    await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
+  })
 
-    const labels = ["Overview", "Sessions", "Runs", "Workspace", "Tools", "Logs", "Settings"]
-    for (const label of labels) {
-      await expect(page.locator(`a[title='${label}'], a:has-text('${label}')`).first()).toBeVisible({ timeout: 5_000 })
+  test("crew page renders its six tabs", async ({ page }) => {
+    const crew = await firstCrew(page)
+    test.skip(!crew, "no seeded crews")
+    await page.goto(`/crews?crew=${crew}`)
+    for (const label of ["Overview", "Team", "Tools and access", "Environment", "Memory", "Settings"]) {
+      await expect(page.getByRole("tab", { name: new RegExp(`^${label}`) })).toBeVisible()
     }
   })
 
-  test("crew detail renders 6 tabs", async ({ page }) => {
-    // Resolve crew ID directly via API — /crews shell renders crew cards as
-    // <button>s, not <a> links, so an href-based selector would miss them
-    // (or pick an agent sub-link, since /crews/agents also starts with /crews/).
-    const wsId = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      const d = await r.json()
-      return Array.isArray(d) ? d[0]?.id : d.id
-    })
-    const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
-    if (!Array.isArray(crews) || crews.length === 0) {
-      test.skip(true, "no seeded crews")
-      return
+  test("agent page renders its six tabs and a way back to its crew", async ({ page }) => {
+    const crew = await firstCrew(page)
+    test.skip(!crew, "no seeded crews")
+    await page.goto(`/crews?crew=${crew}&tab=team`)
+    const row = page.locator("[data-agent-row]").first()
+    test.skip(!(await row.isVisible({ timeout: 10_000 }).catch(() => false)), "crew has no agents")
+    await row.click()
+    await expect(page).toHaveURL(/[?&]agent=/)
+    for (const label of ["Overview", "Instructions", "Model and limits", "Tools and access", "Memory", "Settings"]) {
+      await expect(page.getByRole("tab", { name: label })).toBeVisible()
     }
-    await page.goto(`/crews/${crews[0].id}`)
-
-    const tabs = ["Overview", "Members", "Network", "Runtime", "Journal", "Settings"]
-    for (const label of tabs) {
-      await expect(page.getByRole("tab", { name: label })).toBeVisible({ timeout: 5_000 })
-    }
+    await page.getByTestId("agent-header").locator("xpath=preceding-sibling::button[1]").click()
+    await expect(page).toHaveURL(new RegExp(`crew=${crew}`))
+    await expect(page).not.toHaveURL(/[?&]agent=/)
   })
 
-  test("workspace sub-strip switches between Files and Terminal", async ({ page }) => {
-    await page.goto("/crews/agents")
-    await page.waitForLoadState("networkidle")
-    const agentLink = page
-      .locator("a[href^='/crews/agents/']:not([href$='/new']):not([href*='/agents/new'])")
-      .first()
-    if (await agentLink.count() === 0) {
-      test.skip(true, "no seeded agents")
-      return
-    }
-    const href = await agentLink.getAttribute("href")
-    expect(href, "agent card link is missing href — selector regressed").toBeTruthy()
-    await page.goto(`${href!}/workspace`)
-    await expect(page.getByRole("tab", { name: "Files" })).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByRole("tab", { name: "Terminal" })).toBeVisible()
-    await page.getByRole("tab", { name: "Terminal" }).click()
-    await page.waitForURL(/pane=terminal/, { timeout: 5_000 })
-  })
-
-  test("tools sub-strip has Skills Credentials MCP", async ({ page }) => {
-    await page.goto("/crews/agents")
-    await page.waitForLoadState("networkidle")
-    const agentLink = page
-      .locator("a[href^='/crews/agents/']:not([href$='/new']):not([href*='/agents/new'])")
-      .first()
-    if (await agentLink.count() === 0) {
-      test.skip(true, "no seeded agents")
-      return
-    }
-    const href = await agentLink.getAttribute("href")
-    expect(href, "agent card link is missing href — selector regressed").toBeTruthy()
-    await page.goto(`${href!}/tools`)
-    await expect(page.getByRole("tab", { name: "Skills" })).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByRole("tab", { name: "Credentials" })).toBeVisible()
-    await expect(page.getByRole("tab", { name: "MCP" })).toBeVisible()
+  test("the dock is the crew container's Terminal and Files", async ({ page }) => {
+    const crew = await firstCrew(page)
+    test.skip(!crew, "no seeded crews")
+    await page.goto(`/crews?crew=${crew}`)
+    await expect(page.getByRole("tablist", { name: "Bottom panel" }).getByRole("tab")).toHaveText(["Terminal", "Files"])
   })
 })
