@@ -1293,6 +1293,9 @@ body {
   .page-banner-ok > svg { color: var(--chip-ok-fg); }
   .page-banner-info { background: var(--chip-info-bg); }
   .page-banner-info > svg { color: var(--chip-info-fg); }
+  /* bad: something failed and the page is incomplete (COM-03). */
+  .page-banner-bad { background: var(--chip-danger-bg); }
+  .page-banner-bad > svg { color: var(--chip-danger-fg); }
   .page-banner-text { min-width: 0; }
   .page-banner-spacer { flex: 1; }
   .page-banner-dismiss { margin: -4px -6px -4px 0; color: var(--muted-foreground); }
