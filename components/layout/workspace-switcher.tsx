@@ -17,17 +17,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier } from "@/lib/permissions/tiers"
@@ -320,38 +317,44 @@ export function CreateWorkspaceDialog({
   const [slug, setSlug] = useState("")
   const [slugTouched, setSlugTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // A refusal belongs to its field (v67 `newws`, G13): a slug conflict under
+  // Slug, anything else under Name. Not a toast that leaves with the reason.
+  const [fieldError, setFieldError] = useState<{ field: "name" | "slug"; message: string } | null>(null)
 
   function reset() {
     setName("")
     setSlug("")
     setSlugTouched(false)
     setSubmitting(false)
+    setFieldError(null)
   }
 
   // Clear form when the dialog closes from any source — Cancel button,
-  // Escape, or overlay click. The Dialog's own onOpenChange handles
-  // Esc/overlay, but Cancel calls the parent setter directly, which
-  // would otherwise leak stale name/slug into the next open.
+  // Escape, or overlay click — so stale name/slug never leak into the next
+  // open.
   useEffect(() => {
     if (!open && !submitting) reset()
   }, [open, submitting])
 
   function handleNameChange(v: string) {
     setName(v)
+    if (fieldError?.field === "name" || (!slugTouched && fieldError?.field === "slug")) setFieldError(null)
     if (!slugTouched) setSlug(slugify(v))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  const canSubmit = !submitting && name.trim().length >= 2 && slug.length >= 2
+
+  async function submit() {
     if (name.trim().length < 2) {
-      toast.error("Name must be at least 2 characters")
+      setFieldError({ field: "name", message: "Name must be at least 2 characters" })
       return
     }
     if (slug.length < 2) {
-      toast.error("Slug must be at least 2 characters")
+      setFieldError({ field: "slug", message: "Slug must be at least 2 characters" })
       return
     }
     setSubmitting(true)
+    setFieldError(null)
     try {
       const res = await apiFetch("/api/v1/workspaces", {
         method: "POST",
@@ -361,13 +364,17 @@ export function CreateWorkspaceDialog({
       if (!res.ok) {
         const text = await res.text().catch(() => "")
         let message = "Failed to create workspace"
+        let field: string | undefined
         try {
           const json = JSON.parse(text)
           message = json.error ?? json.message ?? message
+          field = json.field
         } catch {
           if (text) message = text
         }
-        toast.error(message)
+        // The server answers a taken slug with 409 "Workspace slug already taken".
+        const onSlug = field === "slug" || res.status === 409 || /\bslug\b/i.test(message)
+        setFieldError({ field: onSlug ? "slug" : "name", message })
         return
       }
       const data = (await res.json()) as { id: string; name: string }
@@ -376,73 +383,75 @@ export function CreateWorkspaceDialog({
       reset()
       onOpenChange(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create workspace")
+      setFieldError({ field: "name", message: err instanceof Error ? err.message : "Failed to create workspace" })
     } finally {
       setSubmitting(false)
     }
   }
 
+  const nameError = fieldError?.field === "name" ? fieldError.message : undefined
+  const slugError = fieldError?.field === "slug" ? fieldError.message : undefined
+
   return (
-    <Dialog
+    <CreateSurface
       open={open}
       onOpenChange={(v) => {
         if (!submitting) onOpenChange(v)
       }}
+      size="sm"
+      onSubmit={() => {
+        if (canSubmit) void submit()
+      }}
     >
-      <DialogContent className="max-w-md">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create workspace</DialogTitle>
-            <DialogDescription>
-              Workspaces are isolated tenants — crews, credentials, and runs live inside one workspace.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="ws-name">Name</Label>
-              <Input
-                id="ws-name"
-                autoFocus
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="Acme Engineering"
-                maxLength={100}
-                disabled={submitting}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ws-slug">Slug</Label>
-              <Input
-                id="ws-slug"
-                value={slug}
-                onChange={(e) => {
-                  setSlugTouched(true)
-                  setSlug(slugify(e.target.value))
-                }}
-                placeholder="acme"
-                maxLength={50}
-                disabled={submitting}
-              />
-              <p className="text-micro text-muted-foreground">
-                Lowercase, used in URLs and API calls. Auto-generated from the name.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting || name.trim().length < 2 || slug.length < 2}>
-              {submitting ? "Creating…" : "Create workspace"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <CreateSurfaceHeader
+        title="Create workspace"
+        description="Workspaces are isolated tenants — crews, credentials, and runs live inside one workspace."
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody className="flex flex-col gap-4">
+        <CreateSurfaceField label="Name" htmlFor="ws-name" error={nameError}>
+          <Input
+            id="ws-name"
+            autoFocus
+            value={name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder="Acme Engineering"
+            maxLength={100}
+            disabled={submitting}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby={nameError ? "ws-name-error" : undefined}
+          />
+        </CreateSurfaceField>
+        <CreateSurfaceField
+          label="Slug"
+          htmlFor="ws-slug"
+          error={slugError}
+          hint="Lowercase, used in URLs and API calls. Auto-generated from the name."
+        >
+          <Input
+            id="ws-slug"
+            value={slug}
+            onChange={(e) => {
+              setSlugTouched(true)
+              if (fieldError?.field === "slug") setFieldError(null)
+              setSlug(slugify(e.target.value))
+            }}
+            placeholder="acme"
+            maxLength={50}
+            disabled={submitting}
+            aria-invalid={slugError ? true : undefined}
+            aria-describedby={slugError ? "ws-slug-error" : undefined}
+          />
+        </CreateSurfaceField>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        hint={null}
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={submitting ? "Creating…" : "Create workspace"}
+        onPrimary={() => void submit()}
+        primaryDisabled={!canSubmit}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
 }

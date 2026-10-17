@@ -19,6 +19,10 @@ import { useRouter } from "next/navigation"
  * (hooks/use-crews-selection.tsx), so inventing one here would only clear
  * itself and land the user on an empty canvas.
  */
+// It sits in the layout-less (legacy) group, as /approvals does: inside
+// (dashboard) the layout prerenders only its loading frame until the session
+// resolves, so the <noscript> below never reached the exported agents.html
+// (CHR-05, inventory Z01).
 export default function LegacyAgentsRedirect() {
   const router = useRouter()
   useEffect(() => {

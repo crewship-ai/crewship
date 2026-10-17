@@ -38,6 +38,10 @@ interface AppState {
   setSecondaryPanelOpen: (open: boolean) => void
   commandPaletteOpen: boolean
   setCommandPaletteOpen: (open: boolean | ((prev: boolean) => boolean)) => void
+  /** Text the palette opens with (the not-found page's missing path); cleared on close. */
+  commandPaletteQuery: string
+  /** Opens the palette with `query` typed in (CHR-03). */
+  openCommandPalette: (query?: string) => void
   setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
@@ -60,5 +64,11 @@ export const useAppStore = create<AppState>((set) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setBreadcrumbs: (items) => set({ breadcrumbs: items }),
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
-  setCommandPaletteOpen: (open) => set((s) => ({ commandPaletteOpen: typeof open === "function" ? open(s.commandPaletteOpen) : open })),
+  setCommandPaletteOpen: (open) =>
+    set((s) => {
+      const next = typeof open === "function" ? open(s.commandPaletteOpen) : open
+      return next ? { commandPaletteOpen: true } : { commandPaletteOpen: false, commandPaletteQuery: "" }
+    }),
+  commandPaletteQuery: "",
+  openCommandPalette: (query = "") => set({ commandPaletteOpen: true, commandPaletteQuery: query }),
 }))
