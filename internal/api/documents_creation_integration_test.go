@@ -168,6 +168,45 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 	if repeated != created {
 		t.Fatal("lost-ACK exact retry changed saved identity")
 	}
+	// Exercise the advertised MCP wire against the same live sidecar, Router,
+	// private Node process and durable creation used by the actual CLI above.
+	mcpCreate := func(arguments string, wantStatus int, wantError bool) json.RawMessage {
+		t.Helper()
+		payload := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "doc_create", "arguments": json.RawMessage(arguments)}}
+		raw, status, err := request("http://127.0.0.1:9119", "POST", "/mcp/routines", token, "", payload)
+		var envelope struct {
+			Result struct {
+				IsError bool `json:"isError"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+		}
+		if err != nil || status != http.StatusOK || json.Unmarshal(raw, &envelope) != nil || len(envelope.Result.Content) != 1 || envelope.Result.Content[0].Type != "text" || envelope.Result.IsError != wantError {
+			t.Fatalf("actual MCP creation envelope: HTTP%d %v %s", status, err, raw)
+		}
+		var result struct {
+			Status int             `json:"status"`
+			Body   json.RawMessage `json:"body"`
+		}
+		if json.Unmarshal([]byte(envelope.Result.Content[0].Text), &result) != nil || result.Status != wantStatus || len(result.Body) == 0 {
+			t.Fatalf("actual MCP creation wrapped status: %s", envelope.Result.Content[0].Text)
+		}
+		return result.Body
+	}
+	var mcpRepeated documentCreationResult
+	if raw := mcpCreate(authoring, http.StatusOK, false); json.Unmarshal(raw, &mcpRepeated) != nil || mcpRepeated != created {
+		t.Fatal("actual MCP exact retry changed the CLI-created document identity")
+	}
+	mcpCreate(strings.Replace(authoring, "Pilot with one team", "A changed MCP plan", 1), http.StatusConflict, true)
+	var creationCount, documentCount int
+	if err := h.db.QueryRow(`SELECT count(*) FROM document_creations`).Scan(&creationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.QueryRow(`SELECT count(*) FROM documents`).Scan(&documentCount); err != nil || creationCount != 1 || documentCount != 1 {
+		t.Fatalf("MCP retry/conflict duplicated creation: ledger%d documents%d %v", creationCount, documentCount, err)
+	}
 	changedFile := filepath.Join(dir, "changed.json")
 	if err = os.WriteFile(changedFile, []byte(strings.Replace(authoring, "Pilot with one team", "A changed plan", 1)), 0600); err != nil {
 		t.Fatal(err)
@@ -215,7 +254,7 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 	if err = h.db.QueryRow(`SELECT actor FROM document_receipts WHERE page_id=?`, created.PageID).Scan(&actor); err != nil || actor != "agent:"+f.a.AgentID+":"+run {
 		t.Fatalf("creation audit actor %s %v", actor, err)
 	}
-	t.Log(fmt.Sprintf("actual protected CLI binary/fixed sidecar/Router/private Node24: schema3 content+server identities, exact retry, changed409, durable creation provenance, human owner read, no continuation delegation; no model run; Page %s", created.PageID))
+	t.Log(fmt.Sprintf("actual protected CLI binary/fixed sidecar/Router/private Node24: schema3 content+server identities, CLI+MCP exact retry, changed409, one durable creation, durable creation provenance, human owner read, no continuation delegation; no model run; Page %s", created.PageID))
 }
 
 func documentsWaitSocket(t *testing.T, path string) {
