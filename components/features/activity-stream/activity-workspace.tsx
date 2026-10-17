@@ -32,14 +32,6 @@ export function ActivityWorkspace({ workspaceId }: { workspaceId: string }) {
   const requested = searchParams.get("section")
   const section: Section = requested === "work" || requested === "deliveries" ? requested : "overview"
 
-  // Whether the overview is coming BACK from a ledger, so its rail slides in
-  // from the left then — and not on the page's first paint.
-  const cameFromLedger = React.useRef(false)
-  const backFromLedger = section === "overview" && cameFromLedger.current
-  React.useEffect(() => {
-    cameFromLedger.current = section !== "overview"
-  }, [section])
-
   function selectSection(value: Section) {
     const params = new URLSearchParams(searchParams.toString())
     if (value === "overview") params.delete("section")
@@ -53,7 +45,7 @@ export function ActivityWorkspace({ workspaceId }: { workspaceId: string }) {
   if (section === "overview") {
     return (
       <div className={cn(height, "min-h-0 overflow-hidden")}>
-        <ActivityStreamView workspaceId={workspaceId} onOpenSection={selectSection} railEntersFromLeft={backFromLedger} />
+        <ActivityStreamView workspaceId={workspaceId} onOpenSection={selectSection} />
       </div>
     )
   }
