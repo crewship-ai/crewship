@@ -105,12 +105,14 @@ export function VirtualConversation({
 
   if (turns.length === 0 && !historyLoading) {
     return (
-      <div className="relative flex-1 overflow-y-hidden" role="log">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto" role="log">
         <ConversationEmptyState
+          className="h-auto flex-1"
           icon={<Bot className="h-12 w-12" />}
           title={canChat ? "Start a conversation" : "Agent shared for discovery"}
           description={canChat ? (agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below") : "Chat has not been shared with you."}
         />
+        <VirtuosoFooter context={{ footer }} />
       </div>
     )
   }
