@@ -146,6 +146,104 @@ test.describe("desktop", () => {
     await expect(banner).toHaveAttribute("data-state", /ok|broken|error/)
   })
 
+  // ── #3487 finishing items ────────────────────────────────────────────
+
+  test("SET-01 T12 a member opens in the 480 px Peek and J moves to the next person", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/members")
+    const rows = page.locator("tr[data-member]")
+    await expect(rows.first()).toBeVisible()
+    test.skip((await rows.count()) < 2, "environment prerequisite: the workspace needs two members")
+    await rows.first().locator("[title]").first().click()
+    const peek = page.locator("[data-slot=peek]")
+    await expect(peek).toBeVisible()
+    expect(Math.round((await peek.boundingBox())!.width)).toBe(480)
+    const detail = peek.locator("[data-slot=member-detail]")
+    const first = await detail.getAttribute("aria-label")
+    await peek.press("j")
+    await expect(detail).not.toHaveAttribute("aria-label", first!)
+    await expect(peek.locator("[data-slot=member-cli]")).toContainText("crewship workspace member capabilities list")
+  })
+
+  test("SET-02 T13–T15 crew links: keys 1–3 switch the spaces; a matrix cell opens the small link dialog", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/crew-links")
+    const spaces = page.getByRole("tablist", { name: "Spaces" })
+    await expect(spaces.getByRole("tab", { name: /By crew/ })).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.press("2")
+    await expect(page).toHaveURL(/view=all/)
+    await page.keyboard.press("3")
+    await expect(page).toHaveURL(/view=matrix/)
+    const cell = page.getByRole("button", { name: /\. Edit$/ }).first()
+    test.skip((await cell.count()) === 0, "environment prerequisite: the workspace needs two crews")
+    await cell.click()
+    const dialog = page.getByRole("dialog", { name: / → / })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText("The other direction is set separately.")
+    expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(480)
+    await dialog.getByRole("button", { name: /^(Cancel|Close)$/ }).click()
+    await expect(dialog).toBeHidden()
+    await page.keyboard.press("1")
+    await expect(page).not.toHaveURL(/view=/)
+  })
+
+  test("SET-03 T16 the range is one segmented control on the top bar; a row opens its detail", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/audit")
+    const range = page.getByRole("radiogroup", { name: "Time range" })
+    await expect(range.getByRole("radio")).toHaveCount(6)
+    await range.getByRole("radio", { name: "Last 30 days" }).click()
+    await expect(page).toHaveURL(/audit_range=30d/)
+    await expect(page.locator("[data-slot=audit-display]").getByRole("switch", { name: "Group repeated events" })).toBeVisible()
+    const row = page.locator("[data-audit-weight] > button[aria-controls]").first()
+    test.skip((await row.count()) === 0, "environment prerequisite: no audit events in the last 30 days")
+    await row.click()
+    await expect(page.locator(`#${await row.getAttribute("aria-controls")}`)).toContainText("This record is immutable.")
+  })
+
+  test("SET-04 T09 ?card= marks the card with a 2 px outline that follows its corners", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings?tab=general&card=identity")
+    const card = page.getByRole("region", { name: "Identity" })
+    await expect(card).toHaveAttribute("data-focused", "true")
+    await expect(card).toHaveCSS("outline-style", "solid")
+    await expect(card).toHaveCSS("outline-width", "2px")
+    await expect(card).toHaveCSS("border-top-left-radius", "10px")
+    await expect(card).not.toHaveAttribute("data-focused", "true", { timeout: 2500 })
+  })
+
+  test("SET-05 T07 classification counts open the Vault filtered by class", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings?tab=access-secrets")
+    const card = page.getByRole("region", { name: "Classification" })
+    for (const cls of ["STANDARD", "RESTRICTED", "SEALED"]) {
+      await expect(card.locator(`a[href="/credentials?class=${cls}"]`)).toHaveCount(1)
+    }
+  })
+
+  test("SET-06 small controls in a Settings card are the 28 px token at Small", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/members")
+    const exportCsv = page.getByRole("button", { name: "Export CSV" })
+    await expect(exportCsv).toBeVisible()
+    const h = Math.round((await exportCsv.boundingBox())!.height)
+    expect(h).toBeGreaterThanOrEqual(27)
+    expect(h).toBeLessThanOrEqual(29)
+  })
+
+  test("SET-07 drill pages say what they are once, in the section head", async ({ page }) => {
+    await seed(page, PINNED)
+    for (const [path, sentence] of [
+      ["/settings/members", "Who is in this workspace"],
+      ["/settings/crew-links", "Who hands work to whom"],
+      ["/settings/audit", "Every state-changing action, immutably recorded"],
+    ] as const) {
+      await page.goto(path)
+      await expect(page.locator("[data-slot=settings-page-head]")).toContainText(sentence)
+      await expect(page.getByText(sentence)).toHaveCount(1)
+    }
+  })
+
   const MOVED: [string, RegExp][] = [
     // Integrations rewrites its old ?tab=&section= links to ?space=&view=
     // once its Harbor 2 layout is in (#3400); either form is the same place.
