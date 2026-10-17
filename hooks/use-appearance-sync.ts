@@ -125,7 +125,10 @@ export function useAppearanceSync(enabled: boolean): void {
             ok: Boolean(r?.ok),
             status: typeof r?.status === "number" ? r.status : r?.ok ? 200 : 0,
           })),
-        schedule: (fn, ms) => void setTimeout(() => void fn(), ms),
+        schedule: (fn, ms) => {
+          const t = setTimeout(() => void fn(), ms)
+          return () => clearTimeout(t)
+        },
         onStatus: setSyncStatus,
       })
     }
@@ -143,9 +146,12 @@ export function useAppearanceSync(enabled: boolean): void {
   useEffect(() => {
     if (!active) {
       setReady(false)
+      // APR-05: sync off stops every request, a scheduled retry included.
+      outboxRef.current?.pause()
       return
     }
     activeOutbox = outbox()
+    outbox().resume()
     let cancelled = false
     apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -154,7 +160,12 @@ export function useAppearanceSync(enabled: boolean): void {
         const map = data && typeof data === "object" ? (data as Record<string, unknown>) : {}
         const remote = parseAppearance(map[APPEARANCE_PREFERENCE_KEY])
         const local = currentRef.current
-        if (Object.keys(remote).length > 0) {
+        if (outbox().pending(APPEARANCE_PREFERENCE_KEY)) {
+          // A local change the server has not received yet (sync was off, or
+          // the write is still retrying) wins over the server's older value,
+          // as it does for the style below; the outbox sends it next.
+          lastSentRef.current = null
+        } else if (Object.keys(remote).length > 0) {
           if (remote.theme && remote.theme !== local?.theme) setTheme(remote.theme)
           if (remote.accent && remote.accent !== local?.accent) setAccent(remote.accent)
           if (remote.density && remote.density !== local?.density) setDensity(remote.density)
