@@ -46,9 +46,9 @@ describe("the user menu (v67 pop-user)", () => {
   it("lists the rows in the order of the design", async () => {
     open()
     await screen.findByTestId("user-menu-build")
-    const names = screen.getAllByRole("menuitem").map((el) => (el.textContent ?? "").replace(/\d+ active$/, "").trim())
+    const names = Array.from(document.querySelectorAll<HTMLElement>('[role^="menuitem"]')).map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").replace(/\d+ active$/, "").trim())
     expect(names).toEqual([
-      "Demo Userdemo@crewship.ai",
+      "Your profile: Demo User",
       "Profile & account",
       "Appearance",
       "Notification sounds",
@@ -72,7 +72,9 @@ describe("the user menu (v67 pop-user)", () => {
 
   it("draws Log out neutral: signing out is not a destructive action", () => {
     open()
-    expect(screen.getByRole("menuitem", { name: /log out/i }).className).not.toMatch(/destructive/)
+    const logout = screen.getByRole("menuitem", { name: /log out/i })
+    expect(logout).not.toHaveAttribute("data-variant", "destructive")
+    expect(logout.className).not.toMatch(/(^|\s)text-destructive/)
   })
 
   it("ends in a footer with the build and, when one exists, Update available", async () => {

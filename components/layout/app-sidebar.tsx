@@ -4,10 +4,9 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { PanelLeft, PanelLeftClose, PanelLeftDashed, Search, type LucideIcon } from "lucide-react"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
-import { navSections, isHiddenForRole } from "@/lib/nav-sections"
+import { navSections, visibleItems } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
@@ -61,8 +60,7 @@ export function AppSidebar() {
   // A restricted session sees only the screens the server says it may open.
   const surfaces = useRestrictedSurfaces()
   const authAvailable = useAuthAvailable()
-  const visible = (items: NavItem[]) =>
-    items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+  const visible = (items: NavItem[]) => visibleItems(items, { role, instanceAdmin, surfaces })
   const row = (item: NavItem) => {
     const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
     const unread = item.href === "/inbox" ? inboxUnread : 0

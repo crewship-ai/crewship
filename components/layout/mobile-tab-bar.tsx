@@ -5,10 +5,9 @@ import { usePathname } from "next/navigation"
 import { Menu } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { phoneTabs } from "@/lib/nav-sections"
+import { visiblePhoneTabs } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useAppStore } from "@/lib/store"
 
 /**
@@ -31,7 +30,7 @@ export function MobileTabBar() {
   const workspaceId = useTrustedWorkspaceId()
   const setMobileNavOpen = useAppStore((s) => s.setMobileNavOpen)
   const surfaces = useRestrictedSurfaces()
-  const tabs = phoneTabs().filter((tab) => !surfaces || restrictedPathAllowed(tab.href, surfaces))
+  const tabs = visiblePhoneTabs({ surfaces })
 
   return (
     <nav

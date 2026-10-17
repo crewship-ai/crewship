@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { visibleNavItems, visiblePhoneTabs } from "../nav-sections"
+import { navSections, visibleNavItems, visiblePhoneTabs } from "../nav-sections"
 import type { RestrictedSurface } from "../restricted-surfaces"
 
 // CHR-01 (#3482), chrome-states G10/G11: which destinations each person sees.
@@ -8,9 +8,12 @@ import type { RestrictedSurface } from "../restricted-surfaces"
 // cannot slip through unseen. The matrix describes the UI only; what the
 // server lets a role open is decided server-side and is not changed here.
 
+// Calendar (F-01) is a row only on a branch that carries the Calendar page; on
+// those it sits right after Pages (PRD SHL-01), and every full session sees it.
+const HAS_CALENDAR = navSections.some((s) => s.items.some((i) => i.href === "/calendar"))
 const WORK_AND_BUILD = [
   "Dashboard", "Inbox", "Chat", "Activity",
-  "Issues", "Routines", "Pages", "Calendar",
+  "Issues", "Routines", "Pages", ...(HAS_CALENDAR ? ["Calendar"] : []),
   "Crews", "Skills", "Vault", "Integrations",
 ]
 const titles = (items: { title: string }[]) => items.map((i) => i.title)
@@ -41,9 +44,9 @@ describe("role x navigation rows (full session)", () => {
     expect(titles(visibleNavItems({ role: null, instanceAdmin: false, surfaces: null }))).toEqual([...WORK_AND_BUILD, "Settings"])
   })
 
-  it("keeps the order of the design: Work is Issues, Routines, Pages, Calendar", () => {
+  it("keeps the order of the design: Work is Issues, Routines, Pages (then Calendar)", () => {
     const t = titles(visibleNavItems({ role: "MEMBER", instanceAdmin: false, surfaces: null }))
-    expect(t.slice(4, 8)).toEqual(["Issues", "Routines", "Pages", "Calendar"])
+    expect(t.slice(4, HAS_CALENDAR ? 8 : 7)).toEqual(["Issues", "Routines", "Pages", ...(HAS_CALENDAR ? ["Calendar"] : [])])
   })
 })
 

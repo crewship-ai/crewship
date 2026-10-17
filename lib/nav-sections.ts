@@ -1,4 +1,5 @@
 import { roleAtLeast } from "@/lib/routine-governance"
+import { restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -43,8 +44,8 @@ export interface NavSection {
  * Inbox, Chat, Activity); then **Work** (what gets done) and **Build** (who
  * does it and with what). Settings and Admin live in the sidebar footer with
  * the sidebar mode and the user menu. Marketplace — announced, never built —
- * is gone. Journal stays an admin-only row beside Activity until it is merged
- * into it. "Vault" is the label of Credentials (same route); "Pages" keeps its
+ * is gone. The Journal is part of Activity (F-02): its admin-only views are
+ * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); "Pages" keeps its
  * name until the Artifacts delivery renames it.
  */
 export const navSections: NavSection[] = [
@@ -57,7 +58,6 @@ export const navSections: NavSection[] = [
       // which agent, and the index is what answers that.
       { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
       { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
-      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal, minRole: "ADMIN" },
     ],
   },
   {
@@ -97,6 +97,35 @@ export function isHiddenForRole(item: NavItem, role: string | null | undefined, 
   // While the role is loading it is null, and the row stays hidden: showing it
   // and then taking it away is worse than letting it appear.
   return item.minRole != null && !roleAtLeast(role, item.minRole)
+}
+
+/** Who is looking: the inputs every navigation surface filters by. */
+export interface NavViewer {
+  /** Workspace role; null while it loads. */
+  role: string | null | undefined
+  instanceAdmin?: boolean | null
+  /** The screens a restricted (Guest) session may open; null for a full one. */
+  surfaces: readonly RestrictedSurface[] | null
+}
+
+/**
+ * Every row this person sees, in navigation order, footer rows (Settings,
+ * Admin) last. The sidebar, the phone More sheet and the tab bar all filter
+ * through here, so the role x destination matrix has one definition and one
+ * test (lib/__tests__/nav-role-matrix.test.ts).
+ */
+export function visibleNavItems(viewer: NavViewer, sections: NavSection[] = navSections): NavItem[] {
+  return sections.flatMap((s) => visibleItems(s.items, viewer))
+}
+
+/** One section's rows for this person. */
+export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }: NavViewer): NavItem[] {
+  return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+}
+
+/** The phone tab bar for this person: a Guest keeps only granted tabs. */
+export function visiblePhoneTabs({ surfaces }: Pick<NavViewer, "surfaces"> & Partial<NavViewer>): NavItem[] {
+  return phoneTabs().filter((tab) => !surfaces || restrictedPathAllowed(tab.href, surfaces))
 }
 
 /**

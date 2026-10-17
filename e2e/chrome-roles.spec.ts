@@ -1,0 +1,129 @@
+import { test, expect, type Browser, type BrowserContext } from "@playwright/test"
+
+// CHR-01 (#3482): the shell per role - sidebar at 1440, tab bar and More sheet
+// at 390, and the user menu on both. Each role signs in once (NextAuth rate
+// limits credential logins) and every test reuses that session.
+//
+// Roles are the demo-RBAC accounts: admin-baseline (instance administrator)
+// and member-baseline (workspace member, not an administrator). The pinned
+// role x row matrix is lib/__tests__/nav-role-matrix.test.ts; this spec checks
+// the same rows survive the real shell.
+
+const PASSWORD = process.env.E2E_PASSWORD_ROLES ?? "rbac-demo-1234"
+const ROLES = {
+  admin: { email: "admin-baseline@crewship.local", sees: { admin: true } },
+  member: { email: "member-baseline@crewship.local", sees: { admin: false } },
+} as const
+
+// What a full session sees, in order. Calendar is checked separately: it is a
+// row only where the Calendar page exists, and its place in Work is not what
+// this spec is about.
+const CORE_HREFS = [
+  "/", "/inbox", "/chat", "/activity",
+  "/issues", "/routines", "/pages",
+  "/crews", "/skills", "/credentials", "/integrations",
+]
+
+type Who = keyof typeof ROLES
+const states = new Map<Who, ReturnType<BrowserContext["storageState"]>>()
+
+async function sessionFor(browser: Browser, who: Who) {
+  if (!states.has(who)) {
+    states.set(who, (async () => {
+      const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+      const page = await ctx.newPage()
+      await page.goto("/login")
+      await page.getByLabel(/email/i).fill(ROLES[who].email)
+      await page.getByLabel(/password/i).fill(PASSWORD)
+      await page.getByRole("button", { name: /sign in|log in/i }).click()
+      await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20_000 })
+      const state = await ctx.storageState()
+      await ctx.close()
+      return state
+    })())
+  }
+  return states.get(who)!
+}
+
+for (const who of Object.keys(ROLES) as Who[]) {
+  test.describe(`${who}-baseline`, () => {
+    test.describe("desktop 1440", () => {
+      test("the sidebar offers the full set of destinations, no Journal", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), viewport: { width: 1440, height: 900 } })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        const rail = page.locator("[data-slot=sidebar-container]")
+        await expect(rail).toBeVisible()
+        const hrefs = await rail.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")))
+        expect(hrefs.filter((h) => h !== "/calendar" && h !== "/admin" && h !== "/settings")).toEqual(CORE_HREFS)
+        expect(hrefs).toContain("/settings")
+        expect(hrefs).not.toContain("/journal")
+        if (!ROLES[who].sees.admin) expect(hrefs).not.toContain("/admin")
+        await ctx.close()
+      })
+
+      test("the user menu opens from the sidebar foot with the v67 rows", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), viewport: { width: 1440, height: 900 } })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        await page.getByRole("button", { name: "User menu" }).click()
+        const menu = page.getByRole("menu")
+        for (const name of [/^profile & account$/i, /^appearance$/i, /sessions & cli tokens/i, /help & resources/i, /^log out$/i]) {
+          await expect(menu.getByRole("menuitem", { name })).toBeVisible()
+        }
+        await expect(menu.getByRole("radiogroup", { name: "Theme" })).toBeVisible()
+        await ctx.close()
+      })
+    })
+
+    test.describe("phone 390", () => {
+      const phone = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } as const
+
+      test("tab bar is Home, Inbox, Chat, Issues, More", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), ...phone })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        const bar = page.getByRole("navigation", { name: "Primary" })
+        await expect(bar.getByRole("link")).toHaveText(["Home", "Inbox", "Chat", "Issues"])
+        await expect(bar.getByRole("button", { name: "More" })).toBeVisible()
+        await ctx.close()
+      })
+
+      test("More is a grid of tiles with the user row, and no horizontal scroll", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), ...phone })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click()
+        const grid = page.getByRole("list", { name: "Navigation" })
+        await expect(grid).toBeVisible()
+        const hrefs = await grid.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")))
+        expect(hrefs.filter((h) => h !== "/calendar" && h !== "/admin" && h !== "/settings")).toEqual(CORE_HREFS)
+        expect(hrefs).not.toContain("/journal")
+        if (!ROLES[who].sees.admin) expect(hrefs).not.toContain("/admin")
+        await expect(grid.locator('[data-slot="concept-tile"]')).not.toHaveCount(0)
+        // Four columns: the first tile row shares one y.
+        const ys = await grid.locator("li").evaluateAll((li) => li.slice(0, 4).map((e) => Math.round(e.getBoundingClientRect().top)))
+        expect(new Set(ys).size).toBe(1)
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+        expect(overflow).toBeLessThanOrEqual(0)
+        // Every tile is a comfortable target.
+        for (const box of await grid.locator("a").evaluateAll((as) => as.map((a) => a.getBoundingClientRect().height))) {
+          expect(box).toBeGreaterThanOrEqual(44)
+        }
+        await ctx.close()
+      })
+
+      test("the user row in More opens the same user menu", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), ...phone })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click()
+        await page.getByRole("dialog").getByRole("button", { name: "User menu" }).click()
+        const menu = page.getByRole("menu")
+        await expect(menu.getByRole("menuitem", { name: /^log out$/i })).toBeVisible()
+        await expect(menu.getByRole("menuitem", { name: /^appearance$/i })).toBeVisible()
+        await ctx.close()
+      })
+    })
+  })
+}
