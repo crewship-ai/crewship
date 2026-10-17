@@ -126,15 +126,20 @@ interface Routes {
   agents?: unknown[]
   single?: Response
   dependents?: Record<string, unknown[]>
+  /** Answer the single-secret fetch only after a real timer, like a network round trip. */
+  singleDelayMs?: number
 }
-function routeApi({ credentials = [], crews = [], agents = [], single, dependents = {} }: Routes = {}) {
+function routeApi({ credentials = [], crews = [], agents = [], single, dependents = {}, singleDelayMs }: Routes = {}) {
   h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
     if (init?.method === "DELETE" || init?.method === "PATCH") return ok({})
     if (url.startsWith("/api/v1/credentials?")) return ok(credentials)
     const dep = /\/api\/v1\/credentials\/([^/?]+)\/dependents/.exec(url)
     if (dep) return ok({ routines: dependents[decodeURIComponent(dep[1])] ?? [] })
-    if (/^\/api\/v1\/credentials\/[^/?]+\?/.test(url)) return single ?? fail(404)
+    if (/^\/api\/v1\/credentials\/[^/?]+\?/.test(url)) {
+      if (singleDelayMs) await new Promise((r) => setTimeout(r, singleDelayMs))
+      return single ?? fail(404)
+    }
     if (url.startsWith("/api/v1/crews?")) return ok(crews)
     if (url.startsWith("/api/v1/agents?")) return ok(agents)
     return ok([])
@@ -212,6 +217,21 @@ describe("page states", () => {
     expect(await screen.findByText("This secret doesn’t exist")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Back to Secrets" }))
     expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
+  })
+  // The lookup used to cancel itself: marking it "loading" re-ran the effect,
+  // whose cleanup discarded the response, so a slow answer never landed.
+  it("a linked secret that is gone shows not found even when the lookup is slow", async () => {
+    nav.reset("id=gone")
+    routeApi({ credentials: [makeCredential()], singleDelayMs: 30 })
+    render(<CredentialsPage />)
+    expect(await screen.findByText("This secret doesn’t exist")).toBeInTheDocument()
+  })
+
+  it("a linked secret outside the list opens even when the lookup is slow", async () => {
+    nav.reset("id=cred_far")
+    routeApi({ credentials: [makeCredential()], single: ok(makeCredential({ id: "cred_far", name: "FAR_KEY" })), singleDelayMs: 30 })
+    render(<CredentialsPage />)
+    expect(await screen.findByTestId("detail-sheet")).toHaveTextContent("FAR_KEY")
   })
 })
 
