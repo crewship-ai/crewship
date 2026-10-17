@@ -51,3 +51,33 @@ describe("the decision dock", () => {
     expect(labels(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "s1" } }))).toEqual(["Open routines", "Re-enable schedule"])
   })
 })
+
+// v67 `ib-dock` (inbox.js DETAIL.*): the refusal is always the SECONDARY
+// button (`second('Deny')`, `second('Reject')` — surface fill, strong border)
+// and the yes is the primary. A ghost Reject read as a link-weight "skip", a
+// soft Deny/Approve pair read as two equal choices; neither is what v67 draws.
+// Ghost stays for the way out that decides nothing (Cancel, Dismiss, Open …).
+describe("Deny and Reject use the dock's secondary variant (INB-04)", () => {
+  const SHAPES: { name: string; item: InboxItem; refuse: RegExp; accept: RegExp; extra?: Partial<React.ComponentProps<typeof KindActions>> }[] = [
+    { name: "waitpoint", item: item({ kind: "waitpoint", source_id: "tok" }), refuse: /^Deny$/, accept: /^Approve$/ },
+    { name: "autonomy hold", item: item({ kind: "waitpoint", payload: { kind: "autonomy_gate", approval_id: "ap1" } }), refuse: /^Deny$/, accept: /^Approve$/ },
+    { name: "hire", item: item({ kind: "waitpoint", payload: { kind: "hire" } }), refuse: /^Deny$/, accept: /^Approve hire$/, extra: { onDenyHire: vi.fn() } },
+    { name: "skill proposal", item: item({ kind: "escalation", payload: { kind: "skill_proposal", crew_id: "c", file_name: "f" } }), refuse: /^Reject$/, accept: /^Approve$/ },
+    { name: "routine proposal", item: item({ kind: "escalation", payload: { kind: "routine_proposal", slug: "nightly" } }), refuse: /^Reject$/, accept: /^Approve$/ },
+    { name: "access request", item: item({ kind: "escalation", payload: { request_type: "access", request_id: "kr1" } }), refuse: /^Deny$/, accept: /^Approve$/ },
+    { name: "credential with a proposed value", item: item({ kind: "escalation", payload: { escalation_type: "CREDENTIAL", has_pending_credential: true } }), refuse: /^Reject$/, accept: /^Approve$/ },
+    { name: "general escalation", item: item({ kind: "escalation", payload: { escalation_type: "GENERAL" } }), refuse: /^Reject$/, accept: /^Approve$/ },
+    { name: "memory consolidation", item: item({ kind: "memory_consolidation", payload: { proposal_id: "p1" } }), refuse: /^Reject$/, accept: /^Accept$/ },
+  ]
+
+  it.each(SHAPES)("$name: the refusal is secondary, the yes is primary", ({ item: i, refuse, accept, extra }) => {
+    render(<KindActions item={i} onResolve={vi.fn()} onRefresh={vi.fn()} disabled={false} {...extra} />)
+    expect(screen.getByRole("button", { name: refuse })).toHaveAttribute("data-variant", "outline")
+    expect(screen.getByRole("button", { name: accept })).toHaveAttribute("data-variant", "default")
+  })
+
+  it("a legacy credential escalation, which only refuses, still refuses as secondary", () => {
+    render(<KindActions item={item({ kind: "escalation", payload: { escalation_type: "CREDENTIAL" } })} onResolve={vi.fn()} onRefresh={vi.fn()} disabled={false} />)
+    expect(screen.getByRole("button", { name: /^Reject$/ })).toHaveAttribute("data-variant", "outline")
+  })
+})
