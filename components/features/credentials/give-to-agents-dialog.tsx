@@ -17,6 +17,7 @@ import { Bot, Building2, Users } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Segmented } from "@/components/ui/segmented"
 import {
   CreateSurface,
   CreateSurfaceBody,
@@ -120,14 +121,17 @@ export function GiveToAgentsDialog({ workspaceId, credential, open, onOpenChange
         onClose={() => { if (!busy) onOpenChange(false) }}
       />
       <CreateSurfaceBody className="space-y-4">
-        <div role="radiogroup" aria-label="Who gets it" className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/40 p-0.5">
-          {([["AGENT", "Agents", Bot], ["CREW", "Crews", Users], ["WORKSPACE", "Whole workspace", Building2]] as const).map(([v, text, Icon]) => (
-            <button key={v} type="button" role="radio" aria-checked={who === v} onClick={() => setWho(v)}
-              className={cn("kit-tap inline-flex h-8 items-center justify-center gap-1.5 rounded text-label", who === v ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-              <Icon className="size-3.5" aria-hidden /> {text}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          ariaLabel="Who gets it"
+          fill
+          value={who}
+          onChange={setWho}
+          options={[
+            { value: "AGENT", label: "Agents", icon: Bot },
+            { value: "CREW", label: "Crews", icon: Users },
+            { value: "WORKSPACE", label: "Whole workspace", icon: Building2 },
+          ]}
+        />
 
         {loadError ? (
           <p role="alert" className="text-label text-warn">Agents or assignments could not be loaded. Close and try again.</p>

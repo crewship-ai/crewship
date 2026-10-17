@@ -94,3 +94,75 @@ describe("AddProviderDialog", () => {
     expect(JSON.parse(binding[1].body)).toMatchObject({ credential_id: "seat-new", scope: "AGENT", agent_id: "ag1" })
   })
 })
+
+// VLT-01 (#3491, vault.md Q05): Connect has a Test for what can be checked
+// before saving — an API key, or a Claude setup token — through the existing
+// POST /api/v1/credentials/test. The value goes in the request body only; it
+// is never put on screen, and a result never outlives a change of the value.
+describe("AddProviderDialog › Test (VLT-01)", () => {
+  const KEY = "fixture-" + "k".repeat(32)
+  function withTest(result: Record<string, unknown>, status = 200) {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/credentials/test") return ok(result, status)
+      return ok([])
+    })
+  }
+  const testCall = () => h.apiFetch.mock.calls.find(([u]) => u === "/api/v1/credentials/test")
+  const typeKey = (value: string) =>
+    fireEvent.change(screen.getByLabelText(/API key/i, { selector: "textarea, input" }), { target: { value } })
+
+  it("tests an API key with the provider before saving and says it works", async () => {
+    withTest({ valid: true, supported: true, status: 200 })
+    renderDialog({ initial: { provider: "ANTHROPIC", loginMode: "api_key", signIn: "paste", step: "values" } })
+    const dialog = screen.getByRole("dialog", { name: /Add AI provider/ })
+    const test = within(dialog).getByRole("button", { name: "Test" })
+    expect(test).toBeDisabled()
+    typeKey(KEY)
+    fireEvent.click(test)
+    expect(await within(dialog).findByText("The key works")).toBeInTheDocument()
+    const [, init] = testCall()!
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body)).toEqual({ provider: "ANTHROPIC", type: "PROVIDER_LOGIN", mode: "api_key", value: KEY })
+    // The value is sent, never shown.
+    expect(dialog.textContent).not.toContain(KEY)
+  })
+
+  it("a rejected key reads the provider's reason; editing the key clears the result", async () => {
+    withTest({ valid: false, supported: true, status: 401, error: "Invalid API key" })
+    renderDialog({ initial: { provider: "OPENAI", loginMode: "api_key", signIn: "paste", step: "values" } })
+    const dialog = screen.getByRole("dialog", { name: /Add AI provider/ })
+    typeKey(KEY)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Test" }))
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Invalid API key")
+    typeKey(KEY + "2")
+    expect(within(dialog).queryByText("Invalid API key")).not.toBeInTheDocument()
+  })
+
+  it("a provider without a probe is not shown as passed", async () => {
+    withTest({ valid: true, supported: false, status: 0, error: "No validation available for this provider" })
+    renderDialog({ initial: { provider: "DEEPSEEK", loginMode: "api_key", signIn: "paste", step: "values" } })
+    const dialog = screen.getByRole("dialog", { name: /Add AI provider/ })
+    typeKey(KEY)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Test" }))
+    expect(await within(dialog).findByText(/can’t be checked before saving/)).toBeInTheDocument()
+    expect(within(dialog).queryByText("The key works")).not.toBeInTheDocument()
+  })
+
+  it("a sign-in with a code has no Test: there is no value to check", () => {
+    renderDialog({ initial: { provider: "OPENAI", loginMode: "subscription", signIn: "device", step: "values" } })
+    const dialog = screen.getByRole("dialog", { name: /Add AI provider/ })
+    expect(within(dialog).queryByRole("button", { name: "Test" })).not.toBeInTheDocument()
+  })
+
+  it("a passed test is carried to the last step instead of 'not tested'", async () => {
+    withTest({ valid: true, supported: true, status: 200 })
+    renderDialog({ initial: { provider: "ANTHROPIC", loginMode: "api_key", signIn: "paste", step: "values", name: "Anthropic production" } })
+    const dialog = screen.getByRole("dialog", { name: /Add AI provider/ })
+    typeKey(KEY)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Test" }))
+    await within(dialog).findByText("The key works")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }))
+    expect(await within(dialog).findByText(/Connection tested · the key works/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/Connection not tested/)).not.toBeInTheDocument()
+  })
+})

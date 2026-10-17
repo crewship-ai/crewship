@@ -3,8 +3,9 @@
 /**
  * The Vault's secondary panel in the AI providers space (Harbor 2): the
  * spaces on top, then the views with their counts, the account groups (each
- * opens its own page) and the facets behind the toolbar's Filter button, with
- * a removable chip for each one in force.
+ * opens its own page). The toolbar's Filter button opens the facets inside
+ * the panel (kit COM-01); while it is closed, a removable chip shows each
+ * facet in force.
  *
  * The space is OWNER/ADMIN only, and the panel says so in one line.
  */
@@ -16,14 +17,13 @@ import { AlertTriangle, CircleDashed, FolderPlus, Layers, Lock, Sparkles, UserRo
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import {
   EMPTY_LOGIN_FILTERS,
   type LoginFacetOption,
@@ -87,6 +87,7 @@ export function ProvidersPanel({
   onNewPool,
   spaces,
 }: ProvidersPanelProps) {
+  const facets = useSidebarFacets()
   const set = (patch: Partial<LoginFilters>) => onFiltersChange({ ...filters, ...patch })
   const toggle = (key: ListKey, value: string) => {
     const list = filters[key]
@@ -114,38 +115,40 @@ export function ProvidersPanel({
             aria-label="Search AI provider accounts"
           />
         </div>
-        <SidebarFilterPopover
-          label="Filter accounts"
-          activeCount={activeLoginFacetCount(filters)}
-          panelClassName="w-64 max-h-[min(480px,70dvh)]"
-          onClear={() => onFiltersChange({ ...EMPTY_LOGIN_FILTERS, status: filters.status, search: filters.search })}
-        >
-          {groups
-            .filter((g) => g.options.length > 0)
-            .map((g, i) => (
-              <SidebarFacet key={g.key} label={g.title} resetLabel={g.reset} resetActive={filters[g.key].length === 0} onReset={() => set({ [g.key]: [] } as Partial<LoginFilters>)} first={i === 0}>
-                {g.options.slice(0, 12).map((o) => (
-                  <SidebarFacetOption key={o.value} active={filters[g.key].includes(o.value)} onToggle={() => toggle(g.key, o.value)}>
-                    {g.mark?.(o)}
-                    <span className="min-w-0 truncate">{o.label}</span>
-                    {meta(o.count)}
-                  </SidebarFacetOption>
-                ))}
-              </SidebarFacet>
-            ))}
-        </SidebarFilterPopover>
+        <SidebarFilterButton activeCount={activeLoginFacetCount(filters)} {...facets.triggerProps}>Filter</SidebarFilterButton>
       </SidebarToolbar>
+
+      {/* COM-01: the facets open here, inside the panel under the toolbar. */}
+      <SidebarFacetBlock
+        {...facets.blockProps}
+        label="Filter accounts"
+        activeCount={activeLoginFacetCount(filters)}
+        onClear={() => onFiltersChange({ ...EMPTY_LOGIN_FILTERS, status: filters.status, search: filters.search })}
+      >
+        {groups
+          .filter((g) => g.options.length > 0)
+          .map((g) => (
+            <SidebarInlineFacet
+              key={g.key}
+              label={g.title}
+              values={g.options.map((o) => ({ value: o.value, label: o.label, text: o.label, count: o.count, icon: g.mark?.(o) }))}
+              selected={filters[g.key]}
+              onToggle={(v) => toggle(g.key, v)}
+              onClear={() => set({ [g.key]: [] } as Partial<LoginFilters>)}
+            />
+          ))}
+      </SidebarFacetBlock>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
         {spaces}
-        <SidebarActiveChips className="pt-2">
+        {!facets.open && <SidebarActiveChips className="pt-2">
           {groups.flatMap((g) =>
             filters[g.key].map((v) => {
               const text = `${g.title}: ${label(g.options, v)}`
               return <SidebarActiveChip key={`${g.key}:${v}`} label={text} onRemove={() => toggle(g.key, v)}>{text}</SidebarActiveChip>
             }),
           )}
-        </SidebarActiveChips>
+        </SidebarActiveChips>}
 
         <SidebarSection label="Views" />
         {views.map((v) => {
