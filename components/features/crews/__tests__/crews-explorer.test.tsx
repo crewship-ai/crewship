@@ -60,7 +60,7 @@ describe("CrewsExplorer", () => {
     expect(screen.getByTestId("explorer-count")).toHaveTextContent("1 crew · 1 agent match")
     expect(window.location.search).toBe("?status=needs")
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Remove filter/ }))
     expect(screen.getByTestId("explorer-count")).toHaveTextContent("3 crews · 3 agents")
   })
 
@@ -74,7 +74,7 @@ describe("CrewsExplorer", () => {
     const panel = screen.getByRole("group", { name: "Filter agents" })
     fireEvent.click(within(panel).getByRole("button", { name: /^Lead/ }))
     expect(screen.getAllByRole("button", { name: /^(Ops|Engineering|Quality)$/ }).map((r) => r.getAttribute("aria-label"))).toEqual(["Engineering"])
-    expect(screen.getByRole("button", { name: "Remove filter" }).parentElement).toHaveTextContent("Lead")
+    expect(screen.getByRole("button", { name: /^Remove filter/ }).parentElement).toHaveTextContent("Lead")
     expect(window.location.search).toBe("?role=lead")
   })
 
