@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) valid(schema int, snap []byte, p json.RawMessage) error {
-	if schema != 1 {
+	if !supportedSchema(schema) {
 		return ErrSchema
 	}
 	if len(snap) == 0 || !json.Valid(p) {
@@ -76,4 +76,3 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 }
 
 // Schema admission remains at the initial storage boundary until validators land.
-func supportedSchema(schema int) bool { return schema == 1 }
