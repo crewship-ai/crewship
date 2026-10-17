@@ -2343,6 +2343,69 @@ authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
 
+## Native document availability
+
+`GET /api/v1/documents/status`
+
+Authentication: a current human session or CLI credential and workspace
+membership. Response: `{ "enabled": false }` until the instance is configured
+for documents. Statuses: 200 availability; 400 missing workspace; 401 invalid
+credential; 403 workspace boundary; 500 unavailable storage. Responses are not
+cached. CLI: `crewship doc status`.
+
+## Read a native document
+
+`GET /api/v1/pages/{slug}/document`
+
+Authentication: a current human credential with current document read access;
+scoped CLI credentials need `pages:read`. Response: the confirmed content tree,
+outline, revision, opaque editing epoch and current write capability. Comment
+and resolve capabilities are disabled. The request does not accept a `block_id`
+selector in this release. Statuses: 200 document; 400 unsupported selector;
+401 invalid credential; 403 missing access/scope; 404 unavailable Page/document;
+409 incompatible content; 413 oversized content; 500 storage failure;
+502 invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
+
+## Initialize a native document
+
+`POST /api/v1/pages/{slug}/document/initialize`
+
+Authentication: a current human credential owning an empty Page, with current
+write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
+Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2 or 3)
+and `body`. Schema 3 also requires the original `page_id`. Stage a Page through
+`POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
+human-only opt-in and cannot assign crew ownership. Existing panel Pages retain
+normal validation. Response: first durable initialization state, or the original
+receipt on an exact retry. Always read the document before preparing an edit.
+Statuses: 200 confirmed initialization; 400 invalid request; 401 invalid
+credential; 403 wrong owner/access/scope; 404 unavailable Page; 409 incompatible
+or conflicting initialization; 413 oversized request; 422 invalid content;
+429 capacity limit; 500 storage failure; 502 invalid engine response;
+503 disabled or unavailable service. Responses use `Cache-Control: no-store`.
+CLI: `crewship doc initialize <page-slug> --file <request.json>`.
+
+## Update a native document
+
+`POST /api/v1/pages/{slug}/document/patch`
+
+Authentication: a current human credential with current document write access;
+scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
+one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
+`epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
+uses `kind: "human"` and base64 `update`; schema 3 requires the original
+`page_id`. The service rechecks the exact credential and permission within the
+storage transaction. Response: a receipt for the confirmed revision. Repeating
+the original operation after a lost confirmation returns its receipt without
+another write; revocation still refuses the retry. A stale request is never
+automatically rebased. Statuses: 200 confirmed receipt; 400 invalid request;
+401 invalid credential; 403 missing access/scope; 404 unavailable document;
+409 stale revision/hash/epoch or conflicting operation ID; 413 oversized
+request; 422 invalid content; 429 temporary operation limit; 500 storage failure;
+502 invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
+
 Page read and list responses include `has_document`, which identifies saved native
 document content. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.

@@ -499,3 +499,8 @@ func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
 		r.documentStoreOptions = documents.Options{MaxDocuments: c.MaxDocumentsPerWorkspace, MaxCommits: c.MaxOperationsPerWindow, ReceiptWindow: time.Duration(c.OperationWindowSeconds) * time.Second}
 	}
 }
+
+// WithDocumentService connects the public Pages bridge to a private engine.
+func WithDocumentService(socket string) RouterOption {
+	return func(r *Router) { r.documentsServiceSocket = socket }
+}
