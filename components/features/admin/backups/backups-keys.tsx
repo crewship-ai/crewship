@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Bell, BellRing, KeyRound, LockKeyhole } from "lucide-react"
 
 import { cn } from "@/lib/utils"

@@ -7,7 +7,7 @@ import * as React from "react"
 import { CreateSurface, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { CredentialForm, type CredentialFormValues, type CredentialType } from "./credential-form"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { CredentialExtraFieldsEditor, type EditableCredentialField } from "./credential-extra-fields-editor"
 
 export interface CredentialData {

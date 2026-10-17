@@ -16,7 +16,7 @@ import { RestrictedIssues } from "@/components/features/issues/restricted-issues
 import { useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ChevronRight, Link2 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 import { parseReturnTo } from "@/lib/return-to"

@@ -1,5 +1,5 @@
 import React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { RefreshCw, AlertTriangle, ChevronRight, ExternalLink, Container, ScrollText, Wrench, Trash2, Loader2 } from "lucide-react"
 import { StatusDot } from "@/components/ui/status-badge"
 import { StatusPill } from "@/components/ui/status-pill"

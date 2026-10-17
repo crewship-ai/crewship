@@ -7,7 +7,7 @@ import {
   Card, CardContent, CardHeader,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewMCPServer {

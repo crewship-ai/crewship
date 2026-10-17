@@ -8,7 +8,7 @@ import {
   AlertTriangle, Archive, ArrowUpRight, Check, CheckCircle2, Clock3,
   ExternalLink, ShieldAlert, X,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { InboxMessageSurface, messageSection, messageDivider } from "@/components/features/inbox/inbox-message-surface"
 import { InboxDetail } from "@/components/features/inbox/inbox-detail"

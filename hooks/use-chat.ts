@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 import { requireApiPathSegment } from "@/lib/api-path-segment"

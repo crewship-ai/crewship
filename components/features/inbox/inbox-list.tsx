@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"

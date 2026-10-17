@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AlertTriangle } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useAbilities } from "@/hooks/use-abilities"

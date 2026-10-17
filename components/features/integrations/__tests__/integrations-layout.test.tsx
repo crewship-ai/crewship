@@ -221,7 +221,7 @@ describe("Integrations workspace layout", () => {
       fireEvent.click(screen.getByRole("button", { name: "Delete team@example.test" }))
       fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete connection" }))
     }
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(...(action === "test" ? ["Test send failed", { description: undefined }] : [action === "toggle" ? "Failed to update the connection" : "Failed to delete the connection"])))
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(...(action === "test" ? ["Test send failed", { duration: Infinity, description: undefined }] : [action === "toggle" ? "Failed to update the connection" : "Failed to delete the connection", { duration: Infinity }])))
     expect(screen.getByTitle("Open team@example.test")).toBeInTheDocument()
   })
   it("derives recent delivery counts and failure status from the full channel history", async () => {

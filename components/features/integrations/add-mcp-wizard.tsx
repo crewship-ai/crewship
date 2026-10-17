@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { TrustTierBadge, type TrustTier } from "./trust-tier-badge"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"

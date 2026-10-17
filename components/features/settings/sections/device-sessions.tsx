@@ -3,7 +3,7 @@
 import { StatusPill } from "@/components/ui/status-pill"
 import { useCallback, useEffect, useState } from "react"
 import { Laptop, LogOut, Smartphone, Terminal, HelpCircle } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"

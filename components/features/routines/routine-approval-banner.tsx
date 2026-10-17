@@ -14,7 +14,7 @@ import {
 } from "@/components/layout/create-surface"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { PendingWaitpoint } from "@/hooks/use-pending-approval"
 
 // RoutineApprovalBanner — the "this run is parked on YOU" strip. Primary

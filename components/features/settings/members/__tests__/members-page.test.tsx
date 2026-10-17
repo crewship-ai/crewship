@@ -342,7 +342,7 @@ describe("Members — one person", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Change role" }))
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot modify this member"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot modify this member", { duration: Infinity }))
   })
 
   it("lets a MANAGER change roles below them but never capabilities", async () => {

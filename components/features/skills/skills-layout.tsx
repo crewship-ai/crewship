@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { ChevronLeft, ChevronRight, Library, PanelLeftOpen, Sparkles, Upload } from "lucide-react"
 
 import { ImportSkillDialog } from "@/components/skills/import-dialog"

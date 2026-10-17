@@ -80,6 +80,6 @@ it("a failed fetch says why and stays on the list", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "From off-site storage…" }))
   const row = (await screen.findByText(KEY)).closest("tr") as HTMLElement
   fireEvent.click(within(row).getByRole("button", { name: "Fetch" }))
-  await waitFor(() => expect(h.toast.error).toHaveBeenCalledWith(expect.stringContaining("environment layer")), { timeout: 5000 })
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledWith(expect.stringContaining("environment layer"), { duration: Infinity }), { timeout: 5000 })
   expect(screen.queryByRole("radiogroup", { name: "Restore into" })).toBeNull()
 })

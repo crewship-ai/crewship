@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 

@@ -71,7 +71,7 @@ describe("setTaskStatus", () => {
     expect(toastSuccess).not.toHaveBeenCalled()
     // The server's own words — it is the only thing that separates "this task
     // is busy" from "you may not touch this crew".
-    expect(toastError).toHaveBeenCalledWith("task is owned by a run that is still executing")
+    expect(toastError).toHaveBeenCalledWith("task is owned by a run that is still executing", { duration: Infinity })
   })
 
   it("does not claim the task was skipped when the server refuses it", async () => {
@@ -80,7 +80,7 @@ describe("setTaskStatus", () => {
     await expect(setTaskStatus("skip", ref)).resolves.toBe(false)
 
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith("you do not have write access to this crew")
+    expect(toastError).toHaveBeenCalledWith("you do not have write access to this crew", { duration: Infinity })
   })
 
   it("names the status when the refusal carries no readable body", async () => {
@@ -90,7 +90,7 @@ describe("setTaskStatus", () => {
     await expect(setTaskStatus("retry", ref)).resolves.toBe(false)
 
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith(expect.stringContaining("502"))
+    expect(toastError).toHaveBeenCalledWith(expect.stringContaining("502"), { duration: Infinity })
   })
 
   it("does not claim success when the request never reaches the server", async () => {
@@ -99,7 +99,7 @@ describe("setTaskStatus", () => {
     await expect(setTaskStatus("skip", ref)).resolves.toBe(false)
 
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith("Failed to fetch")
+    expect(toastError).toHaveBeenCalledWith("Failed to fetch", { duration: Infinity })
   })
 })
 

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Copy, Link2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"

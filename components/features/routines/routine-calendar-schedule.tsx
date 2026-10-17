@@ -3,7 +3,7 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { useEffect, useId, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { CalendarClock } from "lucide-react"

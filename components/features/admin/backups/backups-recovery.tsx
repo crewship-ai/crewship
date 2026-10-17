@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   Archive, Cloud, FlaskConical, History, KeyRound, ListChecks, ListTodo, MapPin, PauseCircle, ShieldCheck, Terminal, TriangleAlert, CircleCheck,
 } from "lucide-react"

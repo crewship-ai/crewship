@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   Copy,
   Check,

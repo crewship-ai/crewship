@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Wallet, Pencil } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Card } from "./_shared"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"

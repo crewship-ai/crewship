@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { CircleCheck, Loader2 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { registerNavigationGuard } from "@/hooks/use-navigation-guard"

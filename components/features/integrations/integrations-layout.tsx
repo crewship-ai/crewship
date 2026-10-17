@@ -19,7 +19,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"

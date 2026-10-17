@@ -23,7 +23,7 @@
 // this off here" look identical without it.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { adminFetch } from "@/lib/admin-api"
 import {

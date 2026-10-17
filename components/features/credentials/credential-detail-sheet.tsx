@@ -31,7 +31,7 @@ import {
   TerminalSquare,
   UserCircle2,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"

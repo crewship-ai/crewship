@@ -14,7 +14,7 @@
 // than leaving the dialog open over a stale generation.
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import {
