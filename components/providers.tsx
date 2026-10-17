@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { AuthProvider } from "@/hooks/use-auth"
 import { Toaster } from "@/components/ui/sonner"
+import { ConfirmHost } from "@/components/ui/confirm-host"
 import { useMotionChoice } from "@/hooks/use-appearance"
 import { DEFAULT_THEME, motionConfigValue } from "@/lib/theme/appearance"
 
@@ -52,6 +53,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <AuthProvider>
           {children}
           <Toaster />
+          <ConfirmHost />
         </AuthProvider>
       </MotionConfig>
     </QueryClientProvider>

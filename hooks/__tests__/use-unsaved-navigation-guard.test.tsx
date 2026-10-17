@@ -1,7 +1,8 @@
-import { act, cleanup, renderHook } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useUnsavedNavigationGuard } from "../use-unsaved-navigation-guard"
 import { navigationAllowed } from "../use-navigation-guard"
+import { ConfirmHost } from "@/components/ui/confirm-host"
 
 const router = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => router }))
@@ -97,5 +98,50 @@ describe("unsaved editor navigation", () => {
       act(() => { window.dispatchEvent(new PopStateEvent("popstate")) })
       expect(later).toHaveBeenCalledTimes(2)
     } finally { window.removeEventListener("popstate", later) }
+  })
+
+  describe("inside the application shell", () => {
+    it("asks in the page, not with the browser's confirm, and retries the navigation on Leave", async () => {
+      render(<ConfirmHost />)
+      renderHook(() => useUnsavedNavigationGuard(true, "Discard draft?"))
+      const retry = vi.fn()
+      let allowed = true
+      act(() => { allowed = navigationAllowed(retry) })
+      expect(allowed).toBe(false)
+      const dialog = await screen.findByRole("alertdialog")
+      expect(dialog).toHaveTextContent("Discard draft?")
+      expect(window.confirm).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: "Leave" }))
+      await waitFor(() => expect(retry).toHaveBeenCalledOnce())
+    })
+
+    it("stays on the page when the person keeps editing", async () => {
+      render(<ConfirmHost />)
+      renderHook(() => useUnsavedNavigationGuard(true, "Discard draft?"))
+      const retry = vi.fn()
+      act(() => { navigationAllowed(retry) })
+      fireEvent.click(await screen.findByRole("button", { name: "Keep editing" }))
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+      expect(retry).not.toHaveBeenCalled()
+    })
+
+    it("refuses Back, then repeats the same traversal once Leave is chosen", async () => {
+      render(<ConfirmHost />)
+      renderHook(() => useUnsavedNavigationGuard(true, "Discard draft?"))
+      const go = vi.spyOn(window.history, "go").mockImplementation(() => {})
+      // The dispatcher has put the editor's entry (index 3) back by the time
+      // the person answers; the refused traversal was to index 1.
+      window.history.replaceState({ __crewshipHistoryIndex: 1 }, "", "/other")
+      const guard = [...window.__crewshipHistoryGuards!][0]
+      let allowed = true
+      act(() => { allowed = guard(new PopStateEvent("popstate", { state: { __crewshipHistoryIndex: 1 } })) })
+      expect(allowed).toBe(false)
+      window.history.replaceState({ __crewshipHistoryIndex: 3 }, "", "/editor?draft=1#start")
+      fireEvent.click(await screen.findByRole("button", { name: "Leave" }))
+      await waitFor(() => expect(go).toHaveBeenCalledWith(-2))
+      // The repeated traversal is not asked about a second time.
+      window.history.replaceState({ __crewshipHistoryIndex: 1 }, "", "/other")
+      expect(guard(new PopStateEvent("popstate", { state: { __crewshipHistoryIndex: 1 } }))).toBe(true)
+    })
   })
 })
