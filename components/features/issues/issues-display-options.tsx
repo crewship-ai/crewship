@@ -4,6 +4,7 @@ import { SlidersHorizontal } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Segmented } from "@/components/ui/segmented"
 import { SubBarSecondary } from "@/components/layout/sub-bar"
 import {
   GROUP_OPTIONS,
@@ -14,44 +15,6 @@ import {
   type RowField,
   type RowFields,
 } from "./issues-view-model"
-
-/** A small segmented choice. One of the options is always on. */
-export function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-  className,
-}: {
-  label: string
-  options: { id: T; label: React.ReactNode; title?: string }[]
-  value: T
-  onChange: (v: T) => void
-  className?: string
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className={cn("inline-flex shrink-0 rounded-lg border border-border bg-surface-subtle p-0.5", className)}>
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          role="radio"
-          aria-checked={value === o.id}
-          title={o.title}
-          onClick={() => onChange(o.id)}
-          className={cn(
-            // kit-tap: 44 px under a coarse pointer. The shell's touch rule
-            // skips role="radio" (meant for drawn radios), so opt in here.
-            "kit-tap inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-label transition-colors",
-            value === o.id ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 /**
  * Display options (⇧V): how the list groups and orders, and which fields a
@@ -92,12 +55,12 @@ export function IssuesDisplayOptions({
         {!board && (
           <div className="grid gap-1 px-1.5 py-1">
             <span className="text-label text-foreground">Group by</span>
-            <Segmented label="Group by" options={GROUP_OPTIONS} value={groupBy} onChange={onGroupBy} className="flex [&>button]:flex-1 [&>button]:justify-center" />
+            <Segmented ariaLabel="Group by" size="xs" fill options={GROUP_OPTIONS.map((o) => ({ value: o.id, label: o.label }))} value={groupBy} onChange={onGroupBy} />
           </div>
         )}
         <div className="grid gap-1 px-1.5 py-1">
           <span className="text-label text-foreground">Order</span>
-          <Segmented label="Order" options={ORDER_OPTIONS} value={orderBy} onChange={onOrderBy} className="flex [&>button]:flex-1 [&>button]:justify-center [&>button]:px-1" />
+          <Segmented ariaLabel="Order" size="xs" fill options={ORDER_OPTIONS.map((o) => ({ value: o.id, label: o.label }))} value={orderBy} onChange={onOrderBy} className="[&>button]:px-1" />
         </div>
         {!board && (
           <>

@@ -1,30 +1,42 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
-import { Segmented } from "../issues-display-options"
+import * as displayOptions from "../issues-display-options"
+import { IssuesDisplayOptions } from "../issues-display-options"
+import { DEFAULT_ROW_FIELDS } from "../issues-view-model"
 
-describe("Segmented", () => {
-  const options = [
-    { id: "list" as const, label: "List" },
-    { id: "board" as const, label: "Board" },
-  ]
+// COM-02 (#3481): Issues uses the kit's one Segmented control
+// (components/ui/segmented.tsx) instead of its own copy — one radio group
+// where the arrow keys move and select and only the chosen segment is in
+// the tab order. Its touch target and look are the kit's, tested there.
 
-  it("is a radio group with one option checked", () => {
-    const onChange = vi.fn()
-    render(<Segmented label="View" options={options} value="list" onChange={onChange} />)
-    expect(screen.getByRole("radiogroup", { name: "View" })).toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(screen.getByRole("radio", { name: "Board" }))
-    expect(onChange).toHaveBeenCalledWith("board")
+describe("Issues Display options use the kit Segmented", () => {
+  it("the local Segmented copy is gone", () => {
+    expect("Segmented" in displayOptions).toBe(false)
   })
 
-  // The shell's coarse-pointer rule grows buttons to 44 px but leaves
-  // role="radio" at its drawn size (it is meant for drawn radios). These are
-  // buttons a finger presses in the top bar, so they opt into the kit's
-  // touch target explicitly (the Issues List | Board switch measured 21 px
-  // at 1024 px with a coarse pointer).
-  it("every option carries the kit touch target", () => {
-    render(<Segmented label="View" options={options} value="list" onChange={() => {}} />)
-    for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveClass("kit-tap")
+  it("Group by and Order are kit segmented groups: arrows move and select, one tab stop", () => {
+    const onGroupBy = vi.fn()
+    render(
+      <IssuesDisplayOptions
+        open
+        onOpenChange={() => {}}
+        groupBy="status"
+        onGroupBy={onGroupBy}
+        orderBy="manual"
+        onOrderBy={() => {}}
+        fields={DEFAULT_ROW_FIELDS}
+        onFields={() => {}}
+      />,
+    )
+    const group = screen.getByRole("radiogroup", { name: "Group by" })
+    expect(group).toHaveAttribute("data-slot", "segmented")
+    expect(screen.getByRole("radiogroup", { name: "Order" })).toHaveAttribute("data-slot", "segmented")
+    const radios = within(group).getAllByRole("radio")
+    expect(radios.filter((r) => r.tabIndex === 0)).toHaveLength(1)
+    const status = within(group).getByRole("radio", { name: "Status" })
+    expect(status).toHaveAttribute("aria-checked", "true")
+    fireEvent.keyDown(status, { key: "ArrowRight" })
+    expect(onGroupBy).toHaveBeenCalledWith("project")
   })
 })

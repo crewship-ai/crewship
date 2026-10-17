@@ -9,7 +9,7 @@
 // Artifacts sources under Files.
 
 import * as React from "react"
-import { ChevronRight, Download, FileText, Folder, FolderKanban, Plus, Trash2, Users } from "lucide-react"
+import { ChevronRight, Download, FileText, Folder, FolderKanban, MoreHorizontal, Plus, Trash2, Upload, Users } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -18,6 +18,8 @@ import { DetailCard } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
 import { TabBar } from "@/components/ui/tab-bar"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
@@ -52,6 +54,8 @@ interface Props {
   onTabChange?: (tab: ProjectTab) => void
   /** Needed by Files and Tree, which read their own endpoints. */
   workspaceId?: string
+  /** Files: Upload and Retire (POST / DELETE …/projects/{id}/files). */
+  canWriteFiles?: boolean
   /** A row or tree node was picked. Absent, rows link to /issues/<id>. */
   onOpenIssue?: (issue: Mission) => void
   onNewIssue?: () => void
@@ -72,6 +76,7 @@ export function ProjectCardDetail({
   tab = "overview",
   onTabChange,
   workspaceId,
+  canWriteFiles = false,
   onOpenIssue,
   onNewIssue,
   milestones,
@@ -110,7 +115,7 @@ export function ProjectCardDetail({
         )}
         {tab === "tree" && workspaceId && <ProjectTree workspaceId={workspaceId} project={project} issues={issues} onOpen={open} />}
         {tab === "issues" && <ProjectIssues issues={issues} onOpen={open} onNewIssue={onNewIssue} />}
-        {tab === "files" && workspaceId && <ProjectFiles workspaceId={workspaceId} projectId={project.id} />}
+        {tab === "files" && workspaceId && <ProjectFiles workspaceId={workspaceId} projectId={project.id} canWrite={canWriteFiles} />}
         {tab === "settings" && <ProjectSettings project={project} edit={edit} share={share} onRequestDelete={onRequestDelete} />}
       </div>
     </div>
@@ -500,13 +505,87 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ProjectFiles({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+/** The server's limit per project file (internal/access MaxProjectFileBytes). */
+const MAX_PROJECT_FILE_BYTES = 1024 * 1024
+
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const url = String(r.result ?? "")
+      resolve(url.slice(url.indexOf(",") + 1))
+    }
+    r.onerror = () => reject(r.error ?? new Error("The file could not be read"))
+    r.readAsDataURL(file)
+  })
+}
+
+function ProjectFiles({ workspaceId, projectId, canWrite = false }: { workspaceId: string; projectId: string; canWrite?: boolean }) {
   const [state, setState] = React.useState<{ files: ProjectFileVersion[] | null; error: string | null }>({ files: null, error: null })
   const [reload, setReload] = React.useState(0)
+  const [writeError, setWriteError] = React.useState<string | null>(null)
+  const [uploading, setUploading] = React.useState(false)
+  const [retiring, setRetiring] = React.useState<ProjectFileVersion | null>(null)
+  const fileInput = React.useRef<HTMLInputElement>(null)
+  const inputId = React.useId()
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/files`
+
+  // A name already in the list is that file's next revision; anything else
+  // is a new file at revision 0. The server refuses a stale revision (409).
+  const upload = async (file: File) => {
+    setWriteError(null)
+    if (file.size > MAX_PROJECT_FILE_BYTES) {
+      setWriteError(`${file.name} is larger than 1 MB, the limit for a project file. Bigger outputs belong in Artifacts.`)
+      return
+    }
+    if (file.name.startsWith(".")) {
+      setWriteError("A project file name can't start with a dot.")
+      return
+    }
+    const existing = state.files?.find((f) => f.name === file.name)
+    setUploading(true)
+    try {
+      const content = await readBase64(file)
+      const body = existing
+        ? { file_id: existing.file_id, name: file.name, expected_revision: existing.revision, content_base64: content }
+        : { name: file.name, expected_revision: 0, content_base64: content }
+      const res = await apiFetch(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      if (!res.ok) {
+        setWriteError(
+          res.status === 409
+            ? `${file.name} was not saved: it changed since you loaded it, or the project is full (256 files). Reload and try again.`
+            : `${file.name} was not saved (HTTP ${res.status}).`,
+        )
+        return
+      }
+      setReload((n) => n + 1)
+    } catch (e) {
+      setWriteError(e instanceof Error ? e.message : "Could not reach the server")
+    } finally {
+      setUploading(false)
+      if (fileInput.current) fileInput.current.value = ""
+    }
+  }
+
+  const retire = async (f: ProjectFileVersion) => {
+    setWriteError(null)
+    const res = await apiFetch(`${base}/${encodeURIComponent(f.file_id)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: f.revision }),
+    })
+    if (!res.ok) {
+      setWriteError(
+        res.status === 409 ? `${f.name} changed since you loaded it. Reload and try again.` : `${f.name} was not retired (HTTP ${res.status}).`,
+      )
+      return
+    }
+    setReload((n) => n + 1)
+  }
+
   React.useEffect(() => {
     let cancelled = false
-    setState({ files: null, error: null })
+    setState((s) => (s.files ? s : { files: null, error: null }))
     apiFetch(base)
       .then(async (r) => {
         if (!r.ok) throw new Error(`Project files could not load (HTTP ${r.status})`)
@@ -532,9 +611,37 @@ function ProjectFiles({ workspaceId, projectId }: { workspaceId: string; project
   if (state.files === null) return <p className="px-1 py-3 text-label text-muted-foreground">Loading project files…</p>
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-label text-muted-foreground">
-        Project files live on the server and are versioned; every run reads the exact revision it started with.
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 flex-1 text-label text-muted-foreground">
+          Project files live on the server and are versioned; every run reads the exact revision it started with. Max 1 MB per file.
+        </p>
+        {canWrite && (
+          <>
+            <label htmlFor={inputId} className="sr-only">Choose a file to upload</label>
+            <input
+              id={inputId}
+              ref={fileInput}
+              type="file"
+              className="sr-only"
+              tabIndex={-1}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void upload(f)
+              }}
+            />
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()} className="gap-1.5">
+              <Upload className="size-3.5" aria-hidden />
+              {uploading ? "Uploading…" : "Upload file"}
+            </Button>
+          </>
+        )}
+      </div>
+      {writeError && (
+        <div role="alert" className="flex items-center gap-3 rounded-card border border-destructive/30 bg-destructive/10 px-3 py-2 text-label text-destructive">
+          <span className="flex-1">{writeError}</span>
+          <Button size="xs" variant="ghost" onClick={() => { setWriteError(null); setReload((n) => n + 1) }}>Reload</Button>
+        </div>
+      )}
       {state.files.length === 0 ? (
         <div className="rounded-card border border-dashed border-border px-6 py-8 text-center text-label text-muted-foreground">
           No project files yet.
@@ -564,17 +671,48 @@ function ProjectFiles({ workspaceId, projectId }: { workspaceId: string; project
                   <td className="px-3 py-2 font-mono text-label text-muted-foreground max-sm:hidden">{formatBytes(f.size_bytes)}</td>
                   <td className="px-3 py-2 text-label text-muted-foreground max-sm:hidden">{relTime(f.created_at)}</td>
                   <td className="px-2 py-1">
-                    <Button asChild variant="ghost" size="icon-xs">
-                      <a href={`${base}/${encodeURIComponent(f.version_id)}/download`} aria-label={`Download ${f.name}`} download>
-                        <Download className="size-3.5" aria-hidden />
-                      </a>
-                    </Button>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <Button asChild variant="ghost" size="icon-xs">
+                        <a href={`${base}/${encodeURIComponent(f.version_id)}/download`} aria-label={`Download ${f.name}`} download>
+                          <Download className="size-3.5" aria-hidden />
+                        </a>
+                      </Button>
+                      {canWrite && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon-xs" aria-label={`${f.name} options`}>
+                              <MoreHorizontal className="size-3.5" aria-hidden />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem variant="destructive" onSelect={() => setRetiring(f)}>
+                              <Trash2 className="size-3.5" aria-hidden /> Retire file…
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {retiring && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => { if (!o) setRetiring(null) }}
+          title={`Retire ${retiring.name}?`}
+          description="New runs no longer see it. Runs that already started keep the revision they read."
+          destructive
+          confirmLabel="Retire file"
+          onConfirm={async () => {
+            const f = retiring
+            setRetiring(null)
+            await retire(f)
+          }}
+        />
       )}
     </div>
   )

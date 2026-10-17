@@ -62,6 +62,18 @@ describe("IssuePeek", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
+  it("focuses the content on open, so Enter opens the full page and never presses Previous", async () => {
+    const onPrev = vi.fn()
+    const onNext = vi.fn()
+    const onOpenFull = vi.fn()
+    render(<IssuePeek open identifier="ENG-4" row={row} workspaceId="ws" onOpenChange={() => {}} onPrev={onPrev} onNext={onNext} onOpenFull={onOpenFull} />)
+    const sheet = screen.getByRole("dialog")
+    await waitFor(() => expect(document.activeElement).toBe(sheet))
+    fireEvent.keyDown(document.activeElement!, { key: "Enter" })
+    expect(onOpenFull).toHaveBeenCalledTimes(1)
+    expect(onPrev).not.toHaveBeenCalled()
+  })
+
   it("says the issue is gone when the server does not know it", async () => {
     apiFetch.mockResolvedValue(json(404, { detail: "Issue not found" }))
     render(<IssuePeek open identifier="ENG-404" row={null} workspaceId="ws" onOpenChange={() => {}} onOpenFull={() => {}} />)

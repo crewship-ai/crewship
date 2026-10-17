@@ -59,7 +59,7 @@ export function issueRunStatus(run: Pick<IssueRun, "status" | "outcome" | "error
   return { label: "Outcome not reported", tone: "muted" }
 }
 
-function runTitle(issue: Mission, run: IssueRun): string {
+export function runTitle(issue: Mission, run: Pick<IssueRun, "task">): string {
   const task = run.task?.trim()
   // The runs API also returns complete model prompts in `task`. Keep them
   // on the run's technical surface instead of rendering prompt scaffolding.
@@ -122,6 +122,20 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
         ) : undefined
       }
     >
+      <IssueRunsList issue={issue} runs={runs} unavailable={unavailable} />
+    </DetailCard>
+  )
+}
+
+/**
+ * The rows of the runs, without a card around them. The issue page shows
+ * them as the Runs segment of its Timeline (v67 I-FULL); IssueRunsCard wraps
+ * the same rows for hosts that want a card.
+ */
+export function IssueRunsList({ issue, runs, unavailable = false }: { issue: Mission; runs: IssueRun[]; unavailable?: boolean }) {
+  const links = issueRunLinks(issue)
+  return (
+    <>
       {unavailable && runs.length === 0 ? (
         <InlineEmpty icon={Play} text="Could not load the runs — try again above." className="border-destructive/40 text-destructive" />
       ) : runs.length === 0 ? (
@@ -191,7 +205,7 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
           </div>
         </div>
       )}
-    </DetailCard>
+    </>
   )
 }
 

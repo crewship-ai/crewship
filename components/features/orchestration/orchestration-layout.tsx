@@ -41,7 +41,8 @@ import { parseSavedViews, issueViews } from "@/lib/saved-views"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuePeek } from "@/components/features/issues/issue-peek"
-import { IssuesDisplayOptions, Segmented } from "@/components/features/issues/issues-display-options"
+import { IssuesDisplayOptions } from "@/components/features/issues/issues-display-options"
+import { Segmented } from "@/components/ui/segmented"
 import {
   DEFAULT_ROW_FIELDS,
   PRIORITY_TEXT,
@@ -60,6 +61,7 @@ import { CreateIssueModal } from "@/components/features/orchestration/create-iss
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 import { IssuesPanel, panelKeyOrder, selectionLabel, type IssuesPanelSelection } from "@/components/features/orchestration/issues-panel"
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
+import { arrivalFromParams } from "@/components/features/orchestration/issues-page-links"
 
 
 export interface OrchestrationLayoutProps {
@@ -254,16 +256,34 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
   // The dashboard's "New issue" lands here with ?create=1. Consumed once:
   // without the strip-back a reload reopens the composer forever (#2187).
+  // The Issues panel on /issues/<id> links here with one-time keys
+  // (issues-page-links.ts): ?view=, ?saved=, ?q= and ?create=project. Read
+  // once and stripped, like ?create=1.
+  const [arrivalSaved, setArrivalSaved] = useState<string | null>(null)
   useEffect(() => {
     if (typeof window === "undefined") return
     const search = new URLSearchParams(window.location.search)
+    const arrival = arrivalFromParams(search)
+    const rest = new URLSearchParams(arrival.rest)
     if (search.get("create") === "1") {
       setShowCreateIssue(true)
-      search.delete("create")
-      const query = search.toString()
+      rest.delete("create")
+    }
+    if (arrival.quick) setQuick(arrival.quick)
+    if (arrival.search) setSearch(arrival.search)
+    if (arrival.savedId) setArrivalSaved(arrival.savedId)
+    if (arrival.createProject) setShowCreateProject(true)
+    const query = rest.toString()
+    if (query !== search.toString()) {
       window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`)
     }
   }, [])
+  // A saved view applies once the list of them has answered.
+  useEffect(() => {
+    if (!arrivalSaved || !savedViews.some((v) => v.id === arrivalSaved)) return
+    setArrivalSaved(null)
+    select({ kind: "saved", id: arrivalSaved })
+  }, [arrivalSaved, savedViews, select])
 
   const fullHref = useCallback((issue: Pick<Mission, "identifier" | "id">) => {
     const here = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search)
@@ -392,12 +412,13 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   ) : (
     <>
       <Segmented
-        label="View"
+        ariaLabel="View"
+        size="xs"
         value={viewMode}
         onChange={setViewMode}
         options={[
-          { id: "list", label: <><List className="size-3.5" aria-hidden />List</> },
-          { id: "board", label: <><Kanban className="size-3.5" aria-hidden />Board</> },
+          { value: "list", label: "List", icon: List },
+          { value: "board", label: "Board", icon: Kanban },
         ]}
       />
       <IssuesDisplayOptions

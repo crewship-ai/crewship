@@ -93,9 +93,9 @@ describe("AddRelationPicker — Enter confirms an IME candidate before it means 
   it("does not add the relation mid-composition", async () => {
     const edit = issueEdit()
     render(<AddRelationPicker edit={edit} />)
-    fireEvent.click(screen.getByRole("button", { name: /add link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add relation/i }))
     const menu = screen.getByRole("dialog")
-    const box = within(menu).getByLabelText(/target issue identifier/i)
+    const box = within(menu).getByLabelText(/^issue$/i)
 
     fireEvent.change(box, { target: { value: "EN" } })
     fireEvent.keyDown(box, { key: "Enter", isComposing: true })

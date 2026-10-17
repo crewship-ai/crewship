@@ -153,6 +153,83 @@ describe("Project page — Issues and Tree", () => {
   })
 })
 
+describe("Project page — Files: upload and retire (ISS-05)", () => {
+  const calls = (method: string) => h.api.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method === method)
+
+  function chooseFile(file: File) {
+    const input = screen.getByLabelText("Choose a file to upload") as HTMLInputElement
+    fireEvent.change(input, { target: { files: [file] } })
+  }
+
+  it("Upload file posts a new file as base64 at revision 0 and reloads the list", async () => {
+    renderPage({ tab: "files" })
+    await screen.findByText("plan.md")
+    const gets = h.api.mock.calls.filter((c) => String(c[0]).endsWith("/files") && !(c[1] as RequestInit | undefined)?.method).length
+    expect(screen.getByRole("button", { name: "Upload file" })).toBeInTheDocument()
+    chooseFile(new File(["hello"], "notes.md", { type: "text/markdown" }))
+    await waitFor(() => expect(calls("POST")).toHaveLength(1))
+    const [url, init] = calls("POST")[0] as [string, RequestInit]
+    expect(url).toBe("/api/v1/workspaces/ws1/projects/p1/files")
+    expect(JSON.parse(String(init.body))).toEqual({ name: "notes.md", expected_revision: 0, content_base64: btoa("hello") })
+    await waitFor(() =>
+      expect(h.api.mock.calls.filter((c) => String(c[0]).endsWith("/files") && !(c[1] as RequestInit | undefined)?.method).length).toBeGreaterThan(gets),
+    )
+  })
+
+  it("a file named like an existing one is sent as that file's next revision", async () => {
+    renderPage({ tab: "files" })
+    await screen.findByText("plan.md")
+    chooseFile(new File(["v6"], "plan.md"))
+    await waitFor(() => expect(calls("POST")).toHaveLength(1))
+    expect(JSON.parse(String((calls("POST")[0][1] as RequestInit).body))).toEqual({
+      file_id: "f1", name: "plan.md", expected_revision: 5, content_base64: btoa("v6"),
+    })
+  })
+
+  it("a file over 1 MB is refused before anything is sent", async () => {
+    renderPage({ tab: "files" })
+    await screen.findByText("plan.md")
+    chooseFile(new File([new Uint8Array(1024 * 1024 + 1)], "big.bin"))
+    expect(await screen.findByRole("alert")).toHaveTextContent("big.bin is larger than 1 MB")
+    expect(calls("POST")).toHaveLength(0)
+  })
+
+  it("a refused upload (409) says why and keeps the list", async () => {
+    const base = h.api.getMockImplementation()!
+    h.api.mockImplementation(async (url: string, init?: RequestInit) =>
+      init?.method === "POST" ? new Response(JSON.stringify({ error: "Project file revision or capacity conflict" }), { status: 409 }) : base(url, init),
+    )
+    renderPage({ tab: "files" })
+    await screen.findByText("plan.md")
+    chooseFile(new File(["x"], "plan.md"))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/changed since you loaded it, or the project is full/)
+    expect(screen.getByText("plan.md")).toBeInTheDocument()
+  })
+
+  it("Retire asks first, then DELETEs the file with the revision it read", async () => {
+    renderPage({ tab: "files" })
+    await screen.findByText("plan.md")
+    fireEvent.keyDown(screen.getByRole("button", { name: "plan.md options" }), { key: "Enter" })
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Retire/ }))
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Retire plan.md?")
+    expect(calls("DELETE")).toHaveLength(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retire file" }))
+    await waitFor(() => expect(calls("DELETE")).toHaveLength(1))
+    const [url, init] = calls("DELETE")[0] as [string, RequestInit]
+    expect(url).toBe("/api/v1/workspaces/ws1/projects/p1/files/f1")
+    expect(JSON.parse(String(init.body))).toEqual({ expected_revision: 5 })
+  })
+
+  it("a reader who cannot edit the project sees neither Upload nor Retire", async () => {
+    renderPage({ tab: "files", editable: false })
+    await screen.findByText("plan.md")
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "plan.md options" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Download plan.md" })).toBeInTheDocument()
+  })
+})
+
 describe("Project page — Settings", () => {
   it("holds the properties, Share under Access, and no Archive (no backend)", () => {
     renderPage({ tab: "settings" })

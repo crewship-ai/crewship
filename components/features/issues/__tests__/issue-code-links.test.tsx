@@ -191,6 +191,19 @@ describe("IssueCodeLinksCard — attaching", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
+  it("is a titled popover at the field: URL, the credential it uses, Cancel and Attach", () => {
+    const edit = editStub()
+    render(<IssueCodeLinksCard links={[]} edit={edit} />)
+    const trigger = screen.getByRole("button", { name: /attach a pull request/i })
+    expect(trigger).toHaveTextContent("Attach PR URL")
+    const menu = openAttach()
+    expect(within(menu).getByRole("heading", { name: "Attach a pull request" })).toBeInTheDocument()
+    expect(within(menu).getByText(/uses your stored github or gitlab credential to read its state/i)).toBeInTheDocument()
+    fireEvent.click(within(menu).getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(edit.attach).not.toHaveBeenCalled()
+  })
+
   it("submits on Enter", async () => {
     const edit = editStub()
     render(<IssueCodeLinksCard links={[]} edit={edit} />)

@@ -44,9 +44,10 @@ import { isImeComposing } from "@/lib/ime"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
-import { ISSUE_STATUSES, ALL_PRIORITIES, RELATION_TYPE_OPTIONS } from "@/components/features/issues/issue-constants"
+import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
 import { getCrewDotColor } from "@/lib/entities"
 import type {
   IssueLabel,
@@ -63,6 +64,13 @@ export interface PickableAgent {
   id: string
   name: string
   slug?: string
+}
+
+/** An issue the Add relation picker can point at. */
+export interface PickableIssue {
+  identifier: string
+  title: string
+  status?: MissionStatus
 }
 
 /** A routine that can be bound to an issue. */
@@ -97,6 +105,14 @@ export interface IssueCardEdit {
   /** Creates a workspace label and attaches it in one gesture. */
   createLabel?: (name: string) => Promise<void>
   addRelation: (targetIdentifier: string, type: RelationType) => Promise<boolean>
+  /**
+   * Workspace people the Owner can be. Absent, Owner renders as text: the
+   * owner write (PATCH assignee_type "user") is only offered where the host
+   * can stage and send it (the issue page), not in embeds.
+   */
+  people?: { id: string; name: string }[]
+  /** Finds issues for the Add relation picker. Absent, the identifier is typed. */
+  searchIssues?: (query: string) => Promise<PickableIssue[]>
   removeRelation: (relationId: string) => Promise<void>
   /** Fires the bound routine now. Absent when nothing is bound. */
   runRoutine?: () => Promise<void>
@@ -350,6 +366,54 @@ export function AssigneePicker({ issue, edit }: { issue: Mission; edit: IssueCar
         </>
       ) : (
         <Muted>Unassigned</Muted>
+      )}
+    </Picker>
+  )
+}
+
+/**
+ * Owner — the accountable person (v67 props: "Owner · accountable person").
+ * Stages `owner_user_id` (+ the name, for the draft's display); the host
+ * sends it as its own PATCH with assignee_type "user", which the server
+ * routes to owner_user_id without touching the delegate. There is no
+ * "Nobody": an empty assignee_id clears the delegate too.
+ */
+export function OwnerPicker({ issue, edit }: { issue: Mission; edit: IssueCardEdit }) {
+  const [q, setQ] = React.useState("")
+  const people = edit.people ?? []
+  const shown = people.filter((p) => matches(p.name, q))
+  return (
+    <Picker
+      label="Change owner"
+      menu={(close) => (
+        <>
+          <PickerSearch value={q} onChange={setQ} placeholder="Search people" />
+          <div className="max-h-56 overflow-y-auto pt-1">
+            {shown.map((p) => (
+              <Option
+                key={p.id}
+                current={issue.owner?.id === p.id}
+                onSelect={() => {
+                  void edit.patch({ owner_user_id: p.id, owner_name: p.name })
+                  close()
+                }}
+              >
+                <span aria-hidden className="contents"><UserAvatar name={p.name} email="" className="size-4" /></span>
+                <span className="truncate">{p.name}</span>
+              </Option>
+            ))}
+            {shown.length === 0 && <p className="px-2 py-2 text-label text-muted-foreground-soft">No people match.</p>}
+          </div>
+        </>
+      )}
+    >
+      {issue.owner ? (
+        <>
+          <UserAvatar name={issue.owner.name} email="" className="size-4" />
+          <span className="truncate">{issue.owner.name ?? "Owner"}</span>
+        </>
+      ) : (
+        <Muted>No human owner</Muted>
       )}
     </Picker>
   )
@@ -668,11 +732,45 @@ export function LabelsPicker({ issue, edit }: { issue: Mission; edit: IssueCardE
  * which only issue-detail-inline had — the shipped /issues/&lt;id&gt; page could
  * follow a relation but never make one.
  */
+/** v67 `D.relate`: the four kinds, in the order the popover lists them. */
+const RELATION_CHOICES: { value: RelationType; label: string }[] = [
+  { value: "blocks", label: "Blocks" },
+  { value: "blocked_by", label: "Blocked by" },
+  { value: "relates_to", label: "Related" },
+  { value: "duplicate_of", label: "Duplicate of" },
+]
+
+/**
+ * Add relation — a popover anchored to the Relations field (v67 `is-relate`:
+ * "ponechat jako popover u pole"). A kind, an issue (typed, or picked from
+ * the workspace search when the host offers one), Cancel and Add relation.
+ */
 export function AddRelationPicker({ edit }: { edit: IssueCardEdit }) {
   const [open, setOpen] = React.useState(false)
   const [target, setTarget] = React.useState("")
   const [type, setType] = React.useState<RelationType>("relates_to")
   const [adding, setAdding] = React.useState(false)
+  const [found, setFound] = React.useState<PickableIssue[]>([])
+  const inputId = React.useId()
+  const search = edit.searchIssues
+
+  React.useEffect(() => {
+    const q = target.trim()
+    if (!open || !search || q.length < 2) {
+      setFound([])
+      return
+    }
+    let live = true
+    const t = setTimeout(() => {
+      search(q)
+        .then((rows) => { if (live) setFound(rows.filter((r) => r.identifier !== q).slice(0, 6)) })
+        .catch(() => { if (live) setFound([]) })
+    }, 150)
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [open, search, target])
 
   async function submit() {
     if (!target.trim() || adding) return
@@ -688,56 +786,88 @@ export function AddRelationPicker({ edit }: { edit: IssueCardEdit }) {
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setFound([])
+      }}
+    >
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Add link"
-          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={4} className="w-[260px] space-y-2 p-3">
-        <input
-          aria-label="Target issue identifier"
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter confirms an IME candidate before it means "add".
-            if (isImeComposing(e)) return
-            if (e.key === "Enter") void submit()
-          }}
-          placeholder="Target identifier (e.g. ENG-5)"
-          className="h-7 w-full rounded border border-border/60 bg-card px-2 text-[12px] outline-none focus:border-primary/50"
-        />
-        <div className="flex flex-wrap gap-1">
-          {RELATION_TYPE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setType(opt.value)}
-              aria-pressed={type === opt.value}
-              className={cn(
-                "rounded border px-2 py-0.5 text-[10px] transition-colors",
-                type === opt.value
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border/60 text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 w-full text-[11px]"
-          disabled={!target.trim() || adding}
-          onClick={() => void submit()}
-        >
-          Add link
+        <Button type="button" variant="ghost" size="xs" aria-label="Add relation" className="gap-1">
+          <Plus className="size-3.5" aria-hidden />
+          Add
         </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={4} className="w-80 p-0">
+        <div className="flex flex-col gap-3 p-3">
+          <h3 className="text-body font-semibold">Add relation</h3>
+          <div role="radiogroup" aria-label="Relation" className="grid grid-cols-2 gap-1.5">
+            {RELATION_CHOICES.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                role="radio"
+                aria-checked={type === c.value}
+                onClick={() => setType(c.value)}
+                className={cn(
+                  "kit-tap rounded-md border px-2 py-1.5 text-label font-medium transition-colors",
+                  type === c.value ? "border-primary/60 bg-primary/10 text-primary-hover" : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={inputId} className="text-label font-medium text-muted-foreground">Issue</label>
+            <input
+              id={inputId}
+              autoFocus
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter confirms an IME candidate before it means "add".
+                if (isImeComposing(e)) return
+                if (e.key === "Enter") void submit()
+              }}
+              placeholder={search ? "ENG-5, or search by title" : "ENG-5"}
+              role={search ? "combobox" : undefined}
+              aria-expanded={search ? found.length > 0 : undefined}
+              aria-autocomplete={search ? "list" : undefined}
+              className="h-[var(--control-sm)] w-full rounded-md border border-border bg-card px-2 text-body outline-none focus:border-ring"
+            />
+            {found.length > 0 && (
+              <div role="listbox" aria-label="Matching issues" className="flex flex-col rounded-md border border-border py-1">
+                {found.map((i) => (
+                  <button
+                    key={i.identifier}
+                    type="button"
+                    role="option"
+                    aria-selected={target === i.identifier}
+                    onClick={() => {
+                      setTarget(i.identifier)
+                      setFound([])
+                    }}
+                    className="flex min-w-0 items-center gap-2 px-2 py-1.5 text-left text-label hover:bg-foreground/[0.06]"
+                  >
+                    {i.status && <StatusIcon status={i.status} className="size-3.5 shrink-0" />}
+                    <span className="shrink-0 font-mono text-muted-foreground">{i.identifier}</span>
+                    <span className="truncate">{i.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
+          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" disabled={!target.trim() || adding} onClick={() => void submit()}>
+            Add relation
+          </Button>
+        </div>
       </PopoverContent>
     </Popover>
   )
