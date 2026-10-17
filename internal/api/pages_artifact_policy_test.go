@@ -231,3 +231,23 @@ func TestArtifactCreationPolicyBoundsAndStrictJSON(t *testing.T) {
 		t.Fatalf("invalid JSON persisted policy: %d %v", count, err)
 	}
 }
+
+func TestArtifactPolicyAuthenticatedRoutesRejectPathShadow(t *testing.T) {
+	f := newInstanceFixture(t)
+	t.Cleanup(f.r.Shutdown)
+	mustExec(t, f.db, `UPDATE cli_tokens SET scopes='["workspace:admin"]' WHERE id='clt-wsadmin'`)
+	var before int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM workspace_artifact_creation_policy`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"GET", "PUT"} {
+		t.Run(method, func(t *testing.T) {
+			response := f.do(f.wsAdmin, method, "/api/v1/workspaces/foreign-workspace/artifact-creation-policy?workspace_id=ws-old", `{"enabled":true,"crew_ids":[],"base_version":0}`)
+			artifactPolicyExpect(t, response, 404)
+		})
+	}
+	var after int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM workspace_artifact_creation_policy`).Scan(&after); err != nil || after != before {
+		t.Fatalf("path shadow changed policy rows: before=%d after=%d err=%v", before, after, err)
+	}
+}
