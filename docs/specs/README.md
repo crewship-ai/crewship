@@ -28,6 +28,8 @@ public contract here. Superseded a spec? Move it to
   files, profiles and content-free attempt records.
 - [Member resource policy](member-resource-policy.md): the administration API/CLI
   for restricted member authority; does not itself enable model execution.
+- [Shared Issues management](issues-manage.md): bounded project and milestone
+  administration, separate destructive rights, live authority and conflicts.
 - [Credentials vault](credentials-vault.md): credential types, storage and
   mounting conventions, with implementation provenance.
 - [Trusted provider budgets](trusted-llm-hard-budgets.md): reservations before

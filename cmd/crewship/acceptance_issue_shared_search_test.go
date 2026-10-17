@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -100,5 +101,39 @@ func TestAcceptanceGuestIssueSearchDoesNotRetryDeniedAudience(t *testing.T) {
 	out, err := runGuestCLI(t, server.URL, "", "issue", "shared", "--search", "client", "--project", "removed-project")
 	if err == nil || !strings.Contains(out, "Issues unavailable") || calls.Load() != 1 {
 		t.Fatalf("denied search: %v calls=%d %s", err, calls.Load(), out)
+	}
+}
+
+func TestAcceptanceGuestIssueSearchRateLimitGuidance(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/workspaces" {
+			io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
+			return
+		}
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(429)
+			io.WriteString(w, `{"error":"Shared issue searches are temporarily limited. Try again in 3s."}`)
+			return
+		}
+		io.WriteString(w, `[]`)
+	}))
+	defer server.Close()
+	out, err := runGuestCLI(t, server.URL, "", "issue", "shared", "--search", "client")
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 6 || !strings.Contains(out, "Try again in 3s.") {
+		t.Fatalf("wrong retry guidance/exit: %v %s", err, out)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("CLI automatically retried429: %d", calls.Load())
+	}
+	if strings.Contains(out, "fake-token") {
+		t.Fatal("token leaked in retry guidance")
+	}
+	out, err = runGuestCLI(t, server.URL, "", "issue", "shared", "--search", "client")
+	if err != nil || calls.Load() != 2 {
+		t.Fatalf("explicit retry after server recovery: %v %s calls%d", err, out, calls.Load())
 	}
 }

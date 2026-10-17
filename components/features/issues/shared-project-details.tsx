@@ -1,7 +1,9 @@
 "use client"
 
 import { useId, useState } from "react"
+import { useRestrictedProjection } from "@/hooks/use-restricted-projection"
 import { SharedProjectMilestones } from "./shared-project-milestones"
+import { SharedIssueDelete } from "./shared-issue-delete"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import { useSession } from "@/hooks/use-auth"
@@ -27,32 +29,42 @@ export function SharedProjectDetails({ workspaceId, projects }: { workspaceId: s
   </details>
 }
 
-function ProjectDetails({ workspaceId, projectId, userId }: { workspaceId: string; projectId: string; userId: string }) {
+export function KnownProjectDetails({ workspaceId, projectId, userId, issueId, onIssueDeleted }: { workspaceId: string; projectId: string; userId: string; issueId?: string; onIssueDeleted?: () => void }) {
+  return <ProjectDetails key={`${userId}:${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} userId={userId} issueId={issueId} onIssueDeleted={onIssueDeleted} />
+}
+
+function ProjectDetails({ workspaceId, projectId, userId, issueId, onIssueDeleted }: { workspaceId: string; projectId: string; userId: string; issueId?: string; onIssueDeleted?: () => void }) {
   const client = useQueryClient()
+  const projection = useRestrictedProjection<Details>(JSON.stringify([userId, workspaceId, projectId]))
   const key = ["restricted-project-details", userId, workspaceId, projectId]
   const path = `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-projects/${requireApiPathSegment(projectId)}`
-  const query = useQuery({ queryKey: key, retry: false, refetchInterval: 15_000,
+  const query = useQuery({ queryKey: key, retry: false, staleTime: 0, refetchInterval: 15_000, refetchOnMount: "always",
     queryFn: async ({ signal }) => {
+      const read = projection.read(signal)
       const response = await apiFetch(path, { signal })
-      if (!response.ok) throw new ProjectReadError(response.status)
+      if (!response.ok) { read.reject(response.status); throw new ProjectReadError(response.status) }
       const data = schema.parse(await response.json())
       if (data.id !== projectId) throw new Error("Project access could not be confirmed.")
+      read.accept(data)
       return data
     },
   })
+  const visible = projection.value
   const lost = query.error instanceof ProjectReadError && [401, 403, 404].includes(query.error.status)
   return <section aria-label="Shared project details" className="space-y-3">
     <Button variant="outline" onClick={() => void query.refetch()}>Refresh project details</Button>
     {query.isPending && <p role="status">Loading project details…</p>}
+    {!visible && !query.isPending && !query.isError && <p role="status">Checking project access…</p>}
     {query.isError && <p role="alert">{query.error.message}</p>}
-    {!lost && query.data && (query.data.can_manage
-      ? <ProjectDetailsForm value={query.data} path={path} disabled={query.isError || query.isFetching} onConflict={() => void query.refetch()} onSaved={value => { client.setQueryData(key, value); void client.invalidateQueries({ queryKey: ["restricted-issue-projects", userId, workspaceId] }); void client.invalidateQueries({ queryKey: ["restricted-issues", userId, workspaceId] }) }} />
-      : <div><h3 className="font-medium">{query.data.name}</h3><p className="whitespace-pre-wrap text-sm">{query.data.description || "No project description."}</p></div>)}
-    {!lost && query.data && <SharedProjectMilestones key={`${userId}:${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} userId={userId} />}
+    {!lost && visible && (visible.can_manage
+      ? <ProjectDetailsForm value={visible} path={path} disabled={query.isError || query.isFetching} onConflict={() => void query.refetch()} onSaveStarted={() => { const confirm = projection.captureSave(); return value => { if (!confirm(value)) return; client.setQueryData(key, value); void client.invalidateQueries({ queryKey: ["restricted-issue-projects", userId, workspaceId] }); void client.invalidateQueries({ queryKey: ["restricted-issues", userId, workspaceId] }) } }} />
+      : <div><h3 className="font-medium">{visible.name}</h3><p className="whitespace-pre-wrap text-sm">{visible.description || "No project description."}</p></div>)}
+    {!lost && visible && <SharedProjectMilestones key={`${userId}:${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} userId={userId} />}
+    {!lost && visible?.can_manage && issueId && <SharedIssueDelete key={`${userId}:${workspaceId}:${projectId}:${issueId}`} path={`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-issues/${requireApiPathSegment(issueId)}`} issueId={issueId} projectId={projectId} userId={userId} disabled={query.isError || query.isFetching} onDeleted={onIssueDeleted} />}
   </section>
 }
 
-function ProjectDetailsForm({ value, path, disabled, onSaved, onConflict }: { value: Details; path: string; disabled: boolean; onSaved: (value: Details) => void; onConflict: () => void }) {
+function ProjectDetailsForm({ value, path, disabled, onSaveStarted, onConflict }: { value: Details; path: string; disabled: boolean; onSaveStarted: () => (value: Details) => void; onConflict: () => void }) {
   const id = useId()
   const [name, setName] = useState(value.name)
   const [description, setDescription] = useState(value.description)
@@ -60,6 +72,7 @@ function ProjectDetailsForm({ value, path, disabled, onSaved, onConflict }: { va
   const [conflict, setConflict] = useState(false)
   const changed = conflict || value.version !== version
   const save = useMutation({
+    onMutate: () => onSaveStarted(),
     mutationFn: async () => {
       const response = await apiFetch(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description, version }) })
       if (!response.ok) {
@@ -70,7 +83,7 @@ function ProjectDetailsForm({ value, path, disabled, onSaved, onConflict }: { va
       if (data.id !== value.id) throw new Error("Saved project could not be confirmed. Refresh before retrying.")
       return data
     },
-    onSuccess: current => { setName(current.name); setDescription(current.description); setVersion(current.version); setConflict(false); onSaved(current) },
+    onSuccess: (current, _variables, confirm) => { setName(current.name); setDescription(current.description); setVersion(current.version); setConflict(false); confirm?.(current) },
   })
   return <form className="space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && !changed && name.trim() && !save.isPending && value.can_manage) save.mutate() }}>
     <label htmlFor={`${id}-name`} className="block text-sm">Project name</label><Input id={`${id}-name`} value={name} maxLength={4096} disabled={save.isPending} onChange={event => setName(event.target.value)} required />
