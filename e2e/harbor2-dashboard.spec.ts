@@ -83,7 +83,7 @@ test.describe("window", () => {
     await expect(page.getByRole("region", { name: "Run volume · 7d · by crew" })).toBeVisible()
   })
 
-  test("the phone does not offer the window (v67)", async ({ page }) => {
+  test("the phone does not offer the window", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await seed(page)
     await page.goto("/")
