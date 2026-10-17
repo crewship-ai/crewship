@@ -22,6 +22,8 @@ export interface AgentSummary {
   expires_at?: string | null
   expired_at?: string | null
   hire_reason?: string | null
+  /** Remember between runs (the agents list carries it). */
+  memory_enabled?: boolean
 }
 
 export interface CrewRecord {
