@@ -1,8 +1,8 @@
-import { beforeEach, afterEach, expect, it, vi } from "vitest"
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 const mocks = vi.hoisted(() => ({
-  push: vi.fn(), replace: vi.fn(), work: vi.fn(), deliveries: vi.fn(), mobile: false, role: "OWNER",
+  push: vi.fn(), replace: vi.fn(), work: vi.fn(), deliveries: vi.fn(), mobile: false, role: "OWNER" as string | null, roleLoading: false,
 }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
@@ -10,9 +10,20 @@ vi.mock("next/navigation", () => ({
   usePathname: () => window.location.pathname,
 }))
 vi.mock("../activity-stream-view", () => ({
-  ActivityStreamView: ({ onOpenSection }: { onOpenSection: (s: "work" | "deliveries") => void }) => (
-    <><p>Execution overview</p><button onClick={() => onOpenSection("work")}>Rail: Work queue</button></>
+  ActivityStreamView: ({ onOpenSection, journalLedgers, modeSegment }: { onOpenSection: (s: string) => void; journalLedgers?: boolean; modeSegment?: React.ReactNode }) => (
+    <>
+      <p>Execution overview</p>
+      <button onClick={() => onOpenSection("work")}>Rail: Work queue</button>
+      {journalLedgers && <button onClick={() => onOpenSection("log")}>Rail: Technical log</button>}
+      {modeSegment}
+    </>
   ),
+}))
+vi.mock("@/components/features/journal/journal-ledger", () => ({
+  JournalLedger: ({ view, actions }: { view: string; actions?: React.ReactNode }) => <><p>Journal ledger {view}</p>{actions}</>,
+}))
+vi.mock("@/components/features/journal/journal-spend-view", () => ({
+  JournalSpendView: () => <p>Spend ledger</p>,
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
 // The panel reads its remembered collapse from the user's preferences.
@@ -20,7 +31,7 @@ vi.mock("@/lib/api-fetch", async (original) => ({
   ...await original<typeof import("@/lib/api-fetch")>(),
   apiFetch: vi.fn(async () => new Response("{}")),
 }))
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role }) }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role, loading: mocks.roleLoading }) }))
 vi.mock("@/hooks/use-work-items", async (original) => ({
   ...await original<typeof import("@/hooks/use-work-items")>(),
   useLedgerWork: mocks.work,
@@ -51,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.mobile = false
   mocks.role = "OWNER"
+  mocks.roleLoading = false
   try { window.localStorage.removeItem("crewship.pref.panel.activity.collapsed") } catch { /* no storage */ }
   useAppStore.getState().setSecondaryPanelOpen(false)
   window.history.replaceState(null, "", "/activity")
@@ -244,4 +256,76 @@ it("uses a replacement redirect for old Work bookmarks", () => {
   window.history.replaceState(null, "", "/work?section=deliveries")
   render(<WorkPage />)
   expect(mocks.replace).toHaveBeenCalledWith("/activity?section=deliveries", { scroll: false })
+})
+
+// F-02: the Journal's views live in Activity, gated exactly as before.
+describe("the Journal inside Activity (F-02)", () => {
+  it.each([
+    ["section=log", "Journal ledger log"],
+    ["section=runs", "Journal ledger runs"],
+    ["mode=spend", "Spend ledger"],
+  ])("shows ?%s to OWNER and ADMIN", (query, text) => {
+    for (const role of ["OWNER", "ADMIN"]) {
+      mocks.role = role
+      window.history.replaceState(null, "", `/activity?${query}`)
+      const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+      expect(screen.getByText(text)).toBeInTheDocument()
+      expect(mocks.replace).not.toHaveBeenCalled()
+      view.unmount()
+    }
+  })
+
+  it.each([
+    ["MANAGER", "section=log&trace_id=run-1&severity=error", "/activity?run=run-1"],
+    ["MEMBER", "section=log&crew_id=c1&time=30d", "/activity?range=30d&crew=c1"],
+    ["MEMBER", "section=runs&run_status=FAILED", "/activity?what=work&range=24h&view=failed"],
+    ["VIEWER", "section=runs", "/activity?what=work&range=24h"],
+    ["MEMBER", "mode=spend", "/activity"],
+    ["MANAGER", "mode=spend", "/activity"],
+  ])("sends a %s on ?%s to the list (%s), never drawing the admin view", (role, query, target) => {
+    mocks.role = role
+    window.history.replaceState(null, "", `/activity?${query}`)
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(mocks.replace).toHaveBeenCalledWith(target, { scroll: false })
+    expect(view.container.textContent).toBe("")
+  })
+
+  it("draws nothing for an admin-only view while the role is loading, and does not redirect", () => {
+    mocks.role = null
+    mocks.roleLoading = true
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(view.container.textContent).toBe("")
+    expect(mocks.replace).not.toHaveBeenCalled()
+  })
+
+  it("offers the Activity / Spend segment and the Journal ledgers only to OWNER / ADMIN", () => {
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    const seg = screen.getByRole("navigation", { name: "Activity or spend" })
+    expect(within(seg).getByRole("link", { name: "Activity" })).toHaveAttribute("aria-current", "page")
+    expect(within(seg).getByRole("link", { name: "Spend" })).toHaveAttribute("href", "/activity?mode=spend")
+    expect(screen.getByRole("button", { name: "Rail: Technical log" })).toBeInTheDocument()
+    view.unmount()
+    for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
+      mocks.role = role
+      const v = render(<ActivityWorkspace workspaceId="ws-a" />)
+      expect(screen.queryByRole("navigation", { name: "Activity or spend" })).toBeNull()
+      expect(screen.queryByRole("link", { name: "Spend" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Rail: Technical log" })).toBeNull()
+      v.unmount()
+    }
+  })
+
+  it("marks Spend as the current side on the Spend view", () => {
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(screen.getByRole("link", { name: "Spend" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("opens the technical log clean, without the list's filters", () => {
+    window.history.replaceState(null, "", "/activity?view=failed&q=boom")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Rail: Technical log" }))
+    expect(mocks.push).toHaveBeenLastCalledWith("/activity?section=log", { scroll: false })
+  })
 })

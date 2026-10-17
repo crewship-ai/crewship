@@ -457,14 +457,14 @@ function RunPage({
             </Appear>
           )}
 
-          {/* The Journal is admin-only (lib/nav-sections), so is the way in. */}
+          {/* The technical log is admin-only (lib/journal-redirect), so is the way in. */}
           {roleAtLeast(role, "ADMIN") && (
             <Appear order={6}>
               <Link
-                href={`/journal?trace_id=${encodeURIComponent(runId)}`}
+                href={`/activity?section=log&trace_id=${encodeURIComponent(runId)}`}
                 className="inline-flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                {eventCount != null ? `${eventCount} raw events` : "Raw events"} · Journal
+                {eventCount != null ? `${eventCount} raw events` : "Raw events"} · Technical log
                 <ExternalLink className="h-3 w-3" />
               </Link>
             </Appear>

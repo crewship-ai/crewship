@@ -79,8 +79,8 @@ describe("bookmarks after navigation migration", () => {
   expect(navigation.router.replace).toHaveBeenCalledWith("/inbox?workspace_id=team&filter=unread#event-42")
   expect(screen.getByRole("link", { name: "Open Inbox" })).toHaveAttribute("href", "/inbox")
  })
- it("redirects retired runs to the journal preset before rendering", () => {
-  expect(() => RunsPage()).toThrow("REDIRECT /journal?tab=runs")
-  expect(navigation.redirect).toHaveBeenCalledWith("/journal?tab=runs")
+ it("redirects retired runs to the fleet runs ledger in Activity before rendering", () => {
+  expect(() => RunsPage()).toThrow("REDIRECT /activity?section=runs")
+  expect(navigation.redirect).toHaveBeenCalledWith("/activity?section=runs")
  })
 })
