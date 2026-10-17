@@ -11,14 +11,26 @@ import {
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe("page states", () => {
-  it("loading is a busy status and notes slow loads after a second", () => {
+  it("loading is a busy status; after 10 s it says so and offers Retry", () => {
     vi.useFakeTimers()
-    render(<PageLoading />)
+    const retry = vi.fn()
+    render(<PageLoading onRetry={retry} />)
     const s = screen.getByRole("status")
     expect(s).toHaveAttribute("aria-busy", "true")
+    act(() => { vi.advanceTimersByTime(9000) })
     expect(screen.queryByText("Still loading…")).toBeNull()
     act(() => { vi.advanceTimersByTime(1000) })
     expect(screen.getByText("Still loading…")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it("a slow load without a retry handler only says it is still loading", () => {
+    vi.useFakeTimers()
+    render(<PageLoading />)
+    act(() => { vi.advanceTimersByTime(10000) })
+    expect(screen.getByText("Still loading…")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
   })
 
   it("empty names what belongs here, offers one primary action and the CLI", () => {
