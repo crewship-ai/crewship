@@ -73,10 +73,10 @@ func TestDocumentCreationAtomicResultAndOriginalPayloadRetry(t *testing.T) {
 	}
 	creationExpect(t, call("changed", strings.Replace(documentCreationBody, "First useful paragraph", "Changed paragraph", 1)), 409)
 	creationExpect(t, call("new mutation", strings.Replace(documentCreationBody, "create-one", "create-two", 1)), 409)
-	var owner, actor string
+	var owner, actor, creator string
 	var grants int
-	if err := h.db.QueryRow(`SELECT p.owner_user_id,r.actor,(SELECT COUNT(*) FROM page_grants WHERE page_id=p.id AND subject_type='agent') FROM pages p JOIN document_receipts r ON r.page_id=p.id WHERE p.id=?`, created.PageID).Scan(&owner, &actor, &grants); err != nil || owner != user || actor != "agent:principal-agent:principal-run" || grants != 0 {
-		t.Fatalf("ownership or continuation expanded: %s %s %d %v", owner, actor, grants, err)
+	if err := h.db.QueryRow(`SELECT p.owner_user_id,r.actor,COALESCE(p.created_by_agent_id,''),(SELECT COUNT(*) FROM page_grants WHERE page_id=p.id AND subject_type='agent') FROM pages p JOIN document_receipts r ON r.page_id=p.id WHERE p.id=?`, created.PageID).Scan(&owner, &actor, &creator, &grants); err != nil || owner != user || actor != "agent:principal-agent:principal-run" || creator != "principal-agent" || grants != 0 {
+		t.Fatalf("ownership, creator provenance or continuation changed: %s %s %s %d %v", owner, actor, creator, grants, err)
 	}
 }
 
