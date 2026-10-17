@@ -1,4 +1,5 @@
 import { roleAtLeast } from "@/lib/routine-governance"
+import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -99,6 +100,45 @@ export function isHiddenForRole(item: NavItem, role: string | null | undefined, 
   // While the role is loading it is null, and the row stays hidden: showing it
   // and then taking it away is worse than letting it appear.
   return item.minRole != null && !roleAtLeast(role, item.minRole)
+}
+
+/** Who is looking: the inputs every navigation surface filters by. */
+export interface NavViewer {
+  /** Workspace role; null while it loads. */
+  role: string | null | undefined
+  instanceAdmin?: boolean | null
+  /** The screens a restricted (Guest) session may open; null for a full one. */
+  surfaces: readonly RestrictedSurface[] | null
+}
+
+/**
+ * Every row this person sees, in navigation order, footer rows (Settings,
+ * Admin) last. The sidebar, the phone More sheet and the tab bar all filter
+ * through here, so the role x destination matrix has one definition and one
+ * test (lib/__tests__/nav-role-matrix.test.ts).
+ */
+export function visibleNavItems(viewer: NavViewer, sections: NavSection[] = navSections): NavItem[] {
+  return sections.flatMap((s) => visibleItems(s.items, viewer))
+}
+
+/** One section's rows for this person. */
+export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }: NavViewer): NavItem[] {
+  return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+}
+
+/**
+ * The phone tab bar for this person: a Guest keeps only granted tabs. A
+ * restricted session has no Dashboard, so Home leads to its own home
+ * (`restrictedHome`, SHL-07 / DSH-02) instead of vanishing; a tab that would
+ * point at the same place as Home is dropped.
+ */
+export function visiblePhoneTabs({ surfaces }: Pick<NavViewer, "surfaces"> & Partial<NavViewer>): NavItem[] {
+  if (!surfaces) return phoneTabs()
+  const home = restrictedHome(surfaces)
+  return phoneTabs().flatMap((tab) => {
+    if (tab.href === "/") return home ? [{ ...tab, href: home }] : []
+    return tab.href !== home && restrictedPathAllowed(tab.href, surfaces) ? [tab] : []
+  })
 }
 
 /**

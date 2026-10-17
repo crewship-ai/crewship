@@ -36,6 +36,7 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER", workspace: { name: "Example workspace" } }),
 }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 3 }))
+vi.mock("@/hooks/use-live-run-count", () => ({ useLiveRunCount: () => 0 }))
 // The sheet only renders when the toolbar believes it is on a phone.
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => true }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))

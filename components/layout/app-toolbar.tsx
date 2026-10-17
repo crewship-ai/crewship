@@ -3,22 +3,16 @@
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
-import { ChevronRight, LogOut, PanelLeft, Search, X } from "lucide-react"
+import { ChevronRight, PanelLeft, Search } from "lucide-react"
 
-import { areaOf, navSections, isHiddenForRole } from "@/lib/nav-sections"
+import { areaOf } from "@/lib/nav-sections"
 import { useRealtime } from "@/hooks/use-realtime"
-import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
-import { useInboxUnreadCount } from "@/hooks/use-inbox"
+import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useAbilities } from "@/hooks/use-abilities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
@@ -29,26 +23,7 @@ import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
 import { UserMenu } from "./user-menu"
 import { useIsTabletPanel } from "./secondary-panel"
-import { MobileWorkspaceSwitcher } from "./workspace-switcher"
-
-/**
- * The phone sheet carries the same unread count the desktop rail does — it was
- * the one live signal in the product with no mobile home at all, since the
- * bell that shows it sits inside `hidden md:flex` (#2483).
- *
- * It is a leaf rather than a hook in AppToolbar so the query only runs while
- * the sheet is actually open: the toolbar renders on every route at every
- * width, and the badge is never visible outside the sheet.
- */
-function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
-  const unread = useInboxUnreadCount(workspaceId)
-  if (!unread) return null
-  return (
-    <span className="ml-auto rounded-full bg-primary px-1.5 text-micro font-semibold text-primary-foreground">
-      {unread > 99 ? "99+" : unread}
-    </span>
-  )
-}
+import { MobileMoreSheet } from "./mobile-more-sheet"
 
 // The top bar is the product's identity strip, not a page label — it says
 // "Crewship" and nothing else. There used to be a route -> title map here
@@ -93,18 +68,12 @@ export function AppToolbar() {
   // allowlist. Their hooks idle on a null workspace, and their widgets are not
   // rendered unless the session is trusted.
   const trusted = useAccessMode() === "trusted"
-  const surfaces = useRestrictedSurfaces()
   const workspaceId = useTrustedWorkspaceId()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
-  const { session, signOut } = useAuth()
   const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
-  // Shared with the phone tab bar's "More", which is a sibling of this
-  // component rather than a child, so the state cannot be local to either.
-  const mobileNavOpen = useAppStore((st) => st.mobileNavOpen)
-  const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
   const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
   const secondaryPanel = useAppStore((st) => st.secondaryPanel)
   const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
@@ -121,8 +90,6 @@ export function AppToolbar() {
   const hasStorePalette = typeof (storeSetCmdk as unknown) === "function"
   const cmdkOpen = hasStorePalette ? Boolean(storeCmdk) : localCmdk
   const setCmdkOpen = hasStorePalette ? storeSetCmdk : setLocalCmdk
-  const { role } = useAbilities()
-  const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   // ⌘K opens the global palette, on every route, and it is the ONLY listener
@@ -155,9 +122,6 @@ export function AppToolbar() {
     return () => document.removeEventListener("keydown", onKeyDown)
   }, [setCmdkOpen])
 
-  const userName = session?.user?.name ?? "User"
-  const userEmail = session?.user?.email ?? ""
-  const userAvatar = session?.user?.avatar_url ?? ""
 
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
@@ -337,74 +301,8 @@ export function AppToolbar() {
 
       </div>
 
-      {/* Mobile: main navigation bottom sheet */}
-      {isMobile && (
-        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl max-h-[85dvh] p-0">
-            <div className="w-12 h-1.5 rounded-full bg-border mx-auto mt-3 mb-1" />
-            <SheetHeader className="px-4 py-2 border-b">
-              <div className="flex items-center justify-between">
-                {/* The workspace switcher — the phone has no rail, so this is
-                    its only home. This slot used to print a hardcoded
-                    placeholder ("Unify Technology") for every workspace. */}
-                <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <MobileWorkspaceSwitcher onNavigate={() => setMobileNavOpen(false)} />
-                <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto py-2">
-              {navSections.map((section, i) => (
-                <div key={section.label || `group-${i}`}>
-                  {section.label && <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>}
-                  {section.items
-                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
-                    .map((item) => {
-                      const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-                      const rowClass = `w-full flex items-center gap-3 px-4 min-h-12 py-2.5 text-sm transition-colors ${
-                        isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                      }`
-                      const body = (
-                        <>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{item.title}</span>
-                          {item.href === "/inbox" && <InboxUnreadBadge workspaceId={workspaceId} />}
-                        </>
-                      )
-                      return (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          onClick={() => setMobileNavOpen(false)}
-                          className={rowClass}
-                        >
-                          {body}
-                        </Link>
-                      )
-                    })}
-                </div>
-              ))}
-            </div>
-            <div className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <div className="flex items-center gap-3">
-                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-8 w-8" textClassName="text-micro" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{userName}</div>
-                  <div className="text-micro text-muted-foreground">{userEmail}</div>
-                </div>
-                <button
-                  onClick={() => { signOut().then(() => window.location.href = "/login") }}
-                  className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
-                  aria-label="Log out"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
+      {/* Mobile: the More sheet (v67 pop-more) */}
+      {isMobile && <MobileMoreSheet />}
 
       <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} initialQuery={paletteQuery || undefined} />
     </header>

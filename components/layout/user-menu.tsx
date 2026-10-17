@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   Bell, BookOpen, ChevronDown, ChevronRight, ChevronsUpDown, CircleAlert, GitBranch, HelpCircle,
-  LogOut, MonitorSmartphone, Sparkles, SquareTerminal, User, Volume2,
+  LogOut, MonitorSmartphone, Palette, Sparkles, SquareTerminal, User, Volume2,
 } from "lucide-react"
 
 import { useAuth } from "@/hooks/use-auth"
@@ -63,8 +63,9 @@ const ICON = "h-4 w-4 text-muted-foreground"
  */
 export function UserMenu({ placement = "toolbar" }: {
   /** "sidebar": the last row of the sidebar footer (Harbor 2) — avatar, name
-   *  and role, opening to the right. "toolbar": the phone top bar. */
-  placement?: "toolbar" | "sidebar"
+   *  and role, opening to the right. "toolbar": the phone top bar. "row": the
+   *  user row of the phone More sheet, opening upward. */
+  placement?: "toolbar" | "sidebar" | "row"
 } = {}) {
   const { session, signOut } = useAuth()
   const { workspace, workspaceId, role: workspaceRole } = useWorkspace()
@@ -95,6 +96,14 @@ export function UserMenu({ placement = "toolbar" }: {
               </span>
               <ChevronsUpDown className="rail-label size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
             </button>
+          ) : placement === "row" ? (
+            <button type="button" className="rail-user" aria-label="User menu">
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-6 shrink-0" textClassName="text-micro" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {userName}{workspaceRole ? ` · ${roleLabel(workspaceRole)}` : ""}
+              </span>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+            </button>
           ) : (
             <button
               className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-12 hover:bg-accent data-[state=open]:bg-accent transition-colors"
@@ -108,7 +117,7 @@ export function UserMenu({ placement = "toolbar" }: {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          side={placement === "sidebar" ? "right" : "bottom"}
+          side={placement === "sidebar" ? "right" : placement === "row" ? "top" : "bottom"}
           sideOffset={placement === "sidebar" ? 8 : 4}
           className="w-72 p-0"
         >
@@ -140,6 +149,12 @@ export function UserMenu({ placement = "toolbar" }: {
               <Link href="/settings?tab=profile">
                 <User className={ICON} />
                 Profile &amp; account
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className={ITEM}>
+              <Link href="/settings?tab=appearance">
+                <Palette className={ICON} />
+                Appearance
               </Link>
             </DropdownMenuItem>
             {/* Not a menu item: a row holding its own radiogroup, so picking a
@@ -215,16 +230,16 @@ export function UserMenu({ placement = "toolbar" }: {
             </DropdownMenuSub>
           </div>
           <DropdownMenuSeparator className="my-0" />
-          <div className="flex items-center p-1">
+          <div className="p-1">
             <DropdownMenuItem
-              className={cn(ITEM, "flex-1 text-destructive")}
+              className={ITEM}
               onClick={() => { signOut().then(() => window.location.href = "/login") }}
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className={ICON} />
               Log out
             </DropdownMenuItem>
-            {trusted && <BuildFooter />}
           </div>
+          {trusted && <BuildFooter />}
         </DropdownMenuContent>
       </DropdownMenu>
       {canPair && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
@@ -301,18 +316,30 @@ function ActiveSessionsCount() {
   return <span className="font-mono text-micro text-muted-foreground">{count} active</span>
 }
 
-/** Which build this is, at the foot of the menu — the first thing a bug
- *  report needs. Same read and label as the rail's SidebarVersion. */
+/** The foot of the menu (v67 `pu-ver`): which build this is — the first thing
+ *  a bug report needs — and, when a newer release exists, a link to it. Same
+ *  read and label as the rail's SidebarVersion. */
 function BuildFooter() {
-  const [label, setLabel] = useState<string | null>(null)
+  const [build, setBuild] = useState<{ label: string; update: string | null } | null>(null)
   useEffect(() => {
     let live = true
     apiFetch("/api/v1/system/version")
       .then((r) => (r.ok ? r.json() : null))
-      .then((b) => { if (live && b?.current) setLabel(buildLabel(b)) })
+      .then((b) => {
+        if (live && b?.current) setBuild({ label: buildLabel(b), update: b.newer ? (b.url ?? RELEASES_URL) : null })
+      })
       .catch(() => {})
     return () => { live = false }
   }, [])
-  if (!label) return null
-  return <span className="shrink-0 px-2 font-mono text-micro text-muted-foreground-soft" data-testid="user-menu-build">{label}</span>
+  if (!build) return null
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2" data-testid="user-menu-footer">
+      <span className="min-w-0 truncate font-mono text-micro text-muted-foreground-soft" data-testid="user-menu-build">{build.label}</span>
+      {build.update && (
+        <a href={build.update} target="_blank" rel="noopener noreferrer" className="shrink-0 text-micro font-medium text-primary hover:underline">
+          Update available
+        </a>
+      )}
+    </div>
+  )
 }
