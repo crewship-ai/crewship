@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useId, useMemo, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Workflow, Plus, Upload, ChevronLeft, ChevronRight } from "lucide-react"
+import { Workflow, Plus, Upload, List } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import {
   CreateSurface,
@@ -12,22 +12,30 @@ import {
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
 } from "@/components/layout/create-surface"
+import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { roleAtLeast } from "@/lib/routine-governance"
 import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
+import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
-import { RoutinesExplorer } from "./routines-explorer"
+import { listRoutineDrafts, type RoutineDraftListEntry } from "@/lib/routine-drafts"
+import { RoutinesExplorer, ROUTINE_VIEWS, type PanelCrew, type RoutinesView } from "./routines-explorer"
 import { isRoutineTestFixture, type RoutineFilterState as RoutineFilters } from "@/lib/routine-filters"
 import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
-import { RoutineNewDialog } from "./routine-new-dialog"
+import { RoutineNewWizard } from "./routine-new-wizard"
+import { RoutinesViewPane, needsYou } from "./routines-views"
 
-// Keep the shared explorer mounted across overview, definition and historical
-// run views. The URL identifies the routine and optional execution; filters
-// belong to the explorer and survive navigation inside this workspace.
+// Keep the shared panel mounted across the views, a routine and a run. The
+// URL identifies the view (?view=needs|live|runs|drafts), the routine
+// (?slug=) and the run (?run=); filters belong to the panel and survive
+// navigation inside this area.
 
 interface RoutinesLayoutProps {
   workspaceId: string
@@ -36,53 +44,88 @@ interface RoutinesLayoutProps {
 /** `?routine=` is the older spelling two callers still emit. */
 const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 
+/** Creating or importing a routine is POST /pipelines/save|drafts|import,
+ *  all roleCreate on the server: Manager and above. */
+export const CREATE_ROUTINE_REASON = "Creating routines needs Manager or above. Ask a crew lead in Chat."
+
+const EMPTY_FILTERS: RoutineFilters = {
+  status: "all",
+  invocations: "all",
+  authorAgentId: null,
+  showEphemeral: false,
+  lifecycle: "all",
+  crewId: null,
+}
+
+const LIST_VIEWS = new Set<RoutinesView>(["needs", "live", "runs", "drafts"])
+
+function useWorkspaceCrews(workspaceId: string): ReadonlyMap<string, PanelCrew> {
+  const [crews, setCrews] = useState<PanelCrew[]>([])
+  useEffect(() => {
+    const controller = new AbortController()
+    apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : []))
+      // The crews route answers a bare array or, paginated, { data }.
+      .then((body: PanelCrew[] | { data?: PanelCrew[] }) => {
+        if (controller.signal.aborted) return
+        setCrews(Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [])
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [workspaceId])
+  return useMemo(() => new Map(crews.map((c) => [c.id, { id: c.id, name: c.name }])), [crews])
+}
+
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines: loadedPipelines, loading, error, refresh } = usePipelines(workspaceId)
   const pipelines = useRoutinePurposes(workspaceId, loadedPipelines)
-  // The explorer lives in the shared SecondaryPanel: a column on desktop, a
-  // bottom sheet from the top bar on a phone. Picking a routine closes it.
+  const { role } = useAbilities()
+  const canCreate = roleAtLeast(role, "MANAGER")
+  const isMobile = useIsMobile()
+  const crews = useWorkspaceCrews(workspaceId)
+  const { runs: activeRuns } = useActiveRoutineRuns()
+  const reasonId = useId()
+  // The panel is the shared SecondaryPanel: a column on desktop, a bottom
+  // sheet on a phone. Picking something in it closes the sheet.
   const closePanelSheet = useCloseSecondaryPanelSheet()
+  const openPanelSheet = useAppStore((s) => s.setSecondaryPanelOpen)
   const [search, setSearch] = useState("")
-  const [filters, setFilters] = useState<RoutineFilters>({
-    status: "all",
-    invocations: "all",
-    authorAgentId: null,
-    showEphemeral: false,
-  })
+  const [filters, setFilters] = useState<RoutineFilters>(EMPTY_FILTERS)
   const visiblePipelines = useMemo(
-    () =>
-      filters.showTestRoutines
-        ? pipelines
-        : pipelines.filter((p) => !isRoutineTestFixture(p.slug)),
+    () => (filters.showTestRoutines ? pipelines : pipelines.filter((p) => !isRoutineTestFixture(p.slug))),
     [pipelines, filters.showTestRoutines],
   )
-  // The selected routine lives in the URL: /routines?slug=<slug>.
-  //
-  // It used to be read from the URL once and then kept in component state,
-  // so picking a routine left the address bar at /routines — a reload lost
-  // the selection, Back left the page instead of closing the detail, and a
-  // routine could not be linked to except by typing. Every routine link in
-  // the app (routineHref, entityHref) points here with ?slug=; the dashboard's
-  // "Up next" and the issue's routine chip still say ?routine=, which is read
-  // as an alias and rewritten on the first pick.
+  // The selected routine lives in the URL: /routines?slug=<slug> (every
+  // routine link in the app points here; ?routine= is read as an alias).
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
   const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
-  // The detail's own view (`?view=edit` opens the page editor). It belongs to
-  // one routine: leaving or switching routines must not carry it along, or
-  // the next routine opened would land in the editor uninvited.
-  const [detailView, setDetailView] = useUrlSelection("view")
-  const editing = detailView === "edit" || detailView === "settings"
+  // `?view=` is the routine page's own view while a routine is open
+  // (`?view=edit` opens the editor) and the list view otherwise. It never
+  // carries over from one to the other: leaving or switching routines
+  // clears it, or the next routine would open in the editor uninvited.
+  const [viewParam, setViewParam] = useUrlSelection("view")
+  const listView: RoutinesView = !selectedSlug && !selectedRun && LIST_VIEWS.has(viewParam as RoutinesView) ? (viewParam as RoutinesView) : "overview"
+  const panelView: RoutinesView | null = selectedSlug || selectedRun ? null : listView
   const leaveRoutine = () => {
-    setDetailView(null, { replace: true })
+    setViewParam(null, { replace: true })
     setSelectedRun(null, { replace: true })
     setSelectedSlug(null)
   }
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [drafts, setDrafts] = useState<RoutineDraftListEntry[] | null>(null)
+  const loadDrafts = useCallback(() => {
+    listRoutineDrafts(workspaceId).then(setDrafts).catch(() => setDrafts((d) => d ?? []))
+  }, [workspaceId])
+  useEffect(() => loadDrafts(), [loadDrafts])
+  const changed = useCallback(() => {
+    refresh()
+    loadDrafts()
+  }, [refresh, loadDrafts])
+
   // The lead's "Open the draft" link: /routines?draft=<slug>&draft_id=…
-  // (&workspace=…). There is no editor to land in any more — the routine
-  // page itself shows the draft row on top — so the link opens that page
-  // and the draft params are cleared from the address.
+  // (&workspace=…). The routine page itself shows the draft, so the link
+  // opens that page and the draft params are cleared from the address.
   const [linkedDraft, setLinkedDraft] = useUrlSelection("draft")
   const [linkedDraftId, setLinkedDraftId] = useUrlSelection("draft_id")
   const [linkedWorkspace, setLinkedWorkspace] = useUrlSelection("workspace")
@@ -93,23 +136,35 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setLinkedDraftId(null, { replace: true })
     setLinkedWorkspace(null, { replace: true })
     setSelectedRun(null, { replace: true })
-    setDetailView(null, { replace: true })
+    setViewParam(null, { replace: true })
     setSelectedSlug(slug, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedDraft, linkedDraftId, linkedWorkspace])
 
-  // Keyboard shortcuts (mirrors /issues): `/` focuses the explorer's
-  // search input, `Esc` clears every filter, `c` opens the create
-  // dialog. Skips when typing in inputs/textarea/contentEditable.
+  const showView = (view: RoutinesView) => {
+    setSelectedRun(null, { replace: true })
+    setSelectedSlug(null, { replace: true })
+    setViewParam(view === "overview" ? null : view)
+    closePanelSheet()
+  }
+
+  const openRun = (slug: string, runId: string) => {
+    setViewParam(null, { replace: true })
+    setSelectedSlug(slug, { replace: true })
+    setSelectedRun(runId)
+  }
+
+  // Keyboard (mirrors /issues): `/` focuses the panel's search, `Esc`
+  // clears every filter, `c` opens New routine (Manager and above), 1–5
+  // switch the views. Skipped while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      const isInputContext =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      if (e.key === "/" && !isInputContext) {
+      const isInputContext = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)
+      if (isInputContext || e.metaKey || e.ctrlKey || e.altKey) return
+      // A dialog owns the keyboard while it is open.
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return
+      if (e.key === "/") {
         const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
           e.preventDefault()
@@ -118,106 +173,114 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         }
         return
       }
-      if (e.key === "Escape" && !isInputContext) {
-        if (
+      if (e.key === "Escape") {
+        const filtered =
           search ||
           filters.status !== "all" ||
+          (filters.lifecycle ?? "all") !== "all" ||
+          filters.crewId ||
           filters.invocations !== "all" ||
           filters.authorAgentId ||
           filters.showEphemeral ||
           filters.showTestRoutines
-        ) {
+        if (filtered) {
           e.preventDefault()
           setSearch("")
-          setFilters({
-            status: "all",
-            invocations: "all",
-            authorAgentId: null,
-            showEphemeral: false,
-          })
+          setFilters(EMPTY_FILTERS)
         }
         return
       }
-      if (e.key === "c" && !isInputContext && !e.metaKey && !e.ctrlKey) {
+      if (e.key === "c") {
+        if (!canCreate) return
         e.preventDefault()
         setCreateDialogOpen(true)
+        return
+      }
+      const n = Number(e.key)
+      if (Number.isInteger(n) && n >= 1 && n <= ROUTINE_VIEWS.length) {
+        e.preventDefault()
+        showView(ROUTINE_VIEWS[n - 1].id)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [
-    search,
-    filters.status,
-    filters.invocations,
-    filters.authorAgentId,
-    filters.showEphemeral,
-    filters.showTestRoutines,
-  ])
-
-  const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
-  // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
-  // context. Future: wire selectedSlug → breadcrumb on detail open.
-  void setBreadcrumbs
+  })
 
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
-    setDetailView(null, { replace: true })
+    setViewParam(null, { replace: true })
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
-    // Picking a routine on a phone means "show me that", and the sheet
-    // covering it would be the opposite.
     closePanelSheet()
   }
 
-  // Selected routine — looked up from the loaded pipeline list so the
-  // toolbar breadcrumb can show the human name without a second fetch.
-  // The detail panel does its own fetch for the full DSL body.
+  // Looked up from the loaded list so the breadcrumb can name the routine
+  // without a second fetch; the detail fetches the full definition itself.
   const selectedRoutine = selectedSlug ? pipelines.find((p) => p.slug === selectedSlug) : null
-
+  const crewName = selectedRoutine?.author_crew_id ? crews.get(selectedRoutine.author_crew_id)?.name : undefined
+  const needsCount = useMemo(() => needsYou(visiblePipelines, activeRuns).length, [visiblePipelines, activeRuns])
+  const liveCount = activeRuns.filter((r) => !isAwaitingApproval(r.status)).length
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
+
+  const section = selectedRun
+    ? `${selectedRoutine?.name || selectedSlug || "Routine"} · Run`
+    : selectedSlug
+      ? [crewName, selectedRoutine?.name || selectedSlug].filter(Boolean).join(" › ")
+      : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
+
+  const createActions = (
+    <>
+      {!canCreate && (
+        <span id={reasonId} className="sr-only">
+          {CREATE_ROUTINE_REASON}
+        </span>
+      )}
+      <span title={canCreate ? undefined : CREATE_ROUTINE_REASON} className="max-sm:hidden">
+        <SubBarSecondary
+          icon={Upload}
+          onClick={() => setImportDialogOpen(true)}
+          disabled={!canCreate}
+          aria-describedby={canCreate ? undefined : reasonId}
+          title={canCreate ? "Import a routine bundle from JSON" : undefined}
+        >
+          Import
+        </SubBarSecondary>
+      </span>
+      <span title={canCreate ? undefined : CREATE_ROUTINE_REASON}>
+        <SubBarPrimary
+          icon={Plus}
+          onClick={() => setCreateDialogOpen(true)}
+          disabled={!canCreate}
+          aria-describedby={canCreate ? undefined : reasonId}
+          title={canCreate ? "New routine (C)" : undefined}
+        >
+          New routine
+        </SubBarPrimary>
+      </span>
+    </>
+  )
 
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
-      {/* ---- Sub-bar: identity + actions ----
-          Row 1 carries global context (Import / New routine); the
-          page-specific 'Back to routines / <name>' breadcrumb lives one level
-          down inside the content area (matches /issues) so it doesn't compete
-          with the global affordances. */}
+      {/* Routines › {view} / Routines › {crew} › {routine}. The area's own
+          breadcrumb links back to the overview, so the content needs no
+          "Back to routines" bar. New routine and Import belong to the list;
+          a routine page carries its own actions. */}
       <SubBar
         icon={Workflow}
         title="Routines"
+        section={section}
         description={
-          <>
-            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} ·{" "}
-            {totalRuns} {totalRuns === 1 ? "run" : "runs"}
-          </>
+          !selectedSlug && !selectedRun ? (
+            <>
+              {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns} {totalRuns === 1 ? "run" : "runs"}
+            </>
+          ) : undefined
         }
         ariaLabel="Routines"
-        actions={
-          <>
-            <SubBarSecondary
-              icon={Upload}
-              onClick={() => setImportDialogOpen(true)}
-              title="Import a routine bundle from JSON"
-            >
-              Import
-            </SubBarSecondary>
-            <SubBarPrimary
-              icon={Plus}
-              onClick={() => setCreateDialogOpen(true)}
-              title="Create a routine"
-            >
-              New routine
-            </SubBarPrimary>
-          </>
-        }
+        actions={!selectedSlug && !selectedRun ? createActions : undefined}
       />
 
-      {/* ---- Body ---- */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* The explorer sidebar is the app-wide navigation element (Issues
-            has the same one): search, status buckets and the routine list.
-            The main panel does not repeat its controls — it answers what
-            each routine does and how it went (#2519). */}
         <SecondaryPanel id="routines" label="Routine list">
           <RoutinesExplorer
             routines={visiblePipelines}
@@ -227,121 +290,107 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             onSelectRoutine={handleSelect}
             filters={filters}
             onChange={setFilters}
+            view={panelView}
+            onViewChange={showView}
+            counts={{ needs: needsCount, live: liveCount, drafts: drafts?.length ?? null }}
+            crews={crews}
           />
         </SecondaryPanel>
 
-        {/* Overview, definition or historical run beside the explorer. */}
-        <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
-          <AnimatePresence mode="wait">
-            {selectedRun ? (
-              <div key={selectedRun} className="absolute inset-0 overflow-auto">
-                <RoutineRunDetail
-                  key={selectedRun}
-                  workspaceId={workspaceId}
-                  runId={selectedRun}
-                />
-              </div>
-            ) : selectedSlug ? (
-              <motion.div
-                key={`detail-${selectedSlug}`}
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="absolute inset-0 flex flex-col overflow-hidden"
-              >
-                {/* Breadcrumb back-bar — matches the /issues pattern:
-                    sits inside the content area, not in the global
-                    toolbar. Keeps global affordances (List/Schedules/
-                    Insights tabs, Import, New routine) where they
-                    belong. */}
-                {/* While the page editor is open, its own header × and footer
-                    Cancel are the way out — both ask before discarding. A
-                    second, unguarded Back here would throw edits away. */}
-                {!editing && (
-                  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
-                    <button
-                      type="button"
-                      onClick={leaveRoutine}
-                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                      Back to routines
-                    </button>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                    <span
-                      className="truncate text-xs font-medium text-foreground/85"
-                      title={selectedRoutine?.name || selectedSlug}
-                    >
-                      {selectedRoutine?.name || selectedSlug}
-                    </span>
-                    {selectedRoutine?.slug && (
-                      <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
-                        {selectedRoutine.slug}
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className="flex-1 overflow-hidden">
-                  <RoutinesDetailPanel
-                    workspaceId={workspaceId}
-                    slug={selectedSlug}
-                    onClose={leaveRoutine}
-                    onChanged={refresh}
-                    onRunStarted={setSelectedRun}
-                  />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {/* On a phone the panel is a sheet; this chip is the way to it. */}
+          {isMobile && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-1.5">
+              <Button type="button" variant="outline" size="sm" onClick={() => openPanelSheet(true)} className="h-8 gap-1.5 text-xs coarse:h-12">
+                <List className="h-3.5 w-3.5" />
+                {crewName && selectedSlug ? crewName : "All routines"}
+              </Button>
+            </div>
+          )}
+          <div className="relative min-h-0 flex-1">
+            <AnimatePresence mode="wait">
+              {selectedRun ? (
+                <div key={selectedRun} className="absolute inset-0 overflow-auto">
+                  <RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} />
                 </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="overview"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="absolute inset-0 overflow-hidden"
-              >
-                <RoutinesWorkspace
-                  search={search}
-                  filters={filters}
-                  workspaceId={workspaceId}
-                  routines={visiblePipelines}
-                  loading={loading}
-                  error={error}
-                  onSelect={handleSelect}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
+              ) : selectedSlug ? (
+                <motion.div
+                  key={`detail-${selectedSlug}`}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="absolute inset-0 flex flex-col overflow-hidden"
+                >
+                  <div className="flex-1 overflow-hidden">
+                    <RoutinesDetailPanel
+                      workspaceId={workspaceId}
+                      slug={selectedSlug}
+                      onClose={leaveRoutine}
+                      onChanged={changed}
+                      onRunStarted={setSelectedRun}
+                    />
+                  </div>
+                </motion.div>
+              ) : listView !== "overview" ? (
+                <motion.div key={`view-${listView}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-hidden">
+                  <RoutinesViewPane
+                    view={listView}
+                    workspaceId={workspaceId}
+                    routines={visiblePipelines}
+                    drafts={drafts}
+                    onSelect={handleSelect}
+                    onOpenRun={openRun}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-hidden">
+                  <RoutinesWorkspace
+                    search={search}
+                    filters={filters}
+                    workspaceId={workspaceId}
+                    routines={visiblePipelines}
+                    loading={loading}
+                    error={error}
+                    onSelect={handleSelect}
+                    onRetry={refresh}
+                    onNew={canCreate ? () => setCreateDialogOpen(true) : undefined}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
-      {/* Import dialog */}
-      {importDialogOpen && (
+      {importDialogOpen && canCreate && (
         <ImportRoutineDialog
           workspaceId={workspaceId}
           onClose={() => setImportDialogOpen(false)}
           onImported={() => {
-            refresh()
+            changed()
             setImportDialogOpen(false)
           }}
         />
       )}
 
-      {/* New routine — Describe it · Copy an existing routine · Build it with
-          the CLI. Every way in ends as a draft on the routine page. */}
-      <RoutineNewDialog
-        workspaceId={workspaceId}
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        routines={pipelines}
-        onCreated={refresh}
-        onOpenRoutine={(slug) => {
-          setSelectedRun(null, { replace: true })
-          setDetailView(null, { replace: true })
-          setSelectedSlug(slug)
-        }}
-      />
+      {/* New routine — the five-step wizard. Saving turns it on (or sends it
+          for a Manager review); Save as draft keeps it unpublished. */}
+      {canCreate && (
+        <RoutineNewWizard
+          workspaceId={workspaceId}
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          routines={pipelines}
+          onCreated={changed}
+          onImport={() => setImportDialogOpen(true)}
+          onOpenRoutine={(slug) => {
+            setSelectedRun(null, { replace: true })
+            setViewParam(null, { replace: true })
+            setSelectedSlug(slug)
+          }}
+        />
+      )}
     </div>
   )
 }

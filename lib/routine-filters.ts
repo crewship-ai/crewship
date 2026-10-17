@@ -25,7 +25,13 @@ export interface RoutineFilterState {
   showEphemeral: boolean
   /** Release-verification fixtures (`test-*` slugs) are hidden unless asked for. */
   showTestRoutines?: boolean
+  /** The routine's own state: live, has changes not live, proposed, turned off. */
+  lifecycle?: RoutineLifecycleFilter
+  /** The owning crew (`author_crew_id`); the panel groups by it. */
+  crewId?: string | null
 }
+
+export type RoutineLifecycleFilter = "all" | "active" | "draft" | "proposed" | "disabled"
 
 /** The routine fields the filter reads — a narrow view, not the row. */
 export interface RoutineFilterInput {
@@ -39,6 +45,11 @@ export interface RoutineFilterInput {
   /** A run can complete and still fail its result check (`FAILED`). */
   lastOutcome?: string | null
   ephemeral?: boolean
+  /** `status` on the row: active | proposed | disabled. Absent reads as active. */
+  lifecycle?: string | null
+  /** A saved draft newer than the published version exists. */
+  hasDraft?: boolean
+  crewId?: string | null
 }
 
 /** Live runs keyed by pipeline slug — only `status` is read. */
@@ -71,6 +82,18 @@ export function matchesRoutineFilters(
   if (filters.authorAgentId !== null && routine.authorAgentId !== filters.authorAgentId) {
     return false
   }
+
+  switch (filters.lifecycle ?? "all") {
+    case "all":
+      break
+    case "draft":
+      if (!routine.hasDraft) return false
+      break
+    default:
+      if ((routine.lifecycle || "active") !== filters.lifecycle) return false
+  }
+
+  if (filters.crewId && routine.crewId !== filters.crewId) return false
 
   switch (filters.status) {
     case "all":
@@ -113,5 +136,8 @@ export function routineFilterInput(p: Pipeline): RoutineFilterInput {
     lastStatus: p.last_invocation_status,
     lastOutcome: p.last_run_outcome,
     ephemeral: p.ephemeral,
+    lifecycle: p.status,
+    hasDraft: !!p.draft,
+    crewId: p.author_crew_id ?? null,
   }
 }
