@@ -4,14 +4,13 @@ import { Building2, User, Users } from "lucide-react"
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import {
   CALENDAR_SCOPE_LABELS,
   STATUS_FACETS,
@@ -31,7 +30,9 @@ export interface CalendarCrew {
  * The Calendar's secondary panel (CAL-PANEL): search over the loaded range,
  * Views (Mine / Workspace), Crews, and the Status filter. Every count ignores
  * its own facet, so picking one never zeroes the others; active filters show
- * as removable chips under the toolbar.
+ * as removable chips under the toolbar. Filter opens the facets inside the
+ * panel, under the toolbar (kit facet block, PNL-02), not in a popover; the
+ * Type facet waits for the aggregated dates (CAL-08) and stays hidden.
  */
 export function CalendarPanel({
   items,
@@ -48,6 +49,7 @@ export function CalendarPanel({
   onPicked?: () => void
 }) {
   const counts = calendarCounts(items, filters)
+  const facets = useSidebarFacets()
   const toggleStatus = (id: StatusFacet) =>
     onChange({ statuses: filters.statuses.includes(id) ? filters.statuses.filter((s) => s !== id) : [...filters.statuses, id] })
   const crewName = (id: string) => crews.find((c) => c.id === id)?.name ?? "Crew"
@@ -72,16 +74,7 @@ export function CalendarPanel({
         <div className="min-w-0 flex-1" data-calendar-search>
           <SidebarSearch value={filters.query} onValueChange={(query) => onChange({ query })} placeholder="Search dates, routines…" />
         </div>
-        <SidebarFilterPopover label="Filter calendar" activeCount={filters.statuses.length} onClear={() => onChange({ statuses: [] })}>
-          <SidebarFacet first label="Status" resetLabel="Any status" resetActive={!filters.statuses.length} onReset={() => onChange({ statuses: [] })}>
-            {STATUS_FACETS.map((f) => (
-              <SidebarFacetOption key={f.id} active={filters.statuses.includes(f.id)} onToggle={() => toggleStatus(f.id)}>
-                <span className="min-w-0 flex-1 truncate">{f.label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{counts.statuses[f.id]}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-        </SidebarFilterPopover>
+        <SidebarFilterButton activeCount={filters.statuses.length} {...facets.triggerProps} />
       </SidebarToolbar>
       <SidebarActiveChips>
         {filters.crewId && (
@@ -89,12 +82,22 @@ export function CalendarPanel({
             {crewName(filters.crewId)}
           </SidebarActiveChip>
         )}
-        {STATUS_FACETS.filter((f) => filters.statuses.includes(f.id)).map((f) => (
+        {/* While the block is open its Status header names the choice. */}
+        {!facets.open && STATUS_FACETS.filter((f) => filters.statuses.includes(f.id)).map((f) => (
           <SidebarActiveChip key={f.id} label={f.label} onRemove={() => toggleStatus(f.id)}>
             {f.label}
           </SidebarActiveChip>
         ))}
       </SidebarActiveChips>
+      <SidebarFacetBlock {...facets.blockProps} label="Filter calendar" activeCount={filters.statuses.length} onClear={() => onChange({ statuses: [] })}>
+        <SidebarInlineFacet
+          label="Status"
+          values={STATUS_FACETS.map((f) => ({ value: f.id, label: f.label, count: counts.statuses[f.id] }))}
+          selected={filters.statuses}
+          onToggle={(id) => toggleStatus(id as StatusFacet)}
+          onClear={() => onChange({ statuses: [] })}
+        />
+      </SidebarFacetBlock>
       <SidebarSection label="Views">
         {scopeRow("mine", User)}
         {scopeRow("workspace", Building2)}
