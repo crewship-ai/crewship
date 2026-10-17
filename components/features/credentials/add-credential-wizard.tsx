@@ -40,6 +40,7 @@ import {
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
+import { detectPastedValue } from "@/lib/credentials/paste-detect"
 import { loginProvider } from "@/lib/credentials/login-providers"
 import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
@@ -146,15 +147,17 @@ export interface AddCredentialWizardProps {
    * the step lives here.
    */
   primaryRef?: React.MutableRefObject<(() => void) | null>
+  /** Switch this surface to "Add AI provider" — offered when a pasted value is a model provider's key. */
+  onAddProvider?: () => void
 }
 
 type Step = "type" | "values" | "scope"
 
 /** The three steps, in order, as the shell's step bar wants them. */
 const STEPS: { id: Step; label: string }[] = [
-  { id: "type", label: "Type" },
+  { id: "type", label: "What it is" },
   { id: "values", label: "Details" },
-  { id: "scope", label: "Use" },
+  { id: "scope", label: "Access" },
 ]
 
 const STEP_ORDER: Step[] = STEPS.map((s) => s.id)
@@ -173,7 +176,7 @@ function CardNote({ children }: { children: React.ReactNode }) {
 }
 
 export function AddCredentialWizard({
-  workspaceId, onSuccess, onCancel, knownTags, initial, devicePollMs, onDirtyChange, primaryRef,
+  workspaceId, onSuccess, onCancel, knownTags, initial, devicePollMs, onDirtyChange, primaryRef, onAddProvider,
 }: AddCredentialWizardProps) {
   const { abilities } = useAbilities()
   // POST /credentials/bindings is roleManage — OWNER/ADMIN — and the handler
@@ -250,6 +253,28 @@ export function AddCredentialWizard({
       .catch(() => { if (active) setError("Could not load agents. Try selecting Assign now again.") })
     return () => { active = false }
   }, [assignNow, workspaceId])
+
+  // Step 1's paste box. The value moves into the Details step's own field and
+  // the box is cleared, so there is never a second copy of it in the form.
+  const [pasteDraft, setPasteDraft] = React.useState("")
+  const pasteDetection = React.useMemo(() => detectPastedValue(pasteDraft), [pasteDraft])
+  function takePasted(value: string) {
+    const det = detectPastedValue(value)
+    setItemTypeKey("TOKEN")
+    setChosenType(true)
+    setPrimaryValue(value.trim())
+    setExtras({})
+    setCustom([])
+    if (det && !nameTouched.current) setName(det.suggestedName)
+    setPasteDraft("")
+    setAttempted(false)
+    setStep("values")
+  }
+  function onPaste(value: string) {
+    const det = detectPastedValue(value)
+    if (det && !det.aiProvider) takePasted(value)
+    else setPasteDraft(value)
+  }
 
   function changeInput(action: () => void) {
     if (primaryValue || Object.values(extras).some(Boolean) || custom.some((f) => f.value)) {
@@ -370,6 +395,7 @@ export function AddCredentialWizard({
       description ||
       name ||
       expiresAt ||
+      pasteDraft ||
       tagDraft ||
       tags.length > 0 ||
       slotTouched ||
@@ -629,11 +655,36 @@ export function AddCredentialWizard({
                 }} />
               </>
             ) : <>
-            <CreateSurfaceSection title="Choose a secret type" icon={KeyRound} accent="amber">
-              <p className="type-meta leading-relaxed text-muted-foreground">
-                Choose what you want to store. We will show only the fields it needs.
-              </p>
-            </CreateSurfaceSection>
+            <CreateSurfaceField
+              label="Paste the value, or pick the type"
+              htmlFor="cred-paste"
+              hint="Recognised in your browser; nothing is sent until you save."
+            >
+              <Textarea
+                id="cred-paste"
+                rows={2}
+                autoComplete="off"
+                spellCheck={false}
+                value={pasteDraft}
+                onChange={(e) => onPaste(e.target.value)}
+                placeholder="Paste a key or token"
+                className="font-mono [-webkit-text-security:disc]"
+              />
+            </CreateSurfaceField>
+            {pasteDetection?.aiProvider ? (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.06] px-3 py-2 type-meta">
+                <span className="min-w-0 flex-1">
+                  Looks like a <b>{pasteDetection.label}</b> key. That is an <b>AI provider</b>: add it there so agents can pay with it.
+                </span>
+                {onAddProvider && <Button size="sm" variant="outline" onClick={onAddProvider}>Add as AI provider</Button>}
+                <Button size="sm" variant="ghost" onClick={() => takePasted(pasteDraft)}>Store as a secret</Button>
+              </div>
+            ) : pasteDraft.trim().length >= 8 ? (
+              <div className="flex items-center gap-2">
+                <span className="type-meta flex-1 text-muted-foreground">Not recognised. Store it as one value, or pick the type below.</span>
+                <Button size="sm" variant="outline" onClick={() => takePasted(pasteDraft)}>Continue as API key or token</Button>
+              </div>
+            ) : null}
             {/* Two-up on a phone: six tiles in one column is four thumb-swipes
                 to reach Certificate, and three-up leaves 110px of tile for a
                 label plus a blurb. */}

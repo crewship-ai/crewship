@@ -116,10 +116,32 @@ describe("step 1 — the shape decides the form, not the brand", () => {
 // that says where you are in a flow you cannot see the end of, so it now
 // carries the state in the accessibility tree rather than in a border colour,
 // and it is the way back to a step you already finished.
+// Harbor 2 step 1: "Paste the value, or pick the type". Recognition happens in
+// the browser; nothing is sent until Save. Prefixes followed by filler only.
+describe("paste to start", () => {
+  it("recognises a Stripe-shaped key, fills the name and moves the value to Details", () => {
+    renderWizard()
+    fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value: "sk_live_" + "x".repeat(24) } })
+    expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
+    expect(document.getElementById("cred-name")).toHaveValue("Stripe secret key")
+    expect(document.getElementById("cred-primary")).toHaveValue("sk_live_" + "x".repeat(24))
+    expect(h.apiFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/v1/credentials?"), expect.objectContaining({ method: "POST" }))
+  })
+
+  it("points a model provider's key at Add AI provider instead", () => {
+    const onAddProvider = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" onSuccess={vi.fn()} onCancel={vi.fn()} onAddProvider={onAddProvider} />)
+    fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value: "sk-ant-" + "y".repeat(24) } })
+    expect(screen.getByRole("button", { name: /what it is/i })).toHaveAttribute("aria-current", "step")
+    fireEvent.click(screen.getByRole("button", { name: /add as ai provider/i }))
+    expect(onAddProvider).toHaveBeenCalled()
+  })
+})
+
 describe("the step bar", () => {
   it("announces the step you are on rather than only tinting it", () => {
     renderWizard()
-    expect(screen.getByRole("button", { name: /type/i })).toHaveAttribute("aria-current", "step")
+    expect(screen.getByRole("button", { name: /what it is/i })).toHaveAttribute("aria-current", "step")
   })
 
   it("walks back to a finished step but will not skip ahead to an unfinished one", () => {
@@ -128,9 +150,9 @@ describe("the step bar", () => {
     expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
     // Step 3 needs a password and a name first; offering it would be a link
     // to a form that cannot be submitted.
-    expect(screen.getByRole("button", { name: /use/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^Step 3: Access$/i })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole("button", { name: /type/i }))
+    fireEvent.click(screen.getByRole("button", { name: /what it is/i }))
     expect(screen.getByRole("button", { name: /^login/i })).toBeInTheDocument()
   })
 
@@ -147,7 +169,7 @@ describe("the step bar", () => {
     expect(bar).toHaveAttribute("aria-valuemax", "3")
     // The chip row is what a pointer device gets; it does not take width on a
     // phone, and it is not what the phone reads.
-    const chips = screen.getByRole("button", { name: /type/i }).parentElement!
+    const chips = screen.getByRole("button", { name: /what it is/i }).parentElement!
     expect(chips.className).toContain("max-sm:hidden")
   })
 })
