@@ -258,13 +258,16 @@ test.describe("finish (#3486)", () => {
 
   test("ACT-05 a slug in an Activity link narrows the list to that agent", async ({ page }) => {
     await seed(page)
-    const agents = page.waitForResponse((r) => /\/api\/v1\/agents\?/.test(r.url()) && r.ok())
+    // Activity resolves slugs through the journal lookup (useJournalLookup);
+    // it never reads the agent directory, so the agent comes from there.
+    const lookup = page.waitForResponse((r) => /\/api\/v1\/journal\/lookup\?/.test(r.url()) && r.ok())
     await page.goto("/activity")
-    const body = (await (await agents).json()) as { id: string; slug: string }[] | { agents?: { id: string; slug: string }[] }
-    const list = Array.isArray(body) ? body : (body.agents ?? [])
-    test.skip(list.length === 0, "needs at least one agent")
-    await page.goto(`/activity?agent=${encodeURIComponent(list[0].slug)}`)
-    await expect(page).toHaveURL(new RegExp(`agent=${list[0].id}`))
+    const { agents } = (await (await lookup).json()) as { agents: { id: string; slug: string }[] }
+    // A slug two agents share (in different crews) cannot name one of them.
+    const agent = agents.find((a) => a.slug && agents.filter((b) => b.slug === a.slug).length === 1)
+    test.skip(!agent, "needs an agent with a unique slug")
+    await page.goto(`/activity?agent=${encodeURIComponent(agent!.slug)}`)
+    await expect(page).toHaveURL(new RegExp(`agent=${agent!.id}`))
   })
 })
 
