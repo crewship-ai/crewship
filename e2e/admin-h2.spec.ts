@@ -132,6 +132,24 @@ test.describe("Admin console", () => {
     await expect(again.locator(`[data-ws="${dropped}"]`)).toHaveAttribute("aria-pressed", "false")
     await expect(page.getByRole("region", { name: "Keep for" })).toBeVisible()
   })
+
+  // ADM-03 (#3493): Data retention and the Backups pages share the scope
+  // module instead of importing each other. Each opens from a cold load —
+  // whichever is evaluated first — without a page error.
+  for (const [path, ready] of [
+    ["/admin?tab=retention", "[data-slot=retention-page]"],
+    ["/admin/backups", "[data-slot=backups-scope-summary], [data-slot=backups-console], main"],
+  ] as const) {
+    test(`M05 ${path} opens from a cold load without a page error`, async ({ page }) => {
+      test.skip(!(await isInstanceAdmin(page)), "needs an instance administrator in E2E_EMAIL")
+      const errors: string[] = []
+      page.on("pageerror", (e) => errors.push(e.message))
+      await seed(page, PINNED)
+      await page.goto(path)
+      await expect(page.locator(ready).first()).toBeVisible()
+      expect(errors).toEqual([])
+    })
+  }
 })
 
 test.describe("Admin for someone who is not an instance administrator", () => {

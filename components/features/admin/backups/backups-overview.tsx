@@ -14,7 +14,7 @@ import {
   type AttentionItem, type Night, type OverviewResponse, type SpaceInfo, type StatusRow, type WorkspaceCoverage,
 } from "./backups-model"
 import { useBackupsOverview } from "./use-backups-overview"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Overview, in the Settings card grammar (like Security › Overview).

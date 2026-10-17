@@ -19,7 +19,7 @@ vi.mock("../use-data-retention", () => ({
   useRetentionDefaults: () => ({ status: "ready", data: { defaults: { inbox_days: null }, configured: [] }, reload: vi.fn() }),
 }))
 import { NEW_PREVIEW, NOTHING_TO_CHANGE, RetentionBody } from "../data-retention"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 
 const rows = [{ key: "inbox_days", label: "Inbox items", days: null, foreverAllowed: true }]
 const ctx = (...ids: string[]): SectionCtx => ({

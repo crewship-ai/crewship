@@ -13,7 +13,7 @@ import { ConfirmDialog, type Consequence } from "@/components/ui/confirm-dialog"
 import { Gate, WarnBar, WsAvatar } from "./backups-kit"
 import { RETENTION_OPTIONS, retentionDiff, retentionLabel, type RetentionChange, type RetentionRow } from "./backups-model"
 import { putRetention, putRetentionDefaults, useDataRetention, useRetentionDefaults, type RetentionDefaultsPut } from "./use-data-retention"
-import { useBackupsScope, type SectionCtx } from "./backups-console"
+import { useBackupsScope, type SectionCtx } from "./backups-scope"
 
 /**
  * Admin › Data retention: how long the server keeps each kind of live data,

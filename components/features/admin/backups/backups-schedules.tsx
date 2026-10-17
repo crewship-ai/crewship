@@ -25,7 +25,7 @@ import { deletePlan, previewContents, savePlan, useBackupPlans, usePlanCalendar,
 import { runNow } from "./use-backup-runs"
 import { useBackupSettings, useRecipients } from "./use-backup-settings"
 import { perform, performConfirm, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 export type PlanDraft = Omit<BackupPlan, "next_run_at" | "last_run_at" | "id"> & { id?: string }
 

@@ -23,7 +23,7 @@ import { SpaceCard, attentionItems } from "../backups-overview"
 import { overviewFixture } from "../__fixtures__/backups"
 import { HistoryBody } from "../backups-history"
 import { runsFixture } from "../__fixtures__/backups"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 import type { BackupsSection } from "@/app/(dashboard)/admin/navigation"
 
 function show(page: BackupsSection | "retention", search = "?demo=1") {
