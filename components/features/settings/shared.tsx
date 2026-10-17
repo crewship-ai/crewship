@@ -30,8 +30,10 @@ import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page
  * input, select and picker on the right of a row, so the column lines up and
  * text size comes from the control primitives (text-control).
  */
+// The control token, not the spacing scale: --spacing is 0.23rem, so h-8 is
+// ~27px at the Small text size, where a settings field is 32 (--control-md).
 // coarse:h-[2.75rem] — a finger needs 44px; desktop density is untouched.
-export const controlHeight = "h-8 coarse:h-[2.75rem]"
+export const controlHeight = "h-[var(--control-md)] coarse:h-[2.75rem]"
 export const settingsControl = cn(controlHeight, "w-full sm:w-64")
 /**
  * A control inside a table or list row (a role picker, a model picker): one
@@ -147,11 +149,13 @@ function SettingsCardHeader({
   danger?: boolean
 }) {
   return (
-    // py-2.5 around the 32 px tile: the 50 px header of the card anatomy.
-    <div data-slot="settings-card-header" className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+    // The 50 px header of the card anatomy at the Small text size (a 14.857px
+    // root; it scales with Standard and Large): a floor, so a header with a
+    // description line may grow, around the 32 px tile (--control-md).
+    <div data-slot="settings-card-header" className="flex min-h-[3.3654rem] items-center gap-3 border-b border-border px-4 py-2">
       {Icon && (
         <span
-          className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+          className="icon-tile inline-flex size-[var(--control-md)] shrink-0 items-center justify-center rounded-lg"
           style={{ "--ic": danger ? "var(--destructive)" : (tint ?? "var(--primary)") } as CSSProperties}
           aria-hidden
         >
