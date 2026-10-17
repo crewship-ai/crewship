@@ -40,11 +40,9 @@ function renderStrip() {
   render(<PagesStrip now={NOW} />)
 }
 
-/** The card's own hint node — the right-aligned muted word in the header. */
+/** The card's own hint node — the muted word beside the title. */
 function hint(): string {
-  const label = screen.getByText("Pages")
-  const header = label.closest("div")!.parentElement!
-  return header.querySelector('[data-slot="dashboard-card-hint"]')?.textContent ?? ""
+  return document.querySelector('[data-slot="dashboard-card-hint"]')?.textContent ?? ""
 }
 
 describe("PagesStrip", () => {
@@ -58,6 +56,15 @@ describe("PagesStrip", () => {
   it("titles the card PAGES", () => {
     renderStrip()
     expect(screen.getByText("Pages")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "All pages" })).toHaveAttribute("href", "/pages")
+  })
+
+  it("shows the page state as a pill", () => {
+    PAGES = [
+      page({ slug: "s", name: "Stale one", panels: [{ id: "a", schema: "status.v1", state: "stale", provenance: { produced_at: "2026-08-12T06:00:00Z" } }] }),
+    ]
+    renderStrip()
+    expect(screen.getByText("Stale").closest("[data-slot='status-pill']")?.getAttribute("data-tone")).toBe("warn")
   })
 
   it("says 'n stale' once something has gone quiet, matching §9b.2's idiom", () => {
@@ -90,7 +97,7 @@ describe("PagesStrip", () => {
     expect(hint()).toBe(EM_DASH)
   })
 
-  it("lists the most recently updated pages first, capped at five", () => {
+  it("lists the most recently updated pages first, capped at three", () => {
     PAGES = Array.from({ length: 7 }, (_, i) =>
       page({
         slug: `p${i}`,
@@ -99,8 +106,8 @@ describe("PagesStrip", () => {
       }),
     )
     renderStrip()
-    const rows = screen.getAllByRole("link")
-    expect(rows).toHaveLength(5)
+    const rows = within(screen.getByRole("list", { name: "Recently updated pages" })).getAllByRole("link")
+    expect(rows).toHaveLength(3)
     // p6 (11 Aug) sorts before p0 (10 Aug) — newest produced_at first.
     expect(within(rows[0]).getByText("Page 6")).toBeInTheDocument()
   })
@@ -121,6 +128,7 @@ describe("PagesStrip", () => {
     PAGES = []
     renderStrip()
     expect(screen.getByText("No pages yet")).toBeInTheDocument()
+    expect(document.querySelectorAll("[data-slot='dash-note']")).toHaveLength(1)
     expect(screen.getByText(/crewship page create --file/i)).toBeInTheDocument()
   })
 

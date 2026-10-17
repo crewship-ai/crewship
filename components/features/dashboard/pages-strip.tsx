@@ -27,19 +27,27 @@
  */
 
 import * as React from "react"
-import Link from "next/link"
 
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { EmptyState } from "@/components/layout/empty-state"
+import { DashCard, DashLine, DashNote } from "@/components/features/dashboard/dash-card"
+import { ConceptIcon } from "@/components/ui/concept-icon"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
-import { cn } from "@/lib/utils"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { usePages, summarisePages } from "@/hooks/use-pages"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
+import type { PanelState } from "@/components/features/pages/panels/types"
 import { EM_DASH, formatInstant } from "@/components/features/pages/panels/freshness"
 
-const STRIP_LIMIT = 5
+/** Three rows: the card is a glance, the full list is one click away. */
+const STRIP_LIMIT = 3
+
+const STATE_TONE: Record<PanelState, StatusTone> = {
+  fresh: "success",
+  stale: "warn",
+  failed: "danger",
+  never_produced: "muted",
+}
 
 export interface PagesStripProps {
   /** Injected clock — tests pin "now" so an absolute age is deterministic. */
@@ -52,8 +60,7 @@ export function PagesStrip({ now }: PagesStripProps) {
 
   // One clock for the whole render, ticking on its own timer rather than
   // being re-derived on every render — otherwise "3 stale" and the row ages
-  // could each read a different instant within the same paint. Same
-  // rationale as `PagesOverview`.
+  // could each read a different instant within the same paint.
   const [tick, setTick] = React.useState(() => now ?? new Date())
   React.useEffect(() => {
     if (now) return
@@ -75,10 +82,8 @@ export function PagesStrip({ now }: PagesStripProps) {
     [pages],
   )
 
-  // The right-hand answer word (§9b.2): never a repeat of "Pages", always
-  // what the reader actually wants to know. `—` when the index sent no
-  // freshness rollup at all — a measured `0` and "no basis to compute" are
-  // different claims (§9b.4).
+  // The answer word (§9b.2): `—` when the index sent no freshness rollup at
+  // all — a measured `0` and "no basis to compute" are different claims.
   const hint = loading && pages.length === 0
     ? undefined
     : !summary.hasFreshnessBasis
@@ -88,69 +93,42 @@ export function PagesStrip({ now }: PagesStripProps) {
         : "all fresh"
 
   return (
-    <DashboardCard title="Pages" icon={CONCEPT_ICON.pages} hint={hint}>
+    // "Pages" stays the name until the Artifacts rename ships.
+    <DashCard title="Pages" concept="pages" meta={hint} link={{ label: "All pages", href: "/pages" }}>
       {loading && pages.length === 0 ? (
-        <PagesStripSkeleton />
+        <div className="space-y-2 border-t border-border px-4 py-3">
+          {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-8 w-full rounded-md" />)}
+        </div>
       ) : error ? (
-        <div className="flex items-center justify-center h-[120px] text-[11px] text-destructive">
-          {error}
-        </div>
+        <DashNote tone="error">{error}</DashNote>
       ) : recent.length === 0 ? (
-        <EmptyState
-          size="inline"
-          icon={CONCEPT_ICON.pages}
-          title={pages.length === 0 ? "No pages yet" : "Nothing has run yet"}
-          description={
-            pages.length === 0
-              ? "A page is a named set of panels a producer pushes to. Create one with crewship page create --file page.yaml, then give it a first payload."
-              : "No page has received a payload yet. Open Pages and run a producer, or push one with crewship page set <page>/<panel> --data -."
-          }
-        />
+        pages.length === 0 ? (
+          <DashNote>
+            <b className="font-medium text-foreground">No pages yet</b> · A page is a named set of panels a producer pushes to. Create one with <code className="font-mono">crewship page create --file page.yaml</code>, then give it a first payload.
+          </DashNote>
+        ) : (
+          <DashNote>
+            <b className="font-medium text-foreground">Nothing has run yet</b> · No page has received a payload yet. Open Pages and run a producer, or push one with <code className="font-mono">crewship page set &lt;page&gt;/&lt;panel&gt; --data -</code>.
+          </DashNote>
+        )
       ) : (
-        <div className="flex flex-col">
-          {recent.map((p) => {
-            const meta = p.state ? PAGE_STATE_META[p.state] : null
-            const Icon = meta?.icon ?? CONCEPT_ICON.pages
-            return (
-              <Link
-                key={p.id || p.slug}
+        <ul aria-label="Recently updated pages">
+          {recent.map((p) => (
+            <li key={p.id || p.slug}>
+              <DashLine
+                lead={<ConceptIcon concept="pages" variant="chip" className="h-7 w-7 rounded-md" />}
+                title={p.name}
+                // Absolute, never "a while ago" (§4 rule 3).
+                sub={[p.ownerLabel, `updated ${formatInstant(p.lastProducedAt!, clock)}`].filter(Boolean).join(" · ")}
                 href={`/pages/${encodeURIComponent(p.slug)}`}
-                className="group flex items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.03]"
-              >
-                <Icon
-                  className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">
-                  {p.name}
-                </span>
-                {p.ownerLabel && (
-                  <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:block">
-                    {p.ownerLabel}
-                  </span>
-                )}
-                {/* Absolute, never "a while ago" (§4 rule 3). */}
-                <span className="shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground-soft">
-                  {formatInstant(p.lastProducedAt!, clock)}
-                </span>
-              </Link>
-            )
-          })}
-        </div>
+                // No pill when the server sent no state: an unknown state is
+                // never shown as fresh.
+                right={p.state ? <StatusPill tone={STATE_TONE[p.state]} label={PAGE_STATE_META[p.state].label} /> : undefined}
+              />
+            </li>
+          ))}
+        </ul>
       )}
-    </DashboardCard>
-  )
-}
-
-/** Skeleton in the strip's final geometry — same rationale as the overview's:
- * a placeholder that does not match what replaces it makes the dashboard
- * reflow once the query resolves. */
-function PagesStripSkeleton() {
-  return (
-    <div className="flex flex-col gap-2">
-      {Array.from({ length: 3 }, (_, i) => (
-        <Skeleton key={i} className="h-8 w-full rounded-md" />
-      ))}
-    </div>
+    </DashCard>
   )
 }

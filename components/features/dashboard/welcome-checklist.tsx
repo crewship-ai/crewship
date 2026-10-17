@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, Circle, X, Sparkles, ArrowRight, Terminal, Stethoscope } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
+import { CheckCircle2, Circle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
+import { DashCard, DashLine } from "./dash-card"
 
 /**
  * localStorage flag set on successful onboarding completion. Presence
@@ -37,7 +38,6 @@ interface ChecklistItem {
   done: boolean
   title: string
   description: string
-  icon: React.ComponentType<{ className?: string }>
   cta?: { label: string; href: string } | { label: string; copy: string }
 }
 
@@ -94,7 +94,6 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
       done: false,
       title: "Talk to your first agent",
       description: "Open the chat surface for the agent the wizard just created.",
-      icon: Sparkles,
       // /crews/agents/<id>/chat is gone — that subtree was deleted with the
       // selection-driven /crews redesign, and this CTA 404'd for every user
       // who reached it. Chat is /chat/<slug>; without a slug the roster is
@@ -110,7 +109,6 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
       title: "Run `crewship doctor`",
       description:
         "Verifies Docker, the embedded UI, the DB, and your API key wiring. First thing to try if anything goes wrong.",
-      icon: Stethoscope,
       cta: { label: "Copy command", copy: "crewship doctor" },
     },
     {
@@ -119,72 +117,46 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
       title: "Pair the CLI (optional)",
       description:
         "Drive Crewship from your terminal too: `crewship login --pair` walks you through linking this workspace to your shell.",
-      icon: Terminal,
       cta: { label: "Copy command", copy: "crewship login --pair" },
     },
   ]
 
+  // Harbor 2: one card above the attention tiles, three rows, a ghost
+  // Dismiss in the header. It goes away when dismissed.
   return (
-    <Card className="mb-6 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              <h3 className="text-base font-semibold">You're all set — three quick wins</h3>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Onboarding put your first agent on the launch pad. These three steps cover the
-              90% of "what now?" questions a fresh beta install raises.
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={dismiss}
-            aria-label="Dismiss welcome checklist"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <ul className="mt-4 space-y-3">
-          {items.map((item) => {
-            const Icon = item.icon
-            return (
-              <li key={item.id} className="flex items-start gap-3">
-                {item.done ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                ) : (
-                  <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{item.title}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
-                  <div className="mt-2">
-                    {item.cta && "href" in item.cta && (
-                      <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                        <Link href={item.cta.href}>
-                          {item.cta.label}
-                          <ArrowRight className="ml-1 h-3 w-3" />
-                        </Link>
-                      </Button>
-                    )}
-                    {item.cta && "copy" in item.cta && (
-                      <CopyButton text={item.cta.copy} label={item.cta.label} />
-                    )}
-                  </div>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      </CardContent>
-    </Card>
+    <DashCard
+      title="Get started"
+      concept="dashboard"
+      className="mb-4"
+      action={
+        <Button variant="ghost" size="sm" onClick={dismiss} aria-label="Dismiss welcome checklist" className="coarse:min-h-11">
+          Dismiss
+        </Button>
+      }
+    >
+      <ul>
+        {items.map((item) => (
+          <li key={item.id}>
+            <DashLine
+              lead={item.done
+                ? <CheckCircle2 className="h-5 w-5 shrink-0 text-chip-ok-fg" aria-label="Done" />
+                : <Circle className="h-5 w-5 shrink-0 text-muted-foreground-soft" aria-label="Not done" />}
+              title={item.title}
+              sub={item.description}
+              right={
+                item.cta && "href" in item.cta ? (
+                  <Button asChild size="sm" variant="outline" className="coarse:min-h-11">
+                    <Link href={item.cta.href}>{item.cta.label}</Link>
+                  </Button>
+                ) : item.cta && "copy" in item.cta ? (
+                  <CopyButton text={item.cta.copy} label={item.cta.label} />
+                ) : undefined
+              }
+            />
+          </li>
+        ))}
+      </ul>
+    </DashCard>
   )
 }
 
@@ -199,6 +171,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
+      toast.success("Copied", { description: text })
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
       // Clipboard API can fail in non-secure contexts or when permission
@@ -206,13 +179,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     }
   }
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="h-7 text-xs font-mono"
-      onClick={handleCopy}
-    >
+    <Button type="button" size="sm" variant="outline" className="coarse:min-h-11" onClick={handleCopy}>
       {copied ? "Copied" : label}
     </Button>
   )
