@@ -101,19 +101,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
-        {consequences.length > 0 && (
-          <ul className="flex flex-col gap-1.5 text-label">
-            {consequences.map((c, i) => {
-              const { Icon, className } = TONE_ICON[c.tone]
-              return (
-                <li key={i} className="flex items-start gap-2" data-tone={c.tone}>
-                  <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", className)} aria-hidden />
-                  <span className="min-w-0 text-foreground/85">{c.text}</span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <ConsequenceList items={consequences} />
         {children != null && <div className="flex flex-col gap-2" data-slot="confirm-field">{children}</div>}
         {typeToConfirm != null && !closeOnly && (
           <label htmlFor={inputId} className="flex flex-col gap-1.5 text-label text-muted-foreground">
@@ -162,5 +150,34 @@ export function ConfirmDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+const TONE_WORD: Record<ConsequenceTone, string> = { lost: "Lost", kept: "Kept", warn: "Warning" }
+
+/**
+ * What a decision loses, keeps or puts at risk, one line each (the kit's
+ * confirm shape). ConfirmDialog draws it; a page or CreateSurface that asks
+ * the same question outside a ConfirmDialog (the Guest invitation on /join)
+ * uses it directly. The tone is said in words for assistive technology, not
+ * only by the icon's colour.
+ */
+export function ConsequenceList({ items, className }: { items: readonly Consequence[]; className?: string }) {
+  if (items.length === 0) return null
+  return (
+    <ul aria-label="What happens" data-slot="consequences" className={cn("flex flex-col gap-1.5 text-label", className)}>
+      {items.map((c, i) => {
+        const { Icon, className: tone } = TONE_ICON[c.tone]
+        return (
+          <li key={i} className="flex items-start gap-2" data-tone={c.tone}>
+            <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", tone)} aria-hidden />
+            <span className="min-w-0 text-foreground/85">
+              <span className="sr-only">{TONE_WORD[c.tone]}: </span>
+              <span>{c.text}</span>
+            </span>
+          </li>
+        )
+      })}
+    </ul>
   )
 }

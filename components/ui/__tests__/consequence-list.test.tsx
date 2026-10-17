@@ -2,19 +2,12 @@ import * as React from "react"
 import { describe, it, expect } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 
-import * as ConfirmKit from "@/components/ui/confirm-dialog"
+import { ConfirmDialog, ConsequenceList, type Consequence } from "@/components/ui/confirm-dialog"
 
 // COM-11 (#3481): the lost / warn / kept list is the kit's confirm shape, and
 // pages outside a ConfirmDialog (the Guest invitation on /join, CreateSurface
 // reviews) composed it by hand. One component draws it everywhere.
-type ListProps = { items: ConfirmKit.Consequence[]; className?: string }
-function ConsequenceList(props: ListProps) {
-  const List = (ConfirmKit as unknown as { ConsequenceList?: React.ComponentType<ListProps> }).ConsequenceList
-  if (!List) throw new Error("ConsequenceList is not exported from confirm-dialog")
-  return <List {...props} />
-}
-
-const ITEMS: ConfirmKit.Consequence[] = [
+const ITEMS: Consequence[] = [
   { tone: "lost", text: "Its bindings are removed" },
   { tone: "warn", text: "Running sessions stop" },
   { tone: "kept", text: "Runs stay 30 days" },
@@ -41,7 +34,7 @@ describe("ConsequenceList", () => {
   })
 
   it("is what ConfirmDialog shows", () => {
-    render(<ConfirmKit.ConfirmDialog open onOpenChange={() => {}} title="Delete?" consequences={ITEMS} confirmLabel="Delete" onConfirm={() => {}} />)
+    render(<ConfirmDialog open onOpenChange={() => {}} title="Delete?" consequences={ITEMS} confirmLabel="Delete" onConfirm={() => {}} />)
     expect(screen.getByRole("list", { name: "What happens" })).toHaveAttribute("data-slot", "consequences")
   })
 })
