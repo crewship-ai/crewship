@@ -129,4 +129,15 @@ describe("sidebar-kit", () => {
     render(<SidebarRow onSelect={vi.fn()}><span>Needs you</span></SidebarRow>)
     expect(screen.getByRole("button", { name: "Needs you" }).className).toMatch(/\bitems-center\b/)
   })
+
+  it("SidebarRow passes a tooltip title and aria-current through to the row", () => {
+    render(
+      <ul>
+        <SidebarRow selected onSelect={vi.fn()} title="Quarterly research digest for Ops" aria-current="page">Quarterly…</SidebarRow>
+      </ul>,
+    )
+    const row = screen.getByRole("button", { name: "Quarterly…" })
+    expect(row).toHaveAttribute("title", "Quarterly research digest for Ops")
+    expect(row).toHaveAttribute("aria-current", "page")
+  })
 })

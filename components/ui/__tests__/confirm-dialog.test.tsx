@@ -1,3 +1,4 @@
+import * as React from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -60,5 +61,31 @@ describe("ConfirmDialog destructive", () => {
     const btn = screen.getByRole("button", { name: "Delete" })
     expect(btn).toHaveAttribute("data-variant", "destructive")
     expect(btn.className).not.toMatch(/(^|\s)bg-primary(\s|$)/)
+  })
+
+  it("close-only mode is a notice with one Close button", () => {
+    const onOpenChange = vi.fn()
+    render(<ConfirmDialog open onOpenChange={onOpenChange} title="Token revoked" description="CLI sessions using it stop now." closeOnly />)
+    const buttons = screen.getAllByRole("button")
+    expect(buttons.map((b) => b.textContent)).toEqual(["Close"])
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("renders a caller's field between the consequences and the footer", async () => {
+    function WithReason() {
+      const [reason, setReason] = React.useState("")
+      return (
+        <ConfirmDialog open onOpenChange={() => {}} title="Reject?" confirmLabel="Reject" onConfirm={() => seen.push(reason)}>
+          <label>Reason<input aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+        </ConfirmDialog>
+      )
+    }
+    const seen: string[] = []
+    render(<WithReason />)
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Out of scope" } })
+    expect(screen.getByLabelText("Reason").closest("[data-slot=confirm-field]")).not.toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }))
+    await waitFor(() => expect(seen).toEqual(["Out of scope"]))
   })
 })
