@@ -1,16 +1,18 @@
 "use client"
 
 import { useId, type CSSProperties, type ReactNode } from "react"
-import type { LucideIcon } from "lucide-react"
+import Link from "next/link"
+import { Lock, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page-save-bar"
 
 /**
  * Shared settings card shell (Harbor).
  *
- * One card per section: a header row inside the card — an optional icon
- * tile, the title and a one-line description, actions on the right — and the
- * body under a hairline. 20px radius, 1px border, no resting shadow.
+ * One card per section (Harbor 2 card anatomy): a 50 px header row — a 32 px
+ * icon tile, the title and a one-line subtitle, actions on the right — the
+ * rows under a hairline, and an optional footer strip for a note or a
+ * secondary action. rounded-card (10 px), 1 px border, no resting shadow.
  *
  * ```tsx
  * <SettingsCard icon={User} title="Account" description="Your identity on this instance">
@@ -84,11 +86,18 @@ export function SettingsCard({
   icon,
   tint,
   bodyClassName,
+  footer,
+  hideHeader = false,
 }: {
   title: string
   description?: string
   actions?: ReactNode
   children: ReactNode
+  /** The strip under the rows: a note on the left, an action on the right. */
+  footer?: ReactNode
+  /** A card the section head already names (Notification sounds): the title
+   *  stays only as the region's accessible name. */
+  hideHeader?: boolean
   className?: string
   /** Classes for the body under the header (e.g. flex-1 in a stretched card). */
   bodyClassName?: string
@@ -107,10 +116,15 @@ export function SettingsCard({
       aria-labelledby={titleId}
       className={cn("scroll-mt-4 overflow-hidden rounded-card border border-border bg-card transition-shadow duration-500 data-[focused=true]:ring-2 data-[focused=true]:ring-primary/50", className)}
     >
-      <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
+      {hideHeader ? (
+        <h3 id={titleId} className="sr-only">{title}</h3>
+      ) : (
+        <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
+      )}
       <PageSaveLabel label={title}>
         <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
       </PageSaveLabel>
+      {footer != null && <SettingsCardFooter>{footer}</SettingsCardFooter>}
     </section>
   )
 }
@@ -133,7 +147,8 @@ function SettingsCardHeader({
   danger?: boolean
 }) {
   return (
-    <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+    // py-2.5 around the 32 px tile: the 50 px header of the card anatomy.
+    <div data-slot="settings-card-header" className="flex items-center gap-3 border-b border-border px-4 py-2.5">
       {Icon && (
         <span
           className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
@@ -157,11 +172,15 @@ function SettingsCardHeader({
 }
 
 /**
- * Single row inside a SettingsCard: label + optional description on the
- * left, right-aligned content on the right. The label is text-control,
- * the size of the field beside it; the description is text-label in the
- * muted ink, the same as the card header's — a supporting line is 12px,
- * never fine print (docs/ux/README.md › Type).
+ * Single row inside a SettingsCard (Harbor 2 row anatomy): label + optional
+ * hint on the left, the control on the right. The label is text-control at
+ * 500, the size of the field beside it; the hint is text-label in the muted
+ * ink, the same as the card header's — a supporting line is 12px, never fine
+ * print (docs/ux/README.md › Type).
+ *
+ * `lead` puts a 28 px grey icon tile before the label (sounds, devices);
+ * `lock` says who may change the value ("Owner", "Owners and admins") with a
+ * lock beside the label, before anyone tries.
  */
 export function SettingsRow({
   label,
@@ -169,33 +188,158 @@ export function SettingsRow({
   children,
   border = true,
   className,
+  lead,
+  lock,
+  lockTitle,
 }: {
   label: ReactNode
   description?: ReactNode
   children: ReactNode
   border?: boolean
   className?: string
+  /** Icon for the small grey tile before the label. */
+  lead?: LucideIcon
+  /** Who may change this row: a lock and this word beside the label. */
+  lock?: string
+  /** The longer reason, on the lock's tooltip. */
+  lockTitle?: string
 }) {
   return (
     <div
+      data-slot="settings-row"
       className={cn(
-        "flex items-center justify-between gap-4 px-4 py-2.5",
+        // Wraps rather than squeezes. The label side is at least 11rem; when
+        // it and the control do not fit side by side (a phone), the control
+        // drops under the label instead of pushing out of the card or
+        // clipping a sentence-long hint mid-word.
+        "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3",
         border && "border-b border-border last:border-b-0",
         className,
       )}
     >
-      {/* The label side flexes and may shrink; the control side never does.
-          It used to be the other way round, which meant a row with a long
-          description pushed its own control out of the card — the description
-          clipped mid-word and the input sat on top of the text. A description
-          is allowed to be a sentence, so the layout has to absorb one. */}
-      <div className="min-w-0 flex-1">
-        <div className="text-control text-foreground">{label}</div>
+      {lead && <SettingsRowIcon icon={lead} />}
+      <div className="min-w-0 flex-[1_1_11rem]">
+        <div className="text-control font-medium text-foreground">
+          {label}
+          {lock && <SettingsLock label={lock} title={lockTitle} />}
+        </div>
         {description && (
           <div className="text-label text-muted-foreground mt-0.5 leading-snug">{description}</div>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0 justify-end">{children}</div>
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">{children}</div>
+    </div>
+  )
+}
+
+/** The 28 px grey tile a row's lead icon sits in. */
+export function SettingsRowIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span aria-hidden data-slot="settings-row-icon" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle text-muted-foreground">
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  )
+}
+
+/** "🔒 Owner" beside a label: who may change the value. */
+export function SettingsLock({ label, title }: { label: string; title?: string }) {
+  return (
+    <span
+      data-slot="settings-lock"
+      title={title ?? `Only ${label.toLowerCase()} can change this`}
+      className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-micro font-medium text-muted-foreground"
+    >
+      <Lock className="h-2.5 w-2.5" aria-hidden />
+      {label}
+    </span>
+  )
+}
+
+/** The strip under a card's rows: a note on the left, an action on the right. */
+export function SettingsCardFooter({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      data-slot="settings-card-footer"
+      className={cn("flex flex-wrap items-center justify-between gap-2.5 border-t border-border bg-surface-subtle px-4 py-2.5 text-label text-muted-foreground", className)}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** A line of actions under a list in a card ("Sign out everywhere else · Show all"). */
+export function SettingsCardActions({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div data-slot="settings-card-actions" className={cn("flex flex-wrap items-center gap-3 px-4 pb-3 pt-2", className)}>
+      {children}
+    </div>
+  )
+}
+
+export interface SettingsCount {
+  icon: LucideIcon
+  value: ReactNode
+  label: string
+  /** Makes the tile a link (Classification → Vault). */
+  href?: string
+}
+
+/**
+ * Figures side by side in a card (Usage, Classification): an icon and the
+ * number on one line, the label under it. A tile with `href` is a link. Three
+ * columns from `sm`, one on a phone.
+ */
+export function SettingsCounts({ items, className }: { items: SettingsCount[]; className?: string }) {
+  const tile = "grid grid-cols-[auto_1fr] items-center gap-x-2 rounded-card border border-border bg-card px-3 py-2.5 text-left"
+  return (
+    <div data-slot="settings-counts" className={cn("grid grid-cols-1 gap-2.5 px-4 py-3 sm:grid-cols-3", className)}>
+      {items.map(({ icon: Icon, value, label, href }) => {
+        const body = (
+          <>
+            <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+            <b className="text-default font-semibold tabular-nums text-foreground">{value}</b>
+            <span className="col-span-2 text-label text-muted-foreground">{label}</span>
+          </>
+        )
+        return href ? (
+          <Link
+            key={label}
+            href={href}
+            className={cn(tile, "transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50")}
+          >
+            {body}
+          </Link>
+        ) : (
+          <div key={label} className={tile}>{body}</div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * The head of a Settings section or nested page: a 40 px tile in the accent,
+ * the title (text-title, 21 px) and one sentence about what the section is for.
+ */
+export function SettingsPageHead({ icon: Icon, title, description, actions, className, level = 2 }: {
+  icon: LucideIcon
+  title: string
+  description?: ReactNode
+  actions?: ReactNode
+  className?: string
+  /** 2 under a sub-bar, which already carries the page h1 ("Settings › …");
+   *  1 on a page without one (restricted Account security). */
+  level?: 1 | 2
+}) {
+  const Heading = level === 1 ? "h1" : "h2"
+  return (
+    <div data-slot="settings-page-head" className={cn("flex flex-wrap items-center gap-3.5", className)}>
+      <span className="page-tile page-tile-40" aria-hidden><Icon /></span>
+      <div className="min-w-0 flex-[1_1_14rem]">
+        <Heading className="text-title font-semibold leading-tight tracking-tight text-foreground">{title}</Heading>
+        {description && <p className="mt-0.5 text-body text-muted-foreground">{description}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   )
 }
