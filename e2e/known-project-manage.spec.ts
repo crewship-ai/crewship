@@ -83,11 +83,15 @@ for (const width of [1280, 390]) {
     await expect(milestonePanel).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Delete issue", exact: true })).toHaveCount(0)
     transient = true
+    await page.evaluate(() => localStorage.setItem("crewshipDebug", "1"))
+    const failedRead = page.waitForEvent("console", message => message.type() === "warning" && message.text().includes("[crewship] 500 from") && message.text().includes(projectPath))
     const failedRefresh = page.waitForResponse(response => new URL(response.url()).pathname === projectPath && response.status() === 500)
     await details.getByRole("button", { name: "Refresh project details", exact: true }).click()
-    await (await failedRefresh).finished()
-    // Flush response notification and paint before negative DOM assertions.
+    await failedRefresh
+    await failedRead
+    // apiFetch processed the 500; flush query notification and paint as well.
     await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+    await expect(details.getByRole("alert")).toContainText("unavailable")
     await expect(page.getByLabel("Project name", { exact: true })).toHaveCount(0)
     await expect(milestonePanel).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Delete issue", exact: true })).toHaveCount(0)
