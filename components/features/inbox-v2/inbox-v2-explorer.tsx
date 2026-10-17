@@ -300,7 +300,9 @@ export function InboxV2Explorer({
       <div className="shrink-0 px-2 pt-2">
         <div role="tablist" aria-label="Inbox spaces" className="grid gap-0.5 rounded-lg bg-muted p-0.5 ring-1 ring-border ring-inset">
           {SPACES.map((s, index) => {
-            const on = !attention && !overviewSelected && view === s.key
+            // The Overview row sits beside the spaces, not instead of one:
+            // the list below stays the current space's (v67 keeps it marked).
+            const on = !attention && view === s.key
             return (
               <button
                 key={s.key}

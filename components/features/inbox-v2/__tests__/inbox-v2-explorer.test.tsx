@@ -60,6 +60,14 @@ describe("inbox v2 explorer", () => {
     expect(onOverview).toHaveBeenCalledOnce()
   })
 
+  it("keeps the current space selected while the Overview is in the pane", () => {
+    renderExplorer({ view: "updates", onOverview: vi.fn(), overviewSelected: true })
+    const spaces = screen.getByRole("tablist", { name: "Inbox spaces" })
+    // The list below is still that space's list; the Overview row is selected beside it.
+    expect(within(spaces).getByRole("tab", { name: /Updates/ })).toHaveAttribute("aria-selected", "true")
+    expect(within(spaces).getByRole("tab", { name: /To handle/ })).toHaveAttribute("aria-selected", "false")
+  })
+
   it("renders in the v67 row anatomy: unread dot, crew · kind, expiry or age, merged count", () => {
     const soon = new Date(Date.now() + 3 * 3_600_000).toISOString()
     const lookup = { crewById: new Map([["c-r", { id: "c-r", name: "Research", slug: "research", color: "teal" }]]), agentBySlug: new Map(), agentById: new Map(), ready: true }
