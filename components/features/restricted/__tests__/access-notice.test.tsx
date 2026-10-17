@@ -42,7 +42,7 @@ describe("restricted catalog retry", () => {
     render(<RestrictedRoutines workspaceId="workspace" />)
     await screen.findByText("No routines can currently be run with your access. Shared definitions appear above.")
     fireEvent.click(screen.getByRole("button", { name: "Check again" }))
-    await screen.findByRole("option", { name: "Allowed routine" })
+    await screen.findByRole("radio", { name: /Allowed routine/ })
     await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
   })
 })

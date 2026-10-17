@@ -52,12 +52,12 @@ describe("deleting a schedule", () => {
   it("asks first; Cancel keeps it, confirm deletes it", async () => {
     render(<RoutineSchedulesTab workspaceId="ws-1" pipelineId="p1" slug="digest" />)
     fireEvent.click(screen.getByRole("button", { name: "Delete schedule Morning digest" }))
-    const dialog = await answer("Delete schedule Morning digest?", "Cancel")
-    expect(dialog).toHaveTextContent("The routine stops starting on this schedule.")
+    const dialog = await answer("Delete schedule “Morning digest”?", "Cancel")
+    expect(dialog).toHaveTextContent("It stops starting this routine.")
     expect(h.removeSchedule).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Delete schedule Morning digest" }))
-    await answer("Delete schedule Morning digest?", "Delete schedule")
+    await answer("Delete schedule “Morning digest”?", "Delete schedule")
     await waitFor(() => expect(h.removeSchedule).toHaveBeenCalledWith("sch-1"))
   })
 })
@@ -66,12 +66,12 @@ describe("deleting a webhook", () => {
   it("asks first and says senders will fail; Cancel keeps it, confirm deletes it", async () => {
     render(<RoutineWebhooksTab workspaceId="ws-1" pipelineId="p1" slug="digest" />)
     fireEvent.click(screen.getByRole("button", { name: "Delete webhook GitHub pushes" }))
-    const dialog = await answer("Delete webhook GitHub pushes?", "Cancel")
-    expect(dialog).toHaveTextContent("Existing senders will start failing")
+    const dialog = await answer("Delete webhook “GitHub pushes”?", "Cancel")
+    expect(dialog).toHaveTextContent("Senders using this URL start failing")
     expect(h.removeWebhook).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Delete webhook GitHub pushes" }))
-    await answer("Delete webhook GitHub pushes?", "Delete webhook")
+    await answer("Delete webhook “GitHub pushes”?", "Delete webhook")
     await waitFor(() => expect(h.removeWebhook).toHaveBeenCalledWith("wh-1"))
   })
 })
