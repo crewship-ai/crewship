@@ -66,6 +66,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.
