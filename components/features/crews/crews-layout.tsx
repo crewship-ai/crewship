@@ -282,9 +282,9 @@ export function CrewsLayout({
                 tab={crewTabFromParam(tab)}
                 onTabChange={(t) => setTab(tabParam(t))}
                 onCrewChanged={onRefresh}
-                onSelectAgent={(slug) => {
+                onSelectAgent={(slug, agentTab) => {
                   const a = agents.find((x) => x.slug === slug)
-                  update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? selectedCrewSlug : selectedCrewSlug })
+                  update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? selectedCrewSlug : selectedCrewSlug, tab: agentTab ? tabParam(agentTab) : null })
                 }}
                 onOpenTerminal={openTerminal}
                 onBackToCrews={() => { setLastCrew(null); selectCrew(null) }}

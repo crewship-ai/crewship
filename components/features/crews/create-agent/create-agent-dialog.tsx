@@ -824,7 +824,8 @@ WORK STYLE: …`}
           </CreateSurfaceSection>
 
           {agent && <PersonaDraft workspaceId={workspaceId} agentId={agent.id} value={persona} onChange={setPersona} />}
-          <CreateSurfaceSection title="Memory" icon={Brain} accent="purple">
+          {/* On the agent page memory is a switch on the Memory tab. */}
+          {!inline && <CreateSurfaceSection title="Memory" icon={Brain} accent="purple">
             <CreateSurfaceToggleRow
               concept="memory"
               label="Memory between sessions"
@@ -841,7 +842,7 @@ WORK STYLE: …`}
                 />
               }
             />
-          </CreateSurfaceSection>
+          </CreateSurfaceSection>}
           </EditorPanel>
           <EditorPanel active={show("model")}>
             <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />

@@ -15,6 +15,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { PageError, PageNotFound } from "@/components/layout/page-state"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
@@ -33,7 +34,7 @@ import {
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
 import { AgentOverview } from "./workspace-overview"
-import { MemoryWorkspace } from "./memory-workspace"
+import { AgentMemoryCards } from "./agent-memory"
 import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
@@ -102,8 +103,11 @@ export function AgentCanvas({
   useEffect(() => { if (agent) onLoaded?.(agent) }, [agent, onLoaded])
 
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
-  const { abilities } = useAbilities()
+  const { abilities, role } = useAbilities()
+  const { data: session } = useSessionSafe()
   const canDelete = abilities.can("delete", "Agent")
+  const canUpdate = abilities.can("update", "Agent")
+  const isAdmin = role === "OWNER" || role === "ADMIN"
   // Persona PUT/DELETE are roleCreate (MANAGER+), like creating an agent.
   const canEditPersona = abilities.can("create", "Agent")
   const [personaRev, setPersonaRev] = useState(0)
@@ -436,7 +440,25 @@ export function AgentCanvas({
               onAgentChanged={onAgentChanged}
             />
           )}
-          {tab === "memory" && <MemoryWorkspace key={agent.id} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id ?? undefined} memoryEnabled={agent.memory_enabled} />}
+          {tab === "memory" && (
+            <AgentMemoryCards
+              key={agent.id}
+              workspaceId={workspaceId}
+              agentId={agent.id}
+              agentSlug={agent.slug}
+              agentName={agent.name}
+              crewId={agent.crew_id ?? undefined}
+              userId={session?.user.id}
+              userName={session?.user.name || undefined}
+              memoryEnabled={agent.memory_enabled}
+              canEdit={canUpdate}
+              canExport={isAdmin}
+              onMemoryEnabled={async (next) => {
+                await patch({ memory_enabled: next })
+                toast.success(next ? `${agent.name} remembers between runs` : `${agent.name} no longer adds saved knowledge to its runs`)
+              }}
+            />
+          )}
           {tab === "settings" && (
             <>
               <CreateAgentDialog key={`identity:${editorKey}`} {...editorProps} inlineSections={["identity"]} inlineLabel="Identity" />
