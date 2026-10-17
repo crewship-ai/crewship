@@ -417,6 +417,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Shared project management now has a verified CLI/API contract.** Real-router acceptance checks known-project Read+Manage without List, unrelated-client isolation, metadata and milestones, separate issue deletion, narrow credentials, active work, conflicts, audit rollback and live issuer revocation. Existing rights remain independent.
+
+
 - **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
 
 - Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
