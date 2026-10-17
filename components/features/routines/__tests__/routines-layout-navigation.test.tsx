@@ -1,28 +1,33 @@
 import type { ReactNode } from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { RoutineFilterState } from "@/lib/routine-filters"
+import { useAppStore } from "@/lib/store"
 import { RoutinesLayout } from "../routines-layout"
 
 const h = vi.hoisted(() => ({ mobile: false, refresh: vi.fn(), pipelines: [
   { slug: "nightly", name: "Nightly report", description: "Prepare report", invocation_count: 1 },
   { slug: "test-routines-fixture", name: "Fixture", description: "Test fixture", invocation_count: 5 },
 ] }))
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search), usePathname: () => "/routines" }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
+vi.mock("@/lib/api-fetch", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api-fetch")>()), apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: h.pipelines, loading: false, error: null, refresh: h.refresh }) }))
 vi.mock("motion/react", () => ({ AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>, motion: { div: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div> } }))
-vi.mock("../routines-explorer", () => ({ RoutinesExplorer: (p: { routines: { slug: string; name: string }[]; search: string; onSearchChange: (s: string) => void; onSelectRoutine: (s: string) => void; filters: RoutineFilterState; onChange: (f: RoutineFilterState) => void; onToggleCollapse: () => void }) => <nav aria-label="Routine explorer">
+vi.mock("../routines-explorer", () => ({ RoutinesExplorer: (p: { routines: { slug: string; name: string }[]; search: string; onSearchChange: (s: string) => void; onSelectRoutine: (s: string) => void; filters: RoutineFilterState; onChange: (f: RoutineFilterState) => void }) => <nav aria-label="Routine explorer">
   <div data-routines-search><input aria-label="Routine search" value={p.search} onChange={e => p.onSearchChange(e.target.value)} /></div>
   {p.routines.map(r => <button key={r.slug} onClick={() => p.onSelectRoutine(r.slug)}>Select {r.name}</button>)}
   <button onClick={() => p.onChange({ ...p.filters, showTestRoutines: true })}>Show test routines</button>
-  <button onClick={p.onToggleCollapse}>Collapse explorer</button>
 </nav> }))
 vi.mock("../routines-workspace", () => ({ RoutinesWorkspace: ({ search }: { search: string }) => <div>Overview search: {search}</div> }))
 vi.mock("../routines-detail-panel", () => ({ RoutinesDetailPanel: (p: { slug: string; onClose: () => void; onChanged: () => void; onRunStarted: (s: string) => void }) => <section aria-label={`Detail ${p.slug}`}><button onClick={p.onClose}>Close detail</button><button onClick={p.onChanged}>Refresh detail</button><button onClick={() => p.onRunStarted("run-1")}>Start historical run</button></section> }))
 vi.mock("../routine-run-detail", () => ({ RoutineRunDetail: ({ runId }: { runId: string }) => <div>Run {runId}</div> }))
 vi.mock("../routine-new-dialog", () => ({ RoutineNewDialog: (p: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void; onOpenRoutine: (s: string) => void }) => p.open ? <section aria-label="New routine dialog"><button onClick={() => p.onOpenChange(false)}>Close creation</button><button onClick={() => { p.onCreated(); p.onOpenRoutine("created"); p.onOpenChange(false) }}>Open created routine</button></section> : null }))
-beforeEach(() => { window.history.replaceState(null, "", "/routines"); h.mobile = false; h.refresh.mockClear() })
+beforeEach(() => {
+  window.history.replaceState(null, "", "/routines"); h.mobile = false; h.refresh.mockClear()
+  window.localStorage.removeItem("crewship.pref.panel.routines.collapsed")
+  act(() => useAppStore.getState().setSecondaryPanelOpen(false))
+})
 afterEach(cleanup)
 
 it("keeps navigation in the URL, clears stale run/edit selection and preserves explorer search", () => {
@@ -71,18 +76,32 @@ it("focuses search and resets filters with shortcuts while leaving typed shortcu
   expect(window.location.search).toBe("")
 })
 
-it("normalizes a linked draft and keeps the phone explorer as a dismissible overlay", () => {
+it("sits in the shared SecondaryPanel, which collapses to a rail", () => {
+  render(<RoutinesLayout workspaceId="workspace" />)
+  const panel = document.querySelector('[data-slot="secondary-panel"]')
+  expect(panel).toHaveAttribute("data-panel-id", "routines")
+  expect(panel).toContainElement(screen.getByRole("navigation", { name: "Routine explorer" }))
+  fireEvent.click(screen.getByRole("button", { name: "Hide Routine list" }))
+  expect(panel).toHaveAttribute("data-collapsed", "true")
+  expect(screen.queryByRole("navigation", { name: "Routine explorer" })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Show Routine list" }))
+  expect(screen.getByRole("navigation", { name: "Routine explorer" })).toBeInTheDocument()
+})
+
+it("normalizes a linked draft and puts the phone explorer in the panel sheet", () => {
   h.mobile = true
   window.history.replaceState(null, "", "/routines?draft=nightly&draft_id=draft-1&workspace=w&view=edit&run=old")
   render(<RoutinesLayout workspaceId="workspace" />)
   expect(window.location.search).toBe("?slug=nightly")
   expect(screen.getByRole("region", { name: "Detail nightly" })).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
-  fireEvent.click(screen.getByRole("button", { name: "Close routine list" }))
+  expect(document.querySelector('[data-slot="secondary-panel"]')).toBeNull()
   expect(screen.queryByRole("navigation", { name: "Routine explorer" })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
+  act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+  const sheet = screen.getByRole("dialog", { name: "Routine list" })
+  expect(sheet).toContainElement(screen.getByRole("navigation", { name: "Routine explorer" }))
+  // Picking a routine means "show me that": the sheet closes.
   fireEvent.click(screen.getByRole("button", { name: "Select Nightly report" }))
-  expect(screen.queryByRole("navigation", { name: "Routine explorer" })).not.toBeInTheDocument()
+  expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
 })
 
 it.each(["edit", "settings"])("hides the unguarded back action in the %s view", (view) => {
