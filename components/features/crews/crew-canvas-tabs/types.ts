@@ -4,6 +4,7 @@ export interface AgentSummary {
   slug: string
   status: string
   role_title: string | null
+  description?: string | null
   /** Straight from the API, stored rows included — normalised at render. */
   agent_role: string
   avatar_seed?: string | null
@@ -13,6 +14,14 @@ export interface AgentSummary {
   llm_provider?: string | null
   llm_model?: string | null
   _count?: { skills: number; credentials: number }
+  crew_id?: string | null
+  cli_adapter?: string | null
+  tool_profile?: string | null
+  /** Temporary hire lifecycle (absent on permanent agents). */
+  ephemeral?: boolean
+  expires_at?: string | null
+  expired_at?: string | null
+  hire_reason?: string | null
 }
 
 export interface CrewRecord {
@@ -48,6 +57,8 @@ export interface CrewRecord {
   mise_config: string | null
   escalation_config: string | null
   cached_image: string | null
+  /** How many temporary hires may run at once (0–100). */
+  max_ephemeral_agents?: number
   created_at: string
   updated_at: string
   _count?: { agents: number; members: number }

@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, waitFor } from "@testing-library/react"
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react"
 
 // Creating a crew or an agent is a DIALOG on /crews and has no route of its
-// own — /crews/new and /crews/agents/new were deleted with the redesign. The
-// command palette's two "Create new …" rows went on pointing at them for as
-// long as they did precisely because there was nothing else to point at.
-//
-// ?new=crew | ?new=agent is that something. These pin it, because the palette
-// rows are worthless if this end does not answer.
+// own. ?new=crew | ?new=agent is the deep link the command palette and the
+// onboarding nudge use; these pin it, and the C / A keys of the New menu.
 
 const h = vi.hoisted(() => ({ search: "", replace: vi.fn() }))
 
@@ -18,26 +14,24 @@ vi.mock("next/navigation", () => ({
 }))
 
 vi.mock("../create-crew-dialog", () => ({
-  CreateCrewDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="create-crew-dialog" /> : null,
+  CreateCrewDialog: ({ open, initialStart }: { open: boolean; initialStart?: string }) =>
+    open ? <div data-testid="create-crew-dialog" data-start={initialStart} /> : null,
 }))
 vi.mock("../create-agent", () => ({
-  CreateAgentDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="create-agent-dialog" /> : null,
+  CreateAgentDialog: ({ open, defaultCrewSlug }: { open: boolean; defaultCrewSlug: string | null }) =>
+    open ? <div data-testid="create-agent-dialog" data-crew={defaultCrewSlug ?? ""} /> : null,
 }))
 
-import { CrewsSubbar } from "../crews-subbar"
+import { CrewsCreateProvider } from "../crews-create"
 
-function renderSubbar() {
+function renderProvider(currentCrewSlug: string | null = null) {
   return render(
-    <CrewsSubbar
+    <CrewsCreateProvider
       workspaceId="ws-1"
-      crewSlug={null}
-      crewName={null}
-      agentName={null}
+      crews={[{ id: "c1", name: "Ops", slug: "ops" }]}
+      currentCrewSlug={currentCrewSlug}
       onCrewCreated={vi.fn()}
       onAgentCreated={vi.fn()}
-      crews={[{ id: "c1", name: "Ops", slug: "ops" }]}
     />,
   )
 }
@@ -49,11 +43,11 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-describe("CrewsSubbar — ?new=", () => {
+describe("Crews create — ?new=", () => {
   it("opens the crew dialog for ?new=crew", async () => {
     h.search = "new=crew"
     window.history.replaceState(null, "", "/crews?new=crew")
-    renderSubbar()
+    renderProvider()
     expect(await screen.findByTestId("create-crew-dialog")).toBeInTheDocument()
     expect(screen.queryByTestId("create-agent-dialog")).not.toBeInTheDocument()
   })
@@ -61,21 +55,28 @@ describe("CrewsSubbar — ?new=", () => {
   it("opens the agent dialog for ?new=agent", async () => {
     h.search = "new=agent"
     window.history.replaceState(null, "", "/crews?new=agent")
-    renderSubbar()
+    renderProvider()
     expect(await screen.findByTestId("create-agent-dialog")).toBeInTheDocument()
     expect(screen.queryByTestId("create-crew-dialog")).not.toBeInTheDocument()
+  })
+
+  it("Z31 ?new=agent&crew=ops opens New agent in Ops", async () => {
+    h.search = "new=agent&crew=ops"
+    window.history.replaceState(null, "", "/crews?new=agent&crew=ops")
+    renderProvider()
+    expect(await screen.findByTestId("create-agent-dialog")).toHaveAttribute("data-crew", "ops")
   })
 
   it("consumes the param, so a reload does not reopen the dialog", async () => {
     h.search = "new=crew"
     window.history.replaceState(null, "", "/crews?new=crew")
-    renderSubbar()
+    renderProvider()
     await screen.findByTestId("create-crew-dialog")
     await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/crews", { scroll: false }))
   })
 
   it("opens nothing without the param, and nothing for a value it does not know", async () => {
-    renderSubbar()
+    renderProvider()
     expect(screen.queryByTestId("create-crew-dialog")).not.toBeInTheDocument()
     expect(screen.queryByTestId("create-agent-dialog")).not.toBeInTheDocument()
     expect(h.replace).not.toHaveBeenCalled()
@@ -83,11 +84,32 @@ describe("CrewsSubbar — ?new=", () => {
     cleanup()
     h.search = "new=banana"
     window.history.replaceState(null, "", "/crews?new=banana")
-    renderSubbar()
+    renderProvider()
     expect(screen.queryByTestId("create-crew-dialog")).not.toBeInTheDocument()
     expect(screen.queryByTestId("create-agent-dialog")).not.toBeInTheDocument()
-    // An unknown value is left in the URL rather than silently rewritten —
-    // this hook owns two values and nothing else.
     expect(h.replace).not.toHaveBeenCalled()
+  })
+})
+
+describe("Crews create — keys", () => {
+  it("C opens New crew on Suggest a team", () => {
+    renderProvider()
+    fireEvent.keyDown(document.body, { key: "c" })
+    expect(screen.getByTestId("create-crew-dialog")).toHaveAttribute("data-start", "suggest")
+  })
+
+  it("A opens New agent in the open crew", () => {
+    renderProvider("ops")
+    fireEvent.keyDown(document.body, { key: "a" })
+    expect(screen.getByTestId("create-agent-dialog")).toHaveAttribute("data-crew", "ops")
+  })
+
+  it("keys typed into a field do nothing", () => {
+    renderProvider()
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    fireEvent.keyDown(input, { key: "c" })
+    expect(screen.queryByTestId("create-crew-dialog")).not.toBeInTheDocument()
+    input.remove()
   })
 })

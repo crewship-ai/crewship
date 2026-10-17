@@ -3,20 +3,18 @@
 import { useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import {
-  Activity, CalendarClock, ChevronDown, ChevronUp, Container, FileCode2,
-  Files, GitCompareArrows, MessageCircle, MessageSquare, Play, ScrollText,
+  Activity, CalendarClock, ChevronDown, ChevronUp,
+  Files, GitCompareArrows, MessageCircle, Play, ScrollText,
   Terminal, Workflow,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { useAbilities } from "@/hooks/use-abilities"
 
 import type { BottomPanelProps, BottomTab } from "./types"
-import { PanelEmptyText } from "./shared"
-import { MessagesTab } from "./messages-tab"
+import { EmptyState } from "./shared"
 import { ExecTab } from "./exec-tab"
-import { YamlTab } from "./yaml-tab"
-import { DockerTab } from "./docker-tab"
 import { FilesTab } from "./files-tab"
 import { ActivityTab } from "./activity-tab"
 import { RunsTab } from "./runs-tab"
@@ -46,13 +44,10 @@ const BottomPanelTerminal = dynamic(
 // Registry of every tab the dock can render. A page selects which subset
 // to show via BottomPanelProps.tabs; the entries here are the single source
 // of truth for label + icon so all pages stay visually consistent.
-type TabMeta = { label: string; icon: typeof MessageSquare }
+type TabMeta = { label: string; icon: typeof Terminal }
 const TAB_META: Record<BottomTab, TabMeta> = {
   // crew / agent
-  messages: { label: "Messages", icon: MessageSquare },
-  exec: { label: "Exec Log", icon: Terminal },
-  yaml: { label: "YAML", icon: FileCode2 },
-  docker: { label: "Docker", icon: Container },
+  exec: { label: "Logs", icon: ScrollText },
   files: { label: "Files", icon: Files },
   terminal: { label: "Terminal", icon: Terminal },
   // issue / mission
@@ -67,9 +62,9 @@ const TAB_META: Record<BottomTab, TabMeta> = {
   trace: { label: "Trace", icon: Workflow },
 }
 
-// Default tab set — the original crew/agent dock. Pages that don't pass a
-// `tabs` prop (i.e. the Crews page) get exactly this, unchanged.
-const DEFAULT_TABS: BottomTab[] = ["messages", "exec", "yaml", "docker", "files", "terminal"]
+// Default tab set: the crew container's Terminal and Files (Harbor 2). The
+// agent's run log (exec) is added by the Crews page for an agent.
+const DEFAULT_TABS: BottomTab[] = ["terminal", "files"]
 
 // Sensible bounds for the resize gesture. The min keeps something
 // useful visible (headers + a few rows); the max stops the panel
@@ -81,7 +76,7 @@ const PANEL_HEIGHT_DEFAULT = 320
 
 /**
  * Collapsible bottom panel matching /orchestration's drawer pattern.
- * Six tabs: Messages, Exec Log, YAML, Docker, Files, Terminal.
+ * Crews shows Terminal and Files (and an agent's Logs); other pages pass their own set.
  * Default: collapsed (36 px). Click any tab → expand to 320 px.
  *
  * Tab content is selection-aware: agent-scoped when an agent is
@@ -97,7 +92,9 @@ export function BottomPanel({
   initialTab,
   initialOpen = false,
   onOpenChange,
+  request = null,
 }: BottomPanelProps) {
+  const { role } = useAbilities()
   const tabIds = tabs && tabs.length > 0 ? tabs : DEFAULT_TABS
   // Fall back to the first tab in the page's own set rather than a hardcoded
   // "messages" (which a non-crew page may not even show).
@@ -141,6 +138,14 @@ export function BottomPanel({
   }, [firstTab, initialOpen])
 
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
+
+  // "Terminal" in the top bar: open on that tab; a new `at` opens it again.
+  useEffect(() => {
+    if (!request || !tabIds.includes(request.tab)) return
+    setTab(request.tab)
+    setOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the request
+  }, [request?.at])
 
   // Mouse-driven resize. We track on document so the gesture survives
   // even if the cursor leaves the handle hitbox (typical desktop drag
@@ -295,10 +300,7 @@ export function BottomPanel({
 
       {open && (
         <div role="tabpanel" aria-label={`${TAB_META[tab].label} panel`} className="flex-1 min-h-0 overflow-hidden border-t border-foreground/5">
-          {tab === "messages" && <MessagesTab workspaceId={workspaceId} context={context} />}
           {tab === "exec" && <ExecTab workspaceId={workspaceId} context={context} />}
-          {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}
-          {tab === "docker" && <DockerTab workspaceId={workspaceId} context={context} />}
           {tab === "files" && (context === null || context.kind === "agent" || context.kind === "crew") && (
             <FilesTab workspaceId={workspaceId} context={context} />
           )}
@@ -310,19 +312,25 @@ export function BottomPanel({
           {tab === "logs" && <LogsTab workspaceId={workspaceId} context={context} />}
           {tab === "trace" && <TraceTab workspaceId={workspaceId} context={context} />}
           {tab === "terminal" && (
-            context?.kind === "agent" && context.crewId && context.crewSlug ? (
+            role === "VIEWER" ? (
+              <EmptyState>Viewers cannot open a shell in a crew container. A member or a manager can.</EmptyState>
+            ) : context?.kind === "agent" && context.crewId && context.crewSlug ? (
               <BottomPanelTerminal
+                key={`agent:${context.agentSlug}`}
                 agentName={context.agentName}
                 agentSlug={context.agentSlug}
                 crewId={context.crewId}
                 crewSlug={context.crewSlug}
               />
+            ) : context?.kind === "crew" ? (
+              // The crew's own shell: no agent, the server starts it in /crew/shared.
+              <BottomPanelTerminal key={`crew:${context.crewSlug}`} agentName={context.crewSlug} crewId={context.crewId} crewSlug={context.crewSlug} />
             ) : (
-              <PanelEmptyText>
+              <EmptyState>
                 {context?.kind === "agent"
-                  ? "Agent has no crew assigned — terminal needs a crew container."
-                  : "Select an agent to open a shell."}
-              </PanelEmptyText>
+                  ? "This agent has no crew, so it has no container to open a shell in."
+                  : "Open a crew or an agent to open a shell."}
+              </EmptyState>
             )
           )}
         </div>
