@@ -163,6 +163,20 @@
   --chart-3: oklch(0.61 0.104 200);
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
+  /* Chart series (COM-04, PRD TOK-08): eight slots for per-crew and
+   *  per-agent charts. 1-5 are the chart slots above, unchanged, so a series
+   *  keeps its colour; 6 violet, 7 green and 8 coral are new. Every slot is
+   *  ≥ 3:1 on every surface (WCAG 1.4.11) and no two are closer than ΔE 10
+   *  (OKLab ×100); lib/__tests__/theme-contrast.test.ts holds both. The slot
+   *  order is load-bearing, as for the chart slots. */
+  --series-1: #0E6BE8;
+  --series-2: oklch(0.38 0.17 340);
+  --series-3: oklch(0.61 0.104 200);
+  --series-4: oklch(0.45 0.108 55);
+  --series-5: oklch(0.62 0.133 105);
+  --series-6: oklch(0.5 0.2 300);
+  --series-7: oklch(0.56 0.14 150);
+  --series-8: oklch(0.58 0.2 18);
 
   /* The light rail is white, like the section panels beside it (Pages,
    * Routines, Settings); the page ground under the content is the only grey.
@@ -396,6 +410,15 @@
   --chart-3: oklch(0.84 0.13 200);
   --chart-4: oklch(0.63 0.145 55);
   --chart-5: oklch(0.82 0.13 105);
+  /* Chart series: see the :root block. */
+  --series-1: #1E7BFE;
+  --series-2: oklch(0.60 0.13 340);
+  --series-3: oklch(0.84 0.13 200);
+  --series-4: oklch(0.63 0.145 55);
+  --series-5: oklch(0.82 0.13 105);
+  --series-6: oklch(0.72 0.16 300);
+  --series-7: oklch(0.75 0.15 150);
+  --series-8: oklch(0.72 0.17 12);
 
   --sidebar: #0A0B0D;
   --sidebar-foreground: #ECEEF2;
@@ -522,6 +545,14 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -1193,6 +1224,16 @@ body {
     background: var(--background);
   }
   .secondary-panel[data-collapsed="true"] { width: 44px; }
+  /* Tablet (768–1279, COM-05): the panel floats over the content, under the
+     48 px top bar and beside the 56 px rail, from the top-bar panel button. */
+  .secondary-panel-float {
+    position: fixed; top: 48px; bottom: 0; left: 56px; z-index: 40;
+    background: var(--card); box-shadow: var(--shadow-xl);
+  }
+  .secondary-panel-scrim {
+    position: fixed; top: 48px; right: 0; bottom: 0; left: 56px; z-index: 39;
+    background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  }
   .secondary-panel-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; background: var(--background); }
   .secondary-panel-toolbar {
     display: flex;

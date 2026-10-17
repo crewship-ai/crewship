@@ -209,7 +209,10 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mobile = true
     mount()
     const bar = await screen.findByRole("navigation", { name: "Primary" })
-    expect(within(bar).getByRole("link", { name: "Chat" })).toBeInTheDocument()
+    // Home leads to the session's own home, Chat (SHL-07 / DSH-02), and Chat
+    // is not offered a second time.
+    expect(within(bar).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/chat")
+    expect(within(bar).queryByRole("link", { name: "Chat" })).toBeNull()
     expect(within(bar).queryByRole("link", { name: "Dashboard" })).toBeNull()
     expect(within(bar).queryByRole("link", { name: "Inbox" })).toBeNull()
   })

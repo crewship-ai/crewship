@@ -196,6 +196,26 @@ for (const width of [1280, 390]) {
   })
 }
 
+// DSH-02 (#3505 → #3481, SHL-07): a restricted session has no Dashboard, so
+// the phone Home tab leads to its own home (chat here) and Chat is not
+// offered a second time.
+test("phone Home tab leads to the restricted home and Chat is not offered twice", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname
+    let body: unknown = []
+    if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
+    else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
+    else if (path === "/api/v1/workspaces") body = ROWS
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+  })
+  await page.goto("/routines")
+  const tabs = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: /^more$/i }) })
+  const home = tabs.getByRole("link", { name: "Home" })
+  await expect(home).toHaveAttribute("href", "/chat")
+  await expect(tabs.getByRole("link", { name: "Chat" })).toHaveCount(0)
+})
+
 // The production grid stays read only while mobile navigation returns the
 // selected source context to an actionable composer, without sending it.
 test.describe("mobile artifact selection", () => {

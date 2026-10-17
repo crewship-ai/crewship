@@ -222,4 +222,19 @@ describe("PageSaveBar after a failed save", () => {
     render(<Page><Card label="Members" count={0} save={vi.fn()} /></Page>)
     expect(navigationAllowed(() => {})).toBe(true)
   })
+
+  // COM-14 (#3481): a routine editor saves a draft (v67 "Save as draft"), so
+  // the bar's primary names what it does there.
+  it("names its primary action when the page asks, and still saves every card", async () => {
+    const save = vi.fn()
+    render(
+      <PageSaveProvider>
+        <Card label="Steps" count={2} save={save} />
+        <PageSaveBar saveLabel="Save as draft" />
+      </PageSaveProvider>,
+    )
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+  })
 })
