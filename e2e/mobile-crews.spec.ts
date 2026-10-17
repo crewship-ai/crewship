@@ -15,7 +15,7 @@ async function noSideScroll(page: Page) {
 async function firstCrew(page: Page): Promise<string | null> {
   await page.goto("/crews")
   const row = page.locator("[data-crew-row]").first()
-  if (!(await row.isVisible({ timeout: 10_000 }).catch(() => false))) return null
+  if (!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false))) return null
   return row.getAttribute("data-crew-row")
 }
 
@@ -43,7 +43,7 @@ test("mobile agent page: Chat is the only action, content fits", async ({ page }
   test.skip(!crew, "no seeded crews")
   await page.goto(`/crews?crew=${crew}&tab=team`)
   const row = page.locator("[data-agent-row]").first()
-  test.skip(!(await row.isVisible({ timeout: 10_000 }).catch(() => false)), "crew has no agents")
+  test.skip(!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false)), "crew has no agents")
   const agent = (await row.getAttribute("data-agent-row"))!
   await page.goto(`/crews?agent=${agent}&crew=${crew}`)
   await expect(page.getByTestId("agent-header")).toBeVisible()

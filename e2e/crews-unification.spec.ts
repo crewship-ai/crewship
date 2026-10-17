@@ -11,7 +11,7 @@ test.use({ viewport: { width: 1440, height: 1000 } })
 async function firstCrew(page: Page): Promise<string | null> {
   await page.goto("/crews")
   const row = page.locator("[data-crew-row]").first()
-  if (!(await row.isVisible({ timeout: 10_000 }).catch(() => false))) return null
+  if (!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false))) return null
   return row.getAttribute("data-crew-row")
 }
 
@@ -59,7 +59,7 @@ test.describe("Crews unification", () => {
     test.skip(!crew, "no seeded crews")
     await page.goto(`/crews?crew=${crew}&tab=team`)
     const row = page.locator("[data-agent-row]").first()
-    test.skip(!(await row.isVisible({ timeout: 10_000 }).catch(() => false)), "crew has no agents")
+    test.skip(!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false)), "crew has no agents")
     await row.click()
     await expect(page).toHaveURL(/[?&]agent=/)
     for (const label of ["Overview", "Instructions", "Model and limits", "Tools and access", "Memory", "Settings"]) {
