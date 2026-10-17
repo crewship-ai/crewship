@@ -249,6 +249,8 @@ env:
     e2e/crews-h2.spec.ts
     e2e/routines-h2.spec.ts
     e2e/routines-new-wizard.spec.ts
+    e2e/chrome-roles.spec.ts
+    e2e/harbor2-appearance.spec.ts
 
 jobs:
   build-tools:
