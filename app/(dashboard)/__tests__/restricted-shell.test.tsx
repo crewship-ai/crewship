@@ -246,7 +246,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mount(<SettingsLayout />)
     await settle(300)
     expect(screen.queryByRole("textbox", {name: "Full name"})).toBeNull()
-    expect(screen.queryByText("Failed to load settings")).toBeNull()
+    expect(screen.queryByText("Couldn’t load settings")).toBeNull()
     expect(requests.filter(path => /workspaces\/[^?]+/.test(path))).toEqual([])
     workspacesStatus = 200
     workspacesPayload = [RESTRICTED_A]
@@ -267,7 +267,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(1)
     // Sessions and token revoke live in their own section now; the
     // restricted page still shows them under the password.
-    expect(screen.getByRole("region", { name: /Sessions & access/ })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: /CLI tokens/ })).toBeInTheDocument()
     expect(forbidden()).toEqual([])
   })
 })

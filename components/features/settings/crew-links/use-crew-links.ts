@@ -233,7 +233,7 @@ export function useCrewLinks(workspaceId: string | null) {
     }
   }, [workspaceId, canManage, reload, setPendingUnlink])
 
-  const cancelUnlink = useCallback(() => setPendingUnlink(null), [])
+  const cancelUnlink = useCallback(() => setPendingUnlink(null), [setPendingUnlink])
 
   return {
     crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess,

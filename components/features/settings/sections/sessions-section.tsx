@@ -288,7 +288,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                   <div className="min-w-0 flex-1">
                     <h4 className="flex items-center gap-1.5 text-control font-semibold text-foreground">
                       Token created
-                      <TierPill tier={newToken.tier} />
+                      <TokenTier tier={newToken.tier} />
                     </h4>
                     <p className="text-label text-muted-foreground">
                       {newToken.tier === "ADMIN"
@@ -472,7 +472,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
 }
 
 /** The token's tier, as the one status pill: Admin in the warning tone. */
-function TierPill({ tier }: { tier: string }) {
+function TokenTier({ tier }: { tier: string }) {
   return tier === "ADMIN"
     ? <StatusPill tone="warn" label="Admin" />
     : <StatusPill tone="muted" label="Standard" />
@@ -507,7 +507,7 @@ function TokenListItem({
       label={
         <span className="inline-flex flex-wrap items-center gap-2">
           <span className="truncate font-mono">{token.name}</span>
-          <TierPill tier={tier} />
+          <TokenTier tier={tier} />
         </span>
       }
       description={`Created ${timeAgo(token.created_at)}`}
