@@ -34,18 +34,13 @@ import {
   Hash,
   Play,
   Plus,
-  RotateCcw,
   Search,
-  Square,
-  ThumbsDown,
-  ThumbsUp,
   UserCircle2,
   X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
-import { hasIssueAgentDelegate } from "@/lib/issue-execution"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -213,17 +208,23 @@ function matches(haystack: string, q: string): boolean {
 export function EditRow({
   icon: Icon,
   label,
+  hint,
   children,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
+  /** What the field means, under the value ("accountable person"). */
+  hint?: string
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center gap-2 py-1 text-[12px]">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-      <dt className="w-[70px] shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1 text-foreground/85">{children}</dd>
+    <div className={cn("flex gap-2 py-1 text-label", hint ? "items-start" : "items-center")}>
+      <Icon className={cn("size-3.5 shrink-0 text-muted-foreground-soft", hint && "mt-1")} />
+      <dt className={cn("w-[70px] shrink-0 text-muted-foreground", hint && "pt-0.5")}>{label}</dt>
+      <dd className="min-w-0 flex-1 text-foreground/85">
+        {children}
+        {hint && <small className="block px-1 text-micro text-muted-foreground-soft">{hint}</small>}
+      </dd>
     </div>
   )
 }
@@ -835,135 +836,6 @@ export function TitleEditor({
         </svg>
       </button>
     </span>
-  )
-}
-
-/* ------------------------------------------------------------------ *
- *  Workflow                                                           *
- * ------------------------------------------------------------------ */
-
-export type WorkflowAction = "start" | "stop" | "approve" | "request_changes" | "reopen"
-
-/**
- * The five verbs, gated on status the way the server gates them.
- *
- * `Start work` dispatches an agent. A human owner alone cannot execute;
- * conversely, a human owner must not hide an existing agent delegate.
- */
-export function IssueWorkflowActions({
-  issue,
-  onAction,
-  busy,
-  allowedActions,
-}: {
-  issue: Mission
-  allowedActions?: readonly import("@/lib/chat-entity-cards").IssueAction[]
-  onAction: (action: WorkflowAction, comment?: string) => void | Promise<void>
-  busy?: boolean
-}) {
-  const [asking, setAsking] = React.useState(false)
-  const [reason, setReason] = React.useState("")
-
-  const allows = (action: string) => !allowedActions || allowedActions.some((a) => a === action)
-  const canStart = allows("start_work") && (issue.status === "BACKLOG" || issue.status === "TODO") && hasIssueAgentDelegate(issue)
-  const canStop = allows("change_workflow") && issue.status === "IN_PROGRESS"
-  const canReview = allows("change_workflow") && issue.status === "REVIEW"
-  const canReopen =
-    allows("change_workflow") && (issue.status === "DONE" || issue.status === "CANCELLED" || issue.status === "COMPLETED")
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
-      {canStart && (
-        <Button size="sm" className="h-8 gap-1.5 text-[12px]" disabled={busy} onClick={() => void onAction("start", undefined)}>
-          <Play className="h-3.5 w-3.5" />
-          Start work
-        </Button>
-      )}
-      {canStop && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1.5 text-[12px]"
-          disabled={busy}
-          onClick={() => void onAction("stop", undefined)}
-        >
-          <Square className="h-3.5 w-3.5" />
-          Stop
-        </Button>
-      )}
-      {canReview && (
-        <>
-          <Button
-            size="sm"
-            className="h-8 gap-1.5 text-[12px]"
-            disabled={busy}
-            onClick={() => void onAction("approve", undefined)}
-          >
-            <ThumbsUp className="h-3.5 w-3.5" />
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 text-[12px]"
-            disabled={busy}
-            onClick={() => setAsking((v) => !v)}
-          >
-            <ThumbsDown className="h-3.5 w-3.5" />
-            Request changes
-          </Button>
-        </>
-      )}
-      {canReopen && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1.5 text-[12px]"
-          disabled={busy}
-          onClick={() => void onAction("reopen", undefined)}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          Reopen
-        </Button>
-      )}
-
-      {asking && canReview && (
-        <div className="mt-2 w-[280px] max-w-full space-y-2 rounded-lg border border-warn/30 bg-card p-2.5">
-          <textarea
-            aria-label="What needs to change"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="What needs to change…"
-            className="h-20 w-full resize-none rounded-md border border-border/60 bg-background p-2 text-[12px] outline-none focus:border-primary/50"
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 text-[11px]"
-              onClick={() => {
-                setAsking(false)
-                setReason("")
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="h-7 text-[11px]"
-              disabled={busy}
-              onClick={() => {
-                void onAction("request_changes", reason.trim() || undefined)
-                setAsking(false)
-                setReason("")
-              }}
-            >
-              Send
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
   )
 }
 

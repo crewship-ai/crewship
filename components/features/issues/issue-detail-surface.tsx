@@ -26,7 +26,12 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 
 import { IssueFilesCard } from "./issue-files-card"
-import { IssueWorkPanel } from "./issue-work-panel"
+import { IssueSessionCard } from "./issue-session-card"
+import { IssueWorkCard } from "./issue-work-card"
+import { IssueWorkDialogs } from "./issue-work-dialogs"
+import { sessionState } from "./issue-session"
+import { useIssueWork, type IssueWork, type IssueWorkflowAction } from "@/hooks/use-issue-work"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
@@ -43,11 +48,7 @@ import { automationsForIssue } from "@/lib/automations"
 import { statusLabel } from "@/components/features/issues/status-icon"
 import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueCardDetail, type IssueRun } from "@/components/features/issues/issue-card-detail"
-import {
-  IssueWorkflowActions,
-  type IssueCardEdit,
-  type WorkflowAction,
-} from "@/components/features/issues/issue-card-editors"
+import type { IssueCardEdit } from "@/components/features/issues/issue-card-editors"
 import type {
   CodeLinkAttachResult,
   CodeLinkEdit,
@@ -129,6 +130,9 @@ export function IssueDetailSurface({
 
   const allowed = React.useMemo(() => actions ? actions.filter((a) => issue?.allowed_actions?.includes(a)) : undefined, [actions, issue?.allowed_actions])
   const can = React.useCallback((action: IssueAction) => allowed ? allowed.includes(action) : editable, [allowed, editable])
+  // Embedded hosts (chat) keep work execution on the canonical issue page.
+  const workCan = React.useCallback((action: string) => executionActions && can(action as IssueAction), [executionActions, can])
+  const meId = useSessionSafe().data?.user.id ?? null
 
   const [commentsHasMore, setCommentsHasMore] = React.useState(false)
   const [olderBusy, setOlderBusy] = React.useState(false)
@@ -825,16 +829,24 @@ export function IssueDetailSurface({
   }, [base, qs, routineRunForm, identifier, issue?.routine_slug, refresh])
 
   const runWorkflow = React.useCallback(
-    async (action: WorkflowAction, comment?: string) => {
-      if (!base) return
+    async (action: IssueWorkflowAction, comment?: string): Promise<boolean> => {
+      if (!base) return false
       // Reopen is a status change, not a verb the server exposes — it was
       // implemented as a PATCH in the inline detail and has no endpoint.
-      if (action === "reopen") {
-        await patch({ status: "BACKLOG" })
-        return
+      // A failed issue reopens to Todo (one step back to work); a closed one
+      // to Backlog.
+      if (action === "reopen" || action === "reopen_todo") {
+        await patch({ status: action === "reopen_todo" ? "TODO" : "BACKLOG" })
+        return true
       }
       const review = action === "approve" || action === "request_changes"
-      const url = review ? `${base}/review?${qs}` : `${base}/${action}?${qs}`
+      // Stop is cooperative (after the current step); stop_now also signals
+      // the running processes (?hard=true).
+      const url = review
+        ? `${base}/review?${qs}`
+        : action === "stop_now"
+          ? `${base}/stop?hard=true&${qs}`
+          : `${base}/${action}?${qs}`
       setBusy(true)
       try {
         const res = await apiFetch(url, {
@@ -851,21 +863,25 @@ export function IssueDetailSurface({
         })
         if (!res.ok) {
           const b = await res.json().catch(() => null)
-          toast.error(b?.detail ?? `Failed to ${action.replace("_", " ")} issue`)
-          return
+          toast.error(b?.detail ?? `Failed to ${action === "stop_now" ? "stop" : action.replace("_", " ")} issue`)
+          return false
         }
         toast.success(
           action === "start"
             ? "Issue started"
             : action === "stop"
-              ? "Issue stopped"
-              : action === "approve"
-                ? "Issue approved"
-                : "Changes requested",
+              ? "Stop requested · the agent finishes its current step"
+              : action === "stop_now"
+                ? "Issue stopped"
+                : action === "approve"
+                  ? "Issue approved"
+                  : "Changes requested",
         )
         await refresh()
+        return true
       } catch {
-        toast.error(`Failed to ${action.replace("_", " ")} issue`)
+        toast.error(`Failed to ${action === "stop_now" ? "stop" : action.replace("_", " ")} issue`)
+        return false
       } finally {
         setBusy(false)
       }
@@ -976,10 +992,21 @@ export function IssueDetailSurface({
       </div>
     )}
     <fieldset disabled={write?.blocked} className="min-w-0">
+    <IssueWorkBinding issue={issue} agents={roster.agents} onChanged={refresh} runWorkflow={runWorkflow}>
+    {(work) => (
     <IssueCardDetail
       issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
-      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={executionActions && editable} allowedActions={executionActions ? allowed : []} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
+      session={<IssueSessionCard issue={issue} state={sessionState(issue, { latestOutcome: runs[0]?.outcome })} work={work} can={workCan} meId={meId} />}
+      workPanel={
+        <IssueWorkCard
+          issue={issue}
+          work={work}
+          can={workCan}
+          meId={meId}
+          routine={<span className="text-body">{shown.routine_name ?? "None"}</span>}
+        />
+      }
       unavailable={subFailed}
       comments={comments}
       olderComments={commentsHasMore ? <Button size="sm" variant="outline" disabled={olderBusy} onClick={() => void loadOlderComments()}>{olderBusy ? "Loading…" : "Load older comments"}</Button> : undefined}
@@ -998,11 +1025,6 @@ export function IssueDetailSurface({
       onCommentDraft={write ? setCommentDraft : undefined}
       viewerInitial={viewerInitial}
       edit={edit}
-      actions={
-        executionActions && (editable || !!allowed?.length) ? (
-          <IssueWorkflowActions issue={issue} onAction={runWorkflow} busy={busy} allowedActions={allowed} />
-        ) : undefined
-      }
       runActivity={
         <RunActivityTimeline
           workspaceId={workspaceId}
@@ -1019,6 +1041,8 @@ export function IssueDetailSurface({
         />
       }
     />
+    )}
+    </IssueWorkBinding>
     </fieldset>
     {confirm && (
       <ConfirmDialog
@@ -1173,4 +1197,31 @@ function consequencesOf(
 
 function issueFieldAction(key: string): IssueAction {
   return key === "status" ? "change_status" : key.startsWith("assignee_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
+}
+
+/**
+ * One set of work actions per issue, shared by the session block and the
+ * Work & control card, plus the dialogs they open. Keyed by the issue so a
+ * different issue never inherits an open dialog or a refusal.
+ */
+function IssueWorkBinding({
+  issue,
+  agents,
+  onChanged,
+  runWorkflow,
+  children,
+}: {
+  issue: Mission
+  agents: readonly MentionAgent[]
+  onChanged: () => Promise<void>
+  runWorkflow: (action: IssueWorkflowAction, comment?: string) => Promise<boolean>
+  children: (work: IssueWork) => React.ReactNode
+}) {
+  const work = useIssueWork({ issue, onChanged, runWorkflow })
+  return (
+    <>
+      {children(work)}
+      <IssueWorkDialogs issue={issue} agents={agents} work={work} />
+    </>
+  )
 }

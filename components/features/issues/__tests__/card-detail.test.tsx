@@ -126,13 +126,13 @@ describe("IssueCardDetail", () => {
         project={null}
       />,
     )
-    for (const label of ["Opened", "Updated", "Due", "Estimate", "Sub-issues"]) {
-      expect(screen.getByText(label)).toBeInTheDocument()
+    // The band now sits in Technical details, at the end of the aside.
+    const band = within(document.querySelector("[data-slot=issue-technical]") as HTMLElement)
+    for (const label of ["Opened", "Updated", "Due", "Estimate", "Sub-issues", "Comments"]) {
+      expect(band.getByText(label)).toBeInTheDocument()
     }
-    // "Comments" is deliberately in two places — the band counts them, the
-    // card at the foot holds them. Due and Estimate are not: they used to be
-    // in the band AND as rail rows, which is the duplication being removed.
-    expect(screen.getAllByText("Comments")).toHaveLength(2)
+    // Due and Estimate are not repeated as read-only property rows: they used
+    // to be in the band AND as rail rows, which is the duplication removed.
     expect(screen.getAllByText("Due")).toHaveLength(1)
     expect(screen.getAllByText("Estimate")).toHaveLength(1)
     expect(screen.getByText("3 pts")).toBeInTheDocument()
@@ -362,7 +362,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getByText("mentioned")).toBeInTheDocument()
     expect(screen.getByTestId("mention-chip")).toHaveTextContent("@Robin")
   })
@@ -381,7 +381,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getAllByTestId("mention-chip")).toHaveLength(2)
   })
 
@@ -396,7 +396,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.queryByTestId("mention-chip")).toBeNull()
     expect(screen.getByText(/mentioned/)).toBeInTheDocument()
     expect(screen.getByText(/a_someone_else/)).toBeInTheDocument()
@@ -413,7 +413,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getByText(/some future kind/)).toBeInTheDocument()
   })
 
