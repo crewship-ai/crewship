@@ -930,7 +930,16 @@ WORK STYLE: …`}
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
         {wizard && <CreateSurfaceFooter
-          hint={step === NEW_AGENT_STEPS.length - 1 && validationHint ? <span className="text-warn">{validationHint}</span> : stepHint ?? `Step ${step + 1} of ${NEW_AGENT_STEPS.length}`}
+          // The step counter always stays; what blocks Continue / Create sits beside it.
+          hint={(() => {
+            const reason = step === NEW_AGENT_STEPS.length - 1 ? validationHint : stepHint
+            return (
+              <>
+                <span data-testid="new-agent-step">Step {step + 1} of {NEW_AGENT_STEPS.length}</span>
+                {reason && <> · <span className="text-warn">{reason}</span></>}
+              </>
+            )
+          })()}
           lead={<span className="text-xs text-muted-foreground sm:hidden">Step {step + 1} of {NEW_AGENT_STEPS.length}</span>}
           onCancel={() => onOpenChange(false)}
           secondary={step > 0 ? <Button type="button" variant="ghost" size="sm" onClick={() => setStep((n) => n - 1)}>Back</Button> : undefined}
