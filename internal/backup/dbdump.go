@@ -1224,6 +1224,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
 				}
 			}
+			if err := validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
+			}
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.
