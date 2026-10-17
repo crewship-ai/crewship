@@ -21,7 +21,7 @@ func TestBoardCommentFinalSchemaPreservesActorReceiptsAndImmutableHistory(t *tes
 	}
 	defer db.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err = database.MigrateSkipping(t.Context(), db.DB, logger, "page_boards"); err != nil {
+	if err = database.MigrateSkipping(t.Context(), db.DB, logger, "page_boards", "preview_native_content_exclusion"); err != nil {
 		t.Fatal("main+Artifacts baseline", err)
 	}
 	var tables int
@@ -40,6 +40,10 @@ INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p',
 INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('p','user','other','read','u','2026-10-01T00:00:00Z');`)
 	if err = database.Migrate(t.Context(), db.DB, logger); err != nil {
 		t.Fatal("apply final Board schema", err)
+	}
+	var bridge int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='page_artifacts_exclude_documents_insert'`).Scan(&bridge); err != nil || bridge != 1 {
+		t.Fatalf("dependent content exclusion was not applied: %d %v", bridge, err)
 	}
 	var grant string
 	if err = db.QueryRow(`SELECT level||':'||granted_by_user_id||':'||granted_at FROM page_grants WHERE page_id='p' AND subject_id='other'`).Scan(&grant); err != nil || grant != "read:u:2026-10-01T00:00:00Z" {

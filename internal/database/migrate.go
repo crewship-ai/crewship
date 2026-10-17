@@ -73,7 +73,7 @@ func ensureMigrationsTable(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// MigrateSkipping applies every migration except the one named, and is the
+// MigrateSkipping applies every migration except the explicitly named set, and is the
 // honest way to build one specific fixture: the database that ran a feature
 // branch BEFORE the migration which later claimed that branch's version number
 // had merged. That is the dev3 shape `crewship db repair-ledger` exists to fix,
@@ -90,7 +90,7 @@ func ensureMigrationsTable(ctx context.Context, db *sql.DB) error {
 // built this way is missing a migration by construction. Refuses an unknown
 // name rather than quietly applying everything, because a fixture that skips
 // nothing proves nothing.
-func MigrateSkipping(ctx context.Context, db *sql.DB, logger *slog.Logger, skipName string) error {
+func MigrateSkipping(ctx context.Context, db *sql.DB, logger *slog.Logger, skipName string, dependentNames ...string) error {
 	if migrationRegistryErr != nil {
 		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
 	}
@@ -98,17 +98,23 @@ func MigrateSkipping(ctx context.Context, db *sql.DB, logger *slog.Logger, skipN
 		return err
 	}
 
+	// A withheld foundation can have dependent migrations that must wait too.
+	requested := map[string]bool{skipName: false}
+	for _, name := range dependentNames {
+		requested[name] = false
+	}
 	keep := make([]migration, 0, len(migrations))
-	skipped := false
 	for _, m := range migrations {
-		if m.name == skipName {
-			skipped = true
+		if _, skip := requested[m.name]; skip {
+			requested[m.name] = true
 			continue
 		}
 		keep = append(keep, m)
 	}
-	if !skipped {
-		return fmt.Errorf("no migration is named %q — refusing to build a fixture that skips nothing", skipName)
+	for name, found := range requested {
+		if !found {
+			return fmt.Errorf("no migration is named %q — refusing an unverified fixture", name)
+		}
 	}
 	return applyRegistry(ctx, db, keep, logger)
 }
