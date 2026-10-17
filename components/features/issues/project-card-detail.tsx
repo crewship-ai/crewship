@@ -1,47 +1,28 @@
 "use client"
 
-// The project detail, as one scrolling surface of cards — the same shape as
-// the issue card next to it and the routine card before that.
+// The project page (Harbor 2): a hero that says what the project is, then
+// tabs — Overview, Tree, Issues, Files, Settings.
 //
-// What went, and why:
-//
-//   The 360px    the old panel was a right rail rendered at full width. Its
-//   rail         property rows put a 72px label on the left and pushed the
-//                value to `justify-end`, so on a wide screen "Status" sat at
-//                one edge of the monitor and "In Progress" at the other,
-//                with a metre of nothing between them.
-//   Three        a breadcrumb saying the project's name, above a header
-//   headers      saying "Project", above a title saying the name again.
-//                One identity card says it once.
-//   No issues    a project page that never showed the project's issues. The
-//                one question you open a project to ask.
-//
-// Ordered by what an operator asks: what is it → how much is done → what is
-// in it → who is on it → what shape is it in.
+// Hidden until the backend has them (each would be a control that does
+// nothing): Updates and Write update, Budget and Spend, a lead agent next to
+// the owner (a project has one lead today), Archive, and the Outputs and
+// Artifacts sources under Files.
 
 import * as React from "react"
-import Link from "next/link"
-import {
-  Activity,
-  CalendarClock,
-  CircleDot,
-  Flag,
-  FolderKanban,
-  Tag,
-  UserCircle2,
-  Users,
-} from "lucide-react"
+import { ChevronRight, Download, FileText, Folder, FolderKanban, Plus, Trash2, Users } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { formatDate, formatShortDate, relTime } from "@/lib/time"
-import { Appear, DetailCard, EntityChip, StatStrip } from "@/components/ui/detail"
-import { Badge } from "@/components/ui/badge"
+import { apiFetch } from "@/lib/api-fetch"
+import { formatShortDate, relTime } from "@/lib/time"
+import { DetailCard } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
-import { TintedCard, type TintTone } from "./tinted-card"
+import { TabBar } from "@/components/ui/tab-bar"
+import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
-import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
+import { StatusIcon } from "@/components/features/issues/status-icon"
 import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
+import { IssueRow } from "@/components/features/issues/issue-row"
+import { STATUS_TEXT } from "@/components/features/issues/issues-view-model"
 import {
   ProjectDatesPicker,
   ProjectHealthPicker,
@@ -54,508 +35,642 @@ import {
 } from "@/components/features/issues/project-card-editors"
 import { getCrewIconDef, iconColorProps } from "@/lib/entities"
 import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
-import {
-  issuePriorityTone,
-  projectFacts,
-  projectHealthLabel,
-  projectHealthTone,
-  projectStatusLabel,
-} from "@/lib/issue-facts"
-import type { Mission, Project, ProjectStats } from "@/lib/types/mission"
+import { projectHealthLabel, projectHealthTone, projectStatusLabel } from "@/lib/issue-facts"
+import type { ProjectTab } from "@/hooks/use-project-detail"
+import type { Milestone, Mission, Project, ProjectStats } from "@/lib/types/mission"
 
 interface Props {
   project: Project
   stats: ProjectStats | null
   /** The project's issues, already filtered by the caller. */
   issues: Mission[]
+  /** Rendered after the hero's pills — host actions that belong to the project. */
   actions?: React.ReactNode
-  /** Makes the card writable. Absent, every property renders as text. */
+  /** Makes the page writable. Absent, every property renders as text. */
   edit?: ProjectCardEdit
+  tab?: ProjectTab
+  onTabChange?: (tab: ProjectTab) => void
+  /** Needed by Files and Tree, which read their own endpoints. */
+  workspaceId?: string
+  /** A row or tree node was picked. Absent, rows link to /issues/<id>. */
+  onOpenIssue?: (issue: Mission) => void
+  onNewIssue?: () => void
+  /** The milestones card (editable), owned by the host. */
+  milestones?: React.ReactNode
+  /** Settings › Access: the share control. */
+  share?: React.ReactNode
+  /** Settings › Danger zone. Absent, the zone is not shown. */
+  onRequestDelete?: () => void
 }
 
-type BreakdownTab = "assignees" | "labels"
-
-/**
- * Health, as the one verdict on this page. `DetailCard`'s tone scale has no
- * destructive border, so off-track routes to the tinted card instead — which
- * is the louder treatment anyway, and off-track is the loud case.
- */
-const HEALTH_TINT: Record<Project["health"], TintTone> = {
-  on_track: "success",
-  at_risk: "warn",
-  off_track: "destructive",
-}
-
-function clamp(n: number): number {
-  return Math.max(0, Math.min(100, Math.round(n)))
-}
-
-export function ProjectCardDetail({ project, stats, issues, actions, edit }: Props) {
-  const [breakdown, setBreakdown] = React.useState<BreakdownTab>("assignees")
-
-  const facts = React.useMemo(() => projectFacts(project, stats), [project, stats])
-  const scope = stats?.total_issues ?? project.issue_count
-  const done = stats?.completed_issues ?? project.done_count
-  const Icon = getCrewIconDef(project.icon || "folder").icon
-  const segments = React.useMemo(() => donutSegments(stats), [stats])
+export function ProjectCardDetail({
+  project,
+  stats,
+  issues,
+  actions,
+  edit,
+  tab = "overview",
+  onTabChange,
+  workspaceId,
+  onOpenIssue,
+  onNewIssue,
+  milestones,
+  share,
+  onRequestDelete,
+}: Props) {
+  const open = React.useCallback(
+    (i: Mission) => {
+      if (onOpenIssue) onOpenIssue(i)
+      else if (typeof window !== "undefined") window.location.assign(`/issues/${encodeURIComponent(i.identifier ?? i.id)}`)
+    },
+    [onOpenIssue],
+  )
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <Appear order={0}>
-        <DetailCard>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                {edit ? (
-                  // The icon+colour swatch, straight from the rail's header —
-                  // the one thing up there that was worth keeping.
-                  <div className="shrink-0">
-                    <ProjectIconEditor project={project} edit={edit} />
-                  </div>
-                ) : (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
-                    <Icon className={cn("h-5 w-5", iconColorProps(project.color).className)} style={iconColorProps(project.color).style} />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  {/* The name, in full, once. */}
-                  {edit ? (
-                    <ProjectNameEditor
-                      name={project.name}
-                      onSave={(next) => void edit.patch({ name: next })}
-                    />
-                  ) : (
-                    <h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
-                  )}
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    <span className="font-mono">{project.slug}</span>
-                    {project.lead_name && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
-                          <AgentAvatar
-                            seed={project.lead_id ?? project.lead_name}
-                            className="h-4 w-4"
-                            alt=""
-                          />
-                          <span className="font-medium">{project.lead_name}</span>
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
-            </div>
+    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-4 py-5 sm:px-6">
+      <ProjectHero project={project} stats={stats} edit={edit} actions={actions} />
 
-            {project.description && (
-              <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">
-                {project.description}
-              </p>
-            )}
+      <TabBar
+        value={tab}
+        onValueChange={(v) => onTabChange?.(v as ProjectTab)}
+        ariaLabel="Project"
+        layoutId={`project-tabs-${project.id}`}
+        className="overflow-x-auto [scrollbar-width:none]"
+      >
+        <TabBar.Item value="overview">Overview</TabBar.Item>
+        <TabBar.Item value="tree">Tree</TabBar.Item>
+        <TabBar.Item value="issues" count={issues.length}>Issues</TabBar.Item>
+        <TabBar.Item value="files">Files</TabBar.Item>
+        <TabBar.Item value="settings">Settings</TabBar.Item>
+      </TabBar>
 
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatusPill
-                size="md"
-                status={project.status}
-                icon={<ProjectStatusIcon status={project.status} className="h-3 w-3" />}
-                label={projectStatusLabel(project.status)}
-              />
-              <StatusPill size="md" tone={projectHealthTone(project.health)} label={projectHealthLabel(project.health)} />
-              {project.priority && project.priority !== "none" && (
-                <StatusPill
-                  size="md"
-                  tone={issuePriorityTone(project.priority)}
-                  icon={<PriorityIcon priority={project.priority} className="h-3 w-3" />}
-                  label={priorityLabel[project.priority]}
-                />
-              )}
-              {/* Same source as the Scope figure below. Reading the row's
-                  counter here while the band reads /stats puts two different
-                  answers to "how big is this" on one card. A count, so a Badge. */}
-              <Badge variant="secondary">
-                {scope} {scope === 1 ? "issue" : "issues"}
-              </Badge>
-            </div>
-          </div>
-        </DetailCard>
-      </Appear>
-
-      <Appear order={1}>
-        <StatStrip items={facts} />
-      </Appear>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
-        <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
-          {/* The question you opened the project to ask. */}
-          <Appear order={2}>
-            <DetailCard
-              title="Issues"
-              icon={CircleDot}
-              subtitle={String(issues.length)}
-              bare
-              footer={
-                <Link
-                  href={`/issues?project=${encodeURIComponent(project.id)}`}
-                  className="text-[11px] text-primary hover:underline"
-                >
-                  Open these on the board
-                </Link>
-              }
-            >
-              {issues.length === 0 ? (
-                <p className="px-4 py-4 text-[12px] text-muted-foreground">
-                  Nothing is filed under this project yet.
-                </p>
-              ) : (
-                <ul className="divide-y divide-hairline">
-                  {issues.map((i) => (
-                    <li key={i.id}>
-                      <Link
-                        href={`/issues/${encodeURIComponent(i.identifier ?? i.id)}`}
-                        className="flex items-center gap-2.5 px-4 py-2 text-[12px] transition-colors hover:bg-foreground/[0.03]"
-                      >
-                        <StatusIcon status={i.status} className="h-3.5 w-3.5 shrink-0" />
-                        <span className="w-[54px] shrink-0 truncate font-mono text-[10px] text-muted-foreground">
-                          {i.identifier ?? i.id.slice(0, 6)}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-foreground/85">{i.title}</span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground-soft">
-                          {statusLabel[i.status] ?? i.status}
-                        </span>
-                        {i.assignee_id && (
-                          <AgentAvatar
-                            seed={i.assignee_id}
-                            className="h-4 w-4 shrink-0 rounded-full"
-                            alt={i.assignee_name ?? ""}
-                          />
-                        )}
-                        <PriorityIcon
-                          priority={i.priority ?? "none"}
-                          className="h-3 w-3 shrink-0"
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </DetailCard>
-          </Appear>
-
-          <Appear order={3}>
-            <DetailCard
-              title="Breakdown"
-              subtitle={breakdown === "assignees" ? "who is carrying it" : "what kind of work"}
-              action={
-                <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                  {(["assignees", "labels"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setBreakdown(t)}
-                      aria-pressed={breakdown === t}
-                      className={cn(
-                        "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                        breakdown === t
-                          ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              {breakdown === "assignees" ? (
-                (stats?.by_assignee?.length ?? 0) === 0 ? (
-                  <p className="text-[12px] text-muted-foreground">Nothing is assigned yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {stats!.by_assignee.map((a) => (
-                      <li key={a.agent_id || a.agent_name} className="flex items-center gap-2.5">
-                        <AgentAvatar
-                          seed={a.agent_id || a.agent_name}
-                          className="h-5 w-5 rounded-full"
-                          alt=""
-                        />
-                        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
-                          {a.agent_name}
-                        </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                          {a.completed} of {a.total}
-                        </span>
-                        <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/[0.06]">
-                          <div
-                            className="h-full rounded-full bg-primary/70"
-                            style={{
-                              width: `${a.total > 0 ? (a.completed / a.total) * 100 : 0}%`,
-                            }}
-                          />
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )
-              ) : (stats?.by_label?.length ?? 0) === 0 ? (
-                <p className="text-[12px] text-muted-foreground">No labels in use here.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {stats!.by_label.map((l) => (
-                    <li key={l.label_name} className="flex items-center gap-2.5">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: l.color }}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
-                        {l.label_name}
-                      </span>
-                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                        {l.count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </DetailCard>
-          </Appear>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <Appear order={4}>
-            <TintedCard
-              tone={HEALTH_TINT[project.health]}
-              icon={Activity}
-              title={`${projectHealthLabel(project.health)} · ${clamp(project.progress)}% done`}
-              subtitle={`${done} of ${scope} closed`}
-            >
-              {segments.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">
-                  No issues to measure yet.
-                </p>
-              ) : (
-                <div className="flex items-center gap-4">
-                  <svg viewBox="0 0 40 40" className="h-14 w-14 shrink-0" aria-hidden>
-                    {segments.map((s) => (
-                      <circle
-                        key={s.status}
-                        cx="20"
-                        cy="20"
-                        r="16"
-                        fill="none"
-                        stroke={s.color}
-                        strokeWidth="5"
-                        strokeDasharray={s.dasharray}
-                        strokeDashoffset={s.dashoffset}
-                        transform="rotate(-90 20 20)"
-                      />
-                    ))}
-                  </svg>
-                  <ul className="min-w-0 flex-1 space-y-0.5">
-                    {segments.map((s) => (
-                      <li key={s.status} className="flex items-center gap-1.5 text-[11px]">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-sm"
-                          style={{ backgroundColor: s.color }}
-                        />
-                        <span className="min-w-0 flex-1 truncate capitalize text-muted-foreground">
-                          {s.status.toLowerCase().replace(/_/g, " ")}
-                        </span>
-                        <span className="tabular-nums text-muted-foreground-soft">{s.value}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </TintedCard>
-          </Appear>
-
-          <Appear order={5}>
-            <DetailCard title="Properties">
-              <dl className="space-y-0.5">
-                <Row icon={FolderKanban} label="Status">
-                  {edit ? (
-                    <ProjectStatusPicker project={project} edit={edit} />
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5">
-                      <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5" />
-                      {projectStatusLabel(project.status)}
-                    </span>
-                  )}
-                </Row>
-                {/* Priority had a row in the rail and only a pill here — a
-                    pill you cannot click is not where you change a priority. */}
-                {edit && (
-                  <Row icon={Flag} label="Priority">
-                    <ProjectPriorityPicker project={project} edit={edit} />
-                  </Row>
-                )}
-                <Row icon={CircleDot} label="Health">
-                  {edit ? (
-                    <ProjectHealthPicker project={project} edit={edit} />
-                  ) : (
-                    projectHealthLabel(project.health)
-                  )}
-                </Row>
-                <Row icon={UserCircle2} label="Lead">
-                  {edit ? (
-                    <ProjectLeadPicker project={project} edit={edit} />
-                  ) : project.lead_name ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <AgentAvatar
-                        seed={project.lead_id ?? project.lead_name}
-                        className="h-4 w-4"
-                        alt=""
-                      />
-                      {project.lead_name}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground-soft">No lead</span>
-                  )}
-                </Row>
-                <Row icon={CalendarClock} label="Dates">
-                  {edit ? (
-                    <ProjectDatesPicker project={project} edit={edit}>
-                      <span className="truncate text-[12px]">{dateRange(project)}</span>
-                    </ProjectDatesPicker>
-                  ) : (
-                    dateRange(project)
-                  )}
-                </Row>
-              </dl>
-            </DetailCard>
-          </Appear>
-
-        </div>
-      </div>
-
-      {/* Short, glanceable, and none of it worth a rail slot. Spanning the
-          full width is also what keeps the page from ending in a column of
-          dead space beside a rail that outgrew the main column. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <Appear order={6}>
-          <DetailCard title="Teams" icon={Users}>
-            {(stats?.crews?.length ?? 0) === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
-                No crew has picked up work here yet.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {stats!.crews.map((c) => (
-                  <EntityChip key={c} icon={Users} label={c} />
-                ))}
-              </div>
-            )}
-          </DetailCard>
-        </Appear>
-
-        <Appear order={7}>
-          <DetailCard title="Labels" icon={Tag}>
-            {(stats?.by_label?.length ?? 0) === 0 ? (
-              <p className="text-[12px] text-muted-foreground">No labels.</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {stats!.by_label.map((l) => (
-                  <span
-                    key={l.label_name}
-                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
-                    style={{ backgroundColor: `${l.color}1f`, color: l.color }}
-                  >
-                    <span
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: l.color }}
-                    />
-                    {l.label_name}
-                  </span>
-                ))}
-              </div>
-            )}
-          </DetailCard>
-        </Appear>
-
-        <Appear order={8}>
-          <DetailCard title="Metadata">
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
-              <Fact label="created" value={formatDate(project.created_at)} />
-              <Fact label="updated" value={relTime(project.updated_at)} />
-              <Fact label="slug" value={project.slug} mono />
-              <Fact label="id" value={project.id} mono />
-            </dl>
-          </DetailCard>
-        </Appear>
+      <div role="tabpanel" aria-label={tabLabel(tab)}>
+        {tab === "overview" && (
+          <ProjectOverview project={project} stats={stats} issues={issues} milestones={milestones} />
+        )}
+        {tab === "tree" && workspaceId && <ProjectTree workspaceId={workspaceId} project={project} issues={issues} onOpen={open} />}
+        {tab === "issues" && <ProjectIssues issues={issues} onOpen={open} onNewIssue={onNewIssue} />}
+        {tab === "files" && workspaceId && <ProjectFiles workspaceId={workspaceId} projectId={project.id} />}
+        {tab === "settings" && <ProjectSettings project={project} edit={edit} share={share} onRequestDelete={onRequestDelete} />}
       </div>
     </div>
   )
+}
+
+function tabLabel(tab: ProjectTab): string {
+  return { overview: "Overview", tree: "Tree", issues: "Issues", files: "Files", settings: "Settings" }[tab]
 }
 
 /* ------------------------------------------------------------------ *
- *  Pieces                                                             *
+ *  Hero                                                               *
  * ------------------------------------------------------------------ */
 
-function Row({
-  icon: Icon,
-  label,
-  children,
+function ProjectHero({
+  project,
+  stats,
+  edit,
+  actions,
 }: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  children: React.ReactNode
+  project: Project
+  stats: ProjectStats | null
+  edit?: ProjectCardEdit
+  actions?: React.ReactNode
 }) {
+  const Icon = getCrewIconDef(project.icon || "folder").icon
+  const crews = stats?.crews ?? []
   return (
-    <div className="flex items-center gap-2 py-1 text-[12px]">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-      <dt className="w-[60px] shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1 truncate text-foreground/85">{children}</dd>
-    </div>
+    <header className="flex items-start gap-4" data-slot="project-hero">
+      {edit ? (
+        <div className="shrink-0">
+          <ProjectIconEditor project={project} edit={edit} />
+        </div>
+      ) : (
+        <span className="grid size-[52px] shrink-0 place-items-center rounded-card border border-border bg-surface-raised">
+          <Icon className={cn("size-6", iconColorProps(project.color).className)} style={iconColorProps(project.color).style} />
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="text-label font-semibold text-muted-foreground">Project · {dateRange(project)}</div>
+        {edit ? (
+          <ProjectNameEditor name={project.name} onSave={(next) => void edit.patch({ name: next })} />
+        ) : (
+          <h1 className="mt-0.5 truncate text-display font-bold tracking-tight">{project.name}</h1>
+        )}
+        {project.description && <p className="mb-2.5 mt-1 max-w-[64ch] text-body text-muted-foreground">{project.description}</p>}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <StatusPill
+            size="md"
+            status={project.status}
+            icon={<ProjectStatusIcon status={project.status} className="size-3" />}
+            label={projectStatusLabel(project.status)}
+          />
+          <StatusPill size="md" tone={projectHealthTone(project.health)} label={projectHealthLabel(project.health)} />
+          {project.lead_name && (
+            <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
+              <AgentAvatar seed={project.lead_id ?? project.lead_name} className="size-5 rounded-full" alt="" />
+              <span className="font-medium text-foreground">{project.lead_name}</span>
+              <span className="text-muted-foreground-soft">lead</span>
+            </span>
+          )}
+          {crews.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
+              <Users className="size-3.5" aria-hidden />
+              {crews.join(", ")}
+            </span>
+          )}
+          {actions}
+        </div>
+      </div>
+    </header>
   )
 }
 
-/** "1 Sep → 1 Oct", or a muted note when neither end is set. */
-function dateRange(project: Project): React.ReactNode {
-  if (!project.start_date && !project.target_date) {
-    return <span className="text-muted-foreground-soft">Not scheduled</span>
-  }
+/** "1 Oct → 31 Oct", or "not scheduled". */
+function dateRange(project: Project): string {
+  if (!project.start_date && !project.target_date) return "not scheduled"
   const from = project.start_date ? formatShortDate(project.start_date) : "?"
   const to = project.target_date ? formatShortDate(project.target_date) : "?"
   return `${from} → ${to}`
 }
 
-function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+/* ------------------------------------------------------------------ *
+ *  Overview                                                           *
+ * ------------------------------------------------------------------ */
+
+const SEGMENT_ORDER = ["DONE", "REVIEW", "IN_PROGRESS", "TODO", "BACKLOG", "FAILED"] as const
+
+function statusCounts(stats: ProjectStats | null, issues: Mission[]): Record<string, number> {
+  if (stats?.by_status && Object.keys(stats.by_status).length > 0) {
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(stats.by_status)) {
+      const key = k === "COMPLETED" ? "DONE" : k === "PLANNING" ? "TODO" : k
+      out[key] = (out[key] ?? 0) + v
+    }
+    return out
+  }
+  const out: Record<string, number> = {}
+  for (const i of issues) out[i.status] = (out[i.status] ?? 0) + 1
+  return out
+}
+
+function ProjectOverview({
+  project,
+  stats,
+  issues,
+  milestones,
+}: {
+  project: Project
+  stats: ProjectStats | null
+  issues: Mission[]
+  milestones?: React.ReactNode
+}) {
+  const total = stats?.total_issues ?? project.issue_count
+  const done = stats?.completed_issues ?? project.done_count
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  const counts = statusCounts(stats, issues)
+  const segments = SEGMENT_ORDER.filter((s) => (counts[s] ?? 0) > 0)
+
   return (
-    <div className="min-w-0">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">{label}</dt>
-      <dd className={cn("truncate text-foreground/85", mono && "font-mono text-[10px]")}>{value}</dd>
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_minmax(0,1fr)]" data-slot="project-kpis">
+        <div className="flex items-center gap-3 rounded-card border border-border bg-card px-4 py-3.5">
+          <DoneRing pct={pct} />
+          <div>
+            <small className="block text-label text-muted-foreground">Done</small>
+            <b className="block text-heading font-semibold">{`${done} of ${total}`}</b>
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-col justify-center gap-2 rounded-card border border-border bg-card px-4 py-3.5">
+          <small className="text-label text-muted-foreground">Issues by status</small>
+          {segments.length === 0 ? (
+            <p className="text-label text-muted-foreground-soft">No issues to measure yet.</p>
+          ) : (
+            <>
+              <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                {segments.map((s) => (
+                  <i key={s} className="block h-full" style={{ flex: counts[s], background: ISSUE_STATUS_COLORS[s] || CREW_COLOR_DEFAULT }} />
+                ))}
+              </div>
+              <ul className="flex flex-wrap gap-x-3 gap-y-1 text-label text-muted-foreground">
+                {segments.map((s) => (
+                  <li key={s} className="inline-flex items-center gap-1">
+                    <StatusIcon status={s} className="size-3" />
+                    {counts[s]} {(STATUS_TEXT[s] ?? s).toLowerCase()}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">{milestones}</div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <DetailCard title="Team" icon={Users}>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2.5">
+                {project.lead_name ? (
+                  <>
+                    <AgentAvatar seed={project.lead_id ?? project.lead_name} className="size-7 rounded-full" alt="" />
+                    <div>
+                      <b className="block text-body font-semibold">{project.lead_name}</b>
+                      <small className="text-label text-muted-foreground">Lead</small>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-label text-muted-foreground">No lead yet. Pick one in Settings.</p>
+                )}
+              </div>
+              {(stats?.by_assignee?.length ?? 0) > 0 && (
+                <ul className="flex flex-col gap-2 border-t border-border pt-3">
+                  {stats!.by_assignee.map((a) => (
+                    <li key={a.agent_id || a.agent_name} className="flex items-center gap-2.5">
+                      <AgentAvatar seed={a.agent_id || a.agent_name} className="size-5 rounded-full" alt="" />
+                      <span className="min-w-0 flex-1 truncate text-body">{a.agent_name}</span>
+                      <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
+                        {a.completed}/{a.total}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(stats?.crews?.length ?? 0) === 0 && (
+                <p className="text-label text-muted-foreground-soft">No crew has picked up work here yet.</p>
+              )}
+            </div>
+          </DetailCard>
+        </div>
+      </div>
     </div>
   )
 }
 
-interface Segment {
-  status: string
-  value: number
-  color: string
-  dasharray: string
-  dashoffset: number
+function DoneRing({ pct }: { pct: number }) {
+  const c = 100.5
+  return (
+    <svg viewBox="0 0 40 40" className="size-14 shrink-0" role="img" aria-label={`${pct}% done`}>
+      <circle cx="20" cy="20" r="16" fill="none" stroke="var(--border)" strokeWidth="4" />
+      <circle
+        cx="20"
+        cy="20"
+        r="16"
+        fill="none"
+        stroke="var(--success)"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeDasharray={`${((pct / 100) * c).toFixed(1)} ${c}`}
+        transform="rotate(-90 20 20)"
+      />
+      <text x="20" y="24" textAnchor="middle" className="fill-foreground text-micro font-semibold">
+        {pct}%
+      </text>
+    </svg>
+  )
 }
 
-/** Status ring, in the shared issue-status palette so it matches the board. */
-function donutSegments(stats: ProjectStats | null): Segment[] {
-  const entries = Object.entries(stats?.by_status ?? {}).filter(([, v]) => v > 0)
-  const total = entries.reduce((sum, [, v]) => sum + v, 0)
-  if (total === 0) return []
+/* ------------------------------------------------------------------ *
+ *  Issues                                                             *
+ * ------------------------------------------------------------------ */
 
-  const radius = 16
-  const circumference = 2 * Math.PI * radius
-  let offset = 0
-  return entries.map(([status, value]) => {
-    const len = (value / total) * circumference
-    const seg: Segment = {
-      status,
-      value,
-      color: ISSUE_STATUS_COLORS[status] || CREW_COLOR_DEFAULT,
-      dasharray: `${len} ${circumference - len}`,
-      dashoffset: -offset,
+function ProjectIssues({ issues, onOpen, onNewIssue }: { issues: Mission[]; onOpen: (i: Mission) => void; onNewIssue?: () => void }) {
+  if (issues.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border px-6 py-10 text-center">
+        <FolderKanban className="size-6 text-muted-foreground-soft" aria-hidden />
+        <b className="text-body font-semibold">No issues in this project yet</b>
+        <p className="max-w-[44ch] text-label text-muted-foreground">File work under this project to see it here, on the Tree and in the progress figures.</p>
+        {onNewIssue && (
+          <Button size="sm" onClick={onNewIssue}>
+            <Plus className="size-3.5" aria-hidden />
+            New issue
+          </Button>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="overflow-hidden rounded-card border border-border bg-card" data-slot="project-issues">
+      {issues.map((i) => (
+        <IssueRow key={i.id} issue={i} onOpen={onOpen} />
+      ))}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Tree (Outline): milestone → issue → sub-issue                      *
+ * ------------------------------------------------------------------ */
+
+function ProjectTree({
+  workspaceId,
+  project,
+  issues,
+  onOpen,
+}: {
+  workspaceId: string
+  project: Project
+  issues: Mission[]
+  onOpen: (i: Mission) => void
+}) {
+  const [milestones, setMilestones] = React.useState<Milestone[] | null>(null)
+  React.useEffect(() => {
+    let cancelled = false
+    setMilestones(null)
+    apiFetch(`/api/v1/projects/${encodeURIComponent(project.id)}/milestones?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((b) => {
+        if (!cancelled) setMilestones(Array.isArray(b) ? b : [])
+      })
+      .catch(() => {
+        if (!cancelled) setMilestones([])
+      })
+    return () => {
+      cancelled = true
     }
-    offset += len
-    return seg
-  })
+  }, [workspaceId, project.id])
+
+  const groups = React.useMemo(() => {
+    const ids = new Set(issues.map((i) => i.id))
+    // Sub-issues hang off their parent when the parent is here too.
+    const children = new Map<string, Mission[]>()
+    const top: Mission[] = []
+    for (const i of issues) {
+      if (i.parent_issue_id && ids.has(i.parent_issue_id)) {
+        const list = children.get(i.parent_issue_id) ?? []
+        list.push(i)
+        children.set(i.parent_issue_id, list)
+      } else top.push(i)
+    }
+    const known = new Set((milestones ?? []).map((m) => m.id))
+    const out: { key: string; name: string; meta?: string; issues: Mission[] }[] = (milestones ?? []).map((m) => ({
+      key: m.id,
+      name: m.name,
+      meta: m.target_date ? formatShortDate(m.target_date) : undefined,
+      issues: top.filter((i) => i.milestone_id === m.id),
+    }))
+    const rest = top.filter((i) => !i.milestone_id || !known.has(i.milestone_id))
+    if (rest.length > 0) out.push({ key: "none", name: "No milestone", issues: rest })
+    return { out, children }
+  }, [issues, milestones])
+
+  const doneOf = (list: Mission[]) => list.filter((i) => i.status === "DONE" || i.status === "COMPLETED").length
+
+  return (
+    <div className="overflow-hidden rounded-card border border-border bg-card py-1.5">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-body">
+        <Folder className="size-3.5 text-muted-foreground" aria-hidden />
+        <b className="font-semibold">{project.name}</b>
+        <span className="flex-1" />
+        <span className="font-mono text-label text-muted-foreground">
+          {doneOf(issues)}/{issues.length}
+        </span>
+      </div>
+      <ul role="tree" aria-label={`${project.name} outline`}>
+        {milestones === null && <li className="px-8 py-2 text-label text-muted-foreground">Loading milestones…</li>}
+        {groups.out.map((g) => (
+          <li key={g.key} role="treeitem" aria-expanded aria-label={`${g.name}, ${doneOf(g.issues)} of ${g.issues.length} done`}>
+            <div className="flex items-center gap-2 py-1.5 pl-6 pr-3 text-body">
+              <ChevronRight className="size-3 rotate-90 text-muted-foreground-soft" aria-hidden />
+              <b className="font-semibold">{g.name}</b>
+              {g.meta && <span className="text-label text-muted-foreground">{g.meta}</span>}
+              <span className="flex-1" />
+              <span className="font-mono text-label text-muted-foreground">
+                {doneOf(g.issues)}/{g.issues.length}
+              </span>
+            </div>
+            <ul role="group">
+              {g.issues.length === 0 && <li className="py-1 pl-14 text-label text-muted-foreground-soft">No issues in this milestone.</li>}
+              {g.issues.map((i) => (
+                <TreeIssue key={i.id} issue={i} depth={2} subs={groups.children.get(i.id) ?? []} onOpen={onOpen} />
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function TreeIssue({ issue, depth, subs, onOpen }: { issue: Mission; depth: 2 | 3; subs: Mission[]; onOpen: (i: Mission) => void }) {
+  return (
+    <li role="treeitem" aria-label={`${issue.identifier ?? ""} ${issue.title}`.trim()} aria-expanded={subs.length > 0 ? true : undefined}>
+      <button
+        type="button"
+        onClick={() => onOpen(issue)}
+        className={cn("row-hover flex w-full items-center gap-2 py-1.5 pr-3 text-left text-body", depth === 2 ? "pl-11" : "pl-16")}
+      >
+        <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
+        {issue.identifier && <span className="shrink-0 font-mono text-label text-muted-foreground-soft">{issue.identifier}</span>}
+        <span className="min-w-0 truncate">{issue.title}</span>
+        <span className="flex-1" />
+        {issue.delegate?.name || issue.assignee_name ? (
+          <span className="shrink-0 truncate text-label text-muted-foreground">{issue.delegate?.name ?? issue.assignee_name}</span>
+        ) : (
+          <span className="shrink-0 text-label text-muted-foreground-soft">no delegate</span>
+        )}
+      </button>
+      {subs.length > 0 && (
+        <ul role="group">
+          {subs.map((s) => (
+            <TreeIssue key={s.id} issue={s} depth={3} subs={[]} onOpen={onOpen} />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Files: project files (server, versioned)                           *
+ * ------------------------------------------------------------------ */
+
+interface ProjectFileVersion {
+  version_id: string
+  file_id: string
+  name: string
+  revision: number
+  size_bytes: number
+  created_at: string
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function ProjectFiles({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+  const [state, setState] = React.useState<{ files: ProjectFileVersion[] | null; error: string | null }>({ files: null, error: null })
+  const [reload, setReload] = React.useState(0)
+  const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/files`
+  React.useEffect(() => {
+    let cancelled = false
+    setState({ files: null, error: null })
+    apiFetch(base)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Project files could not load (HTTP ${r.status})`)
+        const b = (await r.json()) as { files?: ProjectFileVersion[] }
+        if (!cancelled) setState({ files: b.files ?? [], error: null })
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setState({ files: null, error: e instanceof Error ? e.message : "Project files could not load" })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [base, reload])
+
+  if (state.error) {
+    return (
+      <div role="alert" className="flex items-center gap-3 rounded-card border border-destructive/30 bg-destructive/10 px-3 py-2 text-label text-destructive">
+        <span className="flex-1">{state.error}</span>
+        <Button size="xs" variant="ghost" onClick={() => setReload((n) => n + 1)}>Retry</Button>
+      </div>
+    )
+  }
+  if (state.files === null) return <p className="px-1 py-3 text-label text-muted-foreground">Loading project files…</p>
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-label text-muted-foreground">
+        Project files live on the server and are versioned; every run reads the exact revision it started with.
+      </p>
+      {state.files.length === 0 ? (
+        <div className="rounded-card border border-dashed border-border px-6 py-8 text-center text-label text-muted-foreground">
+          No project files yet.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-card border border-border bg-card">
+          <table className="w-full text-body">
+            <thead className="border-b border-border text-left text-label text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">File</th>
+                <th className="px-3 py-2 font-medium">Revision</th>
+                <th className="px-3 py-2 font-medium max-sm:hidden">Size</th>
+                <th className="px-3 py-2 font-medium max-sm:hidden">Saved</th>
+                <th className="w-10 px-2 py-2"><span className="sr-only">Download</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.files.map((f) => (
+                <tr key={f.version_id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2">
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <b className="truncate font-medium">{f.name}</b>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-label">{`r${f.revision}`}</td>
+                  <td className="px-3 py-2 font-mono text-label text-muted-foreground max-sm:hidden">{formatBytes(f.size_bytes)}</td>
+                  <td className="px-3 py-2 text-label text-muted-foreground max-sm:hidden">{relTime(f.created_at)}</td>
+                  <td className="px-2 py-1">
+                    <Button asChild variant="ghost" size="icon-xs">
+                      <a href={`${base}/${encodeURIComponent(f.version_id)}/download`} aria-label={`Download ${f.name}`} download>
+                        <Download className="size-3.5" aria-hidden />
+                      </a>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Settings                                                           *
+ * ------------------------------------------------------------------ */
+
+function SettingsRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border px-4 py-3 first:border-t-0">
+      <div className="min-w-[10rem] flex-1">
+        <b className="block text-body font-medium">{label}</b>
+        {hint && <small className="text-label text-muted-foreground">{hint}</small>}
+      </div>
+      <div className="flex min-w-0 items-center text-body">{children}</div>
+    </div>
+  )
+}
+
+function ProjectSettings({
+  project,
+  edit,
+  share,
+  onRequestDelete,
+}: {
+  project: Project
+  edit?: ProjectCardEdit
+  share?: React.ReactNode
+  onRequestDelete?: () => void
+}) {
+  return (
+    <div className="flex max-w-[760px] flex-col gap-4">
+      <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="Project">
+        <header className="flex items-center gap-3 border-b border-border px-4 py-3">
+          <FolderKanban className="size-4 text-muted-foreground" aria-hidden />
+          <div>
+            <b className="block text-body font-semibold">Project</b>
+            <small className="text-label text-muted-foreground">Name, look and plan</small>
+          </div>
+        </header>
+        <SettingsRow label="Status">
+          {edit ? <ProjectStatusPicker project={project} edit={edit} /> : projectStatusLabel(project.status)}
+        </SettingsRow>
+        {edit && (
+          <SettingsRow label="Priority">
+            <ProjectPriorityPicker project={project} edit={edit} />
+          </SettingsRow>
+        )}
+        <SettingsRow label="Health">
+          {edit ? <ProjectHealthPicker project={project} edit={edit} /> : projectHealthLabel(project.health)}
+        </SettingsRow>
+        <SettingsRow label="Lead" hint="One person or agent accountable for the project">
+          {edit ? <ProjectLeadPicker project={project} edit={edit} /> : (project.lead_name ?? "No lead")}
+        </SettingsRow>
+        <SettingsRow label="Start and target">
+          {edit ? (
+            <ProjectDatesPicker project={project} edit={edit}>
+              <span className="truncate text-body">{dateRange(project)}</span>
+            </ProjectDatesPicker>
+          ) : (
+            dateRange(project)
+          )}
+        </SettingsRow>
+      </section>
+
+      {share && (
+        <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="Access">
+          <header className="flex items-center gap-3 px-4 py-3">
+            <Users className="size-4 text-muted-foreground" aria-hidden />
+            <div className="flex-1">
+              <b className="block text-body font-semibold">Access</b>
+              <small className="text-label text-muted-foreground">Who outside the crews working on it can see this project</small>
+            </div>
+            {share}
+          </header>
+        </section>
+      )}
+
+      {onRequestDelete && (
+        <section className="overflow-hidden rounded-card border border-destructive/30 bg-card" aria-label="Danger zone">
+          <header className="flex items-center gap-3 border-b border-border px-4 py-3">
+            <Trash2 className="size-4 text-destructive" aria-hidden />
+            <div>
+              <b className="block text-body font-semibold">Danger zone</b>
+              <small className="text-label text-muted-foreground">Admins and owners</small>
+            </div>
+          </header>
+          <SettingsRow label="Delete project" hint="Issues keep working without a project.">
+            <Button size="sm" variant="destructive" onClick={onRequestDelete}>
+              Delete…
+            </Button>
+          </SettingsRow>
+        </section>
+      )}
+    </div>
+  )
 }

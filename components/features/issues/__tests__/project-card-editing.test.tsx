@@ -68,6 +68,7 @@ function renderCard(over: { project?: Project; edit?: ProjectCardEdit | null } =
       stats={STATS}
       issues={[]}
       edit={e}
+      tab="settings"
     />,
   )
   return e

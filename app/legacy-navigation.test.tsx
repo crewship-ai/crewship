@@ -44,12 +44,20 @@ describe("bookmarks after navigation migration", () => {
   view.rerender(<IssuePage />)
   expect(navigation.router.replace).toHaveBeenLastCalledWith("/issues/OPS-6")
  })
- it("keeps project and mission static stubs pointed at replacement surfaces", () => {
+ // Z10: the project id used to be dropped, so an old project link landed on
+ // the whole issue list. It now opens that project on /issues.
+ it.each([
+  ["/orchestration/projects/p_1", "/issues?project=p_1"],
+  ["/orchestration/projects/a%20b/", "/issues?project=a+b"],
+  ["/orchestration/projects/_", "/issues"],
+ ])("opens the project a legacy link %s names", (path, target) => {
   expect(projectParams()).toEqual([{ projectId: "_" }])
+  window.history.replaceState({}, "", path)
+  render(<ProjectPage />)
+  expect(navigation.router.replace).toHaveBeenLastCalledWith(target)
+ })
+ it("keeps the mission static stub pointed at its replacement surface", () => {
   expect(missionParams()).toEqual([{ missionId: "_" }])
-  const project = render(<ProjectPage />)
-  expect(navigation.router.replace).toHaveBeenLastCalledWith("/issues")
-  project.unmount()
   const mission = render(<MissionPage />)
   expect(navigation.router.replace).toHaveBeenLastCalledWith("/activity")
   mission.unmount()

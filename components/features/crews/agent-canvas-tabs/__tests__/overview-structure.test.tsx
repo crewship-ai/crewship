@@ -66,6 +66,13 @@ function renderTab() {
 }
 
 describe("agent overview structure", () => {
+  // /issues filters by ?assignee_id=<agent id>; ?assignee=<slug> was read by
+  // nothing, so "Open filtered" showed every issue in the workspace.
+  it("opens Issues filtered to this agent with the key the page reads", () => {
+    renderTab()
+    expect(screen.getByRole("link", { name: /Open filtered by casey/ })).toHaveAttribute("href", "/issues?assignee_id=a1")
+  })
+
   it("groups the cards under the question each answers", () => {
     renderTab()
     for (const band of ["What it holds", "Capabilities", "What it has been up to"]) {
