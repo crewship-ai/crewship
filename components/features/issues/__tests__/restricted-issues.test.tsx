@@ -296,7 +296,7 @@ it("keeps the current view and draft while a search budget pauses polling", asyn
     await screen.findByText(/Shared issue searches are temporarily limited/)
     expect(screen.getByRole("link", { name: "Shared issue" })).toBeInTheDocument()
     expect(screen.getByLabelText("Search shared issues")).toHaveValue("Keep this draft")
-    expect(screen.getByRole("button", { name: "Search", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
     expect(screen.queryByText("Issues unavailable")).toBeNull()
     const before = fetchMock.mock.calls.filter(([path]) => path.includes("restricted-issues?")).length
@@ -305,7 +305,7 @@ it("keeps the current view and draft while a search budget pauses polling", asyn
     recovered = true
     await act(async () => { await vi.advanceTimersByTimeAsync(16_000) })
     expect(await screen.findByRole("link", { name: "Recovered issue" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Search", exact: true })).not.toBeDisabled()
+    expect(screen.getByRole("button", { name: "Search" })).not.toBeDisabled()
   } finally { vi.useRealTimers() }
 })
 
@@ -333,7 +333,7 @@ it("clears rate cooldown and cached results when the account or workspace change
   expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
   await screen.findByRole("link", { name: "Other audience" })
   expect(screen.getByLabelText("Search shared issues")).toHaveValue("")
-  expect(screen.getByRole("button", { name: "Search", exact: true })).not.toBeDisabled()
+  expect(screen.getByRole("button", { name: "Search" })).not.toBeDisabled()
   expect(screen.queryByText(/Shared issue searches are temporarily limited/)).toBeNull()
 })
 
@@ -346,7 +346,7 @@ it("keeps the last successful results when a new search query is limited", async
   show()
   await screen.findByRole("link", { name: "Shared issue" })
   fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "new query" } })
-  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
   await screen.findByText(/Shared issue searches are temporarily limited/)
   expect(screen.getByRole("link", { name: "Shared issue" })).toBeInTheDocument()
   expect(screen.getByLabelText("Search shared issues")).toHaveValue("new query")
