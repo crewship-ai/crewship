@@ -9,7 +9,9 @@ import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { roleAtLeast } from "@/lib/routine-governance"
+import { canKillRoutine, roleAtLeast } from "@/lib/routine-governance"
+import { bulkRunNow, bulkSummary, bulkTurnOff } from "@/lib/routine-bulk"
+import { toast } from "@/lib/toast"
 import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
@@ -92,6 +94,30 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     [pipelines, filters.showTestRoutines],
   )
   const panelIndex = useRoutinePanelIndex(workspaceId, pipelines)
+  // Select several in the panel (PNL-03): Turn off (Owner/Admin, one
+  // disable per routine) and Run now (routines that need no answer).
+  const nameOf = (slug: string) => pipelines.find((p) => p.slug === slug)?.name || slug
+  const bulk = {
+    canTurnOff: canKillRoutine(role),
+    onTurnOff: async (slugs: string[]) => {
+      const result = await bulkTurnOff(workspaceId, slugs, apiFetch)
+      if (result.failed.length)
+        toast.error(`Turned off ${result.done.length} of ${slugs.length}`, {
+          description: result.failed.map((f) => `${nameOf(f.slug)}: ${f.reason}`).join(" · "),
+        })
+      else toast.success(`Turned off ${result.done.length} ${result.done.length === 1 ? "routine" : "routines"}`)
+      changed()
+    },
+    onRunNow: async (slugs: string[]) => {
+      const result = await bulkRunNow(workspaceId, slugs, apiFetch)
+      const details = [
+        ...result.skipped.map((s) => `${nameOf(s.slug)}: ${s.reason}`),
+        ...result.failed.map((f) => `${nameOf(f.slug)}: ${f.reason}`),
+      ].join(" · ")
+      ;(result.failed.length || result.skipped.length ? toast.warning : toast.success)(bulkSummary(result), details ? { description: details } : undefined)
+      changed()
+    },
+  }
   // The selected routine lives in the URL: /routines?slug=<slug> (every
   // routine link in the app points here; ?routine= is read as an alias).
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
@@ -307,6 +333,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             counts={{ needs: needsCount, live: liveCount, drafts: drafts?.length ?? null }}
             crews={crews}
             index={panelIndex}
+            bulk={isMobile ? undefined : bulk}
           />
         </SecondaryPanel>
 

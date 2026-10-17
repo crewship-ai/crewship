@@ -1,7 +1,10 @@
 "use client"
 
-import { useMemo } from "react"
-import { ArrowDownUp, Hand, LayoutDashboard, List, Pencil, Play, PenLine } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ArrowDownUp, Check, Hand, LayoutDashboard, List, ListChecks, Pause, Pencil, Play, PenLine, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 
 import {
@@ -90,6 +93,13 @@ interface RoutinesExplorerProps {
   crews: ReadonlyMap<string, PanelCrew>
   /** Triggers, next start and spend per routine; empty until loaded. */
   index?: RoutinePanelIndex
+  /** Select several (PNL-03). Absent on a phone, where there is no selection. */
+  bulk?: {
+    /** Turning off is Owner and Admin on the server. */
+    canTurnOff: boolean
+    onTurnOff: (slugs: string[]) => Promise<void> | void
+    onRunNow: (slugs: string[]) => Promise<void> | void
+  }
 }
 
 /** The one pill a row carries: a live run first, then the routine's own
@@ -144,7 +154,33 @@ export function RoutinesExplorer({
   counts,
   crews,
   index = EMPTY_PANEL_INDEX,
+  bulk,
 }: RoutinesExplorerProps) {
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(() => new Set())
+  const [confirmOff, setConfirmOff] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const toggle = (slug: string) =>
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+  const leaveSelecting = () => {
+    setSelecting(false)
+    setPicked(new Set())
+  }
+  const pickedSlugs = () => [...picked]
+  const runBulk = async (action: () => Promise<void> | void) => {
+    setBusy(true)
+    try {
+      await action()
+      setPicked(new Set())
+    } finally {
+      setBusy(false)
+    }
+  }
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
   const [storedGroup, setGroupBy] = useUserPreference<RoutineGroupBy>("routines.panel.group", "crew")
   const [storedSort, setSortBy] = useUserPreference<RoutineSort>("routines.panel.sort", "recent")
@@ -267,6 +303,16 @@ export function RoutinesExplorer({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+        {bulk && (
+          <SidebarViewButton
+            aria-label="Select several"
+            aria-pressed={selecting}
+            title="Select several"
+            onClick={() => (selecting ? leaveSelecting() : setSelecting(true))}
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+          </SidebarViewButton>
+        )}
       </SidebarToolbar>
 
       <SidebarActiveChips>
@@ -314,20 +360,51 @@ export function RoutinesExplorer({
             <div role="group" aria-label={g.label}>
               {g.rows.map((routine) => {
                 const state = routineRowState(routine, liveBySlug.get(routine.slug))
+                const content = (
+                  <span data-routine-row className="flex min-w-0 flex-1 items-center gap-2" title={routine.description || routine.slug}>
+                    <RoutineGlyph routine={routine} variant="bare" />
+                    <span className="min-w-0 flex-1 truncate text-foreground/85">{routine.name || routine.slug}</span>
+                    {routine.draft && (
+                      <span role="img" aria-label="Changes not live" title="Changes not live" className="shrink-0 text-muted-foreground">
+                        <Pencil className="h-3 w-3" aria-hidden />
+                      </span>
+                    )}
+                    {state && (
+                      <StatusPill tone={state.tone} label={state.label} live={state.live} data-testid={state.live ? "routine-live-chip" : undefined} />
+                    )}
+                  </span>
+                )
+                if (selecting) {
+                  const checked = picked.has(routine.slug)
+                  return (
+                    <button
+                      key={routine.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      aria-label={`Select ${routine.name || routine.slug}`}
+                      onClick={() => toggle(routine.slug)}
+                      className={cn(
+                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-foreground/[0.04] coarse:min-h-11",
+                        checked && "bg-primary/10",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
+                          checked ? "border-primary bg-primary text-primary-foreground" : "border-control-border",
+                        )}
+                      >
+                        {checked && <Check className="h-3 w-3" />}
+                      </span>
+                      {content}
+                    </button>
+                  )
+                }
                 return (
                   <SidebarRow key={routine.id} as="div" selected={selectedSlug === routine.slug} onSelect={() => onSelectRoutine(routine.slug)}>
-                    <span data-routine-row className="flex min-w-0 flex-1 items-center gap-2" title={routine.description || routine.slug}>
-                      <RoutineGlyph routine={routine} variant="bare" />
-                      <span className="min-w-0 flex-1 truncate text-foreground/85">{routine.name || routine.slug}</span>
-                      {routine.draft && (
-                        <span role="img" aria-label="Changes not live" title="Changes not live" className="shrink-0 text-muted-foreground">
-                          <Pencil className="h-3 w-3" aria-hidden />
-                        </span>
-                      )}
-                      {state && (
-                        <StatusPill tone={state.tone} label={state.label} live={state.live} data-testid={state.live ? "routine-live-chip" : undefined} />
-                      )}
-                    </span>
+                    {content}
                   </SidebarRow>
                 )
               })}
@@ -341,6 +418,49 @@ export function RoutinesExplorer({
           </p>
         )}
       </div>
+
+      {/* PNL-03: the bulk bar sits at the bottom of the panel while selecting. */}
+      {selecting && bulk && (
+        <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
+          {bulk.canTurnOff && (
+            <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-11" disabled={!picked.size || busy} onClick={() => setConfirmOff(true)}>
+              <Pause className="h-3 w-3" aria-hidden />
+              Turn off
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1 coarse:h-11"
+            disabled={!picked.size || busy}
+            title="Starts the selected routines that need no answer; a routine with a required input is skipped"
+            onClick={() => void runBulk(() => bulk.onRunNow(pickedSlugs()))}
+          >
+            <Play className="h-3 w-3" aria-hidden />
+            Run now
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Done selecting" title="Done selecting" onClick={leaveSelecting}>
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        </div>
+      )}
+      <ConfirmDialog
+        open={confirmOff}
+        onOpenChange={setConfirmOff}
+        title={`Turn off ${picked.size} ${picked.size === 1 ? "routine" : "routines"}?`}
+        description="They cannot run until each is turned on again."
+        consequences={[
+          { tone: "lost", text: "Schedules, webhooks and the Run button stop starting them." },
+          { tone: "kept", text: "Their runs, versions and settings stay." },
+        ]}
+        confirmLabel="Turn off"
+        destructive
+        onConfirm={async () => {
+          if (bulk) await runBulk(() => bulk.onTurnOff(pickedSlugs()))
+        }}
+      />
     </div>
   )
 }
