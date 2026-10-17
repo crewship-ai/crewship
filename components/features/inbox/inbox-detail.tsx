@@ -2,48 +2,53 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Activity, AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users, MoreHorizontal } from "lucide-react"
+import {
+  Activity, AlertTriangle, ArrowUpRight, Brain, CalendarClock, CircleDot, Eye, EyeOff, HelpCircle, KeyRound,
+  Link2, ListChecks, MessageSquare, MoreHorizontal, PauseCircle, ScrollText, ShieldCheck, Sparkles, UserPlus, Users,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
-import { DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
-import { InboxMessageSurface, messageSection, messageDivider } from "./inbox-message-surface"
+import { Pill, type DetailTone } from "@/components/ui/detail"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { toStatusTone } from "@/lib/status-tone"
 import { entityHref } from "@/lib/entity-links"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { hostOf } from "@/lib/routine-step-describe"
+import { isDecisionForm } from "@/lib/decision-form"
+import { cn } from "@/lib/utils"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup } from "@/components/features/inbox-v2/inbox-v2-types"
-import { EntryAvatar, entryIdentity } from "@/components/features/inbox-v2/inbox-entry-identity"
-import { RoutineProposalDiff } from "./routine-proposal-diff"
-import { Button } from "@/components/ui/button"
+import { entryIdentity } from "@/components/features/inbox-v2/inbox-entry-identity"
+import { inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
+import {
+  DecisionBlock, DetailExpand, DetailFrame, Dock, HistoryReceipt, OriginChips, RoleNote, outcomeLabel, type DecisionTone,
+} from "@/components/features/inbox-v2/inbox-detail-frame"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
-import type { LucideIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
 
+import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { EvidenceFacts } from "./evidence-facts"
 import { ActReceipt, receiptOf } from "./run-needs-human-actions"
 import { KindActions } from "./kind-actions"
 import type { InboxActFn } from "./run-needs-human-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
+  attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
   payloadString, payloadStrings, safeChatURL, since, type WorkspaceRole,
 } from "./inbox-derive"
 
 /**
- * The §12 attention class, as a pill beside the title (#2398). One place for
- * both card shapes so the decision card and the plain card cannot spell it
- * differently.
+ * The §12 attention class, as a pill in the detail head (#2398). One place
+ * for every card shape so the decision block and the plain card cannot spell
+ * it differently.
  */
 function AttentionBadge({ item }: { item: InboxItem }) {
   const badge = attentionBadge(item)
   if (!badge) return null
-  return <StatusPill size="md" tone={toStatusTone(badge.tone)} label={badge.label} data-testid="attention-badge" />
+  return <StatusPill tone={toStatusTone(badge.tone)} label={badge.label} data-testid="attention-badge" />
 }
-import { entryKindPill, entryTitle, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 // =============================================================================
 // The reading pane.
@@ -104,16 +109,18 @@ function RevealableValue({ value }: { value: string }) {
   const [shown, setShown] = useState(false)
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="font-mono text-[11px] text-foreground/80">
+      <span className="font-mono text-label text-foreground/80">
         {shown ? value : "••••••••"}
       </span>
+      {/* v67: the word, not a bare eye — what the click does is the label. */}
       <button
         type="button"
         onClick={() => setShown((s) => !s)}
-        className="text-muted-foreground/60 hover:text-foreground"
+        className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline"
         aria-label={shown ? "Hide value" : "Reveal value"}
       >
-        {shown ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+        {shown ? <EyeOff className="h-3 w-3" aria-hidden /> : <Eye className="h-3 w-3" aria-hidden />}
+        {shown ? "Hide" : "Reveal"}
       </button>
     </span>
   )
@@ -261,8 +268,9 @@ function MessageBody({ body }: { body: string }) {
 }
 
 export function DecisionCard({
-  item, role, onResolve, onRefresh, onDenyHire, crewHref, onAct, embedded = false,
+  item, role, onResolve, onRefresh, onDenyHire, crewHref, onAct,
 }: {
+  /** Kept for callers of the old card shape; the block is the same either way. */
   embedded?: boolean
   item: InboxItem
   role: WorkspaceRole | null
@@ -272,117 +280,106 @@ export function DecisionCard({
   crewHref?: string | null
   onAct?: InboxActFn
 }) {
-  const Frame = embedded ? "section" : DetailCard
   const meta = decisionMetaFor(item)
   if (!meta) return null
 
   const isResolved = item.state === "resolved"
   const allowed = canRole(role, meta.requires)
   const mins = expiresIn(item)
+  const destructive = riskLevelOf(item) === "destructive"
+  // Colour carries the stakes only: a destructive approval is red, a schedule
+  // that stopped is amber, every other ask is the plain block.
+  const tone: DecisionTone = isResolved
+    ? "default"
+    : destructive
+      ? "danger"
+      : item.kind === "schedule_missed" || item.kind === "schedule_circuit_breaker_tripped"
+        ? "warn"
+        : "default"
+  const authorForm = item.kind === "waitpoint" && isDecisionForm(item.payload?.decision_form)
 
   return (
-    <Frame className={embedded ? messageSection : undefined}>
-      <div data-testid="decision-card" className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <AlertTriangle className={cn("h-4 w-4", !isResolved && meta.tone === "warn" ? "text-warn" : "text-muted-foreground")} />
-          {/* meta.heading is written for a pending gate ("Waiting on your
-              decision"). History renders the same card, so a decided row used
-              to announce itself as still waiting. */}
-          <span className={cn("type-section", !isResolved && meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
-            {isResolved ? "Decision record" : meta.heading}
-          </span>
-          <AttentionBadge item={item} />
-          {/* Author-declared, never inferred. Sits with the heading rather
-              than in the Context dump because it changes how the sentence
-              below it should be read, and a reader who scrolls past the
-              buttons has already decided. */}
-          {riskLevelOf(item) === "destructive" && (
-            <span className="type-meta rounded bg-destructive/15 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-destructive">
-              destructive · cannot be undone by re-running
-            </span>
-          )}
-          {/* A decided row has no deadline left to run. Showing "expires in
-              24h" beside a resolved decision — which History does for every
-              row — reads as "this is still open", and the greyed Approve
-              button underneath reads as a permissions problem rather than a
-              decision already made. */}
-          {mins != null && !isResolved && (
-            <span
-              className={cn(
-                "type-meta ml-auto font-mono",
-                // Expired is not a quieter state than expiring; it is the loud
-                // one. It used to render muted, below the pill for a gate that
-                // still had time.
-                mins > 0 ? "text-destructive" : "font-semibold text-destructive",
-              )}
-            >
-              {mins > 0
-                ? `expires ${absolute(payloadString(item, "timeout_at"))} · in ${remainingLabel(mins)}`
-                : `expired ${absolute(payloadString(item, "timeout_at"))}`}
-            </span>
-          )}
-          {isResolved && (
-            <span className="type-meta ml-auto font-mono text-muted-foreground">
-              {item.resolved_action ?? "closed"}
-              {item.resolved_at ? ` · ${since(item.resolved_at)}` : ""}
-            </span>
-          )}
-        </div>
-
-        {/* The question, not the server's "Agent escalation:" prefix — the
-            kind pill beside the heading already says what this is. */}
-        <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entryTitle(inboxEntry(item))}</h1>
-
-        <DecisionSubject item={item} />
-        {item.body_md && <div className="py-2"><MessageBody key={item.id} body={item.body_md} /></div>}
-
-        {/* Ahead of the buttons: whether this person can resolve it at all
-            decides whether pressing one is worth anything. The same component
-            the crew escalations panel renders (#1559/#1574) — the inbox is the
-            other surface with a one-click Approve on the same escalation, and
-            it used to offer it in silence. Every value is the server's
-            read-time answer; the row never re-derives it from the payload. */}
-        {payloadString(item, "kind") === "routine_proposal" && <RoutineProposalDiff workspaceId={item.workspace_id} slug={payloadString(item, "slug")} fromVersion={payloadNumber(item, "from_version")} toVersion={payloadNumber(item, "to_version")} />}
-        <FourEyesNotice
-          required={item.second_approver_required === true}
-          byWorkspace={item.second_approver_by_workspace === true}
-          byTier={item.second_approver_by_tier === true}
-          securityLevelLabel={item.security_level_label ?? null}
-          agentSlug={fourEyesAgentOf(item)}
+    <DecisionBlock
+      testId="decision-card"
+      icon={decisionIcon(item)}
+      // meta.heading is written for a pending gate ("Waiting on your
+      // decision"). History renders the same block, so a decided row used to
+      // announce itself as still waiting.
+      heading={isResolved ? "Decision record" : meta.heading}
+      tone={tone}
+      // A decided row has no deadline left to run: "expires in 24h" beside a
+      // resolved decision reads as "this is still open".
+      expires={mins != null && !isResolved ? remainingLabel(mins) === "expired" ? "expired" : `in ${remainingLabel(mins)}` : null}
+      badge={isResolved ? (
+        <span className="type-meta font-mono text-muted-foreground">
+          {item.resolved_action ?? "closed"}
+          {item.resolved_at ? ` · ${since(item.resolved_at)}` : ""}
+        </span>
+      ) : null}
+      // Who decides sits beside the buttons it disables; otherwise the note
+      // says whose words the buttons are.
+      note={isResolved ? undefined : !allowed ? <RoleNote>{deciderCopy(meta.requires)}</RoleNote> : authorForm ? "Buttons named by the routine author" : undefined}
+      actions={!isResolved ? (
+        // Rendering the buttons disabled for History made it look like a
+        // queue the reader lacked permission to act on; a decided row states
+        // its outcome instead.
+        <KindActions
+          item={item}
+          onResolve={onResolve}
+          onRefresh={onRefresh}
+          disabled={!allowed}
+          onDenyHire={onDenyHire}
+          crewHref={crewHref}
+          onAct={onAct}
         />
-
-        {/* Above the buttons, below the four-eyes notice: the facts belong where
-            they are read before the click, not after it. */}
-        <EvidenceFacts item={item} />
-
-        {/* Rendering the buttons disabled was the old behaviour, and it made
-            History look like a queue the reader lacked permission to act on.
-            A decided row states its outcome instead. */}
-        {!isResolved && (
-          <KindActions
-            item={item}
-            onResolve={onResolve}
-            onRefresh={onRefresh}
-            disabled={!allowed}
-            onDenyHire={onDenyHire}
-            crewHref={crewHref}
-            onAct={onAct}
-          />
-        )}
-
-        {!isResolved && !allowed && (
-          <p className="type-meta text-muted-foreground">
-            {deciderCopy(meta.requires)}
-          </p>
-        )}
-        {meta.missingEndpoint && (
-          <p className="type-meta rounded-md border border-dashed border-border/60 px-2.5 py-1.5 font-mono text-muted-foreground">
-            missing on the server: {meta.missingEndpoint}
-          </p>
-        )}
-      </div>
-    </Frame>
+      ) : undefined}
+    >
+      {/* Author-declared, never inferred. Sits in the block rather than in
+          the Context dump because it changes how the ask should be read. */}
+      {destructive && (
+        <div className="flex flex-wrap gap-1.5">
+          <span className="type-meta rounded-full border border-destructive/40 px-2 py-0.5 font-semibold text-destructive">
+            destructive · cannot be undone by re-running
+          </span>
+        </div>
+      )}
+      <DecisionSubject item={item} />
+      {payloadString(item, "kind") === "routine_proposal" && <RoutineProposalDiff workspaceId={item.workspace_id} slug={payloadString(item, "slug")} fromVersion={payloadNumber(item, "from_version")} toVersion={payloadNumber(item, "to_version")} />}
+      {/* Ahead of the buttons: whether this person can resolve it at all
+          decides whether pressing one is worth anything. Every value is the
+          server's read-time answer; the row never re-derives it. */}
+      <FourEyesNotice
+        required={item.second_approver_required === true}
+        byWorkspace={item.second_approver_by_workspace === true}
+        byTier={item.second_approver_by_tier === true}
+        securityLevelLabel={item.security_level_label ?? null}
+        agentSlug={fourEyesAgentOf(item)}
+      />
+      <EvidenceFacts item={item} />
+      {meta.missingEndpoint && (
+        <p className="type-meta rounded-md border border-dashed border-border/60 px-2.5 py-1.5 font-mono text-muted-foreground">
+          missing on the server: {meta.missingEndpoint}
+        </p>
+      )}
+    </DecisionBlock>
   )
+}
+
+function decisionIcon(item: InboxItem): LucideIcon {
+  if (riskLevelOf(item) === "destructive") return AlertTriangle
+  switch (item.kind) {
+    case "waitpoint": return isDecisionForm(item.payload?.decision_form) ? ListChecks : payloadString(item, "kind") === "hire" ? UserPlus : ShieldCheck
+    case "escalation": {
+      const sub = payloadString(item, "kind")
+      if (sub === "routine_proposal") return ScrollText
+      if (sub === "skill_proposal") return Sparkles
+      return payloadString(item, "escalation_type") === "TEXT" ? HelpCircle : KeyRound
+    }
+    case "schedule_missed": return CalendarClock
+    case "schedule_circuit_breaker_tripped": return PauseCircle
+    case "memory_consolidation": return Brain
+  }
+  return ShieldCheck
 }
 
 /**
@@ -532,6 +529,8 @@ export interface InboxDetailProps {
   onDenyHire?: () => Promise<void>
   /** Act on a run_needs_human card through POST /inbox/{id}/act (#2398). */
   onAct?: InboxActFn
+  /** Render the ⋯ menu in the pane. The Inbox page puts it in the top bar. */
+  menu?: boolean
 }
 
 /**
@@ -549,116 +548,168 @@ function fourEyesAgentOf(item: InboxItem): string | null {
   return item.sender_name ?? null
 }
 
-export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire, onAct }: InboxDetailProps) {
-  const isResolved = item.state === "resolved"
-  const actReceipt = isResolved && item.kind === "run_needs_human" ? receiptOf(item) : null
-  const decision = decisionMetaFor(item)
-  const identity = entryIdentity(inboxEntry(item), lookup ?? EMPTY_INBOX_LOOKUP)
-  const runID = payloadString(item, "pipeline_run_id")
-  const kind = entryKindPill(inboxEntry(item))
-  const crew = identity.crew
-  const agent = identity.agent
-  const crewName = crew?.name ?? agent?.crew?.name ?? null
-  const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
-  const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
-  const links = originLinks(item, lookup).filter((link) => link.href !== crewHref)
-  // Message navigation is rendered once here, alongside the existing Dismiss action.
-  const messageLinks = item.kind === "message" ? links : []
-  const relatedLinks = item.kind === "message" ? [] : links
-  const contentLabel = item.kind === "failed_run" ? "What happened" : item.kind === "run_needs_human" ? "Your input is needed" : item.payload?.issue_identifier ? "Task update" : item.sender_type === "pipeline" ? "Routine update" : "Message"
+/**
+ * Can this row leave the inbox by Archive?
+ *
+ * Decision items are source-managed: the inbox PATCH rejects anything but
+ * "read" while the SOURCE still exists, so they cannot be blind-archived.
+ * Whether a source still exists is a question only the server can answer —
+ * it is a row in pipeline_waitpoints / escalations / agents. This used to be
+ * guessed from the payload, and the guess was wrong in both directions: a
+ * waitpoint whose run was pruned, and an escalation whose escalations row was
+ * deleted, are both resolvable by the server and were both denied an Archive
+ * button, leaving them stuck in the inbox with no way into History.
+ *
+ * So stop guessing — but do not guess in the other direction either, by
+ * offering an Archive that 409s on every live decision. The server answers
+ * the question on the detail read (`source_missing`), using the same probe
+ * its PATCH guard uses, so the button and the outcome cannot disagree.
+ */
+export function inboxArchivable(item: InboxItem): boolean {
+  return (
+    item.state !== "resolved" &&
+    ((item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking) || item.source_missing === true)
+  )
+}
 
-  // Decision items are source-managed: the inbox PATCH rejects anything but
-  // "read" while the SOURCE still exists, so they cannot be blind-archived.
-  //
-  // Whether a source still exists is a question only the server can answer —
-  // it is a row in pipeline_waitpoints / escalations / agents. This used to be
-  // guessed from the payload ("an escalation with no escalation_type must be
-  // synthetic"), and the guess was wrong in both directions: a waitpoint whose
-  // run was pruned, and an escalation whose escalations row was deleted, are
-  // both resolvable by the server and were both denied an Archive button here,
-  // leaving them stuck in the inbox with no way out and no way into History.
-  //
-  // So stop guessing — but do not guess in the other direction either, by
-  // offering an Archive that 409s on every live decision. The server answers
-  // the question on the detail read (`source_missing`), using the same probe
-  // its PATCH guard uses, so the button and the outcome cannot disagree.
-  const archivable =
-    !isResolved &&
-    ((item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking) ||
-      item.source_missing === true)
-  // A restore is meaningful only for something the user manually archived and
-  // whose source does not own a terminal lifecycle. Reopening an approved
-  // waitpoint would not re-pend the run; source-less synthetic escalations are
-  // also terminal by backend contract. The old unconditional button sent both
-  // to PATCH unread and silently received 409.
-  const restorable =
-    isResolved &&
+/**
+ * A restore is meaningful only for something the user manually archived and
+ * whose source does not own a terminal lifecycle. Reopening an approved
+ * waitpoint would not re-pend the run; source-less synthetic escalations are
+ * also terminal by backend contract. The old unconditional button sent both
+ * to PATCH unread and silently received 409.
+ */
+export function inboxRestorable(item: InboxItem): boolean {
+  return (
+    item.state === "resolved" &&
     item.resolved_action === "archived" &&
     item.kind !== "waitpoint" &&
     item.kind !== "escalation"
+  )
+}
+
+/**
+ * The ⋯ menu: Mark unread · Archive · Restore. On the Inbox page it sits in
+ * the top bar (Harbor 2); surfaces without one render it in the pane.
+ */
+export function InboxMessageMenu({ item, onArchive, onMarkUnread, className }: {
+  item: InboxItem
+  onArchive: () => void | Promise<void>
+  onMarkUnread: () => void
+  className?: string
+}) {
+  const isResolved = item.state === "resolved"
+  const archivable = inboxArchivable(item)
+  const restorable = inboxRestorable(item)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Message options" className={cn("h-8 w-8 shrink-0", className)}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {!isResolved && <DropdownMenuItem onSelect={onMarkUnread}>Mark unread</DropdownMenuItem>}
+        {archivable && <DropdownMenuItem onSelect={() => void onArchive()}>Archive</DropdownMenuItem>}
+        {!isResolved && !archivable && <DropdownMenuItem disabled>Archive · decide first</DropdownMenuItem>}
+        {restorable && <DropdownMenuItem onSelect={onMarkUnread}>Restore</DropdownMenuItem>}
+        {isResolved && !restorable && <DropdownMenuItem disabled>Saved in History</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire, onAct, menu = true }: InboxDetailProps) {
+  const isResolved = item.state === "resolved"
+  const actReceipt = isResolved && item.kind === "run_needs_human" ? receiptOf(item) : null
+  const decision = decisionMetaFor(item)
+  const entry = inboxEntry(item)
+  const known = lookup ?? EMPTY_INBOX_LOOKUP
+  const identity = entryIdentity(entry, known)
+  const runID = payloadString(item, "pipeline_run_id")
+  const crew = identity.crew
+  const agent = identity.agent
+  const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
+  const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
+  const links = originLinks(item, lookup)
+  // Message navigation is rendered once, in the dock beside Dismiss.
+  const messageLinks = item.kind === "message" ? links.filter((link) => link.href !== crewHref) : []
+  const relatedLinks = item.kind === "message" ? links.filter((link) => link.href === crewHref) : links
+  const body = item.body_md ? <div className="text-default leading-relaxed text-foreground/90"><MessageBody key={item.id} body={item.body_md} /></div> : null
+  const badge = item.attention_class ? <AttentionBadge item={item} /> : undefined
 
   return (
-    <InboxMessageSurface>
-      <header className={cn(messageSection, "flex items-start gap-3 border-b border-border !py-3")}>
-        <span className="mt-0.5"><EntryAvatar entry={inboxEntry(item)} lookup={lookup ?? EMPTY_INBOX_LOOKUP} compact /></span>
-        <div className="min-w-0 flex-1 text-body">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {agent ? <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="font-medium hover:underline">{agent.name}</Link> : <span className="font-medium">{identity.name}</span>}
-            {agent && !!item.payload?.mission_id && <span className="text-micro text-muted-foreground">Assignee</span>}
-            {crewName && crewHref && <Link href={crewHref} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"><CrewIcon icon={crew?.icon || "users"} color={crew?.color ?? agent?.crew?.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" />{crewName}</Link>}
-          </div>
-          <time dateTime={item.created_at} title={absolute(item.created_at)} className="font-mono text-[11px] text-muted-foreground-soft">{absolute(item.created_at)} · {since(item.created_at)}</time>
+    <DetailFrame entry={entry} lookup={known} attention={badge}>
+      {menu && (
+        <div className="-mt-2 flex justify-end">
+          <InboxMessageMenu item={item} onArchive={onArchive} onMarkUnread={onMarkUnread} />
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message options" className="h-9 w-9 shrink-0"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {!isResolved && <DropdownMenuItem onSelect={onMarkUnread}>Mark unread</DropdownMenuItem>}
-            {archivable && <DropdownMenuItem onSelect={() => void onArchive()}>Archive</DropdownMenuItem>}
-            {restorable && <DropdownMenuItem onSelect={onMarkUnread}>Restore</DropdownMenuItem>}
-            {isResolved && !restorable && <DropdownMenuItem disabled>Saved in History</DropdownMenuItem>}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
-
-      {decision ? (
-        <DecisionCard embedded item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} onAct={onAct} />
-      ) : (
-        <section className={messageSection}>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <StatusPill tone={kind.tone} label={kind.label} />
-            <AttentionBadge item={item} />
-            {isResolved && <StatusPill status={item.resolved_action ?? "resolved"} />}
-          </div>
-          <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entryTitle(inboxEntry(item))}</h1>
-          <div className="mt-4"><DecisionSubject item={item} /></div>
-          <section className="py-3" aria-label={contentLabel}>
-            {(item.kind === "failed_run" || item.kind === "run_needs_human") && <h2 className="mb-2 text-body font-medium">{contentLabel}</h2>}
-            {item.body_md ? <MessageBody key={item.id} body={item.body_md} /> : <p className="text-body text-muted-foreground">No message content was included.</p>}
-          </section>
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-            {messageLinks.map((l, index) => <Button asChild key={l.href} size="sm" variant={index === 0 ? "default" : "outline"}><Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link></Button>)}
-            {actReceipt && <ActReceipt receipt={actReceipt} />}
-            {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
-          </div>
-        </section>
       )}
 
-      {relatedLinks.length > 0 && <nav aria-label="Related work" className={cn(messageSection, messageDivider, "flex flex-wrap items-center gap-3 !py-3")}>
-        {relatedLinks.map((l) => <Link key={l.href} href={l.href} className="inline-flex min-h-8 items-center gap-1.5 text-body text-primary-hover hover:underline"><l.icon className="h-3.5 w-3.5" />{l.label}</Link>)}
-      </nav>}
+      {/* History (v67): the receipt first; the request it settled stays below it. */}
+      {isResolved && (
+        <HistoryReceipt
+          outcome={outcomeLabel(item.resolved_action)}
+          at={item.resolved_at ?? item.updated_at}
+          activityHref={runID ? entityHref({ kind: "run", runId: runID, pipelineSlug: payloadString(item, "pipeline_slug") || undefined }) : "/activity"}
+        />
+      )}
 
+      {decision ? (
+        <>
+          {body}
+          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} onAct={onAct} />
+        </>
+      ) : item.kind === "failed_run" || item.kind === "run_needs_human" ? (
+        <>
+          <DecisionSubject item={item} />
+          <DecisionBlock
+            testId="inbox-ask"
+            icon={item.kind === "failed_run" ? AlertTriangle : MessageSquare}
+            heading={item.kind === "failed_run" ? "What happened" : "Your input is needed"}
+            tone={item.kind === "failed_run" && !isResolved ? "danger" : "default"}
+            note={item.kind === "failed_run" && !isResolved ? "Re-runs with the same inputs" : undefined}
+            actions={actReceipt ? <ActReceipt receipt={actReceipt} /> : !isResolved ? (
+              <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />
+            ) : undefined}
+          >
+            {body ?? <p className="text-body text-muted-foreground">No message content was included.</p>}
+          </DecisionBlock>
+        </>
+      ) : (
+        <>
+          <DecisionSubject item={item} />
+          {body ?? <p className="text-body text-muted-foreground">No message content was included.</p>}
+          {(messageLinks.length > 0 || !isResolved) && (
+            <Dock standalone>
+              {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
+              {messageLinks.map((l, index) => (
+                <Button asChild key={l.href} size="sm" variant={index === messageLinks.length - 1 ? "default" : "outline"}>
+                  <Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link>
+                </Button>
+              ))}
+            </Dock>
+          )}
+        </>
+      )}
 
-      {item.kind === "waitpoint" && runID !== "" && <details className={messageDivider}>
-        <summary className="eyebrow cursor-pointer px-4 py-3 sm:px-6"><Clock className="mr-1.5 inline h-3.5 w-3.5" />How the run got here</summary>
-        <div className={messageSection}><WaitpointRunDetail workspaceId={item.workspace_id} pipelineRunId={runID} inboxResolved={isResolved} /></div>
-      </details>}
-      {item.payload && visibleContextEntries(item.payload).length > 0 && <details className={messageDivider}>
-        <summary className="eyebrow cursor-pointer px-4 py-3 sm:px-6">Additional context</summary>
-        <div className={messageSection}><ContextDetails payload={item.payload} /></div>
-      </details>}
-      {isResolved && <footer className={cn(messageSection, messageDivider, "!py-3 text-label text-muted-foreground")}>
-        {item.resolved_action === "archived" ? "Archived" : "Resolved"} {since(item.resolved_at ?? item.updated_at)}{item.resolved_action && item.resolved_action !== "archived" && ` · ${item.resolved_action}`}
-      </footer>}
-    </InboxMessageSurface>
+      <OriginChips links={relatedLinks} />
+
+      {item.kind === "waitpoint" && runID !== "" && (
+        <DetailExpand title="How the run got here" open={!isResolved}>
+          <WaitpointRunDetail workspaceId={item.workspace_id} pipelineRunId={runID} inboxResolved={isResolved} />
+        </DetailExpand>
+      )}
+      {item.payload && visibleContextEntries(item.payload).length > 0 && (
+        <DetailExpand title="Additional context">
+          <ContextDetails payload={item.payload} />
+        </DetailExpand>
+      )}
+      {isResolved && (
+        <p className="m-0 text-label text-muted-foreground">
+          {item.resolved_action === "archived" ? "Archived" : "Resolved"} {since(item.resolved_at ?? item.updated_at)}{item.resolved_action && item.resolved_action !== "archived" && ` · ${item.resolved_action}`}
+        </p>
+      )}
+    </DetailFrame>
   )
 }

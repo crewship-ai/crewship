@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import {
   InboxActError,
@@ -38,6 +39,9 @@ export type InboxActFn = (action: InboxAction, input?: string) => Promise<InboxA
 function isInboxAction(id: string): id is InboxAction {
   return id === "answer" || id === "take_over" || id === "dismiss"
 }
+
+/** Dock order (Harbor 2): ghost, secondary, then the primary on the right. */
+const DOCK_ORDER: Record<InboxAction, number> = { dismiss: 0, take_over: 1, answer: 2 }
 
 const ICON: Record<InboxAction, LucideIcon> = {
   answer: MessageSquare,
@@ -125,6 +129,8 @@ export function RunNeedsHumanActions({
   // first place the receipt exists, and the card must flip on it without
   // waiting for a refetch to write it back into payload.
   const [receipt, setReceipt] = useState<InboxActReceipt | null>(null)
+  // An irreversible action waits here for the shared confirmation dialog.
+  const [confirming, setConfirming] = useState<(InboxActionSpec & { id: InboxAction }) | null>(null)
 
   const shown = receipt ?? (item.state === "resolved" ? receiptOf(item) : null)
   if (shown) return <ActReceipt receipt={shown} />
@@ -132,7 +138,9 @@ export function RunNeedsHumanActions({
   // existed. The pane's footer states the outcome; nothing to add here.
   if (item.state === "resolved") return null
 
-  const actions = (item.actions ?? []).filter((a): a is InboxActionSpec & { id: InboxAction } => isInboxAction(a.id))
+  const actions = (item.actions ?? [])
+    .filter((a): a is InboxActionSpec & { id: InboxAction } => isInboxAction(a.id))
+    .sort((a, b) => DOCK_ORDER[a.id] - DOCK_ORDER[b.id])
   if (actions.length === 0) {
     return (
       <span className="type-meta text-muted-foreground">
@@ -141,11 +149,11 @@ export function RunNeedsHumanActions({
     )
   }
 
-  const perform = async (spec: InboxActionSpec & { id: InboxAction }, text?: string) => {
+  const perform = async (spec: InboxActionSpec & { id: InboxAction }, text?: string, confirmed = false) => {
     if (!onAct) return
-    if (spec.irreversible) {
-      const effect = spec.effect ? ` ${spec.effect}.` : ""
-      if (!window.confirm(`${spec.label}?${effect} This cannot be undone.`)) return
+    if (spec.irreversible && !confirmed) {
+      setConfirming(spec)
+      return
     }
     setBusy(spec.id)
     try {
@@ -189,16 +197,15 @@ export function RunNeedsHumanActions({
   const trimmed = input.trim()
 
   return (
-    <div className="flex flex-col gap-2" data-testid="needs-human-actions">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="flex w-full flex-col gap-2" data-testid="needs-human-actions">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {actions.map((a) => {
           const Icon = ICON[a.id]
-          const primary = a.id === "answer"
           return (
             <Button
               key={a.id}
               size="sm"
-              variant={primary ? "default" : "outline"}
+              variant={a.id === "answer" ? "default" : a.id === "take_over" ? "outline" : "ghost"}
               disabled={locked}
               // The server's own sentence about what the button does — the
               // effect is its contract, and the tooltip is where a person
@@ -235,11 +242,18 @@ export function RunNeedsHumanActions({
             placeholder="What the agent needs to continue…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              // ⌘↵ / Ctrl+↵ sends, as the inbox's key hint promises.
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                e.currentTarget.form?.requestSubmit()
+              }
+            }}
             disabled={locked}
             rows={3}
             autoFocus
           />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" size="sm" disabled={locked || trimmed === ""} className="gap-1.5">
               <Send className="h-3.5 w-3.5" />
               {busy === "answer" ? "Sending…" : "Send"}
@@ -254,6 +268,21 @@ export function RunNeedsHumanActions({
           </div>
         </form>
       )}
+
+      <ConfirmDialog
+        open={confirming !== null}
+        onOpenChange={(open) => { if (!open) setConfirming(null) }}
+        title={confirming ? `${confirming.label}?` : ""}
+        description={confirming?.effect ? `${confirming.effect}.` : undefined}
+        consequences={[{ tone: "lost", text: "This cannot be undone." }]}
+        confirmLabel={confirming?.label ?? "Confirm"}
+        destructive
+        onConfirm={async () => {
+          const spec = confirming
+          setConfirming(null)
+          if (spec) await perform(spec, undefined, true)
+        }}
+      />
     </div>
   )
 }

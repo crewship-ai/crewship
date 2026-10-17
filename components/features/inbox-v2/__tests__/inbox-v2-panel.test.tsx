@@ -7,7 +7,8 @@ import type { InboxItem } from "@/hooks/use-inbox"
 // Harbor 2 M3 (#3350): the inbox list is the section's SecondaryPanel, so
 // width, collapse and the phone pattern are the panel's, not the page's.
 
-const m = vi.hoisted(() => ({ mobile: false, push: vi.fn(), patch: vi.fn(async () => {}), items: [] as InboxItem[] }))
+const m = vi.hoisted(() => ({ mobile: false, push: vi.fn(), patch: vi.fn(async () => {}), bulk: vi.fn(async () => ({ ok: true as const, result: { updated: 1 } })), items: [] as InboxItem[] }))
+vi.mock("@/lib/api/inbox", () => ({ inboxBulk: m.bulk }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => m.mobile }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: m.push, replace: vi.fn() }),
@@ -75,6 +76,57 @@ describe("Inbox on SecondaryPanel", () => {
     expect(screen.getByRole("main", { name: "Inbox detail" })).not.toHaveClass("hidden")
   })
 
+  it("never opens a row by itself on desktop: the pane is the Overview and nothing is marked read", () => {
+    show()
+    expect(screen.getByRole("main", { name: "Inbox detail" })).toHaveTextContent("Detail none")
+    expect(m.patch).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("walks the list with J and K, shows n / N, and keeps Archive off an undecided decision", () => {
+    show()
+    fireEvent.keyDown(window, { key: "j" })
+    expect(m.push).toHaveBeenLastCalledWith("/inbox?item=wp1")
+    expect(screen.getByText("1 / 2")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Archive (E)" })).toBeDisabled()
+    fireEvent.keyDown(window, { key: "j" })
+    expect(m.push).toHaveBeenLastCalledWith("/inbox?item=wp2")
+    expect(screen.getByText("2 / 2")).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "k" })
+    expect(m.push).toHaveBeenLastCalledWith("/inbox?item=wp1")
+  })
+
+  it("switches spaces with 1–3 but never while typing", () => {
+    show()
+    fireEvent.keyDown(window, { key: "2" })
+    expect(m.push).toHaveBeenLastCalledWith("/inbox?view=updates")
+    m.push.mockClear()
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search inbox…" }), { key: "3" })
+    expect(m.push).not.toHaveBeenCalled()
+  })
+
+  it("selects several rows and marks them read in one call; open decisions cannot be bulk-archived", async () => {
+    show()
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    const panel = document.querySelector("[data-slot=secondary-panel]") as HTMLElement
+    fireEvent.click(within(panel).getByText("Approve the hire"))
+    expect(m.push).not.toHaveBeenCalled()
+    const bar = screen.getByTestId("inbox-bulk")
+    expect(bar).toHaveTextContent("1 selected")
+    expect(within(bar).getByRole("button", { name: /Archive/ })).toBeDisabled()
+    await act(async () => { fireEvent.click(within(bar).getByRole("button", { name: /Mark read/ })) })
+    expect(m.bulk).toHaveBeenCalledWith("ws", ["wp2"], "read")
+    fireEvent.click(within(bar).getByRole("button", { name: "Done selecting" }))
+    expect(screen.queryByTestId("inbox-bulk")).toBeNull()
+  })
+
+  it("Mark N read marks only visible unread rows", async () => {
+    show()
+    fireEvent.change(screen.getByRole("textbox", { name: "Search inbox…" }), { target: { value: "hire" } })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Mark 1 read" })) })
+    expect(m.bulk).toHaveBeenCalledWith("ws", ["wp2"], "read")
+  })
+
   it("collapses to the panel rail and back", () => {
     show()
     fireEvent.click(screen.getByRole("button", { name: "Hide Inbox views" }))
@@ -102,7 +154,7 @@ describe("Inbox on SecondaryPanel", () => {
     expect(screen.queryByRole("region", { name: "Inbox views" })).toBeNull()
     expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
     // Back → the list again.
-    fireEvent.click(screen.getByRole("button", { name: "← Back to inbox" }))
+    fireEvent.click(screen.getByRole("button", { name: "Back to inbox" }))
     expect(screen.getByRole("region", { name: "Inbox views" })).toBeInTheDocument()
     expect(screen.queryByRole("main", { name: "Inbox detail" })).toBeNull()
   })
