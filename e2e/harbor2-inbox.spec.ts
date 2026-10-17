@@ -39,8 +39,13 @@ test.describe("desktop 1440", () => {
   test("key 1 opens To handle", async ({ page }) => {
     await seed(page)
     await page.goto("/inbox?view=updates")
-    await page.locator("body").press("1")
-    await expect(page).toHaveURL(/view=action/)
+    await expect(panel(page).getByRole("tab", { name: /Updates/ })).toHaveAttribute("aria-selected", "true")
+    // A key pressed before the page has hydrated goes nowhere; press again
+    // until the handler is there (1 is idempotent).
+    await expect(async () => {
+      await page.locator("body").press("1")
+      await expect(page).toHaveURL(/view=action/, { timeout: 1000 })
+    }).toPass()
     await expect(panel(page).getByRole("tab", { name: /To handle/ })).toHaveAttribute("aria-selected", "true")
   })
 
