@@ -727,7 +727,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) 
 			ExpiresAt: expiresStr,
 		})
 
-		_, err = stmt.ExecContext(ctx,
+		insertResult, err := stmt.ExecContext(ctx,
 			e.ID,
 			e.WorkspaceID,
 			nullable(e.CrewID),
@@ -753,6 +753,13 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) 
 		)
 		if err != nil {
 			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
+		}
+		affected, err := insertResult.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("journal: acknowledge insert %s: %w", e.Type, err)
+		}
+		if affected != 1 {
+			return fmt.Errorf("journal: insert %s affected %d rows, want 1", e.Type, affected)
 		}
 
 		head.seq = seq

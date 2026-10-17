@@ -550,3 +550,11 @@ The internal recorder accepts only a caller-owned transaction, a live trusted ad
 ### Read-only preset preview transport
 
 The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only; no apply endpoint is enabled by this slice.
+
+The reusable OpenAPI `MemberAccessPolicy` names the same complete administrative policy envelope used by existing GET and PUT. This documentation refactor preserves closed fields, required incarnation/revision/mode/rights and all grant/provenance constraints; it introduces no endpoint or permission change.
+
+The preset CLI uses one shared bounded decoder for explicit JSON documents. File/stdin handling, unknown/trailing-field rejection, exact integer revisions and the absence of automatic consent repair remain unchanged.
+
+Preset application uses a transaction-scoped managed-subset writer. It validates the selected resource and fresh operator/member authority, changes only the immutable definition’s managed operations, and leaves orthogonal grant IDs, issuers and creation timestamps untouched even for FK-valid inactive historical resources. It neither revives unavailable resources nor changes ordinary complete-document PUT validation. Failed audit or selection writes roll back managed changes and revision together.
+
+This prerequisite introduces no apply endpoint. The managed-subset writer remains an internal caller-transaction seam; the existing complete-document policy API is unchanged. Transactional journal acknowledgement requires one inserted row before any post-commit notification is available.
