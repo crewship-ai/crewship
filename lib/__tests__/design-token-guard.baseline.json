@@ -97,7 +97,6 @@
   "app/(dashboard)/crews/page.tsx": 1,
   "app/(dashboard)/integrations/page.tsx": 8,
   "app/(dashboard)/issues/[identifier]/issue-page-client.tsx": 1,
-  "app/(dashboard)/journal/page.tsx": 2,
   "app/(dashboard)/missions/[id]/timeline/mission-timeline-client.tsx": 13,
   "app/(dashboard)/page.tsx": 2,
   "app/(onboarding)/onboarding/page.tsx": 20,

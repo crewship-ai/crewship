@@ -187,7 +187,7 @@ describe("ActivityRunPage", () => {
 
   it("points admins at the raw events, and nobody else — the Journal is theirs", async () => {
     render(<ActivityRunPage workspaceId="ws" runId="run_1" onOpenNode={vi.fn()} />)
-    expect(await screen.findByRole("link", { name: /18 raw events/ })).toHaveAttribute("href", "/journal?trace_id=run_1")
+    expect(await screen.findByRole("link", { name: /18 raw events/ })).toHaveAttribute("href", "/activity?section=log&trace_id=run_1")
     cleanup()
     mock.role = "MANAGER"
     render(<ActivityRunPage workspaceId="ws" runId="run_1" onOpenNode={vi.fn()} />)

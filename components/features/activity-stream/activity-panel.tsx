@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
-import { AlertTriangle, Hand, List, ListChecks, Play, Webhook } from "lucide-react"
+import { Activity, AlertTriangle, Hand, List, ListChecks, Play, ScrollText, Webhook } from "lucide-react"
 
 import {
   SidebarFacet,
@@ -31,6 +31,9 @@ import {
 
 const VIEW_ICON: Record<ActivityView, LucideIcon> = { all: List, need: Hand, live: Play, failed: AlertTriangle }
 
+/** The ledgers under Views. `log` and `runs` are the Journal's, OWNER / ADMIN only. */
+export type LedgerSection = "work" | "deliveries" | "log" | "runs"
+
 export interface PanelOption {
   id: string
   label: string
@@ -51,6 +54,7 @@ export function ActivityPanel({
   sources,
   onOpenLedger,
   ledgerCounts,
+  journalLedgers = false,
 }: {
   filters: FeedFilters
   onFilters: (f: FeedFilters) => void
@@ -60,8 +64,13 @@ export function ActivityPanel({
   crews: PanelOption[]
   sources: { id: WorkSource; count: number }[]
   /** The work queue and webhook deliveries keep their place under Views. */
-  onOpenLedger?: (section: "work" | "deliveries") => void
+  onOpenLedger?: (section: LedgerSection) => void
   ledgerCounts?: { work?: number; deliveries?: number }
+  /**
+   * Show the technical log and fleet runs — the Journal's Timeline and Runs
+   * (F-02). The caller passes true only for OWNER / ADMIN, the Journal's gate.
+   */
+  journalLedgers?: boolean
 }) {
   const closeSheet = useCloseSecondaryPanelSheet()
   const view = viewOfStatus(filters.status) ?? (filters.status ? null : "all")
@@ -182,6 +191,20 @@ export function ActivityPanel({
               <span className="min-w-0 flex-1 truncate">Webhook deliveries</span>
               {ledgerCounts?.deliveries != null && <span className="font-mono text-micro text-muted-foreground">{ledgerCounts.deliveries}</span>}
             </SidebarRow>
+            {journalLedgers && (
+              <>
+                <SidebarRow onSelect={() => onOpenLedger("log")}>
+                  <ScrollText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">Technical log</span>
+                  <span className="text-micro text-muted-foreground">Admins</span>
+                </SidebarRow>
+                <SidebarRow onSelect={() => onOpenLedger("runs")}>
+                  <Activity className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">Fleet runs</span>
+                  <span className="text-micro text-muted-foreground">Admins</span>
+                </SidebarRow>
+              </>
+            )}
             </ul>
           </SidebarSection>
         )}
