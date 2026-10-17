@@ -3,17 +3,6 @@ package main
 // memberAccessPolicySchema documents the complete CAS document, including the
 // explicit empty array used to revoke all restricted resource rights.
 func memberAccessPolicySchema() map[string]any {
-	right := func(kind string, operations []string) map[string]any {
-		return map[string]any{
-			"type": "object", "additionalProperties": false,
-			"required": []string{"kind", "id", "operation"},
-			"properties": map[string]any{
-				"kind":      map[string]any{"type": "string", "enum": []string{kind}},
-				"id":        map[string]any{"type": "string", "minLength": 1},
-				"operation": map[string]any{"type": "string", "enum": operations},
-			},
-		}
-	}
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"membership_id", "mode", "revision", "rights"},
@@ -21,11 +10,7 @@ func memberAccessPolicySchema() map[string]any {
 			"membership_id": map[string]any{"type": "string", "minLength": 1},
 			"mode":          map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}},
 			"revision":      map[string]any{"type": "integer", "format": "int64", "minimum": 1},
-			"rights": map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": map[string]any{"oneOf": []any{
-				right("agent", []string{"discover", "chat", "run", "delegate"}),
-				right("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
-				right("routine", []string{"view", "results", "run", "edit"}),
-			}}},
+			"rights":        map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": memberAccessRightSchema()},
 		},
 	}
 	properties := schema["properties"].(map[string]any)
@@ -58,4 +43,23 @@ func restrictedIssueSchema() map[string]any {
 		properties[key] = map[string]any{"type": "string"}
 	}
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read", "can_contribute", "can_delete_issues"}, "properties": properties}
+}
+
+func memberAccessRightVariant(kind string, operations []string) map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"kind", "id", "operation"},
+		"properties": map[string]any{
+			"kind":      map[string]any{"type": "string", "enum": []string{kind}},
+			"id":        map[string]any{"type": "string", "minLength": 1},
+			"operation": map[string]any{"type": "string", "enum": operations},
+		},
+	}
+}
+
+func memberAccessRightSchema() map[string]any {
+	return map[string]any{"oneOf": []any{ref("MemberAccessAgentRight"), memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}), memberAccessRightVariant("routine", []string{"view", "results", "run", "edit"})}}
+}
+func memberAccessSchemaComponents() map[string]any {
+	return map[string]any{"MemberAccessAgentRight": memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"})}
 }
