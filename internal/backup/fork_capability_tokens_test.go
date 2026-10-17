@@ -146,6 +146,15 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	workspaceID := seedWorkspace(t, source)
 	seedLiveMission(t, source, workspaceID)
 	seedRowPerBackupTable(t, source, workspaceID)
+	// Docs and Slides exclusive-content constraints require separate Page parents.
+	// Assert source coverage before restore so fixture omissions cannot look
+	// like lost capabilities on the fork.
+	for _, table := range []string{"documents", "slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids", "page_panels", "page_webhooks"} {
+		var count int
+		if err := source.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count == 0 {
+			t.Fatalf("source fixture missing %s: count=%d err=%v", table, count, err)
+		}
+	}
 	fixture := seedCapabilityRows(t, source, workspaceID)
 
 	const passphrase = "fork-capability-pass-123"
@@ -175,6 +184,7 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	}
 
 	assertNoFKViolations(t, source, "after capability-token fork")
+	assertForkedSlidesFixture(t, source, workspaceID, forkID)
 
 	// --- workspace_invitations: row lands with a digest requiring explicit reissue.
 	forkInviteToken := queryStringValue(t, source,
@@ -378,7 +388,9 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		var freshArgs []any
 		if c.table == "page_public_tokens" {
 			freshTable = "page_public_tokens"
-			freshInsert = `INSERT INTO page_public_tokens (id, page_id, token_hash, expires_at, created_by_user_id, created_at) SELECT 'pt_fresh', p.id, ?, datetime('now', '+30 days'), 'u_admin', ? FROM pages p WHERE p.workspace_id = ?`
+			// Reissue on the carried token's Page, not every Page in the fork;
+			// the document fixture contributes its own separate Page.
+			freshInsert = `INSERT INTO page_public_tokens (id, page_id, token_hash, expires_at, created_by_user_id, created_at) SELECT 'pt_fresh', p.id, ?, datetime('now', '+30 days'), 'u_admin', ? FROM pages p JOIN page_public_tokens prior ON prior.page_id=p.id WHERE p.workspace_id = ? LIMIT 1`
 			freshArgs = []any{freshDigest, time.Now().UTC().Format(time.RFC3339), forkID}
 		} else {
 			freshTable = "page_webhooks"

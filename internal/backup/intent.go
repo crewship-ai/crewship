@@ -36,6 +36,18 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"slides_heads":        IntentInclude,
+	"slides_revisions":    IntentInclude,
+	"slides_receipts":     IntentInclude,
+	"slides_object_ids":   IntentInclude,
+	"slides_writer_fence": IntentExcludeRuntime, // installation-local serialization singleton
+
+	"documents":             IntentInclude,
+	"document_updates":      IntentInclude,
+	"document_receipts":     IntentInclude,
+	"document_checkpoints":  IntentInclude,
+	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
+
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
