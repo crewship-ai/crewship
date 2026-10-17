@@ -181,7 +181,7 @@ func scopeForRoute(pattern string) string {
 		// would make it mean something.
 		return "workspace:admin"
 	case "chats":
-		if has("artifact-results") {
+		if has("document-results") {
 			return "pages:read"
 		}
 		// Source proposals and decisions keep their canonical mutation scope.

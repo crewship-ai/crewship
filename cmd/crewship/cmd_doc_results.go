@@ -1,6 +1,6 @@
 package main
 
-// GET /api/v1/chats/{chatId}/artifact-results doc chat-results
+// GET /api/v1/chats/{chatId}/document-results doc chat-results
 
 import "github.com/spf13/cobra"
 
@@ -10,7 +10,7 @@ func newDocResultsCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := client.Get("/api/v1/chats/" + pagePathEscape(args[0]) + "/artifact-results")
+		response, err := client.Get("/api/v1/chats/" + pagePathEscape(args[0]) + "/document-results")
 		if err != nil {
 			return err
 		}

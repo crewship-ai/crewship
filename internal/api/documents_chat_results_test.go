@@ -19,7 +19,7 @@ func documentResultsRequest(t *testing.T, h *PageHandler, workspace, user string
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := pagesRequest(t, "GET", "/api/v1/chats/principal-chat/artifact-results", workspace, user, "OWNER", "")
+	r := pagesRequest(t, "GET", "/api/v1/chats/principal-chat/document-results", workspace, user, "OWNER", "")
 	r.SetPathValue("chatId", "principal-chat")
 	ctx := context.WithValue(r.Context(), ctxAuthKind, AuthKindSession)
 	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: user, SessionID: session.ID})

@@ -43,7 +43,7 @@ it.each([401, 403, 404])("clears formerly authorized cache after credential/chat
 it("uses encoded chat/workspace scope and invalidates verified results on realtime completion", async () => {
   const view = mount()
   await waitFor(() => expect(view.result.current.data?.results).toHaveLength(1))
-  expect(vi.mocked(apiFetch).mock.calls[0][0]).toBe("/api/v1/chats/chat%20%2F%26/artifact-results?workspace_id=ws+%2F%26")
+  expect(vi.mocked(apiFetch).mock.calls[0][0]).toBe("/api/v1/chats/chat%20%2F%26/document-results?workspace_id=ws+%2F%26")
   vi.mocked(apiFetch).mockResolvedValue(response({ results: [] }))
   act(() => { events.get("run.completed")?.() })
   await waitFor(() => expect(view.result.current.data?.results).toEqual([]))

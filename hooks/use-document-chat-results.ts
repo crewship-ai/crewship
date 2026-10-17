@@ -20,7 +20,7 @@ export function useDocumentChatResults(workspaceId: string, chatId: string, curr
   const query = useQuery<DocumentChatResults>({ queryKey: key, enabled: available, retry: false, gcTime: 0, refetchInterval: streaming ? 5000 : 60000, refetchIntervalInBackground: false,
     queryFn: async ({ signal }) => {
       if (!available) return { results: [] }
-      const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/artifact-results?${new URLSearchParams({ workspace_id: workspaceId })}`, { signal })
+      const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/document-results?${new URLSearchParams({ workspace_id: workspaceId })}`, { signal })
       const body = await response.json().catch(() => null)
       if (!response.ok) {
         if ([401, 403, 404].includes(response.status)) client.setQueryData<DocumentChatResults>(key, { results: [] })
