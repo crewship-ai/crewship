@@ -3,14 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
-import { Inbox, ShieldX } from "lucide-react"
+import { Activity, Archive, ArrowLeft, Check, ChevronDown, ChevronUp, Inbox, ShieldX, X } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
+import { inboxArchivable, InboxMessageMenu } from "@/components/features/inbox/inbox-detail"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
+import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-state"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { SubBar } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxItem } from "@/hooks/use-inbox"
@@ -20,15 +23,17 @@ import { apiFetch } from "@/lib/api-fetch"
 import { inboxBulk } from "@/lib/api/inbox"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import type { Mission } from "@/lib/types/mission"
+import { cn } from "@/lib/utils"
 
 import {
-  approvalEntry, EMPTY_INBOX_V2_FILTERS, INBOX_V2_TYPES,
-  groupAdvisories, inboxEntry, missionEntries, needsHumanDecision, selectEntry, suppressedApprovalIDs,
-  type InboxV2Filters,
+  approvalEntry, EMPTY_INBOX_V2_FILTERS, entryKindPill, INBOX_SORTS, INBOX_V2_TYPES,
+  groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
+  type InboxSort, type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
-import { filterInboxEntries } from "./inbox-entry-identity"
+import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
+import { DetailRail } from "./inbox-detail-frame"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
@@ -54,6 +59,14 @@ export function InboxV2() {
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
   const isMobile = useIsMobile()
+  // View › Sort, remembered per user (PNL-04).
+  const [storedSort, setSort] = useUserPreference<InboxSort>("inbox.sort", "urgency")
+  const sort: InboxSort = INBOX_SORTS.some((s) => s.key === storedSort) ? storedSort : "urgency"
+  // Phone only: the Overview opened from its row, as a page of its own.
+  const [phoneOverview, setPhoneOverview] = useState(false)
+  // Select mode (v67 panel): several rows, one bulk action.
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const roster = useInboxLookup(workspaceId)
   const wsStatus = useRealtimeStatusSafe()
   const live = wsStatus === "connected"
@@ -193,15 +206,13 @@ export function InboxV2() {
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
-  const decisionCount = feeds.action.filter(needsHumanDecision).length
-  const alertCount = feeds.action.length - decisionCount
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
   const currentEntries = useMemo(
     () => attention ? [...feeds.action, ...feeds.updates].filter((entry) => matchesInboxAttention(entry, attention)) : feeds[view],
     [attention, feeds, view],
   )
-  const visible = useMemo(() => filterInboxEntries(currentEntries, filters, lookup), [currentEntries, filters, lookup])
+  const visible = useMemo(() => filterInboxEntries(currentEntries, filters, lookup, sort), [currentEntries, filters, lookup, sort])
   useEffect(() => {
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
@@ -219,7 +230,16 @@ export function InboxV2() {
     setView(next)
     setSelectedKey(null)
     setConfirmation(null)
+    setPhoneOverview(false)
     router.push(`/inbox?view=${next}`)
+  }
+  function showOverview() {
+    setSelectedKey(null)
+    setConfirmation(null)
+    if (isMobile) setPhoneOverview(true)
+    const query = new URLSearchParams(params?.toString())
+    query.delete("item")
+    router.push(query.size ? `/inbox?${query.toString()}` : "/inbox")
   }
   function closeEntry() {
     setSelectedKey(null)
@@ -238,11 +258,11 @@ export function InboxV2() {
     if (chosenView === null && feedsSettled) setView(feeds.action.length ? "action" : "updates")
   }, [chosenView, feedsSettled, feeds.action.length])
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
-  // Preview the first visible row on desktop without opening it. `openEntry`
-  // alone marks an unread inbox row as read, so arriving at Inbox cannot do it.
-  // Explicit ?item= links never fall back to a different row. A phone shows
-  // the list until a row is opened, so it previews nothing.
-  const displayed = selectedKey ? selected : isMobile ? null : visible[0] ?? null
+  // No automatic preview (Harbor 2, ODCH-I05): with nothing chosen the pane
+  // shows the Overview. A previewed first row put a live Approve button in
+  // front of a reader who never picked that item. Explicit ?item= links
+  // never fall back to a different row.
+  const displayed = selectedKey ? selected : null
   const selectedInboxID = displayed?.source === "inbox" ? displayed.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
   // A staged hire is one decision in two places: this waitpoint and a row in
@@ -345,6 +365,7 @@ export function InboxV2() {
   function openEntry(entry: InboxV2Entry) {
     setSelectedKey(entry.key)
     setConfirmation(null)
+    setPhoneOverview(false)
     const query = new URLSearchParams(params?.toString())
     query.set("item", entry.inboxItem?.id || entry.approval?.id || entry.key)
     router.push(`/inbox?${query.toString()}`)
@@ -357,103 +378,306 @@ export function InboxV2() {
     }
   }
 
+  // Where the reader is in the list they are working through ("4 / 16").
+  const position = displayed ? visible.findIndex((entry) => entry.key === displayed.key) : -1
+  const menuItem = displayed?.source === "inbox" ? detailedInbox.data ?? displayed.inboxItem ?? null : null
+  const canArchive = displayed
+    ? displayed.source === "group" || (menuItem != null && inboxArchivable(menuItem))
+    : false
+  const unreadVisibleIDs = useMemo(() => visible.flatMap((entry) => {
+    if (entry.source === "group") return entry.groupedItems?.filter((item) => item.state === "unread").map((item) => item.id) ?? []
+    return entry.inboxItem?.state === "unread" ? [entry.inboxItem.id] : []
+  }), [visible])
+
+  /** J / K: the next or previous row of the list, wrapping like the panel does. */
+  function step(delta: 1 | -1) {
+    if (visible.length === 0) return
+    const from = position >= 0 ? position : delta > 0 ? -1 : visible.length
+    const target = visible[(from + delta + visible.length) % visible.length]
+    if (target && target.key !== displayed?.key) openEntry(target)
+  }
+
+  /** E: archive what is open — never an undecided decision (the server 409s). */
+  async function archiveCurrent() {
+    if (!displayed) return
+    if (!canArchive) {
+      toast.info("Decide first — an open decision leaves the inbox when it is decided")
+      return
+    }
+    try {
+      if (displayed.source === "group") await archiveGroup(displayed)
+      else if (menuItem) await inboxArchive(inboxEntry(menuItem))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Archive failed")
+    }
+  }
+
+  // Keys (v67): J/K next/previous, E archive, R reply, 1–3 spaces. Bound once;
+  // the handlers read the latest render through a ref.
+  const keys = useRef({ step, archiveCurrent, showView })
+  keys.current = { step, archiveCurrent, showView }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return
+      const k = e.key.toLowerCase()
+      if (k === "j" || k === "k") {
+        e.preventDefault()
+        keys.current.step(k === "j" ? 1 : -1)
+      } else if (k === "e") {
+        e.preventDefault()
+        void keys.current.archiveCurrent()
+      } else if (k === "r") {
+        const pane = detailRef.current
+        const box = pane?.querySelector("textarea")
+        const answer = pane?.querySelector<HTMLButtonElement>('[data-testid="needs-human-actions"] button[aria-pressed="false"]')
+        if (box) { e.preventDefault(); box.focus() }
+        else if (answer) { e.preventDefault(); answer.click() }
+      } else if (k === "1" || k === "2" || k === "3") {
+        e.preventDefault()
+        keys.current.showView((["action", "updates", "history"] as const)[Number(k) - 1])
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  // "Earlier from {sender}" for the wide-desktop rail: the sender's last three.
+  const earlier = useMemo(() => {
+    if (!displayed) return []
+    const sender = entryIdentity(displayed, lookup).name
+    return allEntries
+      .filter((entry) => entry.key !== displayed.key && entryIdentity(entry, lookup).name === sender)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, 3)
+  }, [allEntries, displayed, lookup])
+
+  const pickedEntries = allEntries.filter((entry) => picked.has(entry.key))
+  const pickedUnread = pickedEntries.flatMap((entry) => entry.source === "group"
+    ? entry.groupedItems?.filter((item) => item.state === "unread").map((item) => item.id) ?? []
+    : entry.inboxItem?.state === "unread" ? [entry.inboxItem.id] : [])
+  // Archive takes only what may leave the inbox; an open decision stays
+  // until it is decided (the PATCH would 409 on it).
+  const pickedArchivable = pickedEntries.flatMap((entry) => entry.source === "group"
+    ? entry.groupedItems?.map((item) => item.id) ?? []
+    : entry.inboxItem && inboxArchivable(entry.inboxItem) ? [entry.inboxItem.id] : [])
+
+  function togglePicking() {
+    setPicking((on) => !on)
+    setPicked(new Set())
+  }
+
+  async function bulkPicked(kind: "read" | "archive") {
+    if (!workspaceId) return
+    const ids = kind === "read" ? pickedUnread : pickedArchivable
+    if (ids.length === 0) return
+    const result = kind === "read" ? await inboxBulk(workspaceId, ids, "read") : await inboxBulk(workspaceId, ids, "resolved", "archived")
+    if (!result.ok) return toast.error(result.error)
+    const skipped = kind === "archive" ? pickedEntries.length - pickedEntries.filter((entry) => entry.source === "group" || (entry.inboxItem && inboxArchivable(entry.inboxItem))).length : 0
+    toast.success(`${result.result.updated} ${kind === "read" ? "marked read" : "archived"}${skipped ? ` · ${skipped} open ${skipped === 1 ? "decision stays" : "decisions stay"} until decided` : ""}`)
+    setPicked(new Set())
+    await refreshAll()
+  }
+
+  const bulkBar = picking ? (
+    <div className="flex items-center gap-1.5" data-testid="inbox-bulk">
+      <span className="min-w-0 flex-1 truncate text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick items"}</span>
+      <Button size="sm" variant="outline" className="gap-1" disabled={pickedUnread.length === 0} onClick={() => void bulkPicked("read")}>
+        <Check className="h-3.5 w-3.5" /> Mark read
+      </Button>
+      <Button size="sm" variant="outline" className="gap-1" disabled={pickedArchivable.length === 0} onClick={() => void bulkPicked("archive")}>
+        <Archive className="h-3.5 w-3.5" /> Archive
+      </Button>
+      <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Done selecting" onClick={togglePicking}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  ) : undefined
+
+  const phoneDetail = isMobile && (Boolean(selectedKey) || phoneOverview)
+  const firstLoad = !feedsSettled && allEntries.length === 0
+  const inboxFailed = feedsSettled && allEntries.length === 0 && Boolean(active.error)
+  const empty = feedsSettled && !sourceState.degraded && allEntries.length === 0
+  const section = displayed
+    ? entryKindPill(displayed).label
+    : attention
+      ? ATTENTION_LABELS[attention]
+      : isMobile && !phoneOverview ? undefined : "Overview"
+
+  const back = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8"
+      aria-label="Back to inbox"
+      onClick={() => { if (selectedKey) closeEntry(); setPhoneOverview(false) }}
+    >
+      <ArrowLeft className="h-4 w-4" />
+    </Button>
+  )
+
+  const topActions = displayed && !confirmation ? (
+    <span className="flex items-center gap-0.5" data-testid="inbox-item-nav">
+      {position >= 0 && (
+        <span className="mr-1 hidden whitespace-nowrap font-mono text-label tabular-nums text-muted-foreground sm:inline" aria-label={`Item ${position + 1} of ${visible.length}`}>
+          {position + 1} / {visible.length}
+        </span>
+      )}
+      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Previous (K)" title="Previous · K" disabled={visible.length === 0} onClick={() => step(-1)}>
+        <ChevronUp className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Next (J)" title="Next · J" disabled={visible.length === 0} onClick={() => step(1)}>
+        <ChevronDown className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Archive (E)"
+        title={canArchive ? "Archive · E" : "Decide first — an open decision cannot be archived"}
+        disabled={!canArchive}
+        onClick={() => void archiveCurrent()}
+      >
+        <Archive className="h-4 w-4" />
+      </Button>
+      {menuItem && (
+        <InboxMessageMenu
+          item={menuItem}
+          onArchive={() => inboxArchive(inboxEntry(menuItem))}
+          onMarkUnread={() => { void markUnread(inboxEntry(menuItem)) }}
+        />
+      )}
+    </span>
+  ) : !displayed && !confirmation && unreadVisibleIDs.length > 0 ? (
+    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void markVisibleRead()}>
+      <Check className="h-3.5 w-3.5" /> Mark {unreadVisibleIDs.length} read
+    </Button>
+  ) : null
+
   return (
     <div className="relative flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col overflow-hidden bg-background">
-      {/* The page header every other page has (README §2): what this is, the
-          counts and whether it is live. The top bar
-          used to read only "Crewship" on this route. */}
+      {/* The one page header (SHL-05): Inbox › {kind}, live state, and the
+          item's navigation. Counts live in the Overview and the spaces. */}
       <SubBar
         icon={Inbox}
         title="Inbox"
-        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${decisionCount} to decide${alertCount ? ` · ${alertCount} alerts` : ""} · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
-        meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} className="ml-1 hidden sm:inline-flex" />}
+        section={section}
+        meta={live ? <StatusPill tone="success" live label="Live" className="ml-1 hidden sm:inline-flex" /> : undefined}
+        leading={phoneDetail ? back : undefined}
+        actions={topActions}
         ariaLabel="Inbox"
-
       />
-        {sourceState.degraded && (
-          <div className="flex items-center gap-2 border-b border-destructive/25 bg-destructive/[0.07] px-4 py-2">
-            <ShieldX className="h-3.5 w-3.5 shrink-0 text-destructive" />
-            <span className="text-xs text-destructive">This inbox may be incomplete — {sourceState.detail}</span>
-            <button
-              type="button"
-              onClick={() => void refreshAll()}
-              className="ml-auto text-xs font-medium text-destructive hover:underline"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {/* The one SecondaryPanel (Harbor 2, #3350): 272 px, collapse remembered
-          per user. The explorer's kit toolbar becomes the panel toolbar and
-          carries the collapse button; the views are a section inside it.
-          On a phone the list IS the page while nothing is open (phoneInline),
-          and an opened row shows only the detail with Back (PNL-05). */}
-      {!(isMobile && selectedKey) && <SecondaryPanel id="inbox" label="Inbox views" phoneInline={!selectedKey}>
-        <InboxV2Explorer
-          view={view}
-          onView={showView}
-          viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
-          entries={currentEntries}
-          visible={visible}
-          attention={attention}
-          onClearAttention={() => router.push("/inbox")}
-          filters={filters}
-          onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
-          selectedKey={displayed?.key ?? null}
-          onOpen={openEntry}
-          onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
-          lookup={lookup}
-        />
-      </SecondaryPanel>}
+      {sourceState.degraded && !inboxFailed && (
+        // The page's one banner (KIT-04, bad tone): some source did not answer.
+        <div role="alert" className="page-banner m-2 mb-0 bg-chip-danger-bg text-chip-danger-fg">
+          <ShieldX className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">This inbox may be incomplete — {sourceState.detail}</span>
+          <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Retry</Button>
+        </div>
+      )}
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* The one SecondaryPanel (Harbor 2, #3350): 272 px, collapse remembered
+            per user. On a phone the list IS the page while nothing is open
+            (phoneInline), and an opened row or the Overview shows alone with
+            Back in the bar (PNL-05). Tablet keeps the panel beside the detail. */}
+        {!phoneDetail && <SecondaryPanel id="inbox" label="Inbox views" phoneInline footer={bulkBar}>
+          <InboxV2Explorer
+            view={view}
+            onView={showView}
+            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
+            entries={currentEntries}
+            visible={visible}
+            attention={attention}
+            onClearAttention={() => router.push("/inbox")}
+            filters={filters}
+            onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
+            selectedKey={displayed?.key ?? null}
+            onOpen={openEntry}
+            overviewSelected={!displayed && !confirmation && !isMobile}
+            onOverview={showOverview}
+            sort={sort}
+            onSort={setSort}
+            lookup={lookup}
+            loading={firstLoad}
+            picking={picking}
+            picked={picked}
+            onTogglePicking={togglePicking}
+            onPick={(entry) => setPicked((current) => {
+              const next = new Set(current)
+              if (next.has(entry.key)) next.delete(entry.key)
+              else next.add(entry.key)
+              return next
+            })}
+          />
+        </SecondaryPanel>}
 
-      {!(isMobile && !selectedKey) && <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className="min-w-0 flex-1 overflow-y-auto">
-        {selectedKey && !confirmation && (
-          <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
-            <Button variant="ghost" size="sm" onClick={closeEntry}>← Back to inbox</Button>
-          </div>
-        )}
-        <InboxV2Detail
-          key={displayed?.key || "overview"}
-          entry={displayed}
-          triage={attention && !displayed ? {
-            action: feeds.action,
-            updates: feeds.updates,
-            history: feeds.history,
-            onOpen: openEntry,
-            onCrew: (crewId) => setFilters({ ...filters, crew: crewId }),
-            focus: {
-              label: ATTENTION_LABELS[attention],
-              entries: visible,
-              onClear: () => router.push("/inbox"),
-            },
-          } : undefined}
-          selectionMissing={selectionMissing}
-          role={(role as WorkspaceRole | null) ?? null}
-          detailedInboxItem={detailedInbox.data}
-          detailLoading={detailedInbox.isFetching}
-          confirmation={confirmation}
-          nextReview={confirmation && confirmation.entry.actionable && next && !sourceState.degraded && !sourceState.loading ? {
-            count: feeds.action.filter((entry) => entry.key !== confirmation.entry.key).length,
-            onOpen: () => { setView("action"); openEntry(next) },
-          } : undefined}
-          onClearConfirmation={closeEntry}
-          onViewReceipt={(entry) => { setConfirmation(null); setView("history"); setSelectedKey(entry.key) }}
-          onInboxResolve={async (item, action) => inboxResolve(inboxEntry(item), action)}
-          onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
-          onInboxMarkUnread={async (item) => markUnread(inboxEntry(item))}
-          onInboxRefresh={async (item, action) => sourceRefresh(inboxEntry(item), action)}
-          // The §12 act door (#2398). The hook flips the loaded "all" list to
-          // resolved in place and the card renders its receipt, so the pane
-          // reflects the action without a page-level resolve/confirm flow.
-          onInboxAct={async (item, action, input) => all.actOnInboxItem(item.id, action, input)}
-          onApprovalDecide={approvalDecide}
-          onArchiveGroup={archiveGroup}
-          lookup={lookup}
-          onDenyHire={hireTwin ? denyHire : undefined}
-        />
-      </main>}
-    </div>
+        {!(isMobile && !phoneDetail) && <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className="min-w-0 flex-1 overflow-y-auto">
+          {inboxFailed ? (
+            <PageError
+              title="The inbox could not load"
+              description="Nothing was changed. Decisions stay open until you can see them again."
+              onRetry={() => void refreshAll()}
+              detail={sourceState.detail}
+            />
+          ) : firstLoad && !selectedKey ? (
+            <PageLoading variant="cards" />
+          ) : empty && !selectedKey && !confirmation ? (
+            <PageEmpty
+              icon={Inbox}
+              title="Nothing waits for you"
+              description="Decisions, questions and reviews from agents land here."
+              primary={{ label: "Open Activity", href: "/activity", icon: Activity }}
+              cli="crewship inbox"
+            />
+          ) : (
+            <div className={cn(displayed && !confirmation && "2xl:grid 2xl:grid-cols-[minmax(0,860px)_minmax(260px,300px)] 2xl:items-start 2xl:justify-center 2xl:gap-6 2xl:px-6")}>
+            <InboxV2Detail
+              key={displayed?.key || "overview"}
+              entry={displayed}
+              overview={{
+                action: feeds.action,
+                updates: feeds.updates,
+                history: feeds.history,
+                lookup,
+                onOpen: openEntry,
+                onAttention: (next) => { setFilters((current) => ({ ...current, attention: next })); showView("action") },
+                onCrew: (crewId) => setFilters((current) => ({ ...current, crew: crewId })),
+                incomplete: sourceState.degraded,
+                focus: attention ? { label: ATTENTION_LABELS[attention], entries: visible, onClear: () => router.push("/inbox") } : undefined,
+              }}
+              selectionMissing={selectionMissing}
+              onOpenHistory={() => showView("history")}
+              onBackToHandle={() => showView("action")}
+              role={(role as WorkspaceRole | null) ?? null}
+              detailedInboxItem={detailedInbox.data}
+              detailLoading={detailedInbox.isFetching}
+              confirmation={confirmation}
+              nextReview={confirmation && confirmation.entry.actionable && next && !sourceState.degraded && !sourceState.loading ? {
+                count: feeds.action.filter((entry) => entry.key !== confirmation.entry.key).length,
+                onOpen: () => { setView("action"); openEntry(next) },
+              } : undefined}
+              onClearConfirmation={closeEntry}
+              onViewReceipt={(entry) => { setConfirmation(null); setView("history"); setSelectedKey(entry.key) }}
+              onInboxResolve={async (item, action) => inboxResolve(inboxEntry(item), action)}
+              onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
+              onInboxMarkUnread={async (item) => markUnread(inboxEntry(item))}
+              onInboxRefresh={async (item, action) => sourceRefresh(inboxEntry(item), action)}
+              // The §12 act door (#2398). The hook flips the loaded "all" list to
+              // resolved in place and the card renders its receipt, so the pane
+              // reflects the action without a page-level resolve/confirm flow.
+              onInboxAct={async (item, action, input) => all.actOnInboxItem(item.id, action, input)}
+              onApprovalDecide={approvalDecide}
+              onArchiveGroup={archiveGroup}
+              lookup={lookup}
+              onDenyHire={hireTwin ? denyHire : undefined}
+            />
+            {displayed && !confirmation && <DetailRail entry={displayed} lookup={lookup} earlier={earlier} onOpen={openEntry} />}
+            </div>
+          )}
+        </main>}
+      </div>
     </div>
   )
 }

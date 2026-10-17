@@ -7,6 +7,7 @@ import Link from "next/link"
 import {
   CheckCircle2,
   CircleDot,
+  KeyRound,
   MessageSquare,
   Play,
   Power,
@@ -37,6 +38,35 @@ export function backupIncidentURL(item: InboxItem): string | null {
   const url = item.payload?.view_url
   if (typeof url !== "string") return null
   return /^\/admin\?[\w=&%.-]*$/.test(url) ? url : null
+}
+
+/**
+ * The Harbor 2 dock row: actions sit at the right of the decision block, in
+ * DOM order ghost → secondary → primary, so the primary is the right-most
+ * button and the tab order reads the same way the eye does.
+ */
+export const DOCK_ROW = "flex flex-wrap items-center justify-end gap-2"
+
+/**
+ * A run or schedule that stopped on an authentication failure is fixed in the
+ * vault, not by retrying — offer the way there. Read off the card's own text;
+ * nothing is offered for any other failure.
+ */
+export function failedOnCredentials(item: InboxItem): boolean {
+  const text = `${item.body_md ?? ""} ${typeof item.payload?.error === "string" ? item.payload.error : ""} ${typeof item.payload?.last_error === "string" ? item.payload.last_error : ""}`
+  return /\b401\b|unauthori[sz]ed|invalid (api )?(token|key)|token expired/i.test(text)
+}
+
+function ReplaceToken({ item }: { item: InboxItem }) {
+  if (!failedOnCredentials(item)) return null
+  return (
+    <Button asChild size="sm" variant="outline" className="gap-1.5">
+      <Link href="/credentials">
+        <KeyRound className="h-3 w-3" />
+        Replace token
+      </Link>
+    </Button>
+  )
 }
 
 // =============================================================================
@@ -138,16 +168,7 @@ export function KindActions({
             await onRefresh(approved ? "approved" : "denied")
           })
         return (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={disabled || busy !== null}
-              onClick={() => decide(true)}
-              className="gap-1.5"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {busy === "approved" ? "Approving…" : "Approve"}
-            </Button>
+          <div className={DOCK_ROW}>
             <Button
               size="sm"
               variant="outline"
@@ -157,6 +178,15 @@ export function KindActions({
             >
               <XCircle className="h-3.5 w-3.5" />
               {busy === "denied" ? "Denying…" : "Deny"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => decide(true)}
+              className="gap-1.5"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {busy === "approved" ? "Approving…" : "Approve"}
             </Button>
           </div>
         )
@@ -173,7 +203,51 @@ export function KindActions({
       // non-blocking hire surfaces (blocking lands as kind=waitpoint).
       if (item.payload?.kind === "hire") {
         return (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={DOCK_ROW}>
+            {crewHref && (
+              <Button asChild size="sm" variant="ghost" className="gap-1.5">
+                <Link href={crewHref}>Open crew</Link>
+              </Button>
+            )}
+            {/* approve-hire has no deny of its own; the approvals-queue
+                twin does, and the inbox page wires it through onDenyHire.
+                Where the page cannot (an older server, or the twin has not
+                arrived), the card still says where to go — and links it. */}
+            {onDenyHire ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled || busy !== null}
+                onClick={() =>
+                  wrap("denied", async () => {
+                    try {
+                      await onDenyHire()
+                    } catch (e) {
+                      toast.error(e instanceof Error ? `Deny failed: ${e.message}` : "Deny failed")
+                      return
+                    }
+                    toast.success("Hire denied — the agent will not start")
+                    await onRefresh("denied")
+                  })
+                }
+                className="gap-1.5"
+              >
+                <XCircle className="h-3 w-3" />
+                {busy === "denied" ? "Denying…" : "Deny"}
+              </Button>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                To deny, fire the agent from{" "}
+                {crewHref ? (
+                  <Link href={crewHref} className="text-primary-hover hover:underline">
+                    its crew page
+                  </Link>
+                ) : (
+                  "its crew page"
+                )}
+                .
+              </span>
+            )}
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -216,50 +290,6 @@ export function KindActions({
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approved" ? "Approving…" : "Approve hire"}
             </Button>
-            {/* approve-hire has no deny of its own; the approvals-queue
-                twin does, and the inbox page wires it through onDenyHire.
-                Where the page cannot (an older server, or the twin has not
-                arrived), the card still says where to go — and links it. */}
-            {onDenyHire ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={disabled || busy !== null}
-                onClick={() =>
-                  wrap("denied", async () => {
-                    try {
-                      await onDenyHire()
-                    } catch (e) {
-                      toast.error(e instanceof Error ? `Deny failed: ${e.message}` : "Deny failed")
-                      return
-                    }
-                    toast.success("Hire denied — the agent will not start")
-                    await onRefresh("denied")
-                  })
-                }
-                className="gap-1.5"
-              >
-                <XCircle className="h-3 w-3" />
-                {busy === "denied" ? "Denying…" : "Deny"}
-              </Button>
-            ) : (
-              <span className="text-[11px] text-muted-foreground">
-                To deny, fire the agent from{" "}
-                {crewHref ? (
-                  <Link href={crewHref} className="text-primary-hover hover:underline">
-                    its crew page
-                  </Link>
-                ) : (
-                  "its crew page"
-                )}
-                .
-              </span>
-            )}
-            {crewHref && (
-              <Button asChild size="sm" variant="ghost" className="gap-1.5">
-                <Link href={crewHref}>Open crew</Link>
-              </Button>
-            )}
           </div>
         )
       }
@@ -293,7 +323,33 @@ export function KindActions({
       // or expired" complaint was the second click hitting the
       // already-denied row.
       return (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={DOCK_ROW}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled || busy !== null}
+            onClick={() =>
+              wrap("denied", async () => {
+                const res = await waitpointDecide(item.workspace_id, item.source_id, false)
+                if (!res.ok) {
+                  if (isAlreadyDecidedError(res.status, res.error)) {
+                    toast.info("Already decided elsewhere — refreshing")
+                    await onRefresh("resolved")
+                    return
+                  }
+                  toast.error(res.error)
+                  return
+                }
+                // Same as approve: the server cascades the inbox row;
+                // a self-PATCH to "resolved" would 409 (source-managed).
+                await onRefresh("denied")
+              })
+            }
+            className="gap-1.5"
+          >
+            <XCircle className="h-3 w-3" />
+            {busy === "denied" ? "Denying…" : "Deny"}
+          </Button>
           <Button
             size="sm"
             disabled={disabled || busy !== null}
@@ -327,32 +383,6 @@ export function KindActions({
           >
             <CheckCircle2 className="h-3 w-3" />
             {busy === "approved" ? "Approving…" : "Approve"}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled || busy !== null}
-            onClick={() =>
-              wrap("denied", async () => {
-                const res = await waitpointDecide(item.workspace_id, item.source_id, false)
-                if (!res.ok) {
-                  if (isAlreadyDecidedError(res.status, res.error)) {
-                    toast.info("Already decided elsewhere — refreshing")
-                    await onRefresh("resolved")
-                    return
-                  }
-                  toast.error(res.error)
-                  return
-                }
-                // Same as approve: the server cascades the inbox row;
-                // a self-PATCH to "resolved" would 409 (source-managed).
-                await onRefresh("denied")
-              })
-            }
-            className="gap-1.5"
-          >
-            <XCircle className="h-3 w-3" />
-            {busy === "denied" ? "Denying…" : "Deny"}
           </Button>
         </div>
       )
@@ -396,16 +426,7 @@ export function KindActions({
             await onRefresh(action === "approve" ? "approved" : "rejected")
           })
         return (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={disabled || busy !== null}
-              onClick={() => resolveSkill("approve")}
-              className="gap-1.5"
-            >
-              <CheckCircle2 className="h-3 w-3" />
-              {busy === "approve" ? "Approving…" : "Approve"}
-            </Button>
+          <div className={DOCK_ROW}>
             <Button
               size="sm"
               variant="ghost"
@@ -415,6 +436,15 @@ export function KindActions({
             >
               <XCircle className="h-3 w-3" />
               {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveSkill("approve")}
+              className="gap-1.5"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
             </Button>
           </div>
         )
@@ -472,16 +502,7 @@ export function KindActions({
           })
 
         return (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={disabled || busy !== null}
-              onClick={() => resolveRoutine("approve")}
-              className="gap-1.5"
-            >
-              <CheckCircle2 className="h-3 w-3" />
-              {busy === "approve" ? "Approving…" : "Approve"}
-            </Button>
+          <div className={DOCK_ROW}>
             <Button
               size="sm"
               variant="ghost"
@@ -491,6 +512,15 @@ export function KindActions({
             >
               <XCircle className="h-3 w-3" />
               {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveRoutine("approve")}
+              className="gap-1.5"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
             </Button>
           </div>
         )
@@ -560,15 +590,7 @@ export function KindActions({
           })
 
         return (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="soft"
-              disabled={disabled || busy !== null}
-              onClick={() => void resolveKeeper("approve")}
-            >
-              {busy === "approve" ? "Approving…" : "Approve"}
-            </Button>
+          <div className={DOCK_ROW}>
             <Button
               size="sm"
               variant="soft"
@@ -576,6 +598,14 @@ export function KindActions({
               onClick={() => void resolveKeeper("reject")}
             >
               {busy === "reject" ? "Denying…" : "Deny"}
+            </Button>
+            <Button
+              size="sm"
+              variant="soft"
+              disabled={disabled || busy !== null}
+              onClick={() => void resolveKeeper("approve")}
+            >
+              {busy === "approve" ? "Approving…" : "Approve"}
             </Button>
           </div>
         )
@@ -627,16 +657,7 @@ export function KindActions({
       if (escType === "CREDENTIAL") {
         if (item.payload?.has_pending_credential === true) {
           return (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                disabled={disabled || busy !== null}
-                onClick={() => resolveEsc("approve")}
-                className="gap-1.5"
-              >
-                <CheckCircle2 className="h-3 w-3" />
-                {busy === "approve" ? "Approving…" : "Approve"}
-              </Button>
+            <div className={DOCK_ROW}>
               <Button
                 size="sm"
                 variant="ghost"
@@ -647,11 +668,25 @@ export function KindActions({
                 <XCircle className="h-3 w-3" />
                 {busy === "reject" ? "Rejecting…" : "Reject"}
               </Button>
+              <Button
+                size="sm"
+                disabled={disabled || busy !== null}
+                onClick={() => resolveEsc("approve")}
+                className="gap-1.5"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                {busy === "approve" ? "Approving…" : "Approve"}
+              </Button>
             </div>
           )
         }
         return (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={DOCK_ROW}>
+            <span className="text-[11px] text-muted-foreground">
+              {item.payload?.needs_credential_value === true
+                ? "The agent is asking for a value it does not have — supply it from the crew’s escalations panel. It goes into the vault; the agent gets a name, never the value."
+                : "To grant the credential, supply it from the crew’s escalations panel."}
+            </span>
             <Button
               size="sm"
               variant="ghost"
@@ -662,18 +697,23 @@ export function KindActions({
               <XCircle className="h-3 w-3" />
               {busy === "reject" ? "Rejecting…" : "Reject"}
             </Button>
-            <span className="text-[11px] text-muted-foreground">
-              {item.payload?.needs_credential_value === true
-                ? "The agent is asking for a value it does not have — supply it from the crew’s escalations panel. It goes into the vault; the agent gets a name, never the value."
-                : "To grant the credential, supply it from the crew’s escalations panel."}
-            </span>
           </div>
         )
       }
       // Real agent escalation (non-credential): inline approve / reject.
       if (escType !== "") {
         return (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={DOCK_ROW}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveEsc("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -682,16 +722,6 @@ export function KindActions({
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={disabled || busy !== null}
-              onClick={() => resolveEsc("reject")}
-              className="gap-1.5"
-            >
-              <XCircle className="h-3 w-3" />
-              {busy === "reject" ? "Rejecting…" : "Reject"}
             </Button>
           </div>
         )
@@ -715,7 +745,17 @@ export function KindActions({
       // failure time. If the slug is missing we fall back to just
       // marking the inbox item resolved so the user isn't stuck.
       return (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={DOCK_ROW}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled || busy !== null}
+            onClick={() => wrap("cancelled", async () => onResolve("cancelled"))}
+            className="gap-1.5"
+          >
+            Cancel
+          </Button>
+          <ReplaceToken item={item} />
           <Button
             size="sm"
             disabled={disabled || busy !== null}
@@ -780,15 +820,6 @@ export function KindActions({
             <ScrollText className="h-3 w-3" />
             {busy === "retried" ? "Retrying…" : "Retry"}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled || busy !== null}
-            onClick={() => wrap("cancelled", async () => onResolve("cancelled"))}
-            className="gap-1.5"
-          >
-            Cancel
-          </Button>
         </div>
       )
     case "memory_consolidation": {
@@ -830,16 +861,7 @@ export function KindActions({
           await onResolve(action === "approve" ? "approved" : "rejected")
         })
       return (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={disabled || busy !== null}
-            onClick={() => decide("approve")}
-            className="gap-1.5"
-          >
-            <CheckCircle2 className="h-3 w-3" />
-            {busy === "approve" ? "Accepting…" : "Accept"}
-          </Button>
+        <div className={DOCK_ROW}>
           <Button
             size="sm"
             variant="ghost"
@@ -849,6 +871,15 @@ export function KindActions({
           >
             <XCircle className="h-3 w-3" />
             {busy === "reject" ? "Rejecting…" : "Reject"}
+          </Button>
+          <Button
+            size="sm"
+            disabled={disabled || busy !== null}
+            onClick={() => decide("approve")}
+            className="gap-1.5"
+          >
+            <CheckCircle2 className="h-3 w-3" />
+            {busy === "approve" ? "Accepting…" : "Accept"}
           </Button>
         </div>
       )
@@ -872,7 +903,14 @@ export function KindActions({
         )
       }
       return (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={DOCK_ROW}>
+          <Button asChild size="sm" variant="ghost" className="gap-1.5">
+            <Link href="/routines">
+              <ScrollText className="h-3 w-3" />
+              Open routines
+            </Link>
+          </Button>
+          <ReplaceToken item={item} />
           <Button
             size="sm"
             disabled={disabled || busy !== null}
@@ -910,12 +948,6 @@ export function KindActions({
             <Power className="h-3 w-3" />
             {busy === "reenabled" ? "Enabling…" : "Re-enable schedule"}
           </Button>
-          <Button asChild size="sm" variant="ghost" className="gap-1.5">
-            <Link href="/routines">
-              <ScrollText className="h-3 w-3" />
-              Open routines
-            </Link>
-          </Button>
         </div>
       )
     }
@@ -925,7 +957,16 @@ export function KindActions({
       const scheduleID =
         typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
       return (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={DOCK_ROW}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled || busy !== null}
+            onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
+            className="gap-1.5"
+          >
+            Dismiss
+          </Button>
           {scheduleID !== "" && (
             <Button
               size="sm"
@@ -961,15 +1002,6 @@ export function KindActions({
               {busy === "ran" ? "Running…" : "Run now"}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled || busy !== null}
-            onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
-            className="gap-1.5"
-          >
-            Dismiss
-          </Button>
         </div>
       )
     }
@@ -990,7 +1022,16 @@ export function KindActions({
         const viewURL = backupIncidentURL(item)
         const planID = typeof item.payload?.plan_id === "string" ? item.payload.plan_id : ""
         return (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={DOCK_ROW}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
+              className="gap-1.5"
+            >
+              Dismiss
+            </Button>
             {viewURL && (
               <Button asChild size="sm" variant="outline" className="gap-1.5">
                 <Link href={viewURL}>
@@ -1030,15 +1071,6 @@ export function KindActions({
                 {busy === "retry" ? "Starting…" : "Retry"}
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={disabled || busy !== null}
-              onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
-              className="gap-1.5"
-            >
-              Dismiss
-            </Button>
           </div>
         )
       }
@@ -1048,23 +1080,7 @@ export function KindActions({
       // the title and has nowhere to go. "Agent replied" items carry
       // chat_url instead — deep link straight into the session.
       return (
-        <div className="flex flex-wrap items-center gap-2">
-          {!hideMessageLinks && safeChatURL(item) && (
-            <Button asChild size="sm" className="gap-1.5">
-              <Link href={safeChatURL(item) as string}>
-                <MessageSquare className="h-3 w-3" />
-                Open chat
-              </Link>
-            </Button>
-          )}
-          {!hideMessageLinks && typeof item.payload?.issue_identifier === "string" && (
-            <Button asChild size="sm" className="gap-1.5">
-              <Link href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}>
-                <CircleDot className="h-3 w-3" />
-                Open {item.payload.issue_identifier}
-              </Link>
-            </Button>
-          )}
+        <div className={DOCK_ROW}>
           <Button
             size="sm"
             variant="ghost"
@@ -1074,6 +1090,22 @@ export function KindActions({
           >
             Dismiss
           </Button>
+          {!hideMessageLinks && typeof item.payload?.issue_identifier === "string" && (
+            <Button asChild size="sm" className="gap-1.5">
+              <Link href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}>
+                <CircleDot className="h-3 w-3" />
+                Open {item.payload.issue_identifier}
+              </Link>
+            </Button>
+          )}
+          {!hideMessageLinks && safeChatURL(item) && (
+            <Button asChild size="sm" className="gap-1.5">
+              <Link href={safeChatURL(item) as string}>
+                <MessageSquare className="h-3 w-3" />
+                Open chat
+              </Link>
+            </Button>
+          )}
         </div>
       )
     default:

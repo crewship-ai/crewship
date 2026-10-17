@@ -11,11 +11,13 @@ import type { InboxLookup, InboxV2Entry } from "./inbox-v2-types"
 
 /** A sidebar-sized crew selector: the actual crew icon, searchable name/slug,
  * and a current-view count make same-name crews distinguishable. */
-export function InboxCrewPicker({ lookup, entries, value, onChange }: {
+export function InboxCrewPicker({ lookup, entries, value, onChange, label }: {
   lookup: InboxLookup
   entries: InboxV2Entry[]
   value: string | null
   onChange: (crewId: string | null) => void
+  /** Trigger text when it opens the full list from a facet ("All 9…"). */
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const crews = useMemo(() => {
@@ -57,7 +59,7 @@ export function InboxCrewPicker({ lookup, entries, value, onChange }: {
         {selected
           ? <CrewIcon icon={selected.icon || "users"} color={selected.color} size="sm" className="!h-5 !w-5 !shrink-0 !rounded" />
           : <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10 text-primary-hover"><Users className="h-3.5 w-3.5" /></span>}
-        <span className="min-w-0 flex-1 truncate">{selected?.name ?? "All crews"}</span>
+        <span className="min-w-0 flex-1 truncate">{label ?? selected?.name ?? "All crews"}</span>
         <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       </button>
     </PopoverTrigger>
