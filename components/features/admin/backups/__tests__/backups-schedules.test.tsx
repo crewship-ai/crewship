@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import { SchedulesBody } from "../backups-schedules"
 import { plansFixture } from "../__fixtures__/backups"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 
 // Admin › Backups › a plan, on the nested page: the side panel lists the
 // plans, so the page opens the one it picked and carries its actions — on/off,

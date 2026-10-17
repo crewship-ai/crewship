@@ -17,7 +17,7 @@ import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
-import type { RunFilter, RunQuery, SectionCtx } from "./backups-console"
+import type { RunFilter, RunQuery, SectionCtx } from "./backups-scope"
 
 const FILTERS: { value: RunFilter; label: string }[] = [
   { value: "all", label: "All" },

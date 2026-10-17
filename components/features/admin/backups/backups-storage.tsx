@@ -17,7 +17,7 @@ import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOf
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
 import { perform, performConfirm, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Storage (instance setting): where copies are kept — this server
