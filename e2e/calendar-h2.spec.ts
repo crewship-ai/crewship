@@ -45,8 +45,13 @@ async function fixtures(page: Page, opts: { failCalendar?: boolean } = {}) {
   return calls
 }
 
+// The Mine/Workspace choice is a per-user server preference, so it carries
+// over from whichever test (or person) last touched it. The fixture routines
+// have no author, so under Mine they are all filtered away; a test that needs
+// the grid picks Workspace itself instead of inheriting it.
 async function workspaceScope(page: Page) {
   await page.getByRole("button", { name: /^Workspace/ }).first().click()
+  await expect(page.getByTestId("calendar-summary")).toContainText("Workspace")
 }
 
 test.describe("desktop", () => {
@@ -91,6 +96,7 @@ test.describe("desktop", () => {
     await seed(page, PINNED)
     const calls = await fixtures(page)
     await page.goto("/calendar?view=month&date=2027-03-10")
+    await workspaceScope(page)
     await expect(page.getByRole("grid", { name: "Month" })).toBeVisible()
     await expect.poll(() => calls.length).toBeGreaterThan(0)
     expect(calls.length).toBeLessThanOrEqual(2)
@@ -145,9 +151,14 @@ test.describe("desktop", () => {
 
   test("CAL-09 routines calendar links land on /calendar with view, date and the routine layer", async ({ page }) => {
     await seed(page, PINNED)
+    // Fixtures, so the month is not empty on a dev environment with nothing
+    // scheduled in January 2026 (an empty range shows "Nothing scheduled").
+    await fixtures(page)
     await page.goto("/routines?tab=calendar&calendar=year&date=2026-01-01")
     await page.getByRole("link", { name: "Open in Calendar" }).click()
     await expect(page).toHaveURL(/\/calendar\?view=month&date=2026-01-01&layers=routine/)
+    await workspaceScope(page)
+    await expect(page.getByRole("heading", { level: 2, name: "January 2026" })).toBeVisible()
     await expect(page.getByRole("grid", { name: "Month" })).toBeVisible()
   })
 })
