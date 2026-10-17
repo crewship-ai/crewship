@@ -7644,74 +7644,7 @@
           },
           "rights": {
             "items": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/MemberAccessAgentRight"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "project"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "list",
-                        "read",
-                        "write",
-                        "delete",
-                        "contribute",
-                        "manage",
-                        "delete_issues"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "routine"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "view",
-                        "results",
-                        "run",
-                        "edit"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/MemberAccessRight"
             },
             "maxItems": 256,
             "type": "array",
@@ -7822,74 +7755,7 @@
           },
           "rights": {
             "items": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/MemberAccessAgentRight"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "project"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "list",
-                        "read",
-                        "write",
-                        "delete",
-                        "contribute",
-                        "manage",
-                        "delete_issues"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "routine"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "view",
-                        "results",
-                        "run",
-                        "edit"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/MemberAccessRight"
             },
             "maxItems": 256,
             "type": "array",
@@ -9957,6 +9823,82 @@
               "chat",
               "run",
               "delegate"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "MemberAccessProjectRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "project"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "list",
+              "read",
+              "write",
+              "delete",
+              "contribute",
+              "manage",
+              "delete_issues"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "MemberAccessRight": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MemberAccessAgentRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessProjectRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessRoutineRight"
+          }
+        ]
+      },
+      "MemberAccessRoutineRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "routine"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "view",
+              "results",
+              "run",
+              "edit"
             ],
             "type": "string"
           }
@@ -145491,74 +145433,7 @@
                     },
                     "reissue": {
                       "items": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/components/schemas/MemberAccessAgentRight"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
+                        "$ref": "#/components/schemas/MemberAccessRight"
                       },
                       "maxItems": 256,
                       "type": "array",
@@ -145571,74 +145446,7 @@
                     },
                     "rights": {
                       "items": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/components/schemas/MemberAccessAgentRight"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
+                        "$ref": "#/components/schemas/MemberAccessRight"
                       },
                       "maxItems": 256,
                       "type": "array",
@@ -145844,74 +145652,7 @@
                   },
                   "reissue": {
                     "items": {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/MemberAccessAgentRight"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "project"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "list",
-                                "read",
-                                "write",
-                                "delete",
-                                "contribute",
-                                "manage",
-                                "delete_issues"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "routine"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "view",
-                                "results",
-                                "run",
-                                "edit"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        }
-                      ]
+                      "$ref": "#/components/schemas/MemberAccessRight"
                     },
                     "maxItems": 256,
                     "type": "array",
@@ -145924,74 +145665,7 @@
                   },
                   "rights": {
                     "items": {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/MemberAccessAgentRight"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "project"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "list",
-                                "read",
-                                "write",
-                                "delete",
-                                "contribute",
-                                "manage",
-                                "delete_issues"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "routine"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "view",
-                                "results",
-                                "run",
-                                "edit"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        }
-                      ]
+                      "$ref": "#/components/schemas/MemberAccessRight"
                     },
                     "maxItems": 256,
                     "type": "array",
@@ -146069,74 +145743,7 @@
                     },
                     "reissue": {
                       "items": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/components/schemas/MemberAccessAgentRight"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
+                        "$ref": "#/components/schemas/MemberAccessRight"
                       },
                       "maxItems": 256,
                       "type": "array",
@@ -146149,74 +145756,7 @@
                     },
                     "rights": {
                       "items": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/components/schemas/MemberAccessAgentRight"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
+                        "$ref": "#/components/schemas/MemberAccessRight"
                       },
                       "maxItems": 256,
                       "type": "array",

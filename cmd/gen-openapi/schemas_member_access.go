@@ -10,7 +10,7 @@ func memberAccessPolicySchema() map[string]any {
 			"membership_id": map[string]any{"type": "string", "minLength": 1},
 			"mode":          map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}},
 			"revision":      map[string]any{"type": "integer", "format": "int64", "minimum": 1},
-			"rights":        map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": memberAccessRightSchema()},
+			"rights":        map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": ref("MemberAccessRight")},
 		},
 	}
 	properties := schema["properties"].(map[string]any)
@@ -58,8 +58,13 @@ func memberAccessRightVariant(kind string, operations []string) map[string]any {
 }
 
 func memberAccessRightSchema() map[string]any {
-	return map[string]any{"oneOf": []any{ref("MemberAccessAgentRight"), memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}), memberAccessRightVariant("routine", []string{"view", "results", "run", "edit"})}}
+	return map[string]any{"oneOf": []any{ref("MemberAccessAgentRight"), ref("MemberAccessProjectRight"), ref("MemberAccessRoutineRight")}}
 }
 func memberAccessSchemaComponents() map[string]any {
-	return map[string]any{"MemberAccessAgentRight": memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"})}
+	return map[string]any{
+		"MemberAccessAgentRight":   memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"}),
+		"MemberAccessProjectRight": memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
+		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit"}),
+		"MemberAccessRight":        memberAccessRightSchema(),
+	}
 }

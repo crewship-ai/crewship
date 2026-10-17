@@ -532,3 +532,5 @@ Preset selection workspace, membership, resource and selector foreign keys have 
 The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Application is not enabled by the catalog slice.
 
 The OpenAPI `MemberAccessAgentRight` component names the existing agent-right variant for reuse in administrative policies. It preserves exact operation choices, required IDs and rejection of undeclared fields, without changing grants or runtime authority.
+
+OpenAPI also names `MemberAccessProjectRight`, `MemberAccessRoutineRight` and their complete `MemberAccessRight` union. The schemas preserve existing primitive operation choices, IDs and closed objects exactly; naming them does not add inheritance or alter grant authority.
