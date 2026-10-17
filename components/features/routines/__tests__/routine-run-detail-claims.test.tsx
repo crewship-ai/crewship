@@ -21,6 +21,8 @@ const h = vi.hoisted(() => ({
   approvalRefresh: vi.fn(),
   push: vi.fn(),
   agents: [] as Record<string, unknown>[],
+  role: "OWNER",
+  executions: null as Record<string, unknown>[] | null,
 }))
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
@@ -29,10 +31,10 @@ vi.mock("@/hooks/use-workspace-agent-directory", () => ({
   useWorkspaceAgentDirectory: () => ({ agents: h.agents, error: false }),
 }))
 vi.mock("@/hooks/use-run-executions", () => ({
-  useRunExecutions: () => ({ byStep: new Map(), error: false, truncated: false, refresh: vi.fn() }),
+  useRunExecutions: () => ({ byStep: new Map(), rows: h.executions, error: false, truncated: false, refresh: vi.fn() }),
 }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: h.push }) }))
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: h.role }) }))
 vi.mock("@/hooks/use-trace", () => ({
   useTrace: () => ({
     run: h.run,
@@ -98,6 +100,8 @@ beforeEach(() => {
   h.waitpoint = null
   h.approvalError = null
   h.agents = []
+  h.role = "OWNER"
+  h.executions = null
 })
 
 /** jsdom does not toggle <details> on a summary click; drive it the way the
@@ -255,8 +259,8 @@ describe("routine run detail — run again", () => {
     h.run = baseRun({ status: "running" })
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
     expect(screen.queryByRole("button", { name: "Run again" })).toBeNull()
-    // One word everywhere: Stop, in the header and in the banner.
-    expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(2)
+    // One Stop, in the header; the banner says where the work is.
+    expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(1)
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 })
@@ -558,7 +562,8 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(within(banner).getByRole("heading").textContent).toBe(
       "Work in progress · step 2 of 2, “Check the extraction”",
     )
-    fireEvent.click(within(banner).getByRole("button", { name: "Stop" }))
+    expect(within(banner).queryByRole("button", { name: "Stop" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
     expect(screen.getByRole("alertdialog").textContent).toContain("Stop this run?")
     expect(screen.getByRole("button", { name: "Keep running" })).toBeTruthy()
   })
@@ -654,5 +659,58 @@ describe("routine run detail — one page, one order (#2519)", () => {
     // Each Retry reaches its own hook, not "two calls somewhere".
     expect(h.traceRefresh).toHaveBeenCalledTimes(1)
     expect(h.approvalRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("routine run page (Harbor 2)", () => {
+  it("Stop is one ConfirmDialog and is hidden without cancel permission", () => {
+    // POST …/runs/{id}/cancel is Owner and Admin on the server.
+    h.run = baseRun({ status: "running" })
+    h.role = "MANAGER"
+    const { unmount } = render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
+    unmount()
+    h.role = "ADMIN"
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+    expect(screen.getAllByRole("alertdialog")).toHaveLength(1)
+  })
+
+  it("timeline bars come from execution start and end", () => {
+    h.dsl = { steps: [{ id: "a", name: "Fetch", type: "http" }, { id: "b", name: "Write", type: "agent_run" }] }
+    h.executions = [
+      { id: "e1", step_id: "a", status: "completed", attempt: 1, started_at: "2026-09-08T08:00:00Z", ended_at: "2026-09-08T08:00:10Z" },
+      { id: "e2", step_id: "b", status: "completed", attempt: 1, started_at: "2026-09-08T08:00:10Z", ended_at: "2026-09-08T08:00:40Z" },
+    ]
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("radio", { name: "Timeline" }))
+    const rows = within(screen.getByTestId("run-timeline")).getAllByRole("listitem")
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining("Fetch"), expect.stringContaining("Write")])
+    const bar = rows[1].querySelector("i") as HTMLElement
+    expect(bar.style.left).toBe("25%")
+    expect(bar.style.width).toBe("75%")
+  })
+
+  it("Copy for AI copies a markdown trace without secrets", async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    h.run = baseRun({ status: "failed", inputs: { month: "2026-08", api_token: "tok-secret-1" }, error_message: "401 Bearer abcdefghijklmnopqrstuvwxyz" })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy for AI" }))
+    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    const md = String((writeText.mock.calls[0] as unknown[])[0])
+    expect(md).toContain("# Routine run run_1")
+    expect(md).toContain("- month: 2026-08")
+    expect(md).not.toContain("tok-secret-1")
+    expect(md).not.toContain("abcdefghijklmnopqrstuvwxyz")
+  })
+
+  it("shows duration, cost and steps as figures", () => {
+    h.run = baseRun({ status: "completed", duration_ms: 4200 })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    const kpis = screen.getByTestId("run-kpis")
+    expect(kpis).toHaveTextContent("Duration")
+    expect(kpis).toHaveTextContent("Cost")
+    expect(kpis).toHaveTextContent("Steps")
   })
 })
