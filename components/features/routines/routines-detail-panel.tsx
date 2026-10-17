@@ -1,14 +1,20 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { useRouter } from "next/navigation"
-import { AnimatePresence, motion } from "motion/react"
-import { Play, Check, Ban, Inbox } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { Play, Check, Ban, Inbox, Eye, Upload, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
-import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
+import { StatusPill } from "@/components/ui/status-pill"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { PageError, PageNoAccess, PageNotFound } from "@/components/layout/page-state"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import type { StatusTone } from "@/lib/format-status"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
@@ -17,12 +23,12 @@ import { loadRoutineDraft, RoutineDraftError } from "@/lib/routine-drafts"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
-  routineStatusBadge,
   runDisabledReason,
   canApproveRoutine,
   canKillRoutine,
   normalizeRoutineStatus,
   roleAtLeast,
+  routinePermissions,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
@@ -31,6 +37,8 @@ import {
   usePipelineRunRecords,
   isActiveRunStatus,
 } from "@/hooks/use-pipeline-run-records"
+import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import type { Pipeline } from "@/hooks/use-pipelines"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { credentialTypeLabel, extractMissingCredentials } from "@/lib/credential-labels"
 import { extractProblemDetail } from "@/lib/problem-details"
@@ -39,17 +47,17 @@ import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineActionsMenu } from "./routine-actions-menu"
 import { RoutineProposalAsk, type RoutineAskDefinition } from "./routine-proposal-ask"
-import { RoutineCardDetail } from "./routine-card-detail"
+import { RoutinePage, type RoutinePageActionContext } from "./routine-page"
 import { RoutineLiveRunBanner } from "./routine-live-run-banner"
+import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 import { useAccessMe } from "@/hooks/use-access-me"
 
-// RoutinesDetailPanel — right-side detail for the selected routine.
-// Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
-// Schedules, Webhooks, Waitpoints) plus the action toolbar
-// (Run / Cancel). Subscribes to the same routine state the
-// list view reads, so refresh after a successful Run is already
-// covered by usePipelines' WS subscription in the layout.
+// RoutinesDetailPanel — loads the selected routine and owns what acts on it:
+// Run (with its access guard and input form), Test (a dry run), Stop, the
+// governance actions (approve, reject, turn off and on) and Turn back on for a
+// schedule the circuit breaker paused. It hands them to the routine page
+// (routine-page.tsx) as the top-bar actions and banners.
 
 export interface RoutineDetail {
   behavior?: import("@/lib/routine-behavior").RoutineBehavior
@@ -122,7 +130,17 @@ interface Props {
   onClose: () => void
   onChanged: () => void
   onRunStarted?: (runId: string) => void
+  /** The crew's name for the header line ("Ops crew · runs as …"). */
+  crewName?: string
+  /** Every routine, for the step editor's "Run another routine". */
+  routines?: Pipeline[]
+  /** The top bar's action slot; the page actions render there. */
+  actionsTarget?: HTMLElement | null
+  /** Opens another routine (a duplicate saved as a draft). */
+  onOpenRoutine?: (slug: string) => void
 }
+
+type GovernanceAction = "approve" | "reject" | "disable" | "enable"
 
 export function RoutinesDetailPanel({
   workspaceId,
@@ -130,12 +148,21 @@ export function RoutinesDetailPanel({
   onClose,
   onChanged,
   onRunStarted,
+  crewName,
+  routines,
+  actionsTarget,
+  onOpenRoutine,
 }: Props) {
   const router = useRouter()
   const startIntent = useRef(new RoutineStartIntent())
-  const { role } = useAbilities()
+  const { role, capabilities } = useAbilities()
+  const [confirmGov, setConfirmGov] = useState<GovernanceAction | null>(null)
+  const [deleteRequest, setDeleteRequest] = useState(0)
+  const [testResult, setTestResult] = useState<DryRunResult | null>(null)
+  const [fetchStatus, setFetchStatus] = useState<number | null>(null)
   const workspaceSegment = encodeApiPathSegment(workspaceId)
   const routineSegment = encodeApiPathSegment(slug)
+  const { schedules, update: updateSchedule } = usePipelineSchedules(workspaceSegment && routineSegment ? workspaceId : null)
   const { access: effectiveAccess, loading: accessLoading, error: accessError, refresh: refreshAccess } = useAccessMe(
     workspaceSegment && routineSegment ? `/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}/access/me` : undefined,
   )
@@ -148,7 +175,6 @@ export function RoutinesDetailPanel({
   // Tracks the in-flight governance action (approve/reject/disable/enable)
   // so its button shows a spinner and the others stay disabled meanwhile.
   const [busyGov, setBusyGov] = useState<string | null>(null)
-  const { ask, dialog: governanceDialog } = useConfirm()
   // lastRunId holds the run_id of the most recent Run so we can show its
   // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
@@ -186,12 +212,14 @@ export function RoutinesDetailPanel({
     abortRef.current = ctrl
     setLoading(true)
     setError(null)
+    setFetchStatus(null)
     try {
       if (!workspaceSegment || !routineSegment) throw new Error("Routine unavailable: invalid identifier")
       const res = await apiFetch(`/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}`, {
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return
+      if (!res.ok) setFetchStatus(res.status)
       if (res.status === 404) {
         // Not published yet: a draft alone can still be read, edited and
         // published from this page (publishing a draft creates the routine).
@@ -254,6 +282,8 @@ export function RoutinesDetailPanel({
     workspaceId: string
     slug: string
     inputs: RoutineInputSpec[]
+    /** Test asks the same questions, then dry-runs. */
+    mode?: "run" | "test"
   } | null>(null)
 
   // The Run button's two paths. A routine with declared inputs opens the
@@ -391,32 +421,18 @@ export function RoutinesDetailPanel({
   // Lifecycle governance: approve/reject a proposed routine (MANAGER+),
   // or disable/enable an existing one (OWNER/ADMIN). Each hits its own
   // endpoint, toasts the outcome, then refetches so the hero badge +
-  // run-guard reflect the new status. disable and reject ask first, in
-  // the page (#3342); approve and enable act at once.
-  const governanceAction = async (
-    action: "approve" | "reject" | "disable" | "enable",
-  ) => {
-    if (!routine) return
-    const name = routine.name || routine.slug
-    if (action === "disable") {
-      const ok = await ask({
-        title: `Disable ${name}?`,
-        description: "It cannot be run until it is enabled again.",
-        consequences: [{ tone: "kept", text: "Its recipe, versions and run history stay" }],
-        confirmLabel: "Disable routine",
-        destructive: true,
-      })
-      if (!ok) return
-    }
-    if (action === "reject") {
-      const ok = await ask({
-        title: `Reject ${name}?`,
-        description: "The proposed routine is discarded.",
-        confirmLabel: "Reject routine",
-        destructive: true,
-      })
-      if (!ok) return
-    }
+  // run-guard reflect the new status. enable/disable confirm first
+  // (matches the rollback confirm() pattern in the Versions tab).
+  // Approve is the reviewer's one click; Reject, Turn off and Turn on ask
+  // first, in the shared confirmation dialog.
+  const requestGovernance = (action: GovernanceAction) => {
+    if (action === "approve") void governanceAction(action)
+    else setConfirmGov(action)
+  }
+
+  /** Resolves true once the server accepted the action. */
+  const governanceAction = async (action: GovernanceAction): Promise<boolean> => {
+    if (!routine) return false
     setBusyGov(action)
     try {
       if (!workspaceSegment || !routineSegment) throw new Error("Routine unavailable: invalid identifier")
@@ -435,10 +451,56 @@ export function RoutinesDetailPanel({
       onChanged()
       fetchRoutine()
       void refreshAccess()
+      return true
     } catch (e) {
-      toast.error(`${governanceLabel(action)} failed`, {
+      toast.error(`${governanceFailedLabel(action)}`, {
         description: e instanceof Error ? e.message : String(e),
       })
+      return false
+    } finally {
+      setBusyGov(null)
+    }
+  }
+
+  // Test: the saved routine without side effects (POST …/dry_run, Manager and
+  // above). Asks for the inputs first when the routine declares any.
+  const runTest = async (inputs: Record<string, unknown> = {}) => {
+    if (!routine || routine.slug !== slug) return
+    const { url, body } = buildPipelineActionRequest(workspaceId, slug, "dry_run", routine, inputs)
+    setBusyAction("test")
+    try {
+      const res = await apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) throw new Error((data && (data.error || extractProblemDetail(data))) || `The test was refused (${res.status}).`)
+      setTestResult(data as DryRunResult)
+    } catch (e) {
+      toast.error("Test failed", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusyAction(null)
+    }
+  }
+  const startTest = () => {
+    if (!routine || routine.slug !== slug) return
+    const specs = routineInputSpecs(routine.definition)
+    if (specs.length) setPendingRun({ workspaceId, slug, inputs: specs, mode: "test" })
+    else void runTest()
+  }
+
+  // A schedule the circuit breaker turned off. Turning it back on is the
+  // schedule's own PATCH (Owner/Admin); the failure count resets only after
+  // the next successful run.
+  const breaker = schedules.find(
+    (s) => (s.target_pipeline_id === routine?.id || s.target_pipeline_slug === slug) && !s.enabled && s.disabled_reason === "circuit_breaker",
+  )
+  const turnBackOn = async () => {
+    if (!breaker) return
+    setBusyGov("enable")
+    try {
+      await updateSchedule(breaker.id, { cron_expr: breaker.cron_expr, enabled: true })
+      toast.success("Schedule is on again", { description: "The failure count resets after the next successful run." })
+      onChanged()
+    } catch (e) {
+      toast.error("Could not turn the schedule back on", { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setBusyGov(null)
     }
@@ -457,7 +519,7 @@ export function RoutinesDetailPanel({
       if (!res.ok) {
         if (res.status === 403) {
           throw new Error(
-            "You don't have permission to stop runs (manager role or above required)",
+            "Stopping runs needs Owner or Admin.",
           )
         }
         const t = await res.text().catch(() => "")
@@ -479,7 +541,6 @@ export function RoutinesDetailPanel({
   }
 
   const lifecycle = normalizeRoutineStatus(routine?.status)
-  const lifecycleBadge = routineStatusBadge(routine?.status)
   const runGuard = accessLoading || !runAccess
     ? accessError ? "Your access could not be determined" : "Checking your access…"
     : runAccess.state === "denied"
@@ -489,332 +550,267 @@ export function RoutinesDetailPanel({
     : routine?.draft_only
     ? "Publish the draft first — nothing can run until then"
     : runDisabledReason(routine?.status)
-  const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)
-  const showKillControl = canKillRoutine(role)
+  const canEdit = roleAtLeast(role, "MANAGER")
+  const permissions = routinePermissions(role, capabilities)
+  const showApproval = lifecycle === "proposed" && canApproveRoutine(role)
+  const draftOnly = !!routine?.draft_only
+  const published = !!routine && !draftOnly && (routine.head_version ?? 0) > 0
 
   const latestOutcome = runRecords[0]?.outcome
   const status =
     latestOutcome === "FAILED"
       ? "failed"
       : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
-  // Run-status pill routes its colors through the shared palette
-  // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
-  // the status pills rendered in Inbox / Issues / Activity — failed reads
-  // red (not rose), running reads cyan (IN_PROGRESS), and an approval gate
-  // reads violet (AWAITING_APPROVAL).
-  //
   // A live approval gate wins over the persisted last_invocation_status: the
   // run reads as "running" in the DB while parked, but the human is the
-  // bottleneck, so we show the awaiting-approval state instead.
-  // NEEDS_HUMAN is the outcome of a run that finished, not a waitpoint: there
-  // is nothing to approve. lib/routine-run-presentation.ts says so in as many
-  // words ("this outcome alone is not an approval request"), so it reads as
-  // BLOCKED — the same warn tone that file gives it — rather than borrowing
-  // the violet approval-gate pill and claiming a decision is pending.
-  const runStatus: { token: string; label: string } =
+  // bottleneck. NEEDS_HUMAN is the outcome of a run that finished, not a
+  // waitpoint: nothing to approve, so it reads as needing attention.
+  const runStatus: { tone: StatusTone; label: string } | null =
     pendingApproval || status === "waiting"
-      ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
+      ? { tone: "warn", label: "Waiting for a person" }
       : latestOutcome === "NEEDS_HUMAN"
-        ? { token: "BLOCKED", label: "Last run · needs your attention" }
+        ? { tone: "warn", label: "Last run · needs your attention" }
         : status === "completed" || status === "succeeded" || status === "success"
-          ? { token: "COMPLETED", label: "Last run · completed" }
+          ? { tone: "success", label: "Last run · completed" }
           : status === "failed" || status === "error"
-            ? { token: "FAILED", label: "Last run · failed" }
+            ? { tone: "danger", label: "Last run · could not finish" }
             : status === "running"
-              ? { token: "IN_PROGRESS", label: "Running…" }
-              : {
-                  token: "PENDING",
-                  label: status ? `Last run · ${status}` : "Never invoked",
-                }
+              ? { tone: "blue", label: "Running" }
+              : status
+                ? { tone: "muted", label: `Last run · ${status}` }
+                : null
 
-  // Top-level tabs are collapsed to the three the redesign elevates
-  // (Overview / Runs / Schedules); the four power-user surfaces
-  // (Editor · Versions · Webhooks · Wait points) live behind a single
-  // "Advanced" tab with its own sub-tab bar so the chrome reads as
-  // "the routine" first and "the machinery" second.
+  const runButton = routine && (
+    // Wrapped in a span so the run-guard tooltip still shows on a disabled
+    // button — disabled buttons swallow hover events.
+    <span
+      title={runGuard ?? (routineInputSpecs(routine.definition).length > 0 ? "Fill in this run's inputs, then run" : "Run this routine")}
+      className="inline-flex"
+    >
+      <SubBarPrimary icon={Play} onClick={startRun} disabled={!!busyAction || !!runGuard}>
+        {busyAction === "run" ? "Running…" : "Run"}
+      </SubBarPrimary>
+    </span>
+  )
+  const menu = routine && (
+    <RoutineActionsMenu
+      routine={routine}
+      workspaceId={workspaceId}
+      onChanged={() => {
+        fetchRoutine()
+        onChanged()
+      }}
+      onDeleted={onClose}
+      onOpenRoutine={onOpenRoutine}
+      lifecycle={lifecycle}
+      onGovernance={requestGovernance}
+      governanceBusy={!!busyGov || !!busyAction}
+      requestDelete={deleteRequest}
+    />
+  )
+  const pageActions = (ctx: RoutinePageActionContext) => {
+    if (!routine) return null
+    if (draftOnly) {
+      return (
+        <>
+          {canEdit && routine.draft && (
+            <>
+              <SubBarSecondary icon={Eye} onClick={ctx.testDraft} disabled={ctx.testingDraft} title="Test the draft without side effects">
+                {ctx.testingDraft ? "Testing…" : "Test draft"}
+              </SubBarSecondary>
+              <SubBarPrimary icon={Upload} onClick={ctx.openPublish}>
+                Publish
+              </SubBarPrimary>
+            </>
+          )}
+          {menu}
+        </>
+      )
+    }
+    if (showApproval) {
+      return (
+        <>
+          <SubBarSecondary icon={Ban} onClick={() => requestGovernance("reject")} disabled={!!busyGov || !!busyAction}>
+            Reject
+          </SubBarSecondary>
+          <SubBarPrimary icon={busyGov === "approve" ? undefined : Check} onClick={() => requestGovernance("approve")} disabled={!!busyGov || !!busyAction}>
+            {busyGov === "approve" ? "Approving…" : "Approve routine"}
+          </SubBarPrimary>
+          {menu}
+        </>
+      )
+    }
+    if (breaker) {
+      return (
+        <>
+          {canEdit && published && (
+            <SubBarSecondary icon={Eye} onClick={startTest} disabled={!!busyAction} title="Run without side effects">
+              {busyAction === "test" ? "Testing…" : "Test run"}
+            </SubBarSecondary>
+          )}
+          {permissions.manage ? (
+            <SubBarPrimary icon={Power} onClick={() => void turnBackOn()} disabled={!!busyGov}>
+              Turn back on
+            </SubBarPrimary>
+          ) : (
+            runButton
+          )}
+          {menu}
+        </>
+      )
+    }
+    return (
+      <>
+        {canEdit && published && (
+          <SubBarSecondary icon={Eye} onClick={startTest} disabled={!!busyAction || lifecycle !== "active"} title="Run without side effects">
+            {busyAction === "test" ? "Testing…" : "Test"}
+          </SubBarSecondary>
+        )}
+        {runButton}
+        {menu}
+      </>
+    )
+  }
+
+  // Only the routine's own answer decides "gone" or "not yours"; a failed
+  // draft lookup behind a 404 is reported as what it was.
+  const notFound = !routine && fetchStatus === 404 && !!error?.startsWith("fetch routine")
+  const noAccess = !routine && fetchStatus === 403 && !!error?.startsWith("fetch routine")
 
   return (
     <div className="flex h-full flex-col">
-      {/* The identity used to live here as a fixed band above the scroll
-          area. It is a card now, inside the scroll, so the page reads as
-          one stack of cards and the name scrolls with what it names. The
-          panel keeps the ACTION handlers — RBAC guards, busy states, run
-          guards — and hands them down as a node. */}
-      {loading && (
-        <div className="space-y-2 p-6">
-          <div className="h-3 w-32 animate-pulse rounded bg-muted/30" />
-          <div className="h-8 w-72 animate-pulse rounded bg-muted/40" />
-          <div className="h-3 w-96 animate-pulse rounded bg-muted/20" />
+      {loading && !routine && (
+        <div className="flex flex-col gap-3 p-6" role="status" aria-label="Loading routine">
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 animate-pulse rounded-lg bg-muted/40" />
+            <div className="flex flex-col gap-2">
+              <div className="h-5 w-64 animate-pulse rounded bg-muted/40" />
+              <div className="h-3 w-40 animate-pulse rounded bg-muted/30" />
+            </div>
+          </div>
+          <div className="h-8 w-96 max-w-full animate-pulse rounded bg-muted/20" />
         </div>
       )}
 
-      {/* Approval banner — a proposed routine (risky / agent-authored)
-          needs a MANAGER+ to promote it before it can run. Approve →
-          active; Reject → discarded. Only rendered for MANAGER+ when the
-          routine is in the proposed state. */}
-      {/* Height, not just opacity: the banner pushes the whole surface
-          down when it arrives and pulls it back when the decision is
-          made, and animating that is what stops an approval from
-          feeling like the page jumped under the cursor. */}
-      <AnimatePresence initial={false}>
-        {showApprovalBanner && (
-          <motion.div
-            key="approval-banner"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-warn">
-                  This routine is awaiting approval
-                </div>
-                {/* The reasons the classifier gave. Without them the banner
-                asks a manager to approve something they cannot see —
-                and the reasons already existed, written into the inbox
-                item at save time; nothing read them back. */}
-                {routine?.risk_reasons && routine.risk_reasons.length > 0 ? (
-                  <p className="mt-0.5 text-[12px] text-warn/80">
-                    Flagged because it {routine.risk_reasons.join(", ")}.
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-[12px] text-warn/70">
-                    It was proposed for review and can&apos;t run until a manager approves
-                    it.
-                  </p>
-                )}
-                {/* The reasons are the category; this is the thing itself.
-                "Requires credentials" does not tell a reviewer which
-                ones, and that is the question they have. */}
-                <RoutineProposalAsk
-                  definition={routine?.definition as RoutineAskDefinition | undefined}
-                />
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => governanceAction("approve")}
-                  disabled={!!busyGov || !!busyAction}
-                  className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
-                >
-                  {busyGov === "approve" ? (
-                    <Spinner className="h-3.5 w-3.5" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" />
-                  )}
-                  Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => governanceAction("reject")}
-                  disabled={!!busyGov || !!busyAction}
-                  className="h-8 gap-1.5 px-3 text-sm"
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                  Reject
-                </Button>
-                {/* Beside the decision, not buried in the prose above it.
-                The review row carries the diff, the risk reasons and
-                the audit trail, and someone deciding may well want to
-                read it first — so it is a button, and it lands on the
-                row rather than on the inbox root. */}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    router.push(
-                      routine?.inbox_item_id
-                        ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}`
-                        : "/inbox",
-                    )
-                  }
-                  className="h-8 gap-1.5 px-3 text-sm"
-                  title="Open the review item in Inbox"
-                >
-                  <Inbox className="h-3.5 w-3.5" />
-                  Inbox
-                </Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Run activity — instant readable status for the just-triggered
-          Run, so the user isn't left wondering what's happening
-          after clicking. Full history stays in the Runs tab. */}
-      {routine && lastRunId && (
-        <div className="border-b border-foreground/[0.06]">
-          {pendingApproval && (
-            <div className="px-4 pt-3">
-              <RoutineApprovalBanner
-                waitpoint={pendingApproval}
-                deciding={decidingApproval}
-                onDecide={decideApproval}
-              />
-            </div>
-          )}
-          <PipelineRunActivity
-            workspaceId={workspaceId}
-            slug={routine.slug}
-            runId={lastRunId}
-            awaiting={
-              pendingApproval
-                ? {
-                    stepId: pendingApproval.step_id,
-                    ts: pendingApproval.created_at,
-                  }
-                : null
-            }
+      {/* A SIBLING of the routine block, not a child of it: fetchRoutine sets
+          the error and then clears `routine`. */}
+      {error && !routine && !loading && (
+        notFound ? (
+          <PageNotFound
+            what="routine"
+            description="It may have been deleted, or the link is wrong. Runs it already made stay readable in Activity."
+            back={{ label: "Back to routines", onClick: onClose }}
           />
-        </div>
-      )}
-
-      {/* One scrolling surface of cards, no tabs.
-          A tab is a hiding place: 38 routines had zero schedules between
-          them while Schedules was a tab nobody clicked. Everything that
-          worked is still here — the editor opens beside the graph,
-          schedules and webhooks live under Schedule, versions have
-          their own card. What went is the filing, not the machinery.
-          Wait points went to Activity, where the run they belong to is. */}
-      {/* A SIBLING of the routine block, not a child of it.
-          fetchRoutine sets the error and then clears `routine`, so the
-          banner nested inside `{routine && …}` could only render in the
-          one state it never occupied. `loading` is false by then too,
-          which left a failed fetch showing an empty surface and no
-          explanation at all. */}
-      {error && !routine && (
-        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
+        ) : noAccess ? (
+          <PageNoAccess area="this routine" primary={{ label: "Back to routines", onClick: onClose }} />
+        ) : (
+          <PageError title="This routine could not load" description="Nothing was changed." onRetry={() => void fetchRoutine()} detail={error} />
+        )
       )}
 
       {routine && (
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {error && (
-            <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-          <div className="flex-1 overflow-auto">
-            <RoutineCardDetail
-              // Keyed on the routine, so picking a different one replays
-              // the card entrance instead of swapping text in place.
-              // Without it the surface changes with no transition at all
-              // and it reads as a repaint rather than a navigation.
-              key={routine.slug}
-              routine={routine}
-              workspaceId={workspaceId}
-              onChanged={() => {
-                fetchRoutine()
-                onChanged()
-              }}
-              liveRuns={
+        <div className="flex-1 overflow-hidden">
+          <RoutinePage
+            key={routine.slug}
+            routine={routine}
+            workspaceId={workspaceId}
+            crewName={crewName}
+            routines={routines}
+            records={runRecords}
+            lifecycle={lifecycle}
+            canEdit={canEdit}
+            canManage={permissions.manage}
+            canRun={mayRun && !runGuard}
+            actions={pageActions}
+            actionsTarget={actionsTarget}
+            onChanged={() => {
+              fetchRoutine()
+              onChanged()
+            }}
+            onRun={startRun}
+            onTest={published ? startTest : undefined}
+            onOpenRun={(runId) => onRunStarted?.(runId)}
+            onGovernance={requestGovernance}
+            onDelete={() => setDeleteRequest((n) => n + 1)}
+            pills={
+              <>
+                {lifecycle === "proposed" && <StatusPill size="md" tone="purple" label="Proposed" />}
+                {lifecycle === "disabled" && <StatusPill size="md" tone="muted" label="Turned off" />}
+                {breaker && <StatusPill size="md" tone="danger" label={`Turned off after ${breaker.consecutive_failures} failures in a row`} />}
+                {runStatus && <StatusPill size="md" tone={runStatus.tone} label={runStatus.label} live={runStatus.tone === "blue"} />}
+                <AgentlessBadge agentless={isAgentless(routine.definition)} />
+                {routine.ephemeral && <StatusPill size="md" tone="warn" label="One-off" />}
+              </>
+            }
+            top={
+              <>
+                {lifecycle === "proposed" && (
+                  <section className="flex flex-col gap-1.5 rounded-lg border border-purple/25 bg-purple/[0.06] px-4 py-3" data-testid="routine-proposal">
+                    <p className="text-sm font-medium">Proposed · waiting for approval</p>
+                    {routine.risk_reasons && routine.risk_reasons.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">Flagged because it {routine.risk_reasons.join(", ")}. A Manager or above approves; until then it cannot run.</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">It was proposed for review and cannot run until a Manager approves it.</p>
+                    )}
+                    {/* The reasons are the category; this is the thing itself. */}
+                    <RoutineProposalAsk definition={routine.definition as RoutineAskDefinition | undefined} />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-fit gap-1.5"
+                      onClick={() => router.push(routine.inbox_item_id ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}` : "/inbox")}
+                      title="Open the review item in Inbox"
+                    >
+                      <Inbox className="h-3.5 w-3.5" />
+                      Open in Inbox
+                    </Button>
+                  </section>
+                )}
+                {breaker && (
+                  <section className="flex flex-col gap-1 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-4 py-3" data-testid="routine-breaker">
+                    <p className="text-sm font-medium">Turned off after {breaker.consecutive_failures} failures in a row</p>
+                    <p className="text-xs text-muted-foreground">
+                      The schedule “{breaker.name}” is paused; webhooks and manual runs still work.
+                      {permissions.manage ? " Turn it back on once the cause is fixed; the failure count resets after the next successful run." : " An Owner or Admin can turn it back on."}
+                    </p>
+                  </section>
+                )}
+                {lastRunId && (
+                  <div className="overflow-hidden rounded-lg border border-hairline">
+                    {pendingApproval && (
+                      <div className="px-4 pt-3">
+                        <RoutineApprovalBanner waitpoint={pendingApproval} deciding={decidingApproval} onDecide={decideApproval} />
+                      </div>
+                    )}
+                    <PipelineRunActivity
+                      workspaceId={workspaceId}
+                      slug={routine.slug}
+                      runId={lastRunId}
+                      awaiting={pendingApproval ? { stepId: pendingApproval.step_id, ts: pendingApproval.created_at } : null}
+                    />
+                  </div>
+                )}
                 <RoutineLiveRunBanner
                   runs={activeRuns}
                   definition={routine.definition}
-                  canStop={roleAtLeast(role, "MANAGER")}
+                  canStop={canKillRoutine(role)}
                   stopping={cancelling}
                   onOpen={(runId) => onRunStarted?.(runId)}
                   onStop={stopRun}
                 />
-              }
-              statusPills={
-                <>
-                  {lifecycleBadge && (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 type-meta font-medium",
-                        lifecycleBadge.className,
-                      )}
-                    >
-                      <span
-                        className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)}
-                      />
-                      {lifecycleBadge.label}
-                    </span>
-                  )}
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 type-meta font-medium",
-                      STATUS_BADGE_CLASSES[runStatus.token],
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        STATUS_DOT_CLASSES[runStatus.token],
-                      )}
-                    />
-                    {runStatus.label}
-                  </span>
-                  <AgentlessBadge agentless={isAgentless(routine.definition)} />
-                </>
-              }
-              primary={
-                <>
-                  {/* Wrapped in a span so the run-guard tooltip still
-                      shows on a disabled button — disabled buttons
-                      swallow hover events. */}
-                  <span
-                    title={
-                      runGuard ??
-                      (routineInputSpecs(routine.definition).length > 0
-                        ? "Fill in this run's inputs, then run"
-                        : "Invoke routine")
-                    }
-                    className="inline-flex"
-                  >
-                    <Button
-                      onClick={startRun}
-                      disabled={!!busyAction || !!runGuard}
-                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium"
-                    >
-                      {busyAction === "run" ? (
-                        <Spinner className="h-3.5 w-3.5" />
-                      ) : (
-                        <Play className="h-3.5 w-3.5 fill-current" />
-                      )}
-                      {busyAction === "run" ? "Running…" : "Run"}
-                    </Button>
-                  </span>
-                </>
-              }
-              menu={
-                <>
-                  <RoutineActionsMenu
-                    routine={routine}
-                    workspaceId={workspaceId}
-                    onChanged={() => {
-                      fetchRoutine()
-                      onChanged()
-                    }}
-                    onClose={onClose}
-                    lifecycle={lifecycle}
-                    showKillControl={showKillControl}
-                    onGovernance={governanceAction}
-                    governanceBusy={!!busyGov || !!busyAction}
-                  />
-                </>
-              }
-            />
-          </div>
+              </>
+            }
+          />
         </div>
       )}
       <RoutineRunInputsDialog
         definition={routine?.definition}
         headVersion={routine?.head_version}
         draft={routine?.draft}
-        inputs={
-          pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId
-            ? pendingRun.inputs
-            : null
-        }
+        inputs={pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId ? pendingRun.inputs : null}
         routineName={routine?.name || slug}
-        submitting={busyAction === "run"}
+        submitLabel={pendingRun?.mode === "test" ? "Test" : "Run"}
+        submitting={busyAction === "run" || busyAction === "test"}
         onCancel={() => setPendingRun(null)}
         onRun={(inputs) => {
           // Refuse a submit whose form was built for a different routine.
@@ -824,11 +820,54 @@ export function RoutinesDetailPanel({
             setPendingRun(null)
             return
           }
+          const mode = pendingRun.mode
           setPendingRun(null)
-          void triggerAction("run", inputs)
+          if (mode === "test") void runTest(inputs)
+          else void triggerAction("run", inputs)
         }}
       />
-      {governanceDialog}
+      {testResult && (
+        <CreateSurface open onOpenChange={(open) => !open && setTestResult(null)} size="md" ariaLabel="Test result">
+          <CreateSurfaceHeader concept="routines" context={`Routines › ${routine?.name || slug}`} title="Test without side effects" onClose={() => setTestResult(null)} />
+          <CreateSurfaceBody className="p-0">
+            <RoutineDryRunReport result={testResult} onClose={() => setTestResult(null)} />
+          </CreateSurfaceBody>
+          <CreateSurfaceFooter hint={null} onCancel={() => setTestResult(null)} cancelLabel="Close" guardCancel={false} />
+        </CreateSurface>
+      )}
+      <ConfirmDialog
+        open={confirmGov !== null}
+        onOpenChange={(open) => !open && setConfirmGov(null)}
+        title={
+          confirmGov === "reject"
+            ? `Reject ${routine?.name || slug}?`
+            : confirmGov === "disable"
+              ? `Turn off ${routine?.name || slug}?`
+              : `Turn on ${routine?.name || slug}?`
+        }
+        description={
+          confirmGov === "reject"
+            ? "The proposed routine is discarded."
+            : confirmGov === "disable"
+              ? "It cannot run until it is turned on again."
+              : "It can run again: schedules, webhooks and the Run button start it."
+        }
+        consequences={
+          confirmGov === "reject"
+            ? [{ tone: "lost", text: "The proposal and what it would have done." }]
+            : confirmGov === "disable"
+              ? [
+                  { tone: "lost", text: "Schedules, webhooks and the Run button stop starting it." },
+                  { tone: "kept", text: "Runs in progress finish; its history stays." },
+                ]
+              : []
+        }
+        confirmLabel={confirmGov === "reject" ? "Reject routine" : confirmGov === "disable" ? "Turn off" : "Turn on"}
+        destructive={confirmGov !== "enable"}
+        onConfirm={async () => {
+          if (confirmGov && !(await governanceAction(confirmGov))) throw new Error("refused")
+        }}
+      />
     </div>
   )
 }
@@ -837,16 +876,29 @@ function actionLabel(_a: "run"): string {
   return "Run"
 }
 
-function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string {
+function governanceLabel(a: GovernanceAction): string {
   switch (a) {
     case "approve":
       return "Routine approved"
     case "reject":
       return "Routine rejected"
     case "disable":
-      return "Routine disabled"
+      return "Routine turned off"
     case "enable":
-      return "Routine enabled"
+      return "Routine turned on"
+  }
+}
+
+function governanceFailedLabel(a: GovernanceAction): string {
+  switch (a) {
+    case "approve":
+      return "Approve failed"
+    case "reject":
+      return "Reject failed"
+    case "disable":
+      return "Turn off failed"
+    case "enable":
+      return "Turn on failed"
   }
 }
 

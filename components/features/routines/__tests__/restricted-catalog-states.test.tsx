@@ -15,13 +15,13 @@ afterEach(() => { cleanup(); api.mockReset() })
 const runtimeSentence = /Private execution isn't installed on this server/
 
 const screens = [
-  { name: "routines", Component: RestrictedRoutines, loading: "Loading routines…", empty: "No routines can currently be run with your access. Shared definitions appear above.", unavailable: "Routine catalog unavailable.", item: [{ slug: "allowed", name: "Allowed routine", definition_hash: "h", execution_hash: "e", inputs: [] }], option: "Allowed routine" },
-  { name: "Pages", Component: RestrictedPages, loading: "Loading Page actions…", empty: "No Page actions are available with your current access.", unavailable: "Page actions unavailable.", item: [{ slug: "p", name: "Page", actions: [{ intent_hash: "i", panel_id: "panel", id: "go", label: "Go", inputs: [] }] }], option: "Page — Go" },
+  { name: "routines", Component: RestrictedRoutines, loading: "Loading routines…", empty: "No routines can currently be run with your access. Shared definitions appear above.", unavailable: "Routine catalog unavailable.", item: [{ slug: "allowed", name: "Allowed routine", definition_hash: "h", execution_hash: "e", inputs: [] }], option: "Allowed routine", optionRole: "radio" as const },
+  { name: "Pages", Component: RestrictedPages, loading: "Loading Page actions…", empty: "No Page actions are available with your current access.", unavailable: "Page actions unavailable.", item: [{ slug: "p", name: "Page", actions: [{ intent_hash: "i", panel_id: "panel", id: "go", label: "Go", inputs: [] }] }], option: "Page — Go", optionRole: "option" as const },
 ]
 
 function json(body: unknown, status: number) { return new Response(JSON.stringify(body), { status }) }
 
-describe.each(screens)("restricted $name catalog", ({ Component, loading, empty, unavailable, item, option }) => {
+describe.each(screens)("restricted $name catalog", ({ Component, loading, empty, unavailable, item, option, optionRole }) => {
   function expectOnly(present: string | RegExp) {
     for (const text of [loading, empty, unavailable, runtimeSentence]) {
       if (String(text) === String(present)) continue
@@ -47,7 +47,7 @@ describe.each(screens)("restricted $name catalog", ({ Component, loading, empty,
   it("shows the catalog for a successful non-empty catalog", async () => {
     api.mockResolvedValue(json(item, 200))
     render(<Component workspaceId="workspace" />)
-    await screen.findByRole("option", { name: option })
+    await screen.findByRole(optionRole, { name: new RegExp(option) })
     expect(screen.queryByText(empty)).toBeNull()
     expect(screen.queryByRole("alert")).toBeNull()
   })

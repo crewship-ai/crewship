@@ -2,20 +2,19 @@
 
 import { formatRoutineTime } from "@/lib/routine-time"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus, Trash2, Webhook, Copy, Check, Eye, EyeOff, Pencil } from "lucide-react"
 import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, FieldLabel } from "./_shared"
-import { EmptyState } from "@/components/layout/empty-state"
+import { Card, EmptyState, FieldLabel } from "./_shared"
 import { StatusPill } from "@/components/ui/status-pill"
 import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // RoutineWebhooksTab — event-driven trigger CRUD restyled for the
 // dashboard. Token + signing secret are revealed once on create
@@ -29,15 +28,16 @@ interface Props {
   workspaceId: string
   pipelineId: string
   slug: string
+  /** Bumped by the page's Add trigger › Webhook: opens the new-webhook form. */
+  addRequest?: number
 }
 
-export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
+export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest = 0 }: Props) {
   const { webhooks, loading, error, create, update, remove } = usePipelineWebhooks(workspaceId)
   const ours = useMemo(() => webhooks.filter((w) => w.target_pipeline_id === pipelineId), [webhooks, pipelineId])
 
   const [editing, setEditing] = useState<PipelineWebhook | null>(null)
   const [editSaving, setEditSaving] = useState(false)
-  const { ask, dialog } = useConfirm()
   const saveEdit = async (body: WebhookUpdateBody) => {
     if (!editing) return
     setEditSaving(true)
@@ -99,20 +99,18 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
     }
   }
 
+  useEffect(() => {
+    if (addRequest > 0) setFormOpen(true)
+  }, [addRequest])
+
+  const [deleting, setDeleting] = useState<PipelineWebhook | null>(null)
   const del = async (w: PipelineWebhook) => {
-    const ok = await ask({
-      title: `Delete webhook ${w.name || w.id}?`,
-      description: "Its address stops accepting deliveries.",
-      consequences: [{ tone: "lost", text: "Existing senders will start failing" }],
-      confirmLabel: "Delete webhook",
-      destructive: true,
-    })
-    if (!ok) return
     try {
       await remove(w.id)
       toast.success("Webhook deleted")
     } catch (e) {
       toast.error("Delete failed", { description: e instanceof Error ? e.message : String(e) })
+      throw e
     }
   }
 
@@ -141,7 +139,6 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
       {ours.length === 0 && !formOpen ? (
         <Card title="Webhooks">
           <EmptyState
-            size="compact"
             icon={Webhook}
             title="No webhooks yet"
             description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
@@ -178,7 +175,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
         >
           <ol className="divide-y divide-border/40">
             {ours.map((w) => (
-              <li key={w.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
+              <li key={w.id} id={`webhook-${w.id}`} tabIndex={-1} className="grid scroll-mt-4 grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 outline-none focus:bg-muted">
                 <div
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
@@ -236,7 +233,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => del(w)}
+                    onClick={() => setDeleting(w)}
                     className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                     title="Delete"
                     aria-label={`Delete webhook ${w.name || w.id}`}
@@ -323,7 +320,21 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
         onCancel={() => setEditing(null)}
         onSave={saveEdit}
       />
-      {dialog}
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete webhook “${deleting?.name ?? ""}”?`}
+        description="Its URL stops accepting deliveries."
+        consequences={[
+          { tone: "lost", text: "Senders using this URL start failing; the URL cannot be reused." },
+          { tone: "kept", text: "Runs it already started stay in the history." },
+        ]}
+        confirmLabel="Delete webhook"
+        destructive
+        onConfirm={async () => {
+          if (deleting) await del(deleting)
+        }}
+      />
     </div>
   )
 }

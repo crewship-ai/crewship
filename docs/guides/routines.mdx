@@ -40,14 +40,45 @@ actual step actions; an unreadable recipe is shown as unavailable.
 Selecting a routine uses `?slug=` in the URL. Reload and browser history preserve
 that selection. A selected run adds `&run=` and keeps its recorded recipe version.
 
-### The detail page
+### The routine page
 
-| View | What it answers |
+The header names the routine, its crew and the agent it runs as, and says its
+state in words: **Live**, **Not live yet** (only a draft exists) or **Changes
+not live** (a draft waits to be published). Version and draft numbers appear in
+**Full detail**; the **Simple | Full detail** switch is remembered for you. The
+page actions sit in the top bar: **Test** (no side effects, Manager and above),
+**Run** and the **⋯** menu — **Duplicate as draft**, **Export bundle (JSON)**,
+**Copy CLI command**, **Copy link**, and for Owner and Admin **Turn off / Turn
+on** and **Delete routine…** (type the ID to confirm; run history stays
+readable in Activity). A proposed routine shows **Approve routine** and
+**Reject** instead; a routine whose schedule the circuit breaker paused shows
+**Turn back on** (the failure count resets after the next successful run). A
+routine that only exists as a draft offers **Test draft** and **Publish**.
+
+| Tab | What it answers |
 | --- | --- |
-| **Overview** | Three answers first: *What it does* (readable steps, List or Map — recipes with more than twelve steps open on the Map, one node per phase group), *Last time* (the last run and its verdict) and *Before you run* (the questions asked, declared results, what a run can reach, and how it runs). Status chrome, metadata and access fold into **Technical details**. **Edit** opens the Edit dialog over the page, addressed as `?view=edit` (reload, Back and Forward land on it); nothing there is live until Publish is confirmed. |
-| **History** | Recorded runs, their verdicts and how they started. Each opens its run detail. Composition depth is under Technical details. |
-| **Versions** | Published recipes and an explicit comparison of chosen versions. Comparison starts real work and can change connected systems or incur costs. |
-| **Plan** | Repeating plans, one-time starts, webhooks and the automations that can start this routine, with their saved inputs, shared with Calendar. |
+| **Overview** | What needs you first — the decision the latest run waits for, or why the last run could not finish, with what ran and what did not — then *What it does* (written from the definition, not by a model), the steps in one line, the last 20 runs, the six answers *in one look*, what starts it, and its inputs. |
+| **Steps** | The steps with what each does and **Test step** on sample data; a read-only **Map**; the stored **Definition** in Full detail. **Edit steps** opens the editor: add, remove (refused while a later step reads its result) and reorder agent tasks, approvals, notifications, waits, issue actions, web calls and sub-routines, and edit agent prompts and decision forms of steps written in code. |
+| **Triggers** | One list of everything that starts the routine — schedules, webhooks, the chat command, workspace events and the Run button — with **Add trigger** (a schedule previews its next five starts), the webhook delivery log, and the cards that manage each kind. |
+| **Settings** | About (name, purpose), Inputs, Limits (cost cap, one at a time; model tiers, input guardrails and estimates in Full detail), the chat command, Access and Share, Budget, and Turn off or delete. |
+| **Versions** | Full detail only: published versions, the draft on top with **Review and publish**, and comparisons. |
+
+Steps and Settings save through one bar at the bottom: name and purpose alone
+apply at once; every other change is saved as a draft, and nothing goes live
+until it is published. Leaving with unsaved changes asks first. Older links keep
+working: `?view=plan` opens Triggers, `?view=edit` and `?view=settings` open
+Settings, `?view=versions` opens Versions in Full detail, `?view=history` opens
+the routine's runs in Activity, and `?view=publish` opens the publish review.
+
+**Import** takes an exported bundle or a definition, as a file or pasted, and
+saves it as a draft in the crew you pick. An ID already in use is refused and
+you can rename it; nothing saved is overwritten.
+
+The run page (`&run=`) carries **Copy for AI** (a Markdown trace of the run;
+inputs that look like secrets are left out), **Stop** (Owner and Admin, with one
+confirmation), **Run again** and a way back to the routine. Figures for duration,
+cost and steps, the previous runs as dots (click one to peek, J / K to move,
+Enter to open) and a **Steps | Timeline** switch sit above the steps.
 
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results
@@ -94,10 +125,9 @@ credentials or outside hosts is saved for a Manager review instead of turned on.
 **Save as draft** keeps it unpublished. From Basics you can also copy an
 existing routine's steps and limits (not its triggers), hand a description to
 the crew lead in chat, import a bundle, or see the CLI commands.
-**Edit** is one scrolling document:
-identity, Inputs, steps and schedule. A selected step has **Edit / Test** tools.
-**Code** edits the same buffer, preserving unsupported keys and expressions.
-**Publication changes** is a collapsed review inside the document.
+An existing routine is edited on its page — **Steps** and **Settings**, saved
+as a draft with the page's save bar (see *The routine page* above). Steps the
+editor cannot change are kept exactly as they are.
 
 - **Save draft** saves work without publishing or running it. A conflicting edit
   reports the conflict and preserves local work.

@@ -4,14 +4,6 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Workflow, Plus, Upload, List } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import {
-  CreateSurface,
-  CreateSurfaceBody,
-  CreateSurfaceField,
-  CreateSurfaceFooter,
-  CreateSurfaceHeader,
-  CreateSurfaceRefusal,
-} from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
@@ -31,6 +23,8 @@ import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineNewWizard } from "./routine-new-wizard"
 import { RoutinesViewPane, needsYou } from "./routines-views"
+import { ImportRoutineDialog } from "./routine-import-dialog"
+import { useUserPreference } from "@/hooks/use-user-preference"
 
 // Keep the shared panel mounted across the views, a routine and a run. The
 // URL identifies the view (?view=needs|live|runs|drafts), the routine
@@ -83,6 +77,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const canCreate = roleAtLeast(role, "MANAGER")
   const isMobile = useIsMobile()
   const crews = useWorkspaceCrews(workspaceId)
+  const [lastCrew] = useUserPreference<string | null>("routines.lastCrew", null)
   const { runs: activeRuns } = useActiveRoutineRuns()
   const reasonId = useId()
   // The panel is the shared SecondaryPanel: a column on desktop, a bottom
@@ -104,13 +99,25 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // carries over from one to the other: leaving or switching routines
   // clears it, or the next routine would open in the editor uninvited.
   const [viewParam, setViewParam] = useUrlSelection("view")
+  // The routine page's tab (and a version opened in it) belong to the routine
+  // that is open; leaving or switching routines clears them.
+  const [, setTabParam] = useUrlSelection("tab")
+  const [, setVersionParam] = useUrlSelection("version")
   const listView: RoutinesView = !selectedSlug && !selectedRun && LIST_VIEWS.has(viewParam as RoutinesView) ? (viewParam as RoutinesView) : "overview"
   const panelView: RoutinesView | null = selectedSlug || selectedRun ? null : listView
-  const leaveRoutine = () => {
+  const clearRoutineView = () => {
     setViewParam(null, { replace: true })
+    setTabParam(null, { replace: true })
+    setVersionParam(null, { replace: true })
+  }
+  const leaveRoutine = () => {
+    clearRoutineView()
     setSelectedRun(null, { replace: true })
     setSelectedSlug(null)
   }
+  // The routine and run pages put their actions in the top bar through this
+  // slot (a node inside the SubBar's action area).
+  const [pageActions, setPageActions] = useState<HTMLElement | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [drafts, setDrafts] = useState<RoutineDraftListEntry[] | null>(null)
@@ -136,7 +143,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setLinkedDraftId(null, { replace: true })
     setLinkedWorkspace(null, { replace: true })
     setSelectedRun(null, { replace: true })
-    setViewParam(null, { replace: true })
+    clearRoutineView()
     setSelectedSlug(slug, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedDraft, linkedDraftId, linkedWorkspace])
@@ -144,12 +151,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const showView = (view: RoutinesView) => {
     setSelectedRun(null, { replace: true })
     setSelectedSlug(null, { replace: true })
+    setTabParam(null, { replace: true })
+    setVersionParam(null, { replace: true })
     setViewParam(view === "overview" ? null : view)
     closePanelSheet()
   }
 
   const openRun = (slug: string, runId: string) => {
-    setViewParam(null, { replace: true })
+    clearRoutineView()
     setSelectedSlug(slug, { replace: true })
     setSelectedRun(runId)
   }
@@ -208,7 +217,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
-    setViewParam(null, { replace: true })
+    clearRoutineView()
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
     closePanelSheet()
   }
@@ -222,7 +231,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   const section = selectedRun
-    ? `${selectedRoutine?.name || selectedSlug || "Routine"} · Run`
+    ? [selectedRoutine?.name || selectedSlug || "Routine", "Run"].join(" › ")
     : selectedSlug
       ? [crewName, selectedRoutine?.name || selectedSlug].filter(Boolean).join(" › ")
       : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
@@ -277,7 +286,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           ) : undefined
         }
         ariaLabel="Routines"
-        actions={!selectedSlug && !selectedRun ? createActions : undefined}
+        actions={!selectedSlug && !selectedRun ? createActions : <span ref={setPageActions} className="flex items-center gap-1.5" data-slot="routine-page-actions" />}
       />
 
       <div className="relative flex flex-1 overflow-hidden">
@@ -311,7 +320,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             <AnimatePresence mode="wait">
               {selectedRun ? (
                 <div key={selectedRun} className="absolute inset-0 overflow-auto">
-                  <RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} />
+                  <RoutineRunDetail
+                    key={selectedRun}
+                    workspaceId={workspaceId}
+                    runId={selectedRun}
+                    actionsTarget={pageActions}
+                    onClose={() => setSelectedRun(null)}
+                    onOpenRun={(runId) => setSelectedRun(runId)}
+                  />
                 </div>
               ) : selectedSlug ? (
                 <motion.div
@@ -329,6 +345,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                       onClose={leaveRoutine}
                       onChanged={changed}
                       onRunStarted={setSelectedRun}
+                      crewName={crewName}
+                      routines={pipelines}
+                      actionsTarget={pageActions}
+                      onOpenRoutine={(slug) => {
+                        clearRoutineView()
+                        setSelectedSlug(slug)
+                      }}
                     />
                   </div>
                 </motion.div>
@@ -366,10 +389,15 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {importDialogOpen && canCreate && (
         <ImportRoutineDialog
           workspaceId={workspaceId}
+          crews={[...crews.values()]}
+          defaultCrewId={lastCrew && crews.has(lastCrew) ? lastCrew : null}
           onClose={() => setImportDialogOpen(false)}
-          onImported={() => {
+          onImported={(slug) => {
             changed()
             setImportDialogOpen(false)
+            setSelectedRun(null, { replace: true })
+            clearRoutineView()
+            setSelectedSlug(slug)
           }}
         />
       )}
@@ -386,113 +414,11 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           onImport={() => setImportDialogOpen(true)}
           onOpenRoutine={(slug) => {
             setSelectedRun(null, { replace: true })
-            setViewParam(null, { replace: true })
+            clearRoutineView()
             setSelectedSlug(slug)
           }}
         />
       )}
     </div>
-  )
-}
-
-// Inline import dialog. Plain JSON paste flow — agents and the CLI use
-// the same /pipelines/import endpoint. Drag-and-drop and URL import
-// are follow-ups; paste covers the demo case.
-//
-// One question, one paste: `sm` on the shared create shell. Exported so its
-// own test can drive it without standing the whole page up.
-export function ImportRoutineDialog({
-  workspaceId,
-  onClose,
-  onImported,
-}: {
-  workspaceId: string
-  onClose: () => void
-  onImported: () => void
-}) {
-  const [json, setJson] = useState("")
-  const [err, setErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const bundleFieldId = useId()
-
-  const submit = async () => {
-    setErr(null)
-    setBusy(true)
-    try {
-      const parsed = JSON.parse(json)
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed),
-      })
-      if (!res.ok) {
-        const t = await res.text().catch(() => "")
-        throw new Error(`${res.status}: ${t || res.statusText}`)
-      }
-      onImported()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <CreateSurface
-      open
-      onOpenChange={(next) => {
-        if (!next) onClose()
-      }}
-      size="sm"
-      dirty={json.trim() !== ""}
-      discardLabel="this bundle"
-      onSubmit={() => {
-        if (!busy && json.trim()) void submit()
-      }}
-    >
-      <CreateSurfaceHeader
-        icon={Upload}
-        accent="purple"
-        context="Routines"
-        title="Import a bundle"
-        description="Exported from another workspace, or shared by an agent. Authorship metadata is preserved."
-        onClose={onClose}
-      />
-
-      <CreateSurfaceBody className="flex flex-col gap-3">
-        <CreateSurfaceField
-          label="Bundle JSON"
-          // What the endpoint actually does on a collision: 409, and the
-          // routine already here is left exactly as it was. The old wording
-          // ("…or the existing routine is replaced") described a replace this
-          // import has never performed.
-          hint="A slug already in use here is refused — nothing already saved is overwritten."
-        >
-          <textarea
-            id={bundleFieldId}
-            value={json}
-            onChange={(e) => setJson(e.target.value)}
-            placeholder='{"slug":"…","definition":{…},"versions":[…]}'
-            className="h-64 w-full resize-none rounded-md border border-hairline bg-background p-2 font-mono text-[11px] text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20"
-          />
-        </CreateSurfaceField>
-      </CreateSurfaceBody>
-
-      {/* The parse failure and the server's refusal arrive at the same place,
-          out of the scrollport, instead of under a 256px textarea. */}
-      <CreateSurfaceRefusal
-        message={err == null ? null : `Error: ${err}`}
-        onDismiss={() => setErr(null)}
-      />
-
-      <CreateSurfaceFooter
-        onCancel={onClose}
-        primaryLabel={busy ? "Importing…" : "Import"}
-        primaryIcon={Upload}
-        onPrimary={submit}
-        primaryDisabled={!json.trim()}
-        busy={busy}
-      />
-    </CreateSurface>
   )
 }

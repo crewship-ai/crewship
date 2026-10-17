@@ -1,24 +1,16 @@
 "use client"
 
-import { useAbilities } from "@/hooks/use-abilities"
-import { routinePermissions } from "@/lib/routine-governance"
-
-// The routine kebab: the verbs.
+// The routine's ⋯ menu (Harbor 2): Duplicate as draft, Export bundle, Copy
+// CLI command, Copy link, then Turn off / on and Delete routine for Owner and
+// Admin. Every item does something the API performs; the two that cannot be
+// taken back go through the shared confirmation dialog.
 //
-// It shipped carrying Disable and Close, which is a button that promises
-// actions and delivers housekeeping. Everything here does something
-// real — nothing is listed that the API cannot perform, because a menu
-// item that no-ops is the same lie as a save button that saves nothing.
-//
-// Copy goes through /pipelines/save, because `display_name` and
-// `description` live in the definition rather than in columns of their
-// own. Rename lives in the Edit dialog's Identity tab now, and the recipe
-// itself is edited with the CLI or by the lead — so the menu carries Copy,
-// Export and Enable/Disable, and nothing that opens an editor. Export hits
-// the export endpoint that already existed and was unreachable from the UI.
+// Duplicate saves a DRAFT under a new ID, never a live routine: the copy is
+// read, tested and published like any other change (the old Copy posted to
+// /pipelines/save and put an untested copy live).
 
 import * as React from "react"
-import { Copy, Download, MoreHorizontal, Power, PowerOff, X } from "lucide-react"
+import { Copy, Download, Link2, MoreHorizontal, Power, PowerOff, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import {
@@ -28,32 +20,50 @@ import {
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
+  CreateSurfaceRefusal,
 } from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
 import { extractProblemDetail } from "@/lib/problem-details"
-import { duplicatePayload, type RoutineSaveBody } from "@/lib/routine-save-payload"
+import { routinePermissions } from "@/lib/routine-governance"
+import { saveRoutineDraft, RoutineDraftError } from "@/lib/routine-drafts"
+import { SLUG_RE, slugFromName } from "@/lib/routine-wizard"
 import type { RoutineDetail } from "./routines-detail-panel"
 
-/**
- * Server's own words when it refuses, or a fallback.
- *
- * A 403 here is expected — skip_test_gate is OWNER/ADMIN only — and the
- * server explains why. Swallowing that for a generic "Save failed"
- * turns a clear permissions message into a mystery.
- */
 async function problemMessage(res: Response, fallback: string): Promise<string> {
   try {
-    return extractProblemDetail(await res.clone().json()) ?? fallback
+    const body = await res.clone().json()
+    return extractProblemDetail(body) ?? body?.error ?? fallback
   } catch {
     return fallback
+  }
+}
+
+/** The draft document a duplicate starts as: the definition under a new ID. */
+export function duplicateDraftDocument(
+  routine: Pick<RoutineDetail, "description" | "definition" | "author_crew_id" | "icon" | "color">,
+  next: { slug: string; name: string },
+): Record<string, unknown> {
+  const name = next.name.trim()
+  return {
+    slug: next.slug,
+    name,
+    description: routine.description ?? "",
+    definition: { ...routine.definition, name: next.slug, display_name: name },
+    ...(routine.author_crew_id ? { author_crew_id: routine.author_crew_id } : {}),
+    ...(routine.icon ? { icon: routine.icon } : {}),
+    ...(routine.color ? { color: routine.color } : {}),
   }
 }
 
@@ -61,80 +71,81 @@ interface Props {
   routine: RoutineDetail
   workspaceId: string
   onChanged: () => void
-  onClose: () => void
-  /** Enable / Disable, when the viewer's role allows it. */
+  /** The routine is gone: leave its page. */
+  onDeleted?: () => void
+  /** Opens the copy's page once it is saved. */
+  onOpenRoutine?: (slug: string) => void
   lifecycle?: "active" | "proposed" | "disabled"
-  showKillControl?: boolean
   onGovernance?: (action: "disable" | "enable") => void
   governanceBusy?: boolean
+  /** Ask from outside (Settings › Turn off or delete). */
+  requestDelete?: number
 }
-
-type OpenDialog = "duplicate" | null
 
 export function RoutineActionsMenu({
   routine,
   workspaceId,
   onChanged,
-  onClose,
+  onDeleted,
+  onOpenRoutine,
   lifecycle = "active",
-  showKillControl = false,
   onGovernance,
   governanceBusy,
+  requestDelete,
 }: Props) {
   const { role, capabilities } = useAbilities()
   const permissions = routinePermissions(role, capabilities)
-  const [dialog, setDialog] = React.useState<OpenDialog>(null)
+  const [dialog, setDialog] = React.useState<"duplicate" | "delete" | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [refusal, setRefusal] = React.useState<string | null>(null)
+  const [copyName, setCopyName] = React.useState("")
+  const [copySlug, setCopySlug] = React.useState("")
+  const [slugEdited, setSlugEdited] = React.useState(false)
+  const displayName = routine.name || routine.slug
+  const published = (routine.head_version ?? 0) > 0 && !routine.draft_only
 
-  const definition = routine.definition as Record<string, unknown>
-  const [copyName, setCopyName] = React.useState(`${routine.name ?? routine.slug} (copy)`)
+  React.useEffect(() => {
+    if (requestDelete) setDialog("delete")
+  }, [requestDelete])
 
-  // Re-seed the name whenever the dialog opens, so a cancelled edit does
-  // not survive into the next one.
-  const openDialog = (which: OpenDialog) => {
-    if (which === "duplicate") setCopyName(`${routine.name ?? routine.slug} (copy)`)
-    setDialog(which)
+  const openDuplicate = () => {
+    const name = `${displayName} (copy)`
+    setCopyName(name)
+    setCopySlug(slugFromName(name))
+    setSlugEdited(false)
+    setRefusal(null)
+    setDialog("duplicate")
   }
 
-  /** POST a prepared body to the save endpoint. */
-  const post = async (body: RoutineSaveBody, successMsg: string) => {
+  const slugOk = SLUG_RE.test(copySlug) && copySlug !== routine.slug
+
+  const submitDuplicate = async () => {
+    if (busy || !copyName.trim() || !slugOk) return
     setBusy(true)
+    setRefusal(null)
     try {
-      const res = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/save`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
+      await saveRoutineDraft(
+        workspaceId,
+        { id: "", slug: copySlug, revision: 0, base_pipeline_id: "", base_revision: 0, document: {} },
+        duplicateDraftDocument(routine, { slug: copySlug, name: copyName }),
       )
-      if (!res.ok) {
-        toast.error(await problemMessage(res, "Save failed"))
-        return false
-      }
-      toast.success(successMsg)
+      toast.success(`${copyName.trim()} is saved as a draft · not live`, {
+        description: "Schedules, webhooks and run history stay with the original.",
+      })
       setDialog(null)
       onChanged()
-      return true
-    } catch {
-      toast.error("Save failed")
-      return false
+      onOpenRoutine?.(copySlug)
+    } catch (e) {
+      setRefusal(
+        e instanceof RoutineDraftError && e.status === 409
+          ? `A routine or draft called “${copySlug}” already exists. Pick another ID.`
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      )
     } finally {
       setBusy(false)
     }
-  }
-
-  const source = {
-    slug: routine.slug,
-    name: routine.name,
-    description: routine.description,
-    definition,
-    author_crew_id: routine.author_crew_id,
-  }
-
-  const submitDuplicate = () => {
-    if (!copyName.trim()) return
-    return post(duplicatePayload(source, { name: copyName }), "Copied · schedules and history stay with the original")
   }
 
   const exportBundle = async () => {
@@ -147,9 +158,8 @@ export function RoutineActionsMenu({
         return
       }
       const text = await res.text()
-      // Download rather than copy: a bundle is a file you hand to
-      // `crewship routine validate` or check into a repo, not something
-      // anyone wants sitting in their clipboard.
+      // A bundle is a file you hand to `crewship routine import` or check
+      // into a repo, not something to keep on the clipboard.
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }))
       const a = document.createElement("a")
       a.href = url
@@ -162,55 +172,80 @@ export function RoutineActionsMenu({
     }
   }
 
+  const copy = (text: string, done: string) => {
+    void navigator.clipboard?.writeText(text).then(
+      () => toast.success(done),
+      () => toast.error("Could not copy"),
+    )
+  }
+
+  const remove = async () => {
+    const res = await apiFetch(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(routine.slug)}`,
+      { method: "DELETE" },
+    )
+    if (!res.ok) {
+      toast.error("Could not delete the routine", { description: await problemMessage(res, `The server refused (${res.status}).`) })
+      throw new Error("delete refused")
+    }
+    toast.success(`${displayName} deleted`, { description: "Its run history stays readable in Activity." })
+    onChanged()
+    onDeleted?.()
+  }
+
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label="More actions"
-            className="rounded-lg border border-border/60 p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Routine options">
             <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem disabled={!permissions.manage} onSelect={() => openDialog("duplicate")}>
-            <Copy className="h-3.5 w-3.5" />
-            Copy
+        <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuLabel className="truncate text-label text-muted-foreground">{displayName}</DropdownMenuLabel>
+          {permissions.author && (
+            <DropdownMenuItem onSelect={openDuplicate}>
+              <Copy className="h-3.5 w-3.5" />
+              Duplicate as draft
+            </DropdownMenuItem>
+          )}
+          {published && (
+            <DropdownMenuItem onSelect={() => void exportBundle()}>
+              <Download className="h-3.5 w-3.5" />
+              Export bundle (JSON)
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onSelect={() => copy(`crewship routine run ${routine.slug}`, "CLI command copied")}>
+            <SquareTerminal className="h-3.5 w-3.5" />
+            Copy CLI command
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={exportBundle}>
-            <Download className="h-3.5 w-3.5" />
-            Export
+          <DropdownMenuItem
+            onSelect={() => copy(`${window.location.origin}/routines?${new URLSearchParams({ slug: routine.slug })}`, "Link copied")}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            Copy link
           </DropdownMenuItem>
-          {showKillControl && lifecycle !== "proposed" && onGovernance && (
+          {permissions.manage && published && (
             <>
               <DropdownMenuSeparator />
-              {lifecycle === "disabled" ? (
-                <DropdownMenuItem
-                  onSelect={() => onGovernance("enable")}
-                  disabled={governanceBusy}
-                >
-                  <Power className="h-3.5 w-3.5" />
-                  Enable routine
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => onGovernance("disable")}
-                  disabled={governanceBusy}
-                >
-                  <PowerOff className="h-3.5 w-3.5" />
-                  Disable routine
-                </DropdownMenuItem>
-              )}
+              {lifecycle !== "proposed" && onGovernance &&
+                (lifecycle === "disabled" ? (
+                  <DropdownMenuItem onSelect={() => onGovernance("enable")} disabled={governanceBusy}>
+                    <Power className="h-3.5 w-3.5" />
+                    Turn on
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onSelect={() => onGovernance("disable")} disabled={governanceBusy}>
+                    <PowerOff className="h-3.5 w-3.5" />
+                    Turn off
+                  </DropdownMenuItem>
+                ))}
+              <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete routine…
+              </DropdownMenuItem>
             </>
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onClose}>
-            <X className="h-3.5 w-3.5" />
-            Close
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -218,43 +253,71 @@ export function RoutineActionsMenu({
         open={dialog === "duplicate"}
         onOpenChange={(o) => !o && setDialog(null)}
         size="sm"
-        onSubmit={() => {
-          if (!busy && copyName.trim()) submitDuplicate()
-        }}
+        onSubmit={() => void submitDuplicate()}
       >
         <CreateSurfaceHeader
           concept="routines"
-          title="Copy this routine"
-          description="Copies the definition under a new name. Schedules, webhooks and run history stay with the original."
+          context={`Routines › ${displayName}`}
+          title="Duplicate as draft"
+          description="Copies the steps, inputs and limits under a new ID as a draft. Nothing goes live until you publish it; schedules, webhooks and history stay with the original."
           onClose={() => setDialog(null)}
         />
-        <CreateSurfaceBody>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (!busy && copyName.trim()) submitDuplicate()
-            }}
+        <CreateSurfaceBody className="flex flex-col gap-3">
+          <CreateSurfaceField label="Name" htmlFor="routine-copy-name" required>
+            <Input
+              id="routine-copy-name"
+              value={copyName}
+              onChange={(e) => {
+                setCopyName(e.target.value)
+                if (!slugEdited) setCopySlug(slugFromName(e.target.value))
+              }}
+              className={CREATE_SURFACE_INPUT}
+            />
+          </CreateSurfaceField>
+          <CreateSurfaceField
+            label="ID"
+            htmlFor="routine-copy-slug"
+            hint={slugOk ? "Lowercase letters, digits, - and _. Fixed after the first save." : copySlug === routine.slug ? "The copy needs an ID of its own." : "Start with a letter or digit; use lowercase letters, digits, - and _."}
           >
-            <CreateSurfaceField label="New name" htmlFor="routine-copy-name">
-              <Input
-                id="routine-copy-name"
-                value={copyName}
-                onChange={(e) => setCopyName(e.target.value)}
-                className={CREATE_SURFACE_INPUT}
-              />
-            </CreateSurfaceField>
-          </form>
+            <Input
+              id="routine-copy-slug"
+              value={copySlug}
+              aria-invalid={!slugOk || undefined}
+              onChange={(e) => {
+                setSlugEdited(true)
+                setCopySlug(e.target.value.trim())
+              }}
+              className={`${CREATE_SURFACE_INPUT} font-mono`}
+            />
+          </CreateSurfaceField>
         </CreateSurfaceBody>
+        <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
         <CreateSurfaceFooter
           onCancel={() => setDialog(null)}
           guardCancel={false}
-          primaryLabel="Copy"
-          onPrimary={submitDuplicate}
-          primaryDisabled={!copyName.trim()}
+          primaryLabel={busy ? "Saving…" : "Save as draft"}
+          onPrimary={() => void submitDuplicate()}
+          primaryDisabled={!copyName.trim() || !slugOk}
           busy={busy}
           primaryIcon={Copy}
         />
       </CreateSurface>
+
+      <ConfirmDialog
+        open={dialog === "delete"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title={`Delete ${displayName}?`}
+        description="The routine stops: its schedules and webhooks no longer start it, and it leaves the list."
+        consequences={[
+          { tone: "lost", text: "Schedules, webhooks and the chat command stop starting it." },
+          { tone: "kept", text: "Runs already recorded stay readable in Activity." },
+          { tone: "warn", text: "Runs in progress are not stopped; stop them first if they must not finish." },
+        ]}
+        confirmLabel="Delete routine"
+        destructive
+        typeToConfirm={routine.slug}
+        onConfirm={remove}
+      />
     </>
   )
 }
