@@ -1,8 +1,8 @@
 "use client"
 
 import { StatusPill } from "@/components/ui/status-pill"
-import { useCallback, useEffect, useState } from "react"
-import { Laptop, LogOut, Smartphone, Terminal, HelpCircle } from "lucide-react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { Laptop, LogOut, MonitorSmartphone, Smartphone, Terminal, HelpCircle } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -10,24 +10,18 @@ import { cn } from "@/lib/utils"
 import { describeUserAgent, type DeviceKind } from "@/lib/user-agent"
 import { formatShortDate, timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SettingsRow, SettingsEmpty } from "../shared"
+import { SettingsCard, SettingsCardActions, SettingsRow, SettingsEmpty } from "../shared"
 
 /**
- * The "Browsers & devices" half of Settings → Profile → Sessions & access.
+ * Settings › Sessions & tokens › "Browsers & devices" — its own card (Harbor
+ * 2), beside the CLI tokens card.
  *
  * Its job is not inventory, it is detection: someone scanning this list
  * should be able to notice a login that isn't theirs and end it. Everything
- * below follows from that.
- *
- * Lives in its own file rather than inline in profile-section (already
- * ~1000 lines) so the fetch/revoke logic is testable on its own. The CLI
- * token half stays in profile-section — it shares the create-form state —
- * and the two render as two groups inside one card.
+ * below follows from that. One device ends at once with a toast; ending all
+ * the others asks first (ConfirmDialog), and the dialog waits for the loop.
  */
 
 interface SessionDTO {
@@ -37,15 +31,6 @@ interface SessionDTO {
   user_agent: string
   ip: string
   is_current: boolean
-}
-
-function DeviceIcon({ kind }: { kind: DeviceKind }) {
-  const Icon = kind === "mobile" ? Smartphone : kind === "cli" ? Terminal : kind === "unknown" ? HelpCircle : Laptop
-  return (
-    <span className="size-7 rounded-lg bg-muted/50 grid place-items-center shrink-0">
-      <Icon className="size-3.5 text-muted-foreground" />
-    </span>
-  )
 }
 
 /** Rows shown before "Show all": the ones anyone looks at. */
@@ -158,25 +143,32 @@ export function DeviceSessions({
   // Nothing to say while the sign-out redirect is in flight.
   if (signedOut) return null
 
+  const card = (body: ReactNode, actions?: ReactNode) => (
+    <SettingsCard icon={MonitorSmartphone} title="Browsers & devices" description="Where you are signed in">
+      {body}
+      {actions}
+    </SettingsCard>
+  )
+
   if (error) {
-    return (
+    return card(
       <SettingsEmpty>
         <div className="space-y-2">
-          <div className="text-destructive">{error}</div>
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setError(null); load() }}>
+          <div role="alert" className="text-destructive">{error}</div>
+          <Button variant="outline" size="sm" onClick={() => { setError(null); load() }}>
             Retry
           </Button>
         </div>
-      </SettingsEmpty>
+      </SettingsEmpty>,
     )
   }
 
   if (sessions === null) {
-    return (
-      <div className="px-4 py-3 space-y-2">
+    return card(
+      <div className="px-4 py-3 space-y-2" role="status" aria-label="Loading sessions">
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-      </div>
+      </div>,
     )
   }
 
@@ -186,111 +178,82 @@ export function DeviceSessions({
 
   return (
     <>
-      <div className="flex items-center justify-between px-4 pt-2.5 pb-1.5">
-        <span className="eyebrow">
-          Browsers &amp; devices
-        </span>
-        {others.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-label text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={() => setConfirmBulk(true)}
-          >
-            Sign out everywhere else
-          </Button>
-        )}
-      </div>
-
-      {/* Past five, the list scrolls inside the card instead of growing the
-          page: ~70 sessions from a script used to fill the whole screen. */}
-      <div className={cn(showAll && hidden > 0 && "max-h-[26rem] overflow-y-auto overscroll-contain")} data-slot="session-list">
-      {visible.map((s) => {
-        const { label, kind } = describeUserAgent(s.user_agent)
-        return (
-          <SettingsRow
-            key={s.id}
-            label={
-              <span className="flex items-center gap-2.5">
-                <DeviceIcon kind={kind} />
-                <span className="min-w-0">
-                  <span className="flex items-center gap-2">
+      {card(
+        // Past five, the list scrolls inside the card instead of growing the
+        // page: ~70 sessions from a script used to fill the whole screen.
+        <div className={cn(showAll && hidden > 0 && "max-h-[26rem] overflow-y-auto overscroll-contain")} data-slot="session-list">
+          {visible.map((s) => {
+            const { label, kind } = describeUserAgent(s.user_agent)
+            return (
+              <SettingsRow
+                key={s.id}
+                lead={deviceIcon(kind)}
+                label={
+                  <span className="inline-flex flex-wrap items-center gap-2">
                     <span className="truncate">{label}</span>
-                    {s.is_current && (
-                      <StatusPill tone="success" label="This device" />
-                    )}
+                    {s.is_current && <StatusPill tone="success" label="This device" />}
                   </span>
-                  <span className="block text-label text-muted-foreground-soft mt-0.5">
-                    {s.ip} · {timeAgo(s.last_used_at)} · signed in {formatShortDate(s.created_at)}
-                    {s.is_current && currentExpiresIn ? ` · expires in ${currentExpiresIn}` : ""}
-                  </span>
-                </span>
-              </span>
-            }
-          >
-            {s.is_current ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={onSignOut}
+                }
+                description={`Signed in ${formatShortDate(s.created_at)}${s.is_current && currentExpiresIn ? ` · expires in ${currentExpiresIn}` : ""}`}
               >
-                <LogOut className="size-3 mr-1.5" />
-                Sign out
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label={`Revoke ${label}`}
-                disabled={busyId === s.id}
-                className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => revoke(s, label)}
-              >
-                {busyId === s.id ? "Signing out…" : "Revoke"}
-              </Button>
-            )}
-          </SettingsRow>
-        )
-      })}
-      </div>
-
-      {hidden > 0 && (
-        <div className="border-t border-border/60 px-4 py-2">
-          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-primary-hover" onClick={() => setShowAll((v) => !v)}>
-            {showAll ? "Show fewer" : `Show all ${ordered.length} sessions`}
-          </Button>
-        </div>
+                <span className="font-mono text-label text-muted-foreground">{s.ip} · used {timeAgo(s.last_used_at)}</span>
+                {s.is_current ? (
+                  <Button variant="outline" size="sm" onClick={onSignOut}>
+                    <LogOut className="size-3 mr-1.5" />
+                    Sign out
+                  </Button>
+                ) : (
+                  // One device ends at once with a toast (Harbor 2): the row
+                  // is the confirmation, and it can be signed in again.
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Revoke ${label}`}
+                    disabled={busyId === s.id}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => revoke(s, label)}
+                  >
+                    {busyId === s.id ? "Signing out…" : "Revoke"}
+                  </Button>
+                )}
+              </SettingsRow>
+            )
+          })}
+        </div>,
+        <SettingsCardActions className="border-t border-border pt-3">
+          {others.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={() => setConfirmBulk(true)}>
+              Sign out everywhere else
+            </Button>
+          ) : (
+            <span className="text-label text-muted-foreground">You&rsquo;re not signed in anywhere else.</span>
+          )}
+          {hidden > 0 && (
+            <Button variant="link" size="sm" className="px-0 text-primary-hover" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? "Show fewer" : `Show all ${ordered.length} sessions`}
+            </Button>
+          )}
+        </SettingsCardActions>,
       )}
 
-      {others.length === 0 && (
-        <div className="px-4 pb-3 text-label text-muted-foreground">
-          You&rsquo;re not signed in anywhere else.
-        </div>
-      )}
-
-      <AlertDialog open={confirmBulk} onOpenChange={(o) => !bulkRunning && setConfirmBulk(o)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Sign out everywhere else?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This ends {others.length} other session{others.length === 1 ? "" : "s"}. This
-              device stays signed in, and CLI tokens are not affected — revoke those
-              individually below.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-7 text-xs" disabled={bulkRunning}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="h-7 text-xs bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25"
-              disabled={bulkRunning}
-              onClick={(e) => { e.preventDefault(); void revokeOthers() }}
-            >
-              {bulkRunning ? "Signing out…" : `Sign out ${others.length} device${others.length === 1 ? "" : "s"}`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={confirmBulk}
+        onOpenChange={(o) => { if (!bulkRunning) setConfirmBulk(o) }}
+        title="Sign out everywhere else?"
+        description={`This ends ${others.length} other session${others.length === 1 ? "" : "s"}.`}
+        consequences={[
+          { tone: "lost", text: `${others.length} other browser${others.length === 1 ? "" : "s"} and device${others.length === 1 ? "" : "s"} must sign in again` },
+          { tone: "kept", text: "This device stays signed in" },
+          { tone: "kept", text: "CLI tokens are not affected — revoke those individually below" },
+        ]}
+        confirmLabel={`Sign out ${others.length} device${others.length === 1 ? "" : "s"}`}
+        destructive
+        onConfirm={revokeOthers}
+      />
     </>
   )
+}
+
+function deviceIcon(kind: DeviceKind) {
+  return kind === "mobile" ? Smartphone : kind === "cli" ? Terminal : kind === "unknown" ? HelpCircle : Laptop
 }

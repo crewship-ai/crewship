@@ -89,6 +89,8 @@ describe("Settings navigation panel", () => {
 
   it("on a phone is the top bar's sheet, with no hamburger on the sub-bar, and a pick closes it", async () => {
     h.mobile = true
+    // A link that names a section opens it; the list is behind the sheet.
+    window.history.replaceState(null, "", "/settings?tab=profile")
     render(<SettingsLayout />)
     await screen.findByTestId("profile-section")
     expect(panel()).toBeNull()
@@ -100,5 +102,52 @@ describe("Settings navigation panel", () => {
     fireEvent.click(within(sheet).getByRole("button", { name: "General" }))
     await waitFor(() => expect(useAppStore.getState().secondaryPanelOpen).toBe(false))
     expect(new URLSearchParams(window.location.search).get("tab")).toBe("general")
+  })
+})
+
+describe("Settings on a phone: list → section → back (PNL-05)", () => {
+  it("/settings is the list of sections, with no section open", async () => {
+    h.mobile = true
+    render(<SettingsLayout />)
+    const list = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-slot=secondary-panel][data-phone=inline]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(within(list).getByRole("button", { name: "Profile" })).toBeInTheDocument()
+    expect(screen.queryByTestId("profile-section")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Back to Settings" })).toBeNull()
+  })
+
+  it("a pick opens the section with a Back that returns to the list", async () => {
+    h.mobile = true
+    render(<SettingsLayout />)
+    fireEvent.click(await screen.findByRole("button", { name: "General" }))
+    expect(await screen.findByTestId("general-section")).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("general")
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }))
+    await waitFor(() => expect(screen.queryByTestId("general-section")).toBeNull())
+    expect(screen.getByRole("button", { name: "Profile" })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).has("tab")).toBe(false)
+  })
+})
+
+describe("Settings section head", () => {
+  it("names the section with its icon tile and one sentence", async () => {
+    window.history.replaceState(null, "", "/settings?tab=general")
+    render(<SettingsLayout />)
+    await screen.findByTestId("general-section")
+    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    expect(within(head).getByRole("heading", { level: 2, name: "General" })).toBeInTheDocument()
+    expect(within(head).getByText(/Workspace identity and defaults/)).toBeInTheDocument()
+  })
+
+  it("names the workspace group after the workspace", async () => {
+    render(<SettingsLayout />)
+    await screen.findByTestId("profile-section")
+    const nav = screen.getByRole("navigation", { name: "Settings sections" })
+    expect(within(nav).getByText("Acme")).toBeInTheDocument()
+    expect(within(nav).queryByText("Workspace")).toBeNull()
   })
 })
