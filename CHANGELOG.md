@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+
 - **Human-owned content can be handed over explicitly.** Workspace administrators can review eligible readers and transfer custody while preserving content and grants. Private content requires a human successor before its owner leaves; ordinary Pages retain their existing succession behavior.
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 

@@ -44,6 +44,7 @@ import (
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
 	"artifact_workspace_writes":         "rolling write-rate state is initialized anew on a restored installation",
+	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
 	"artifact_run_principals":           "live human-chat admissions require fresh authority after restore; portable bundles must not replay them",
 	"journal_replay_receipts":           "dedup authority binds this installation's protected spool and run identities; workspace bundles retain visible journal history, not the excluded execution capability",
 	"service_operation_leases":          "provider operations must be admitted on the destination host",

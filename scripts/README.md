@@ -69,6 +69,7 @@ commands. They may publish or remove release/package artifacts.
 | [host-paths/](host-paths/) | AST check for independent host filesystem roots; existing exceptions must remain present, and CI prevents allowlist expansion against the PR base |
 | [docs-inventory/](docs-inventory/), [docs-surface-check/](docs-surface-check/) | API/CLI documentation and documentation surface/link checks |
 | [golangci-shards/](golangci-shards/) | CI lint partitions with canonical settings and unchanged deadlines |
+| [ci/document-create-acceptance.py](ci/document-create-acceptance.py) | Require the managed Document creation scenario to execute through the real CLI |
 | [lint-migrations/](lint-migrations/) | Migration ordering and immutability |
 | [lint-tsformat/](lint-tsformat/) | Timestamp formatting conventions |
 | [deps-drift/](deps-drift/) | Dependency drift checks |

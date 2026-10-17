@@ -180,7 +180,7 @@ var manifestMCPValidateSchema = json.RawMessage(`{
 // routineMCPTools is the stable, ordered tool catalog tools/list returns.
 // Order is fixed so adapters that snapshot the catalog see a deterministic
 // payload (map iteration order is unspecified in Go).
-var routineMCPTools = append([]memoryMCPToolDescriptor{
+var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 	{
 		Name: "save_routine",
 		Description: "Legacy direct publication of a Crewship routine (a durable, versioned, schedulable pipeline). " +
@@ -264,7 +264,7 @@ var routineMCPTools = append([]memoryMCPToolDescriptor{
 	},
 	{Name: "get_routine_draft", Description: "Load the saved draft or a revision-zero baseline before authoring. Keep the returned revision envelope for save_routine_draft; do not overwrite another editor's revision. This does not run or publish work.", InputSchema: routineMCPGetDraftSchema},
 	{Name: "save_routine_draft", Description: "Save unpublished routine edits using the exact revision envelope returned by get_routine_draft. Put slug, name, definition and the proposed trigger inside draft.document. Never changes the live recipe or activates schedules. Return the editor_url to the user for Recipe / Test / Publish. A conflict preserves the existing draft; do not reload and blindly overwrite it. Prefer this for authoring in Chat; legacy save_routine publishes directly.", InputSchema: routineMCPSaveDraftSchema},
-}, artifactMCPCatalog()...)
+}, artifactMCPCatalog()...), documentCreateMCPCatalog()...)
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
 // /mcp/routines. It mirrors handleMemoryMCP exactly — same envelope, same
@@ -379,6 +379,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	}
 
 	if s.respondArtifactMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondDocumentCreateMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
 

@@ -76,8 +76,13 @@ func TestCreateRunCarriesCombinedArtifactAndGenericAuthority(t *testing.T) {
 	if body.TriggerMessageID != "persisted-human-message" || body.ArtifactHumanMessageID != body.TriggerMessageID || body.ArtifactRequestID != "explicit-artifact-request" || body.BoardRequestID != "" {
 		t.Fatalf("trigger or explicit request binding changed: %+v", body)
 	}
-	if len(body.Metadata) != 2 || body.Metadata["cli_adapter"] != "claude" || body.Metadata["human_authority"] != metadata["human_authority"] {
+	if len(body.Metadata) != 1 || body.Metadata["cli_adapter"] != "claude" {
 		t.Errorf("ordinary metadata changed or gained reserved authority: %+v", body.Metadata)
+	}
+	for _, key := range []string{"human_authority", "trigger_message_id", "chat_origin_id"} {
+		if _, exists := body.Metadata[key]; exists {
+			t.Errorf("reserved authority %q leaked into ordinary metadata", key)
+		}
 	}
 	for _, key := range []string{"artifact_human_receipt", "artifact_human_message_id", "artifact_request_id", "board_request_id"} {
 		if _, exists := body.Metadata[key]; exists {

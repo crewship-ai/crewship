@@ -485,8 +485,9 @@ var startCmd = &cobra.Command{
 			srv.LogWriter(),
 			resolver,
 			chatbridge.BridgeConfig{
-				DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
-				DefaultCPUs:     cfg.Container.DefaultCPUs,
+				DocumentCreationEnabled: cfg.Documents.Enabled,
+				DefaultMemoryMB:         cfg.Container.DefaultMemoryMB,
+				DefaultCPUs:             cfg.Container.DefaultCPUs,
 			},
 			logger,
 		)

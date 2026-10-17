@@ -634,6 +634,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/"):
 				s.handleArtifactPublish(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/create":
+				s.handleDocumentCreate(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/"):
 				s.handlePageWebhook(w, r)
 				return

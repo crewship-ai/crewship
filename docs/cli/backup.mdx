@@ -269,6 +269,11 @@ sends the stored token to a server other than the one it belongs to.
 
 ## `crewship backup restore`
 
+The Pages category includes saved Document content and its creation history.
+Restoring into a new workspace remaps the document and its historical run
+identity together. Live permission to create a document is excluded; a restored
+run cannot reuse an old human consent.
+
 Restore a workspace or crew from a bundle. The server refuses a
 restore if a workspace (or crew) with the same slug already exists;
 pass `--as-workspace` / `--as-crew` to land the payload under a fresh

@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 // ChatMessageOption carries optional per-message run settings from the
@@ -27,10 +28,12 @@ import (
 // existing callers stay source-compatible; only the WS dispatch supplies one.
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
-	HumanAuthority    *chataudience.Receipt `json:"-"`
-	BoardRequestID    string                `json:"-"`
-	ArtifactRequestID string                `json:"-"`
-	HumanResume       bool                  `json:"-"`
+	HumanAuthority           *chataudience.Receipt     `json:"-"`
+	BoardRequestID           string                    `json:"-"`
+	ArtifactRequestID        string                    `json:"-"`
+	HumanResume              bool                      `json:"-"`
+	OriginalTriggerMessageID string                    `json:"-"`
+	DocumentCreationIntent   *documents.CreationIntent `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int

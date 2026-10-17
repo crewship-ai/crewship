@@ -185,7 +185,7 @@ const categoryWorkOnly = ""
 var TableCategory = map[string]string{
 	"slides_heads": CategoryPages, "slides_revisions": CategoryPages,
 	"slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
-	"documents": CategoryPages, "document_updates": CategoryPages,
+	"document_creations": CategoryPages, "documents": CategoryPages, "document_updates": CategoryPages,
 	"document_receipts": CategoryPages, "document_checkpoints": CategoryPages,
 
 	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv

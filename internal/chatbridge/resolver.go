@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
@@ -319,15 +320,24 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	if metadata != nil {
 		cleanMetadata := make(map[string]interface{}, len(metadata))
 		for k, v := range metadata {
-			if k != "artifact_human_receipt" && k != "artifact_human_message_id" && k != "artifact_request_id" && k != "board_request_id" {
+			switch k {
+			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "human_authority", "trigger_message_id", "chat_origin_id":
+			default:
 				cleanMetadata[k] = v
 			}
 		}
 		payload["metadata"] = cleanMetadata
-		payload["artifact_human_receipt"] = metadata["artifact_human_receipt"]
-		payload["artifact_human_message_id"] = metadata["artifact_human_message_id"]
-		payload["artifact_request_id"] = metadata["artifact_request_id"]
-		payload["board_request_id"] = metadata["board_request_id"]
+		intent, ok := metadata["document_creation_intent"].(*documents.CreationIntent)
+		receipt := chataudience.ReceiptFromContext(ctx)
+		if ok && intent != nil && intent.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload["document_creation_intent"] = intent
+		}
+		if _, documentIntent := metadata["document_creation_intent"].(*documents.CreationIntent); !documentIntent {
+			payload["artifact_human_receipt"] = metadata["artifact_human_receipt"]
+			payload["artifact_human_message_id"] = metadata["artifact_human_message_id"]
+			payload["artifact_request_id"] = metadata["artifact_request_id"]
+			payload["board_request_id"] = metadata["board_request_id"]
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

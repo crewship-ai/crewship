@@ -9,6 +9,7 @@ import (
 
 func (r *Router) registerDocumentRoutes() {
 	p := r.pages
+	p.documentStoreOptions = r.documentStoreOptions
 	if r.documentsServiceSocket != "" && r.documentsSocket != "" {
 		r.documentsClient = &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", r.documentsServiceSocket)
