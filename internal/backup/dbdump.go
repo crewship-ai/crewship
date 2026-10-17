@@ -1220,6 +1220,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			if err := validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
+			}
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.

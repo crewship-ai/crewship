@@ -406,6 +406,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	if err := remapSlides(dump, idMap); err != nil {
+		return err
+	}
 	dump.chatTranscriptRemap = idMap
 	for source, chat := range dump.AgentChatTranscripts {
 		if mapped := idMap["chats"][chat]; mapped != "" {
