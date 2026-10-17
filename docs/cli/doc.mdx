@@ -56,3 +56,16 @@ state again and decide on a new edit; the command never rebases it automatically
 For a lost confirmation, resend the original request with its original ID.
 The receipt identifies the durable revision; a successful exact retry does not
 create another write. Revoked credentials cannot replay saved requests.
+
+## Requesting a document in chat
+
+With Document support and the workspace creation policy enabled, use a direct
+private-chat request such as `vytvoř dokument o plánu uvedení produktu` without
+selecting an existing Page. The run creates a new populated document for you
+and returns its saved link. Quoted or ambiguous text does not grant creation
+permission.
+
+You remain the document's owner. This request does not grant the run permission
+to edit another Page or to keep accessing the document after creation. For an
+uncertain tool confirmation, retry the original input and mutation ID; sending
+a new chat message is a separate request.

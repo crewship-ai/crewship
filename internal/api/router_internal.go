@@ -43,6 +43,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		internal.SetComposioDefaultConnector(r.composioConfig.DefaultConnector, r.composioConfig.BaseURL)
 	}
 	internal.SetJournal(r.Journal())
+	internal.documentCreationEnabled = r.pages != nil && r.pages.documentCall != nil
 	// Derive approval_mode from the crew autonomy policy in the resolve
 	// response so the request-builder can revive the harbormaster HITL gate
 	// on every dispatch path (#810). Shares the Router's cached resolver.
