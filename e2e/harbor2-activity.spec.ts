@@ -270,3 +270,20 @@ test.describe("finish (#3486) phone", () => {
     expect(overflow).toBeLessThanOrEqual(0)
   })
 })
+
+test.describe("finish (#3486) facets", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("ACT-06 Filter opens the facets inside the panel, not a popover", async ({ page }) => {
+    await seed(page)
+    await page.goto("/activity")
+    const panel = page.locator("[data-slot=secondary-panel][data-panel-id=activity]")
+    await panel.getByRole("button", { name: /^Filter/ }).click()
+    const block = panel.getByRole("group", { name: "Filter activity" })
+    await expect(block).toBeVisible()
+    await expect(page.locator("[data-slot=popover-content]")).toHaveCount(0)
+    await expect(block.getByRole("button", { name: /^What/ })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(block).toBeHidden()
+  })
+})
