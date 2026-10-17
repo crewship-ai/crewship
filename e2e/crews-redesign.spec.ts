@@ -130,12 +130,11 @@ test.describe("/chat/[agentSlug] — full-page chat", () => {
 
     // Navigate directly to /chat/<slug>.
     await page.goto(`/chat/${slug}`)
-    // The chat page has either a sessions sidebar OR an "Allocating session…"
-    // placeholder while the POST /chats round-trips. NEITHER is the
-    // dashboard's "AGENTS" stat card — that was the bug we just fixed.
-    await expect(
-      page.getByText(/Allocating session/).or(page.getByPlaceholder(/Search sessions/)),
-    ).toBeVisible({ timeout: TIMEOUT })
+    // The chat page renders its conversations sidebar (the unified list since
+    // the chat rewrite, #2069; it used to be a "Search sessions" field or an
+    // "Allocating session…" placeholder). NEITHER is the dashboard's "AGENTS"
+    // stat card — that was the bug we just fixed.
+    await expect(page.getByRole("textbox", { name: "Search conversations" })).toBeVisible({ timeout: TIMEOUT })
     // Affirmatively: dashboard markers are absent.
     await expect(page.getByText(/^AGENTS$/, { exact: true })).toHaveCount(0)
     await expect(page.getByText(/^ACTIVE MISSIONS$/, { exact: true })).toHaveCount(0)
@@ -144,9 +143,12 @@ test.describe("/chat/[agentSlug] — full-page chat", () => {
   test("chat header has Back link to /crews", async ({ page }) => {
     const slug = await openFirstAgent(page)
     await page.goto(`/chat/${slug}`)
-    // Back arrow has title "Back to agent canvas"
-    const back = page.getByTitle("Back to agent canvas")
-    await expect(back).toBeVisible({ timeout: TIMEOUT })
+    // The "Back to agent canvas" arrow became the top bar's path
+    // Crews / <crew> / <agent> / Chat (chat-breadcrumbs.ts, #2069): Crews
+    // goes to /crews and the agent's crumb back to its canvas.
+    const bar = page.locator("header")
+    await expect(bar.locator('a[href="/crews"]')).toBeVisible({ timeout: TIMEOUT })
+    await expect(bar.locator(`a[href="/crews?agent=${encodeURIComponent(slug)}"]`)).toBeVisible({ timeout: TIMEOUT })
   })
 })
 

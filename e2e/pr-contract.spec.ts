@@ -97,9 +97,12 @@ test("PR browser contract subset", async ({ page }) => {
     const rows = Array.isArray(data) ? data : data.rows ?? data.data ?? []
     const identifier = rows.find((issue: { title?: string; identifier?: string }) => issue.title === title)?.identifier
     expect(identifier).toBeTruthy()
-    await page.request.delete(
-      `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
+    // Issues are deleted under their crew; /api/v1/issues/<id> has no DELETE
+    // (405), so this cleanup used to leave every fixture issue behind.
+    const removed = await page.request.delete(
+      `/api/v1/crews/${encodeURIComponent(seeded.id)}/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
     )
+    expect(removed.ok(), await removed.text()).toBeTruthy()
   })
 
   // #2398 / #2403 — a run_needs_human card is acted on from /inbox, against
@@ -261,18 +264,34 @@ test.describe("PR browser contract subset — phone", () => {
     }
 
     // More offers every destination the rail carries — the property that drifted.
+    // The Harbor 2 rail (lib/nav-sections.ts, SHL-01) minus Admin, which only
+    // an instance administrator sees. The Journal is no longer a destination
+    // of its own: F-02 merged it into Activity and its row left the rail
+    // (473ef1d95, ODCH-18), so it must not come back here as a second row,
+    // and the old /journal link is checked below to land on Activity.
     await tabs.getByRole("button", { name: "More" }).click()
     const sheet = page.getByRole("dialog")
     await expect(sheet).toBeVisible()
-    for (const label of ["Inbox", "Issues", "Routines", "Pages", "Activity", "Journal", "Integrations"]) {
+    for (const label of [
+      "Dashboard", "Inbox", "Chat", "Activity",
+      "Issues", "Routines", "Pages", "Calendar",
+      "Crews", "Skills", "Vault", "Integrations",
+      "Settings",
+    ]) {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
+    await expect(sheet.getByText("Journal", { exact: true })).toHaveCount(0)
 
     // Back closes it in place rather than leaving the page underneath.
     const before = new URL(page.url()).pathname
     await page.goBack()
     await expect(sheet).toBeHidden()
     expect(new URL(page.url()).pathname, "back left the page instead of closing the sheet").toBe(before)
+
+    // What used to be the Journal row is still reachable on a phone: the old
+    // link opens Activity, where F-02 moved it.
+    await page.goto("/journal")
+    await expect(page).toHaveURL(/\/activity(?:\?|$)/, { timeout: 15_000 })
 
     // Nothing you can type into renders under 16px, which is what makes iOS
     // zoom the page on focus and never zoom back out.
@@ -288,15 +307,32 @@ test.describe("PR browser contract subset — phone", () => {
     )
     expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
 
+    // The old Incoming link opens the Triggers space (Harbor 2 Integrations,
+    // #3395 N05/N06). On a phone the explorer is the SecondaryPanel sheet,
+    // opened from the top bar, and its search narrows the list on the page.
+    // (Before Harbor 2 the sheet carried the target list itself and said "No
+    // matching targets".) The seed's artifacts are listed under Triggers as
+    // webhook targets, so one of them is the row the search has to find.
     await page.goto("/integrations?tab=incoming")
-    // On a phone the explorer is the SecondaryPanel sheet, opened from the top bar.
-    await page.getByRole("button", { name: "Integrations", exact: true }).click()
+    await expect(page).toHaveURL(/[?&]space=triggers/)
+    const targets = page.locator("main").getByRole("button", { name: /^Open webhooks of / })
+    await expect(targets.first(), "the seed lists artifacts as webhook targets").toBeVisible()
+    const name = ((await targets.first().getAttribute("aria-label")) ?? "").replace(/^Open webhooks of /, "")
+    expect(name).not.toBe("")
     const integrationsSheet = page.getByRole("dialog", { name: "Integrations" })
-    await expect(integrationsSheet.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
-    await integrationsSheet.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
-    await expect(integrationsSheet.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
-    await page.keyboard.press("Escape")
-    await expect(integrationsSheet).toBeHidden()
+    const searchFor = async (query: string) => {
+      await page.getByRole("button", { name: "Integrations", exact: true }).click()
+      const search = integrationsSheet.getByRole("textbox", { name: "Search triggers, routines, agents" })
+      await expect(search).toBeVisible()
+      await search.fill(query)
+      await page.keyboard.press("Escape")
+      await expect(integrationsSheet).toBeHidden()
+    }
+    await searchFor(name)
+    await expect(page.locator("main").getByRole("button", { name: `Open webhooks of ${name}`, exact: true })).toBeVisible()
+    await searchFor("no-such-target-e2e")
+    await expect(targets).toHaveCount(0)
+    await expect(page.locator("main").getByRole("button", { name: /^Open / })).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false)
 
   })
