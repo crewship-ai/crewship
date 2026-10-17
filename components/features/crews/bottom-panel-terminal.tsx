@@ -20,7 +20,8 @@ import "@xterm/xterm/css/xterm.css"
 
 interface BottomPanelTerminalProps {
   agentName: string
-  agentSlug: string
+  /** Absent for the crew's own shell, which starts in /crew/shared. */
+  agentSlug?: string
   crewId: string
   crewSlug: string
 }
@@ -63,7 +64,7 @@ export function BottomPanelTerminal({
           <TerminalSquare className="h-3.5 w-3.5" />
           <StatusDot status={status} />
           <span>{agentName}</span>
-          <span className="text-muted-foreground">· /crew/agents/{agentSlug}</span>
+          <span className="text-muted-foreground">· {agentSlug ? `/crew/agents/${agentSlug}` : "/crew/shared"}</span>
         </div>
         {offline && (
           <button

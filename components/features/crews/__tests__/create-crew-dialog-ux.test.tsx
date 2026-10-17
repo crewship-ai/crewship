@@ -66,7 +66,7 @@ function renderDialog() {
   const onCreated = vi.fn()
   const onOpenChange = vi.fn()
   const r = render(
-    <CreateCrewDialog
+    <CreateCrewDialog initialStart="template"
       workspaceId="ws_test"
       open={true}
       onOpenChange={onOpenChange}
@@ -193,10 +193,10 @@ describe("<CreateCrewDialog> — step strip", () => {
     renderDialog()
     // The chips are named by their visible label now — CreateSurfaceSteps
     // draws the strip, and it carries no per-step aria-label.
-    const step1 = screen.getByRole("button", { name: /Identity/ })
+    const step1 = screen.getByRole("button", { name: /Step 1: Name/ })
     expect(step1).toHaveAttribute("aria-current", "step")
 
-    const step2 = screen.getByRole("button", { name: /Lineup/ })
+    const step2 = screen.getByRole("button", { name: /Step 2: Template/ })
     expect(step2).not.toHaveAttribute("aria-current")
   })
 
@@ -212,7 +212,7 @@ describe("<CreateCrewDialog> — step strip", () => {
     })
 
     // Now Step 1 is completed → click jumps back
-    fireEvent.click(screen.getByRole("button", { name: /Identity/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Step 1: Name/ }))
     expect(screen.getAllByText(/step 1 of 3/i).length).toBeGreaterThanOrEqual(1)
   })
 
@@ -221,11 +221,11 @@ describe("<CreateCrewDialog> — step strip", () => {
     renderDialog()
 
     // Future step (Step 3) is disabled
-    const step3 = screen.getByRole("button", { name: /Review/ })
+    const step3 = screen.getByRole("button", { name: /Step 3: Environment/ })
     expect(step3).toBeDisabled()
 
     // Active step (Step 1) is also disabled (cursor-default, no jump)
-    const step1 = screen.getByRole("button", { name: /Identity/ })
+    const step1 = screen.getByRole("button", { name: /Step 1: Name/ })
     expect(step1).toBeDisabled()
   })
 })
@@ -365,7 +365,7 @@ describe("<CreateCrewDialog> — open/close lifecycle", () => {
 
     const onOpenChange = vi.fn()
     const { rerender } = render(
-      <CreateCrewDialog workspaceId="ws_test" open={true} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
+      <CreateCrewDialog initialStart="template" workspaceId="ws_test" open={true} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
     )
 
     // Type something + advance to Step 2
@@ -374,12 +374,12 @@ describe("<CreateCrewDialog> — open/close lifecycle", () => {
 
     // Close the dialog
     rerender(
-      <CreateCrewDialog workspaceId="ws_test" open={false} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
+      <CreateCrewDialog initialStart="template" workspaceId="ws_test" open={false} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
     )
 
     // Re-open
     rerender(
-      <CreateCrewDialog workspaceId="ws_test" open={true} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
+      <CreateCrewDialog initialStart="template" workspaceId="ws_test" open={true} onOpenChange={onOpenChange} onCreated={vi.fn()} />,
     )
 
     // Should be back on Step 1 with empty Name

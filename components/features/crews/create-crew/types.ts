@@ -1,9 +1,18 @@
 import type { LLMProvider } from "@/lib/entities"
-import type { CrewTemplateAgent } from "./api"
+import type { AISuggestedAgent, CrewTemplateAgent } from "./api"
 
 export type WizardStep = 1 | 2 | 3 | 4
 
-export type LineupMode = "browse" | "empty"
+/** browse = a template, suggest = a lineup the lead proposed from the
+ *  description, empty = no agents yet (also an imported manifest). */
+export type LineupMode = "browse" | "empty" | "suggest"
+
+/** How New crew starts (v67 "Start with"). */
+export type CrewStart = "suggest" | "template" | "yaml" | "empty"
+
+export function modeForStart(start: CrewStart): LineupMode {
+  return start === "template" ? "browse" : start === "suggest" ? "suggest" : "empty"
+}
 
 /**
  * Allowed crew color palette IDs. Mirrors lib/crew-icon.ts → GRADIENT_PALETTES.
@@ -101,6 +110,8 @@ export interface WizardState {
   mode: LineupMode
   pickedTemplateSlug: string | null
   pickedTemplateMeta: { name: string; agentCount: number; agents: { name: string; agent_role: string }[] } | null
+  /** The lineup the lead proposed (mode "suggest"); editable before create. */
+  suggested: AISuggestedAgent[]
 
   provider: LLMProvider | null
 
@@ -129,6 +140,7 @@ export const INITIAL_STATE: WizardState = {
   mode: "browse",
   pickedTemplateSlug: null,
   pickedTemplateMeta: null,
+  suggested: [],
   provider: null,
   memoryMB: 4096,
   cpus: 2,

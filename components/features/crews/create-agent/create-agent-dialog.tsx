@@ -72,6 +72,7 @@ import { PersonaDraft } from "../persona-draft"
 import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
 import type { AgentRecord } from "../agent-canvas-tabs/types"
 import type { AgentDraft } from "./types"
+import { usePageSave } from "@/components/ui/page-save-bar"
 
 export interface CreateAgentDialogProps {
   workspaceId: string
@@ -81,6 +82,24 @@ export interface CreateAgentDialogProps {
   crews: CrewLite[]
   onCreated: (slug: string) => void
   agent?: AgentRecord
+  /**
+   * Edit on the agent's page instead of in a dialog: only these sections
+   * render, without the surface's header and footer, and the edits register
+   * with the page's one save bar (PageSaveProvider).
+   */
+  inlineSections?: AgentEditorSection[]
+  /** The save bar's name for this form ("Instructions"). */
+  inlineLabel?: string
+}
+
+export type AgentEditorSection = "identity" | "model" | "instructions" | "access" | "chat"
+
+/** Stands in for CreateSurface when the form is on the page. */
+function InlineSurface({ children }: { children: React.ReactNode } & Record<string, unknown>) {
+  return <div className="space-y-4" data-slot="agent-editor-inline">{children}</div>
+}
+function InlineBody({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={className}>{children}</div>
 }
 
 /** Shared input/select styling. Centralised so the form looks consistent
@@ -105,7 +124,11 @@ export function CreateAgentDialog({
   crews: listedCrews,
   onCreated,
   agent,
+  inlineSections,
+  inlineLabel = "Agent",
 }: CreateAgentDialogProps) {
+  const inline = inlineSections !== undefined
+  const show = (id: AgentEditorSection) => (inline ? inlineSections.includes(id) : section === id)
   const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
     ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
@@ -361,9 +384,14 @@ export function CreateAgentDialog({
       } else {
         toast.success(`Agent "${created.name}" ${agent ? "updated" : "created"}`)
       }
-      onOpenChange(false)
-      onCreated(created.slug)
-      router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
+      if (inline) {
+        // The page refetches the agent and remounts this form from it.
+        onCreated(created.slug)
+      } else {
+        onOpenChange(false)
+        onCreated(created.slug)
+        router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
+      }
     } catch (err) {
       if (err instanceof ApiError && (err.field === "slug" || err.field === "agent_role")) {
         const field = err.field
@@ -378,7 +406,7 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router, inline])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -387,13 +415,38 @@ export function CreateAgentDialog({
     void submit()
   }, [valid, submitting, submit])
 
+  const dirty = agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0
+
+  // On the page, one save bar commits this form with the others.
+  usePageSave({
+    label: inlineLabel,
+    count: inline && dirty ? 1 : 0,
+    canSave: valid && !submitting,
+    saving: inline && submitting,
+    save: () => submit(),
+    discard: () => {
+      if (!baseline) return
+      setDraft(baseline)
+      setExtra({})
+      setPersona(undefined)
+      setSeatDraft(null)
+      setLearningDraft(null)
+      setRestrictedDraft(null)
+      setFieldErrors({})
+      setRefusal(null)
+    },
+  })
+
+  const Surface = inline ? InlineSurface : CreateSurface
+  const Body = inline ? InlineBody : CreateSurfaceBody
+
   return (
-      <CreateSurface
+      <Surface
         open={open}
         onOpenChange={onOpenChange}
         size="xl"
         className="h-[92dvh] sm:h-[min(85dvh,720px)]"
-        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
+        dirty={dirty}
         discardLabel="this agent"
         onSubmit={() => {
           // ⌘↵ inside the picker closes the picker; it must not also create
@@ -403,7 +456,7 @@ export function CreateAgentDialog({
           handleShortcutSubmit()
         }}
       >
-        <CreateSurfaceHeader
+        {!inline && <CreateSurfaceHeader
           concept="crews"
           accent="purple"
           context={crewName}
@@ -415,16 +468,17 @@ export function CreateAgentDialog({
           }
           onBack={pickerOpen ? () => setPickerOpen(false) : undefined}
           onClose={() => onOpenChange(false)}
-        />
+        />}
+        {inline && pickerOpen && <button type="button" className="text-label text-primary-hover hover:underline" onClick={() => setPickerOpen(false)}>Done with the avatar</button>}
 
-        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen} sections={[
+        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen || inline} sections={[
           { id: "identity", label: "Identity", icon: Bot },
           { id: "model", label: "Model and execution", icon: Cpu },
           { id: "instructions", label: "Instructions and persona", icon: FileText },
           { id: "access", label: "Permissions", icon: ShieldCheck },
           { id: "chat", label: "Chat", icon: MessageSquare },
         ]}>
-        <CreateSurfaceBody className="min-w-0 space-y-5">
+        <Body className="min-w-0 space-y-5">
           {/* The avatar picker is a PANEL: the surface swaps its body for it
               and the back arrow returns. It used to be a second Radix dialog
               stacked on this one — two focus traps, two Escape handlers, and
@@ -464,7 +518,7 @@ export function CreateAgentDialog({
               is up: the panel replaces the body, it does not sit beside it. */}
           {!pickerOpen && (
             <>
-          <EditorPanel active={section === "identity"}>
+          <EditorPanel active={show("identity")}>
           {/* ─── Template ───
               One line, not a wall of pills.
               
@@ -703,7 +757,7 @@ export function CreateAgentDialog({
 
           {agent && draft.crewSlug !== baseline?.crewSlug && <CreateSurfaceNotice tone="warn">Moving this agent changes its inherited access, shared knowledge, and runtime environment.</CreateSurfaceNotice>}
           </EditorPanel>
-          <EditorPanel active={section === "instructions"}>
+          <EditorPanel active={show("instructions")}>
           {/* ─── Persona ─── */}
           <CreateSurfaceSection
             title="Instructions"
@@ -789,7 +843,7 @@ WORK STYLE: …`}
             />
           </CreateSurfaceSection>
           </EditorPanel>
-          <EditorPanel active={section === "model"}>
+          <EditorPanel active={show("model")}>
             <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
             {agent && (
               <RestrictedExecutionField
@@ -813,7 +867,7 @@ WORK STYLE: …`}
                 </CreateSurfaceField>
               )}
           </EditorPanel>
-          <EditorPanel active={section === "access"}>
+          <EditorPanel active={show("access")}>
             <CreateSurfaceSection title="Tool access" icon={Wrench} accent="amber" hint="The runner's built-in tools. Credentials and integrations have separate permissions.">
               <CreateSurfaceChoice ariaLabel="Tool access" value={draft.toolProfile} onChange={toolProfile => setDraft({ ...draft, toolProfile })} options={TOOL_PROFILES.map(value => ({ value, label: { MINIMAL: "Read and plan", CODING: "Workspace work", FULL: "Full tool access" }[value] }))} />
               <p className="text-sm text-muted-foreground">{{ MINIMAL: "Requests a restricted tool set or read-only planning mode, depending on the runner.", CODING: "Read and edit workspace files, and run commands inside the crew container.", FULL: "All tools exposed by the runner. Crew permissions and network rules still apply." }[draft.toolProfile]}</p>
@@ -821,20 +875,20 @@ WORK STYLE: …`}
             </CreateSurfaceSection>
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
             {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
-            {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Work → Skills and access.</p>}
+            {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Tools and access.</p>}
           </EditorPanel>
-          <EditorPanel active={section === "chat"}>
+          <EditorPanel active={show("chat")}>
             {!agent && <CreateSurfaceSection title="Chat suggestions and forms" icon={MessageSquare}><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async value => { setExtra(current => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={value => { setExtra(current => ({ ...current, ask_forms: value })) }} /></CreateSurfaceSection>}
             {agent && <ConfigTab agent={{ ...agent, ...extra }} patch={async body => { setExtra(current => ({ ...current, ...body })) }} learning={{ draft: learningDraft, onChange: setLearningDraft }} />}
           </EditorPanel>
             </>
           )}
-        </CreateSurfaceBody>
+        </Body>
         </EditorLayout>
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
-        <CreateSurfaceFooter
+        {!inline && <CreateSurfaceFooter
           hint={validationHint ? <span className="text-warn">{validationHint}</span> : undefined}
           onCancel={() => onOpenChange(false)}
           primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : !providerConfirmed ? "Choose provider" : "Create agent"}
@@ -842,8 +896,9 @@ WORK STYLE: …`}
           primaryDisabled={!valid || (!agent && !providerConfirmed && section === "model")}
           busy={submitting}
           onPrimary={() => void submit()}
-        />
-      </CreateSurface>
+        />}
+        {inline && validationHint && <p className="text-label text-chip-warn-fg">{validationHint}</p>}
+      </Surface>
   )
 }
 

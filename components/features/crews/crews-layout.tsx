@@ -1,19 +1,27 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { motion, AnimatePresence } from "motion/react"
-import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
-import { CrewsSubbar } from "@/components/features/crews/crews-subbar"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Users } from "lucide-react"
+
+import { CrewsPanel } from "@/components/features/crews/crews-panel"
 import type { AgentRecord } from "./agent-canvas-tabs/types"
 import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { AgentCanvas } from "@/components/features/crews/agent-canvas"
 import { CrewCanvas } from "@/components/features/crews/crew-canvas"
-import { CrewCatalog } from "@/components/features/crews/crew-catalog"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
+import { PageEmpty } from "@/components/layout/page-state"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
+import { useUserPreference } from "@/hooks/use-user-preference"
+
+import { CrewsCreateProvider, useCrewsCreate, type CrewsCreateApi } from "./crews-create"
+import type { CrewStart } from "./create-crew/types"
+import { CrewsRootBar } from "./crews-bar"
+import { DEFAULT_PANEL_STATE, buildPanel, firstCrewSlug } from "./crews-panel-model"
+import { agentTabFromParam, crewTabFromParam, tabParam } from "./crews-tabs"
 
 interface CrewData {
   id: string
@@ -40,10 +48,10 @@ interface AgentData {
   crew_id: string | null
   avatar_seed?: string | null
   avatar_style?: string | null
+  avatar_url?: string | null
   crew?: { name: string; slug: string; color: string | null; avatar_style?: string | null } | null
   _count?: { skills: number; credentials: number; chats: number }
   last_active_at?: string | null
-  // PR-D F5 ephemeral lifecycle (server returns these; absent on permanent agents).
   ephemeral?: boolean
   expires_at?: string | null
   expired_at?: string | null
@@ -65,12 +73,8 @@ export interface CrewsLayoutProps {
   agents: AgentData[]
   missions: MissionData[]
   workspaceId: string
-  /** Explicit load signal from the parent fetch. The stale-slug watcher
-   *  needs this because `agents.length > 0` is not a reliable "loaded"
-   *  flag — a legitimately empty workspace would otherwise never get
-   *  its stale `?agent=` / `?crew=` param cleared. */
+  /** Both lists answered at least once; an empty workspace is then really empty. */
   loaded?: boolean
-  /** Server totals and paging for the explorer (usePagedList in the page). */
   crewsTotal?: number | null
   agentsTotal?: number | null
   hasMore?: boolean
@@ -80,38 +84,24 @@ export interface CrewsLayoutProps {
 }
 
 /**
- * Selection-driven canvas layout.
- *
- *   ┌─────────────────────────────────────────────┐
- *   │  CrewsSubbar (breadcrumb · filters · CTAs)  │
- *   ├──────────────┬──────────────────────────────┤
- *   │              │                              │
- *   │  Explorer    │  AgentCanvas /               │
- *   │  (filter +   │  CrewCanvas /                │
- *   │  hierarchy)  │  EmptyRoster                 │
- *   │              │                              │
- *   ├──────────────┴──────────────────────────────┤
- *   │  BottomPanel (Messages/Exec/YAML/Docker/…)  │
- *   └─────────────────────────────────────────────┘
- *
- * Replaces the older drawer-based design (chat/logs/settings as Sheets,
- * top tabs Overview/Activity/Health, dual headers). All settings now
- * live inline in the canvas; chat moves to a dedicated /chat/[slug]
- * full-page route.
- */
-/**
- * Identity of the canvas for AnimatePresence — keyed on what the USER selected,
- * never on the entity currently resolved from the list.
- *
- * Those differ exactly when a fetch is in flight, and that gap is not
- * theoretical: saving a field on the agent's Configuration tab refetched the
- * lists, `agents` went empty for a beat, `agents.find(...)` returned null, and
- * the key flipped to "empty" and back. React read that as a different element,
- * destroyed the canvas and built a new one — which starts on Overview. The user
- * saw a save "redirect" them. Nothing redirected; the screen was rebuilt.
+ * Identity of the canvas, keyed on what the USER selected, never on the
+ * entity currently resolved from the list: those differ while a fetch is in
+ * flight, and keying on the resolved one rebuilt the canvas after every save.
  */
 export function canvasKey(agentSlug: string | null, crewSlug: string | null) {
   return agentSlug ?? crewSlug ?? "empty"
+}
+
+/**
+ * /crews (Harbor 2): the secondary panel of crews and agents, the crew or
+ * agent page beside it, and the dock (Terminal, Files, and an agent's log).
+ * With nothing selected, desktop opens the last crew seen (or the first in
+ * the panel); a phone shows the panel as the page.
+ */
+/** Hands the create dialogs' API to the layout that hosts them. */
+function CreateBridge({ target }: { target: { current: CrewsCreateApi | null } }) {
+  target.current = useCrewsCreate()
+  return null
 }
 
 export function CrewsLayout({
@@ -119,25 +109,22 @@ export function CrewsLayout({
   agents,
   missions,
   workspaceId,
-  loaded: _loaded = false,
+  loaded = false,
   crewsTotal = null,
-  agentsTotal = null,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
   onRefresh,
 }: CrewsLayoutProps) {
+  const isMobile = useIsMobile()
   const closePanelSheet = useCloseSecondaryPanelSheet()
-  // One provisioning read for the whole explorer: a crew whose image needs a
-  // rebuild or whose last build failed sorts into "Needs attention".
+  const createApi = useRef<CrewsCreateApi | null>(null)
+  const newCrew = useCallback((start: CrewStart) => createApi.current?.newCrew(start), [])
   const provisioning = useProvisioningStatus(workspaceId)
   const provisioningByCrew = useMemo(
     () => new Map(provisioning.detail.map((d) => [d.id, d.status] as const)),
     [provisioning.detail],
   )
-  // Credential tool gaps per crew, the same probe the dashboard and the
-  // vault use (capped at its MAX_CREWS); a crew missing a CLI sorts into
-  // "Needs attention" with an "N gaps" pill.
   const readiness = useCredentialReadiness(workspaceId)
   const gapsByCrew = useMemo(() => {
     const out = new Map<string, number>()
@@ -146,31 +133,9 @@ export function CrewsLayout({
     }
     return out
   }, [readiness.gapsByCredential])
-  // Missions in progress per crew, for the line under each crew's name.
-  const runningMissionsByCrew = useMemo(() => {
-    const out = new Map<string, number>()
-    for (const m of missions) {
-      if (m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW") {
-        out.set(m.crew_id, (out.get(m.crew_id) ?? 0) + 1)
-      }
-    }
-    return out
-  }, [missions])
-  // "Add agent" on a crew row opens the subbar's New agent dialog for that crew.
-  const [addAgentRequest, setAddAgentRequest] = useState<{ crewSlug: string; at: number } | null>(null)
-  const {
-    selectedAgentSlug,
-    selectedCrewSlug,
-    update,
-    selectAgent,
-    selectCrew,
-  } = useCrewsSelection()
 
-  const [bottomTab, setBottomTab] = useState<BottomTab>("messages")
-  const [bottomOpen, setBottomOpen] = useState(false)
-
-  // Detail loaders resolve deep links on the server. A paginated sidebar
-  // cannot decide whether a selected entity exists.
+  const { selectedAgentSlug, selectedCrewSlug, tab, setTab, update, selectCrew } = useCrewsSelection()
+  const [lastCrew, setLastCrew] = useUserPreference<string | null>("crews.lastCrew", null)
 
   const [resolvedCrew, setResolvedCrew] = useState<CrewRecord | null>(null)
   const [resolvedAgent, setResolvedAgent] = useState<AgentRecord | null>(null)
@@ -182,52 +147,33 @@ export function CrewsLayout({
     () => (selectedAgentSlug ? (resolvedAgent?.slug === selectedAgentSlug ? resolvedAgent : agents.find((a) => a.slug === selectedAgentSlug)) || null : null),
     [agents, selectedAgentSlug, resolvedAgent],
   )
-
   const crewAgents = useMemo(
     () => (selectedCrew ? agents.filter((a) => a.crew_id === selectedCrew.id) : []),
     [agents, selectedCrew],
   )
 
-  const handleCrewSelect = useCallback((crewId: string) => {
-    const crew = crews.find((c) => c.id === crewId)
-    if (!crew) return
-    if (selectedCrewSlug === crew.slug && !selectedAgentSlug) {
-      selectCrew(null)
-      return
-    }
-    selectCrew(crew.slug)
-  }, [crews, selectedCrewSlug, selectedAgentSlug, selectCrew])
+  // The crew whose agents the panel lists: the open one, or the open agent's.
+  const openCrewId = selectedAgent ? selectedAgent.crew_id : selectedCrew?.id ?? null
 
-  const handleAgentSelect = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.id === agentId)
-    if (!agent) return
-    if (selectedAgentSlug === agent.slug) {
-      selectAgent(null)
-      return
-    }
-    const parentCrew = agent.crew_id ? crews.find((c) => c.id === agent.crew_id) : null
-    update({ agent: agent.slug, crew: parentCrew?.slug ?? null })
-  }, [agents, crews, selectedAgentSlug, selectAgent, update])
+  useEffect(() => {
+    if (selectedCrewSlug && !selectedAgentSlug && selectedCrewSlug !== lastCrew) setLastCrew(selectedCrewSlug)
+  }, [selectedCrewSlug, selectedAgentSlug, lastCrew, setLastCrew])
 
-  const handleAgentSelectBySlug = useCallback((slug: string) => {
-    const agent = agents.find((a) => a.slug === slug)
-    if (agent) handleAgentSelect(agent.id)
-    else selectAgent(slug)
-  }, [agents, handleAgentSelect, selectAgent])
+  // Desktop and tablet never show an empty canvas: open the last crew seen,
+  // or the first one in the panel's order (Needs you → Working → Idle).
+  useEffect(() => {
+    if (isMobile || !loaded || selectedCrewSlug || selectedAgentSlug || crews.length === 0) return
+    const remembered = lastCrew && crews.some((c) => c.slug === lastCrew) ? lastCrew : null
+    const first = remembered ?? firstCrewSlug(buildPanel({ crews, agents, provisioningByCrew, gapsByCrew, state: DEFAULT_PANEL_STATE }))
+    if (first) update({ crew: first })
+  }, [isMobile, loaded, selectedCrewSlug, selectedAgentSlug, crews, agents, lastCrew, provisioningByCrew, gapsByCrew, update])
 
-  const handleOpenFiles = useCallback(() => {
-    setBottomTab("files")
-    setBottomOpen(true)
-  }, [])
+  const [dockRequest, setDockRequest] = useState<{ tab: BottomTab; at: number } | null>(null)
+  const openTerminal = useCallback(() => setDockRequest({ tab: "terminal", at: Date.now() }), [])
 
-  // Bottom panel context: selected agent > selected crew > none.
-  // Agent context carries the parent crew's id+slug because the Terminal
-  // tab needs them to exec into the right `crewship-team-{slug}` container.
   const bottomContext = useMemo(() => {
     if (selectedAgent) {
-      const parentCrew = selectedAgent.crew_id
-        ? crews.find((c) => c.id === selectedAgent.crew_id)
-        : null
+      const parentCrew = selectedAgent.crew_id ? crews.find((c) => c.id === selectedAgent.crew_id) : null
       return {
         kind: "agent" as const,
         agentId: selectedAgent.id,
@@ -237,114 +183,123 @@ export function CrewsLayout({
         crewSlug: parentCrew?.slug ?? selectedAgent.crew?.slug ?? null,
       }
     }
-    if (selectedCrew) {
-      return { kind: "crew" as const, crewId: selectedCrew.id, crewSlug: selectedCrew.slug }
-    }
+    if (selectedCrew) return { kind: "crew" as const, crewId: selectedCrew.id, crewSlug: selectedCrew.slug }
     return null
   }, [selectedAgent, selectedCrew, crews])
 
-  return (
-    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
-      <CrewsSubbar
+  const nothingOpen = !selectedAgentSlug && !selectedCrewSlug
+  const emptyWorkspace = loaded && crews.length === 0 && agents.length === 0
+
+  const panel = (
+    <SecondaryPanel id="crews" label="Crews and agents" phoneInline={nothingOpen}>
+      <CrewsPanel
         workspaceId={workspaceId}
-        crewSlug={selectedCrewSlug}
-        agentSlug={selectedAgentSlug}
-        crewName={selectedCrew?.name ?? null}
-        agentName={selectedAgent?.name ?? null}
-        onCrewCreated={onRefresh}
-        onAgentCreated={(slug) => {
-          onRefresh()
-          handleAgentSelectBySlug(slug)
-        }}
         crews={crews}
+        agents={agents}
+        openCrewId={openCrewId}
+        selectedCrewId={selectedCrew?.id ?? null}
+        selectedAgentId={selectedAgent?.id ?? null}
+        onCrewSelect={(slug) => { closePanelSheet(); selectCrew(slug) }}
+        onAgentSelect={({ slug, crewSlug }) => { closePanelSheet(); update({ agent: slug, crew: crewSlug }) }}
+        onNewCrew={() => newCrew("suggest")}
         crewsTotal={crewsTotal}
-        agentsTotal={agentsTotal ?? agents.length}
-        addAgentRequest={addAgentRequest}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={onLoadMore}
+        provisioningByCrew={provisioningByCrew}
+        gapsByCrew={gapsByCrew}
       />
+    </SecondaryPanel>
+  )
 
-      {/* Main row: the one SecondaryPanel (Harbor 2) | canvas. The explorer's
-          own toolbar becomes the panel toolbar, so collapse is the panel's; on
-          a phone the explorer is the sheet opened from the top bar. */}
-      <div className="flex-1 min-h-0 flex relative">
-        <SecondaryPanel id="crews" label="Crews and agents">
-          <CrewsExplorer
-            workspaceId={workspaceId}
-            onAgentSlugSelect={(slug) => { closePanelSheet(); selectAgent(slug) }}
-            onCrewSlugSelect={(slug) => { closePanelSheet(); selectCrew(slug) }}
-            crews={crews}
-            agents={agents}
-            selectedCrewId={selectedCrew?.id ?? null}
-            selectedAgentId={selectedAgent?.id ?? null}
-            onCrewSelect={(id) => { closePanelSheet(); handleCrewSelect(id) }}
-            onAgentSelect={(id) => { closePanelSheet(); handleAgentSelect(id) }}
-            crewsTotal={crewsTotal}
-            agentsTotal={agentsTotal}
-            hasMore={hasMore}
-            loadingMore={loadingMore}
-            onLoadMore={onLoadMore}
-            provisioningByCrew={provisioningByCrew}
-            gapsByCrew={gapsByCrew}
-            runningMissionsByCrew={runningMissionsByCrew}
-            onAddAgent={(crewSlug) => { closePanelSheet(); setAddAgentRequest({ crewSlug, at: Date.now() }) }}
-          />
-        </SecondaryPanel>
+  const host = (children: ReactNode) => (
+    <CrewsCreateProvider
+      workspaceId={workspaceId}
+      crews={crews}
+      currentCrewSlug={selectedCrewSlug ?? (selectedAgent?.crew_id ? crews.find((c) => c.id === selectedAgent.crew_id)?.slug ?? null : null)}
+      onCrewCreated={onRefresh}
+      onAgentCreated={(slug) => {
+        onRefresh()
+        if (slug !== selectedAgentSlug) {
+          const a = agents.find((x) => x.slug === slug)
+          update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? null : selectedCrewSlug })
+        }
+      }}
+    >
+      <CreateBridge target={createApi} />
+      {children}
+    </CrewsCreateProvider>
+  )
 
-        {/* Canvas — animated cross-fade on selection change */}
-        <div className="flex-1 overflow-y-auto min-h-0 min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={canvasKey(selectedAgentSlug, selectedCrewSlug)}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
-            >
-              {selectedAgentSlug ? (
-                <AgentCanvas
-                  workspaceId={workspaceId}
-                  agentSlug={selectedAgentSlug}
-                  onLoaded={setResolvedAgent}
-                  crews={crews}
-                  onAgentChanged={(nextSlug) => {
-                    if (nextSlug && nextSlug !== selectedAgentSlug) selectAgent(nextSlug)
-                    onRefresh()
-                  }}
-                  onSelectCrew={(slug) => selectCrew(slug)}
-                  onOpenFiles={handleOpenFiles}
-                />
-              ) : selectedCrewSlug ? (
-                <CrewCanvas
-                  onLoaded={setResolvedCrew}
-                  workspaceId={workspaceId}
-                  crewSlug={selectedCrewSlug}
-                  agentsForCrew={crewAgents}
-                  missions={missions}
-                  onCrewChanged={onRefresh}
-                  onSelectAgent={handleAgentSelectBySlug}
-                  onOpenFiles={handleOpenFiles}
-                  provisioning={provisioning}
-                />
-              ) : (
-                <CrewCatalog
-                  onCrewSelect={selectCrew}
-                  workspaceId={workspaceId}
-                  agents={agents}
-                  onAgentSelect={handleAgentSelectBySlug}
-                />
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+  if (emptyWorkspace) {
+    return host(
+      <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+        <CrewsRootBar />
+        <PageEmpty
+          icon={Users}
+          title="No crews yet"
+          description="A crew is a team of agents with one container, memory and set of tools."
+          primary={{ label: "New crew", onClick: () => newCrew("suggest") }}
+          cli="crewship crew create"
+        />
+      </div>,
+    )
+  }
+
+  return host(
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+      {nothingOpen && <CrewsRootBar />}
+      <div className="relative flex min-h-0 flex-1">
+        {panel}
+        {!(isMobile && nothingOpen) && (
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto" key={canvasKey(selectedAgentSlug, selectedCrewSlug)}>
+            {selectedAgentSlug ? (
+              <AgentCanvas
+                workspaceId={workspaceId}
+                agentSlug={selectedAgentSlug}
+                onLoaded={setResolvedAgent}
+                crews={crews}
+                tab={agentTabFromParam(tab)}
+                onTabChange={(t) => setTab(tabParam(t))}
+                onOpenTerminal={openTerminal}
+                onAgentChanged={(nextSlug) => {
+                  if (nextSlug && nextSlug !== selectedAgentSlug) update({ agent: nextSlug, tab })
+                  onRefresh()
+                }}
+                onSelectCrew={(slug) => selectCrew(slug)}
+              />
+            ) : selectedCrewSlug ? (
+              <CrewCanvas
+                onLoaded={setResolvedCrew}
+                workspaceId={workspaceId}
+                crewSlug={selectedCrewSlug}
+                agentsForCrew={crewAgents}
+                missions={missions}
+                tab={crewTabFromParam(tab)}
+                onTabChange={(t) => setTab(tabParam(t))}
+                onCrewChanged={onRefresh}
+                onSelectAgent={(slug) => {
+                  const a = agents.find((x) => x.slug === slug)
+                  update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? selectedCrewSlug : selectedCrewSlug })
+                }}
+                onOpenTerminal={openTerminal}
+                onBackToCrews={() => { setLastCrew(null); selectCrew(null) }}
+                provisioning={provisioning}
+              />
+            ) : null}
+          </div>
+        )}
       </div>
-
-      {/* Bottom panel — context-aware */}
-      <BottomPanel
-        workspaceId={workspaceId}
-        context={bottomContext}
-        initialTab={bottomTab}
-        initialOpen={bottomOpen}
-        onOpenChange={setBottomOpen}
-      />
-    </div>
+      {/* Terminal and Files of the crew container (v67); a phone has no dock. */}
+      {!isMobile && !nothingOpen && (
+        <BottomPanel
+          workspaceId={workspaceId}
+          context={bottomContext}
+          tabs={selectedAgent ? ["terminal", "files", "exec"] : ["terminal", "files"]}
+          initialTab="terminal"
+          request={dockRequest}
+        />
+      )}
+    </div>,
   )
 }

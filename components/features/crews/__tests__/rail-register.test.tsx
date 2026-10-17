@@ -28,18 +28,17 @@ describe("crews rail type register", () => {
   })
 
   it("uses the register in the rail rather than raw sizes", () => {
-    const rail = read("components/features/crews/crews-explorer.tsx")
+    const rail = read("components/features/crews/crews-panel.tsx")
     expect(rail).toContain("type-nav")
     expect(rail).not.toMatch(/text-\[\d/)
     expect(rail).not.toMatch(/\btext-(xs|sm|base|lg)\b/)
   })
 
-  it("keeps the portrait out of the shrink", () => {
-    // Variant E proposed 24px portraits along with the smaller type. The type
-    // came down; the face did not. 24px is where a line-drawing style stops
-    // being a face, which is the thing the avatar work had just fixed.
-    const rail = read("components/features/crews/crews-explorer.tsx")
-    expect(rail).toContain("h-8 w-8 rounded-lg shrink-0")
-    expect(rail).not.toContain("h-6 w-6 rounded-lg shrink-0")
+  it("draws the Harbor 2 panel sizes: 20 px crew tiles, 18 px agent portraits", () => {
+    // The v67 panel row is one line: the crew's tile at 20 px, and under the
+    // open crew its agents at 18 px with the lead's star and the hire's time.
+    const rail = read("components/features/crews/crews-panel.tsx")
+    expect(rail).toContain("size-5 rounded-md")
+    expect(rail).toContain("size-[18px] rounded-md")
   })
 })
