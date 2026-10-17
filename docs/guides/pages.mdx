@@ -8,7 +8,7 @@ tag: Experimental
 
 # Pages
 
-A **Page** is a workspace-scoped, slug-addressable record holding an ordered
+A **panel Page** is a workspace-scoped, slug-addressable record holding an ordered
 list of **panels**. Each panel declares:
 
 - a **schema** — one of a closed set of five (below),
@@ -57,6 +57,24 @@ spec:
       sla: 1h
       span: 12
 ```
+
+## Create and edit a Doc
+
+Open **Artifacts** to find Docs alongside panel Pages. **New Doc** is available
+when Documents are enabled and your workspace access permits Page creation.
+Choose **New Doc**, enter a name and Page address, then select **Create Doc**.
+The new Doc is private and owned by you.
+
+Write in the document editor and wait for **Saved** before closing the tab.
+Reload the Page to reopen its saved content. Its existing Page address stays
+the same.
+
+If initialization fails, **Retry initialization** uses the original confirmed
+Page. If Page creation cannot be confirmed, check the list before starting
+again; do not assume that another creation attempt is safe. Follow any recovery
+message and download your unsaved draft before reopening the saved document.
+An unavailable service pauses editing while retaining local changes in the tab.
+The Doc view does not offer a **Share** button.
 
 ## The five panel schemas
 
