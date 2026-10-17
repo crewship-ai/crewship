@@ -21,6 +21,98 @@
         ],
         "type": "object"
       },
+      "AccessPresetCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetCatalogEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "presets"
+        ],
+        "type": "object"
+      },
+      "AccessPresetCatalogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/AccessPresetDefinition"
+          },
+          "definition_hash": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "definition",
+          "definition_hash"
+        ],
+        "type": "object"
+      },
+      "AccessPresetDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "project",
+              "routine"
+            ],
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetLevel"
+            },
+            "type": "array"
+          },
+          "managed_operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preset_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "preset_id",
+          "version",
+          "kind",
+          "managed_operations",
+          "levels"
+        ],
+        "type": "object"
+      },
+      "AccessPresetLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "operations"
+        ],
+        "type": "object"
+      },
       "ActiveRunList": {
         "items": {
           "properties": {
@@ -142870,6 +142962,159 @@
           }
         ],
         "summary": "Get workspace access me",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/access/presets": {
+      "get": {
+        "description": "List workspace access presets (GET /api/v1/workspaces/{workspaceId}/access/presets).",
+        "operationId": "get_api_v1_workspaces_workspaceId_access_presets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPresetCatalog"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List workspace access presets",
         "tags": [
           "workspaces"
         ],

@@ -526,3 +526,7 @@ remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
 
 Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.
+
+### Administrative preset catalog
+
+The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Application is not enabled by the catalog slice.
