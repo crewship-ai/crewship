@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 import {
   Network, Zap, Key, Activity, Settings, LayoutDashboard, Plus, ShieldCheck,
-  CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History, MessageSquare,
+  CircleDot, Inbox, CalendarClock, Plug, History, MessageSquare,
   LayoutTemplate, Target, Timer, ArrowLeftRight,
 } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
@@ -247,7 +247,6 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   { title: "Issues", href: "/issues", icon: CircleDot, keywords: [] },
   { title: "Crews", href: "/crews", icon: Network, keywords: ["agents", "roster", "canvas"] },
   { title: "Inbox", href: "/inbox", icon: Inbox, keywords: [] },
-  { title: "Approvals", href: "/approvals", icon: ClipboardCheck, keywords: [] },
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
   { title: "Pages", href: "/pages", icon: LayoutTemplate, keywords: ["dashboards", "panels"] },

@@ -1,68 +1,53 @@
-// Pins a CodeRabbit finding on #2254: useWorkspace().role is null while the
-// workspace snapshot loads, and isAdminTier(null) is false — so without a
-// check on useWorkspace().loading, an OWNER/ADMIN would flash "Approvals is
-// an admin surface" on every load, before their real role resolves.
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, cleanup } from "@testing-library/react"
+import { renderToStaticMarkup } from "react-dom/server"
 
-import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
-
-const h = vi.hoisted(() => ({
-  workspaceId: "ws_1" as string | null,
-  role: null as string | null,
-  workspaceLoading: true,
-}))
-
-vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({
-    workspaceId: h.workspaceId,
-    role: h.role,
-    loading: h.workspaceLoading,
-  }),
-}))
-
-vi.mock("@/hooks/use-approvals", () => ({
-  useApprovals: () => ({
-    rows: [],
-    loading: false,
-    error: null,
-    notConfigured: false,
-    refresh: vi.fn(),
-    patchRow: vi.fn(),
-  }),
-}))
-
+// /approvals is a redirect, not a page: approval requests are decided in the
+// Inbox (one decision layout for every request). The route must keep existing
+// because notification emails, Slack "Review" buttons and
+// `crewship open approvals` still build <server>/approvals.
+const h = vi.hoisted(() => ({ query: "" }))
+const replace = vi.fn()
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace, push: vi.fn(), back: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(h.query),
 }))
 
-import ApprovalsPage from "../page"
+import LegacyApprovalsRedirect from "../page"
 
-describe("ApprovalsPage — workspace-loading gate", () => {
-  it("shows a loading state, not the admin-only denial, while the workspace is still loading", () => {
-    h.role = null
-    h.workspaceLoading = true
-
-    render(<ApprovalsPage />)
-
-    expect(screen.queryByText(/admin surface/i)).not.toBeInTheDocument()
+describe("/approvals", () => {
+  beforeEach(() => {
+    cleanup()
+    replace.mockClear()
+    h.query = ""
   })
 
-  it("shows the admin-only denial once loading finishes and the role is not admin", () => {
-    h.role = "MEMBER"
-    h.workspaceLoading = false
-
-    render(<ApprovalsPage />)
-
-    expect(screen.getByText(/admin surface/i)).toBeInTheDocument()
+  it("redirects to the decisions waiting in the Inbox", () => {
+    render(<LegacyApprovalsRedirect />)
+    expect(replace).toHaveBeenCalledWith("/inbox?attention=approvals")
   })
 
-  it("renders the approvals list once loading finishes and the role is an admin tier", () => {
-    h.role = "OWNER"
-    h.workspaceLoading = false
+  it("carries the agent filter from escalation links", () => {
+    h.query = "agent_id=ag_1"
+    render(<LegacyApprovalsRedirect />)
+    expect(replace).toHaveBeenCalledWith("/inbox?attention=approvals&agent_id=ag_1")
+  })
 
-    render(<ApprovalsPage />)
+  it("sends decided requests to Inbox History", () => {
+    h.query = "status=decided"
+    render(<LegacyApprovalsRedirect />)
+    expect(replace).toHaveBeenCalledWith("/inbox?view=history")
+  })
 
-    expect(screen.queryByText(/admin surface/i)).not.toBeInTheDocument()
-    expect(screen.getByText("Approvals")).toBeInTheDocument()
+  // happy-dom serializes <noscript> as empty, so render to static markup.
+  it("has a no-JavaScript fallback to the Inbox", () => {
+    const html = renderToStaticMarkup(<LegacyApprovalsRedirect />)
+    expect(html).toContain("url=/inbox?attention=approvals")
+    expect(html).toContain('href="/inbox?attention=approvals"')
+  })
+
+  it("renders none of the old page", () => {
+    const { container } = render(<LegacyApprovalsRedirect />)
+    expect(container.textContent ?? "").not.toMatch(/admin surface|Inbox clear|not yet configured/i)
   })
 })
