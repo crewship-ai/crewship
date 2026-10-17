@@ -77,8 +77,12 @@ describe("phone tab bar x role", () => {
   })
 
   it("a Guest gets only the tabs they were granted (Issues may be missing)", () => {
-    expect(titles(visiblePhoneTabs({ surfaces: ["chat", "account_security"], role: "VIEWER" }))).toEqual(["Chat"])
-    expect(titles(visiblePhoneTabs({ surfaces: ["chat", "issues"], role: "VIEWER" }))).toEqual(["Chat", "Issues"])
-    expect(titles(visiblePhoneTabs({ surfaces: [], role: "VIEWER" }))).toEqual([])
+    // Home leads to the Guest's own home (DSH-02), so the tab it replaces is not offered twice.
+    const tabs = (surfaces: RestrictedSurface[]) =>
+      visiblePhoneTabs({ surfaces, role: "VIEWER" }).map((i) => `${i.title} ${i.href}`)
+    expect(tabs(["chat", "account_security"])).toEqual(["Home /chat"])
+    expect(tabs(["chat", "issues"])).toEqual(["Home /chat", "Issues /issues"])
+    expect(tabs(["issues"])).toEqual(["Home /issues"])
+    expect(tabs([])).toEqual([])
   })
 })
