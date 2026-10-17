@@ -17,6 +17,7 @@ import {
   WORK_SOURCE_LABEL,
   WORK_STATUS_LABEL,
   WORK_STATUS_TONE,
+  changeSentence,
   runHistory,
   whenLabel,
   type ChangeItem,
@@ -459,7 +460,7 @@ function ChangePeek({
             {whenLabel(item.ts, now)} · {item.who}
           </span>
         </div>
-        <p className="text-body text-foreground/80">{item.entry.summary}</p>
+        <p className="text-body text-foreground/80">{changeSentence(item)}</p>
 
         {from && to && (
           <Section icon={RefreshCw} title="What changed">

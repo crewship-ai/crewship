@@ -172,6 +172,14 @@ describe("ActivityStreamView", () => {
     expect(screen.getByRole("button", { name: /Could not finish\s*1/ })).toBeInTheDocument()
   })
 
+  it("the list keeps one h1: the view title, not the top-bar path", async () => {
+    show()
+    await screen.findByTestId("activity-summary")
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^Everything$/)
+  })
+
   it("j/k moves selection and opens Peek", async () => {
     show()
     await screen.findByTestId("activity-summary")

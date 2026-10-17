@@ -6,6 +6,7 @@ import {
   EMPTY_FILTERS,
   bundleRepeats,
   changeFromEntry,
+  changeSentence,
   feedCsv,
   feedUrlParams,
   groupFeed,
@@ -74,6 +75,27 @@ describe("work and change rows merge by time, repeated runs bundle per routine p
     expect(c).toMatchObject({ type: "change", kind: "issue", object: "CRW-148 Rotate certificates", action: "Status changed", who: "A person", diff: "In progress → In review" })
     expect(changeFromEntry(entry("e2", { entry_type: "run.completed" }))).toBeNull()
     expect(changeFromEntry(entry("e3", { entry_type: "credential.revealed", actor_type: "agent", agent_id: "a1" }), { agentName: () => "Scout" })).toMatchObject({ kind: "access", who: "Scout" })
+  })
+
+  it("names audited objects in words, never the raw event name", () => {
+    const audit = (id: string, entry_type: string, payload: Record<string, unknown>, summary: string) =>
+      changeFromEntry(entry(id, { entry_type, payload, summary }))!
+    expect(
+      audit("a1", "audit.entity_deleted", { action: "hook.delete", entity_type: "hook", entity_id: "hk_4734b7ad8729a2e2", metadata: { event: "post_agent_stop" } }, "hook.delete hook hk_4734b7ad8"),
+    ).toMatchObject({ kind: "crew", object: "Hook hk_4734b7ad8", action: "Deleted" })
+    expect(
+      audit("a2", "audit.entity_created", { action: "agent_template.create", entity_type: "agent_template", entity_id: "tpl_1", metadata: { name: "Nightly reviewer" } }, "agent_template.create agent_template tpl_1"),
+    ).toMatchObject({ object: "Agent template Nightly reviewer", action: "Created" })
+    expect(
+      audit("a3", "audit.entity_updated", { action: "crew.update", entity_type: "crew", entity_id: "crw_9", name: "Platform" }, "crew.update crew crw_9"),
+    ).toMatchObject({ object: "Crew Platform", action: "Updated" })
+    // An older entry with only the summary still reads as words.
+    expect(audit("a4", "audit.entity_restored", {}, "webhook.restore webhook wh_0123456789abcdef")).toMatchObject({ object: "Webhook wh_012345678", action: "Restored" })
+    // A summary that is already a sentence is kept as it is.
+    expect(audit("a5", "audit.entity_updated", {}, "Renamed the Platform crew")).toMatchObject({ object: "Renamed the Platform crew" })
+    // The Peek's sentence: the verb and the object, not the event name.
+    expect(changeSentence(audit("a6", "audit.entity_deleted", { entity_type: "hook", entity_id: "hk_4734b7ad8729a2e2" }, "hook.delete hook hk_4734b7ad8"))).toBe("Deleted hook hk_4734b7ad8")
+    expect(changeSentence(audit("a7", "audit.entity_updated", {}, "Renamed the Platform crew"))).toBe("Renamed the Platform crew")
   })
 
   it("merges newest first", () => {

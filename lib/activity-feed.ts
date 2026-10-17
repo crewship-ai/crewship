@@ -288,12 +288,55 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined
 }
 
+/** `agent_template` → "Agent template". */
+function entityLabel(type: string): string {
+  const words = type.replace(/[_.-]+/g, " ").trim()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : type
+}
+
+// The audit log's own summary, "hook.delete hook hk_4734b7ad8": action, type, id.
+const RAW_AUDIT_SUMMARY = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\s+([a-z][a-z0-9_]*)\s+(\S+)$/
+
+/**
+ * What an audited create / update / delete / restore was about, in words:
+ * "Hook hk_4734b7ad8", "Crew Platform". The row says the verb under it, so
+ * the event name the audit log stores ("hook.delete …") never reaches the
+ * title. Null when the entry names no object, so the caller keeps looking.
+ */
+export function auditObject(e: Pick<JournalEntry, "payload" | "summary">): string | null {
+  const p = e.payload ?? {}
+  const meta = p["metadata"] && typeof p["metadata"] === "object" ? (p["metadata"] as Record<string, unknown>) : {}
+  let type = str(p["entity_type"])
+  let id = str(p["entity_id"])
+  if (!type) {
+    const m = RAW_AUDIT_SUMMARY.exec(e.summary?.trim() ?? "")
+    if (!m) return null
+    type = m[1]
+    id = m[2]
+  }
+  const name = str(p["name"]) ?? str(meta["name"]) ?? str(p["title"]) ?? str(meta["title"]) ?? str(meta["slug"])
+  const label = entityLabel(type)
+  if (name) return `${label} ${name}`
+  return id ? `${label} ${id.length > 12 ? id.slice(0, 12) : id}` : label
+}
+
+/**
+ * The change as one sentence for the Peek: the entry's own summary, unless
+ * that is the audit log's event name — then "Deleted hook hk_4734b7ad8".
+ */
+export function changeSentence(c: Pick<ChangeItem, "action" | "object" | "entry">): string {
+  const summary = c.entry.summary?.trim() ?? ""
+  if (summary && !RAW_AUDIT_SUMMARY.test(summary)) return summary
+  return `${c.action} ${c.object.charAt(0).toLowerCase()}${c.object.slice(1)}`
+}
+
 export function changeFromEntry(e: JournalEntry, ctx: ChangeContext = {}): ChangeItem | null {
   const kind = changeKindOf(e.entry_type)
   if (!kind) return null
   const p = e.payload ?? {}
   const routineSlug = str(p["pipeline_slug"]) ?? str(p["routine_slug"])
   const object =
+    (e.entry_type.startsWith("audit.") && auditObject(e)) ||
     (e.mission_id && (ctx.issueLabel?.(e.mission_id) ?? str(p["identifier"]) ?? str(p["title"]))) ||
     (routineSlug && (ctx.routineName?.(routineSlug) ?? routineSlug)) ||
     str(p["page_title"]) ||

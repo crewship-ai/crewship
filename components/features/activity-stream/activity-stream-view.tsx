@@ -716,6 +716,9 @@ export function ActivityStreamView({
         title="Activity"
         section={path.stops.length > 0 ? (stop?.label ?? "Run") : title}
         ariaLabel="Activity"
+        // The list shows the view title as its own h1; the top bar's path
+        // then stays plain text so the page keeps exactly one.
+        heading={record != null || path.stops.length > 0}
         actions={
           <>
             {!isMobile && <ActivityRange value={range} onChange={setRange} now={now} />}
