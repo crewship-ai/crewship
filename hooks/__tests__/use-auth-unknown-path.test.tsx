@@ -42,4 +42,13 @@ describe("session-expired redirect on a path the app has no page for", () => {
     expect(replaceSpy).toHaveBeenCalledTimes(1)
     expect(replaceSpy.mock.calls[0][0]).toBe(`/login?reason=expired&redirect=${encodeURIComponent("/issues/CRE-12")}`)
   })
+
+  it("a visitor who never had a session goes to login without being told it expired", async () => {
+    window.history.replaceState({}, "", "/routines?tab=library")
+    const { result } = renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
+    act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "no_credentials" } })) })
+    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    expect(replaceSpy.mock.calls[0][0]).toBe(`/login?redirect=${encodeURIComponent("/routines?tab=library")}`)
+  })
 })

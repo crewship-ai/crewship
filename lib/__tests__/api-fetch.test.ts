@@ -112,6 +112,32 @@ describe("apiFetch", () => {
     window.removeEventListener(AUTH_EVENT, handler)
   })
 
+  it("a visitor with no refresh cookie is reported as no_credentials, not an expired session", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ error: "no_credentials" }, { status: 401 }))
+      .mockResolvedValueOnce(mockResponse({ error: "no_credentials" }, { status: 401 })) // refresh: no cookie
+
+    const handler = vi.fn()
+    window.addEventListener(AUTH_EVENT, handler)
+    const res = await apiFetch("/api/v1/workspaces")
+    expect(res.status).toBe(401)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect((handler.mock.calls[0][0] as CustomEvent).detail.reason).toBe("no_credentials")
+    window.removeEventListener(AUTH_EVENT, handler)
+  })
+
+  it("the refresh's own reason decides: a dropped access cookie over an expired session is still expired", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ error: "no_credentials" }, { status: 401 })) // access cookie gone
+      .mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 })) // refresh cookie present, dead
+
+    const handler = vi.fn()
+    window.addEventListener(AUTH_EVENT, handler)
+    await apiFetch("/api/v1/workspaces")
+    expect((handler.mock.calls[0][0] as CustomEvent).detail.reason).toBe("session_expired")
+    window.removeEventListener(AUTH_EVENT, handler)
+  })
+
   it("concurrent 401s share a single refresh attempt", async () => {
     let pendingRefresh: ((value: Response) => void) | null = null
     const refreshSeen = new Promise<void>((seen) => {
