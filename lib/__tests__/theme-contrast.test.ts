@@ -368,7 +368,7 @@ describe.each(["day", "night"] as const)("%s chart series palette", (theme) => {
   const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "surface-raised"]
   const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
 
-  it.each([1, 2, 3, 4, 5])("series-%i is chart-%i", (n) => {
+  it.each([1, 2, 3, 4, 5])("series-%i is the chart slot of the same number", (n) => {
     expect(token(theme, `series-${n}`)).toBe(token(theme, `chart-${n}`))
   })
 

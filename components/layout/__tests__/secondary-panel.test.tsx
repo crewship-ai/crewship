@@ -22,6 +22,9 @@ beforeEach(() => {
     removeItem: (k: string) => void store.delete(k),
     clear: () => store.clear(),
   })
+  // happy-dom's window is 1024 px wide, a tablet; the cases below are about
+  // the desktop column unless they say otherwise (environment only).
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }))
   act(() => {
     useAppStore.getState().setSecondaryPanel(null)
     useAppStore.getState().setSecondaryPanelOpen(false)
