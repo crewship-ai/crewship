@@ -31,6 +31,19 @@ test.describe("desktop shell", () => {
     await expect(frame).toHaveCSS("border-top-left-radius", "12px")
   })
 
+  for (const path of ["/crews", "/issues", "/settings", "/routines"]) {
+    test(`${path} fits inside the frame without clipping its bottom`, async ({ page }) => {
+      await seed(page, PINNED)
+      await page.goto(path)
+      await expect(page.locator("header").first()).toBeVisible()
+      // These pages size themselves to the viewport and scroll inside; the
+      // page scroller under the top bar must not scroll at all.
+      const scroller = page.locator("[data-slot=sidebar-inset] > .overflow-y-auto").first()
+      const overflow = await scroller.evaluate((el) => el.scrollHeight - el.clientHeight)
+      expect(overflow).toBeLessThanOrEqual(1)
+    })
+  }
+
   test("the rail is 56 px when collapsed", async ({ page }) => {
     await seed(page, { ...PINNED, crewship_sidebar_mode: "collapsed" })
     await page.goto("/issues")
