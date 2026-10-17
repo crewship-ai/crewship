@@ -16,6 +16,7 @@ func TestPresetCLIApplyCommandExists(t *testing.T) {
 }
 
 func TestPresetCLIApplyExactConsentAndNoRetry(t *testing.T) {
+	guardCLIState(t)
 	for _, status := range []int{200, 409, 403} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			stub := covStub(t)
