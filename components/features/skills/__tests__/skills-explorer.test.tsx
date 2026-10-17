@@ -40,6 +40,21 @@ describe("SkillsExplorer", () => {
     expect(screen.queryByText("Proposed by agents")).not.toBeInTheDocument()
   })
 
+  it("each view advertises its 1–6 key, numbered by what the viewer sees", () => {
+    renderExplorer()
+    const expected = ["Library", "On agents", "Not on any agent", "Needs attention", "Proposed by agents", "Archived"]
+    expected.forEach((label, i) => {
+      const hint = screen.getByText(label)
+      expect(hint).toHaveAttribute("title", `${label} · press ${i + 1}`)
+      expect(hint).toHaveAttribute("aria-keyshortcuts", String(i + 1))
+    })
+    cleanup()
+    // Without Proposed the keys close up, as the keyboard handler does.
+    renderExplorer({}, false)
+    expect(screen.getByText("Archived")).toHaveAttribute("title", "Archived · press 5")
+    expect(screen.getByText("Archived")).toHaveAttribute("aria-keyshortcuts", "5")
+  })
+
   it("orders the panel: active filters, then Views, then the facets", () => {
     renderExplorer({ agentId: "a-riley" })
     const text = document.body.textContent ?? ""
