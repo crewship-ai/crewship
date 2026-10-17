@@ -532,3 +532,14 @@ crewship workspace member access presets --format json
 Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.
 
 Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
+
+
+### `crewship workspace member access preset preview MEMBER`
+
+Preview an explicit bundle for an existing restricted member without saving it. `--file` is required; provide a JSON file or `--file -` for stdin. Input contains current `membership_id`, `revision`, `resource: {kind,id}`, `preset_id`, `preset_version`, `level` and optional explicit `reissue` rights. Read the revision with `access get`; unknown/trailing/oversized input is rejected and conflicts are never silently refreshed or retried.
+
+```bash
+crewship --workspace WORKSPACE --format json workspace member access preset preview MEMBER --file selection.json
+```
+
+Table output shows the saved choice or Custom, managed changes, retained orthogonal rights and original issuers/timestamps. Review Results history, execution prerequisites, file-role floors and conditional `delete_issues` eligibility. JSON/YAML/NDJSON preserve the complete normalized selection, provenance, consequences and confirmation checksum, including exact int64 revisions. The checksum supplies no authority; this command never applies a preset. See the [API contract](../api-reference/workspaces.mdx#preview-member-access-preset).

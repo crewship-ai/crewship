@@ -546,3 +546,7 @@ OpenAPI names the unchanged `MemberAccessGrant` provenance shape for reuse. This
 ### Transactional selection recorder
 
 The internal recorder accepts only a caller-owned transaction, a live trusted administrator, an existing restricted membership with the expected post-replacement incarnation/revision, a supported immutable definition and exact matching canonical managed operations. It records the authenticated selecting actor and server time without changing canonical grant rows, issuers, timestamps or membership revisions. The caller must first perform fresh preview/digest checks, canonical replacement and transactional audit, then record selection last and commit once. Any failure must roll back the whole transaction. The helper alone exposes no apply endpoint and performs no backfill.
+
+### Read-only preset preview transport
+
+The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only; no apply endpoint is enabled by this slice.

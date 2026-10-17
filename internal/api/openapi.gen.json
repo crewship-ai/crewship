@@ -53,6 +53,40 @@
         ],
         "type": "object"
       },
+      "AccessPresetChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "remove",
+              "retain",
+              "reissue"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "issuer_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "right": {
+            "$ref": "#/components/schemas/MemberAccessRight"
+          }
+        },
+        "required": [
+          "right",
+          "action",
+          "issuer_id",
+          "live"
+        ],
+        "type": "object"
+      },
       "AccessPresetDefinition": {
         "additionalProperties": false,
         "properties": {
@@ -113,6 +147,136 @@
         ],
         "type": "object"
       },
+      "AccessPresetPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "after_rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "before": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetChange"
+            },
+            "type": "array"
+          },
+          "confirmation_digest": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "current_selection": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessPresetSelection"
+              }
+            ],
+            "nullable": true
+          },
+          "definition_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "orthogonal_rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "type": "array"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AccessPresetRequest"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetWarning"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "selection",
+          "definition_hash",
+          "current_selection",
+          "before",
+          "changes",
+          "after_rights",
+          "orthogonal_rights",
+          "warnings",
+          "confirmation_digest"
+        ],
+        "type": "object"
+      },
+      "AccessPresetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "membership_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "preset_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "preset_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reissue": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "resource": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "project",
+                  "routine"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "membership_id",
+          "revision",
+          "resource",
+          "preset_id",
+          "preset_version",
+          "level"
+        ],
+        "type": "object"
+      },
       "AccessPresetSelection": {
         "additionalProperties": false,
         "properties": {
@@ -166,6 +330,30 @@
           "definition_hash",
           "selected_at",
           "state"
+        ],
+        "type": "object"
+      },
+      "AccessPresetWarning": {
+        "additionalProperties": false,
+        "properties": {
+          "after_eligible": {
+            "type": "boolean"
+          },
+          "before_eligible": {
+            "type": "boolean"
+          },
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
         ],
         "type": "object"
       },
@@ -146170,6 +146358,186 @@
           "workspaces"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview": {
+      "post": {
+        "description": "Preview workspace member access presets (POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview).",
+        "operationId": "post_api_v1_workspaces_workspaceId_members_memberId_access_presets_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memberId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessPresetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPresetPreview"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Preview workspace member access presets",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities": {

@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 
+- Read-only resource-preset previews in the administrative API and CLI show exact managed changes, retained provenance, Results disclosure and independent destructive consequences. Confirmation digests bind live state without granting authority or changing permissions.
+
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
 ### Added
