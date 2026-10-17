@@ -2,24 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import {
-  AlertTriangle,
-  ArrowRight,
-  Bot,
-  CalendarClock,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  Gauge,
-  HelpCircle,
-  Play,
-  ShieldAlert,
-  TimerReset,
-  Wrench,
-  XCircle,
-  type LucideIcon,
-} from "lucide-react"
+import { ChevronRight } from "lucide-react"
 
 import type {
   AgentSummary,
@@ -31,94 +14,53 @@ import type {
 } from "@/app/(dashboard)/dashboard-types"
 import type { InboxItem } from "@/hooks/use-inbox"
 import { isBlockingInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
-import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
-import type { Mission } from "@/lib/types/mission"
-import { AnimatedNumber } from "@/components/ui/animated-number"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { InlineEmpty } from "@/components/ui/inline-empty"
+import { ConceptIcon } from "@/components/ui/concept-icon"
+import { StatusPill } from "@/components/ui/status-pill"
+import { Button } from "@/components/ui/button"
+import { sparklinePoints } from "@/components/ui/sparkline"
+import { DashCard, DashLine, DashNote, TEXT_LINK } from "@/components/features/dashboard/dash-card"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/time"
 import { honestPct } from "@/lib/honest-pct"
 
-export interface AttentionItem {
+// The Routines dashboard still renders the pre-Harbor-2 widgets under their
+// old names; they live in legacy-overview.tsx until that area moves.
+export { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "./legacy-overview"
+
+// ─── Attention ──────────────────────────────────────────────────────────────
+
+export interface AttentionTile {
   id: string
+  /** The whole sentence ("2 decisions waiting") — overflow line, page meta. */
   label: string
+  /** The tile's number, as shown ("12+" past the fetch window). */
+  count: string
+  /** The tile's title without the number ("Decisions waiting"). */
+  title: string
   detail: string
   href: string
-  tone: "warn" | "danger" | "purple" | "blue"
-  icon: LucideIcon
-}
-
-const ATTENTION_TONE = {
-  warn: "border-warn/25 bg-warn/[0.07] text-warn",
-  danger: "border-destructive/25 bg-destructive/[0.07] text-destructive",
-  purple: "border-purple/25 bg-purple/[0.07] text-purple-hover",
-  blue: "border-primary/25 bg-primary/[0.07] text-primary-hover",
-} as const
-
-function MotionLink({
-  href,
-  className,
-  children,
-}: {
-  href: string
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className={className}>
-      <Link href={href}>{children}</Link>
-    </div>
-  )
-}
-
-function LiveDot({ tone = "success" }: { tone?: "success" | "warn" | "danger" | "blue" }) {
-  const reduce = useReducedMotion()
-  const color = {
-    success: "bg-success",
-    warn: "bg-warn",
-    danger: "bg-destructive",
-    blue: "bg-primary",
-  }[tone]
-  return (
-    <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
-      {!reduce && (
-        <motion.span
-          className={cn("absolute inset-0 rounded-full", color)}
-          animate={{ opacity: [0.5, 0], scale: [1, 2.2] }}
-          transition={{ duration: 1.65, repeat: Infinity, ease: "easeOut" }}
-        />
-      )}
-      <span className={cn("relative m-auto h-2 w-2 rounded-full", color)} />
-    </span>
-  )
+  tone: "warn" | "bad" | "vio"
 }
 
 /**
- * What the attention strip is allowed to claim.
+ * What the attention tiles are allowed to claim.
  *
- * "All clear" is a positive assertion about the workspace, and the strip can
- * only make it when the inbox actually answered. `useInbox` throws on a non-ok
- * response with `retry: false`, so a 403 on an RBAC-gated workspace is a
- * permanent empty list, not a transient one — and rendering green over it
- * tells an operator with pending approvals that nothing needs them. The same
- * held for the whole first-paint round trip, which the page's `loading` gate
- * does not cover.
+ * "Nothing needs you" is a positive assertion about the workspace, and the
+ * tiles can only make it when the inbox actually answered. `useInbox` throws
+ * on a non-ok response with `retry: false`, so a 403 on an RBAC-gated
+ * workspace is a permanent empty list, not a transient one — and rendering
+ * green over it tells an operator with pending approvals that nothing needs
+ * them.
  *
  * Three states, because there are three: something is wrong, nothing is
- * wrong, and we do not know.
- *
- * `inboxKnown` is the fourth thing, and it is not a fourth state. `capacity`
- * and `credentials` come from their own endpoints, so the list can be
- * non-empty while the inbox — which carries approvals and failures — was
- * never read. Rendering a confident count over that is the same defect this
- * function exists to prevent, one layer up: a partial answer presented as a
- * complete one. The caller shows the items AND says the rest is unknown.
+ * wrong, and we do not know. `inboxKnown` says whether the items that ARE
+ * shown are the whole answer: capacity holds come from their own endpoint, so
+ * the list can be non-empty while the inbox was never read.
  */
 export function attentionState(args: {
-  items: AttentionItem[]
+  items: AttentionTile[]
   inboxLoading: boolean
   inboxError: string | null
 }): { kind: "items" | "clear" | "unknown"; inboxKnown: boolean } {
@@ -131,15 +73,13 @@ export function attentionState(args: {
 /**
  * The capacity holds that belong to THIS workspace, one per crew.
  *
- * Two corrections in one place, because they share a cause. The endpoint
- * (`GET /api/v1/runtime/capacity`) is deliberately instance-scoped — the host
- * is a property of the instance, not of a workspace — so on an instance with
- * more than one tenant the raw list carries other workspaces' crews. This
- * surface is workspace-scoped and renders a hold's `detail` string verbatim,
- * so filtering is what keeps one tenant's crew names off another's dashboard.
- *
- * And `admission.Hold` is appended per held START, not per crew, so five
- * queued starts on one crew read as "5 crews waiting" without the dedupe.
+ * The endpoint (`GET /api/v1/runtime/capacity`) is deliberately
+ * instance-scoped, so on an instance with more than one tenant the raw list
+ * carries other workspaces' crews; this surface renders a hold's `detail`
+ * verbatim, so filtering is what keeps one tenant's crew names off another's
+ * dashboard. And `admission.Hold` is appended per held START, not per crew,
+ * so five queued starts on one crew read as "5 crews waiting" without the
+ * dedupe.
  */
 export function heldForWorkspace(
   held: RuntimeCapacityResponse["held"] | null | undefined,
@@ -157,614 +97,50 @@ export function heldForWorkspace(
   return out
 }
 
-/**
- * The Runtime capacity signal row.
- *
- * A null response means the fetch failed, and `capacity?.enabled === false` is
- * then also false — so the old expression fell through to a green
- * "Available", reporting a dead admission-control endpoint as healthy
- * capacity. That is the one row an operator reads when starts are hanging.
- * The Memory health row beside it already renders "Unavailable" for exactly
- * this case.
- */
-export function capacitySignal(
-  capacity: RuntimeCapacityResponse | null,
-  held: NonNullable<RuntimeCapacityResponse["held"]>,
-): { value: string; tone: string } {
-  if (capacity == null) return { value: "Unavailable", tone: "text-muted-foreground" }
-  if (held.length > 0) {
-    return { value: `${held.length} held`, tone: "text-warn" }
-  }
-  if (capacity.enabled === false) return { value: "Disabled", tone: "text-muted-foreground" }
-  return { value: "Available", tone: "text-success" }
-}
-
-/** The verb on each attention row — what clicking it lets the person do. */
-const ATTENTION_ACTION: Record<string, string> = {
-  approvals: "Review",
-  failures: "Inspect",
-  reviews: "Review",
-  capacity: "Details",
-  schedules: "Review",
-  drafts: "Publish",
-}
-
-/** How many rows the strip renders as cards before it starts summarising. */
-const ATTENTION_VISIBLE = 3
+/** How many tiles the row shows before the rest move to one overflow line. */
+export const ATTENTION_VISIBLE = 4
 
 /**
- * The items the strip cannot render as cards.
- *
- * The badge always showed `items.length`, so the count was never wrong — what
- * was wrong is that the items past the third had nowhere to go. The order is
- * fixed (approvals, failures, reviews, capacity, schedules), so the later
- * operational alerts still need named links when the first cards are full.
- *
- * Returned rather than dropped so the strip can name them and keep their
- * links.
+ * The items past the fourth tile. Returned rather than dropped so the row can
+ * name them and keep their links — the order is fixed (decisions, failures,
+ * reviews, capacity, schedules), so the later operational alerts would
+ * otherwise vanish exactly when the first tiles are full (#2187).
  */
-export function attentionOverflow(items: AttentionItem[]): AttentionItem[] {
+export function attentionOverflow(items: AttentionTile[]): AttentionTile[] {
   return items.slice(ATTENTION_VISIBLE)
 }
 
-export function AttentionStrip({
-  items,
-  inboxLoading = false,
-  inboxError = null,
-}: {
-  items: AttentionItem[]
-  inboxLoading?: boolean
-  inboxError?: string | null
-}) {
-  const reduce = useReducedMotion()
-  const visible = items.slice(0, ATTENTION_VISIBLE)
-  const overflow = attentionOverflow(items)
-  const { kind: state, inboxKnown } = attentionState({ items, inboxLoading, inboxError })
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
-  return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl border bg-card",
-        state === "items" ? "border-warn/20" : state === "clear" ? "border-success/20" : "border-border/60",
-      )}
-    >
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-        <div className="flex items-center gap-2">
-          {state === "items" ? (
-            <AlertTriangle className="h-4 w-4 text-warn" />
-          ) : state === "clear" ? (
-            <CheckCircle2 className="h-4 w-4 text-success" />
-          ) : (
-            <HelpCircle className="h-4 w-4 text-muted-foreground" />
-          )}
-          <h2 className="text-body font-semibold">
-            {state === "items" ? "Needs your attention" : state === "clear" ? "All clear" : "Attention status unavailable"}
-          </h2>
-          {visible.length > 0 && (
-            <span className="hidden shrink-0 whitespace-nowrap rounded-full bg-warn/12 px-2 py-0.5 text-micro font-semibold text-warn sm:inline-flex">
-              {items.length} categories
-            </span>
-          )}
-        </div>
-        <Link href={entityHref({ kind: "inbox" })} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-label text-primary-hover hover:underline">
-          Open Inbox <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
-      </div>
-
-      {state === "unknown" ? (
-        <div className="flex items-center gap-2 px-4 py-4 text-body text-muted-foreground">
-          {inboxError
-            ? "The inbox could not be read, so this cannot say whether anything is blocking your crews."
-            : "Checking what needs you…"}
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="flex items-center gap-2 px-4 py-4 text-body text-muted-foreground">
-          There is nothing blocking your crews right now.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 divide-y divide-border/60 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-          <AnimatePresence initial={false}>
-            {visible.map((item, index) => {
-              const Icon = item.icon
-              return (
-                <motion.div
-                  key={item.id}
-                  initial={reduce ? false : { opacity: 0, y: 8, backgroundColor: "rgba(30,123,254,0.16)" }}
-                  animate={{ opacity: 1, y: 0, backgroundColor: "rgba(30,123,254,0)" }}
-                  exit={reduce ? undefined : { opacity: 0, y: -8 }}
-                  transition={{ duration: 0.28, delay: reduce ? 0 : index * 0.06, backgroundColor: { duration: 2.2, ease: "easeOut" } }}
-                >
-                  <MotionLink href={item.href} className="h-full">
-                    <div className="group flex h-full items-center gap-3 px-4 py-3.5 transition-colors hover:bg-foreground/[0.025]">
-                      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", ATTENTION_TONE[item.tone])}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-body font-semibold text-foreground/90">{item.label}</span>
-                        <span className="mt-0.5 block truncate text-label text-muted-foreground">{item.detail}</span>
-                      </span>
-                      {/* A verb, not a chevron: the row exists so the person
-                          can act, and the label says what acting means. */}
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 px-2.5 py-1 text-label font-medium text-foreground/90 transition-colors group-hover:border-primary/50 group-hover:text-primary-hover">
-                        {ATTENTION_ACTION[item.id] ?? "Open"} <ChevronRight className="h-3.5 w-3.5" />
-                      </span>
-                    </div>
-                  </MotionLink>
-                </motion.div>
-              )
-            })}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* Later alerts stay named and linked even when the first cards fill. */}
-      {state === "items" && !inboxKnown && (
-        <div className="border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
-          {inboxError
-            ? "Approvals and failed runs are missing from this list — the inbox could not be read."
-            : "Still counting approvals and failed runs…"}
-        </div>
-      )}
-
-      {overflow.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
-          <span>{overflow.length} more:</span>
-          {overflow.map((item) => (
-            <Link key={item.id} href={item.href} className="text-primary-hover hover:underline">
-              {item.label}
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function useNow(active: boolean) {
-  const [now, setNow] = React.useState(() => Date.now())
-  React.useEffect(() => {
-    if (!active) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
-    return () => window.clearInterval(timer)
-  }, [active])
-  return now
-}
-
-function elapsed(startedAt: string, now: number): string {
-  const started = new Date(startedAt).getTime()
-  if (!Number.isFinite(started)) return "—"
-  return formatDuration(Math.max(0, now - started))
-}
-
-export function RunningNow({
-  runs: allRuns,
-  agents,
-  crews,
-  children,
-  loading = false,
-  error = null,
-}: {
-  loading?: boolean
-  error?: string | null
-  runs: PipelineRun[]
-  agents: AgentSummary[]
-  crews: CrewSummary[]
-  /** Rendered under the run list — the activity ticker. */
-  children?: React.ReactNode
-}) {
-  const reduce = useReducedMotion()
-  const runs = allRuns.filter((run) => run.status === "running")
-  const waitingCount = allRuns.filter((run) => run.status === "waiting" || run.status === "paused").length
-  const queuedCount = allRuns.filter((run) => run.status === "queued").length
-  const now = useNow(runs.length > 0)
-  const agentById = React.useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
-  const crewById = React.useMemo(() => new Map(crews.map((crew) => [crew.id, crew])), [crews])
-
-  return (
-    <DashboardCard
-      title="Routines running now"
-      icon={Play}
-      hint={error ? "unavailable" : loading && runs.length === 0 ? "checking" : runs.length > 0 ? `${runs.length} running` : "none running"}
-      action={<Link href="/activity" className="text-primary-hover hover:underline">Activity →</Link>}
-      className="h-full"
-    >
-      {runs.length === 0 ? (
-        <InlineEmpty icon={CheckCircle2} text={error ? "Could not refresh routine activity. Open Activity to retry." : loading ? "Checking routine activity…" : "No routines are running right now."} />
-      ) : (
-        <div className="min-w-0">
-          <div className="min-w-0">
-            <div className="sr-only">
-              <span>Agent / Crew</span><span>Work</span><span>Elapsed · cost</span><span className="text-right">Action</span>
-            </div>
-            <AnimatePresence initial={false}>
-              {runs.slice(0, 5).map((run) => {
-                const agent = agentById.get(run.invoking_agent_id)
-                const crew = crewById.get(run.invoking_crew_id)
-                const waiting = run.status === "waiting" || run.status === "paused"
-                return (
-                  <motion.div
-                    layout="position"
-                    key={run.id}
-                    initial={reduce ? false : { opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={reduce ? undefined : { opacity: 0, x: 12, height: 0 }}
-                    transition={{ type: "spring", stiffness: 360, damping: 34 }}
-                  >
-                    <MotionLink href={`/activity?run=${encodeURIComponent(run.id)}`}>
-                      <div className="group grid grid-cols-2 items-center gap-2 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025]">
-                        <span className="flex min-w-0 items-center gap-2.5">
-                          <LiveDot tone={waiting ? "warn" : "success"} />
-                          <span className="min-w-0">
-                            <span className="block truncate text-body font-medium text-foreground/90">
-                              {agent?.name || run.pipeline_name || run.pipeline_slug}
-                            </span>
-                            <span className="block truncate text-label text-muted-foreground">
-                              {crew?.name || agent?.crew?.name || "Workspace routine"}
-                            </span>
-                          </span>
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-body text-foreground/80">
-                            {run.issue_identifier ? `${run.issue_identifier} · ` : ""}{run.pipeline_name || run.pipeline_slug}
-                          </span>
-                          <span className={cn("block truncate text-label", waiting ? "text-warn" : "text-muted-foreground")}>
-                            {waiting ? "Waiting for approval" : run.current_step_id || "Starting…"}
-                          </span>
-                        </span>
-                        <span className="font-mono text-label tabular-nums text-muted-foreground">
-                          {elapsed(run.started_at, now)}
-                          {run.cost_usd > 0 && <span className="text-muted-foreground-soft"> · ${run.cost_usd.toFixed(2)}</span>}
-                        </span>
-                        <span className="inline-flex items-center justify-end gap-1 text-label font-medium text-primary-hover">
-                          View <ChevronRight className="h-3.5 w-3.5" />
-                        </span>
-                      </div>
-                    </MotionLink>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
-          </div>
-        </div>
-      )}
-      {waitingCount > 0 && <Link href={entityHref({ kind: "inbox" })} className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn">{waitingCount} awaiting approval · Open Inbox →</Link>}
-      {queuedCount > 0 && <p className="mt-2 text-label text-muted-foreground">{queuedCount} queued</p>}
-      {children}
-    </DashboardCard>
-  )
-}
-
-export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
-  const upcoming = React.useMemo(() => {
-    const now = Date.now()
-    return schedules
-      .filter((schedule) => schedule.enabled && schedule.next_run_at && new Date(schedule.next_run_at).getTime() > now)
-      .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
-      .slice(0, 4)
-  }, [schedules])
-  const scheduleTime = (iso: string) => {
-    const date = new Date(iso)
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(today.getDate() + 1)
-    const day = date.toDateString() === today.toDateString() ? "Today"
-      : date.toDateString() === tomorrow.toDateString() ? "Tomorrow"
-        : date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    return `${day} · ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
-  }
-
-  return (
-    <DashboardCard
-      title="Up next"
-      icon={CalendarClock}
-      hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : "none queued"}
-      action={<Link href="/routines?tab=calendar" className="text-primary-hover hover:underline">Calendar →</Link>}
-      className="h-full"
-    >
-      {upcoming.length === 0 ? (
-        <InlineEmpty icon={CalendarClock} text="Nothing scheduled." action={<Link href="/routines" className="text-primary-hover hover:underline">Add a trigger →</Link>} />
-      ) : (
-        <div className="flex flex-col">
-          {upcoming.map((schedule) => (
-            <MotionLink key={schedule.id} href={`/routines?routine=${encodeURIComponent(schedule.target_pipeline_slug || "")}`}>
-              <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2 last:border-0 hover:bg-foreground/[0.025]">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/25 bg-primary/[0.07] text-primary-hover">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-body font-medium text-foreground/85">
-                    {schedule.target_pipeline_slug || schedule.name}
-                  </span>
-                  <span className="block truncate text-label text-muted-foreground">{schedule.name}</span>
-                </span>
-                <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
-                  {scheduleTime(schedule.next_run_at!)}
-                </span>
-                <span
-                  title={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
-                  className={cn("h-2 w-2 shrink-0 rounded-full", scheduleDotClass(schedule.last_status))}
-                  aria-label={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
-                />
-              </div>
-            </MotionLink>
-          ))}
-        </div>
-      )}
-    </DashboardCard>
-  )
-}
-
-/** Pure: the colour of a schedule's "last run" dot. */
-export function scheduleDotClass(lastStatus: string | undefined): string {
-  if (!lastStatus) return "bg-muted-foreground/50"
-  const s = lastStatus.toLowerCase()
-  if (s === "completed" || s === "succeeded" || s === "success" || s === "ok") return "bg-muted-foreground/50"
-  if (s === "failed" || s === "error" || s === "timeout") return "bg-destructive"
-  if (s === "running" || s === "queued") return "bg-primary"
-  return "bg-warn"
-}
-
-function MetricNumber({ value }: { value: number }) {
-  const reduce = useReducedMotion()
-  return reduce ? <>{Math.round(value)}</> : <AnimatedNumber value={value} duration={0.72} />
-}
-
-export interface OutcomeKpiData {
-  completed: number
-  successPct: number | null
-  successOk: number
-  successTotal: number
-  p95Ms: number
-}
-
-export function OutcomeKpis({
-  data,
-  window,
-  spendUsd = null,
-  spendPerRun = null,
-}: {
-  data: OutcomeKpiData
-  window: DashboardWindow
-  /** Metered spend for the window; null when paymaster answered with no
-   *  ledger rows; undefined while pending or after a failed fetch. */
-  spendUsd?: number | null | undefined
-  spendPerRun?: number | null
-}) {
-  const reduce = useReducedMotion()
-  // Nothing ran in the window: four tiles of zeros and dashes say one thing,
-  // so say it once. The tiles come back as soon as anything finishes.
-  if (data.completed === 0 && data.successTotal === 0 && data.p95Ms === 0) {
-    return (
-      <InlineEmpty
-        icon={Gauge}
-        text={<>No agent runs in the last {window}. Routine runs are counted in Activity.</>}
-        action={<Link href="/activity" className="shrink-0 text-label font-medium text-primary-hover hover:underline">Open Activity →</Link>}
-      />
-    )
-  }
-  const cards = [
-    {
-      label: "Completed",
-      icon: CheckCircle2,
-      tone: "text-success bg-success/10 border-success/20",
-      value: <MetricNumber value={data.completed} />,
-      detail: `successful runs · ${window}`,
-    },
-    {
-      label: "Success",
-      icon: Gauge,
-      tone: "text-primary-hover bg-primary/10 border-primary/20",
-      value: data.successPct == null ? "—" : `${data.successPct}%`,
-      detail: data.successTotal > 0 ? `${data.successOk} of ${data.successTotal} finished` : "no finished runs",
-    },
-    // No cost tile. On a flat-rate subscription the marginal cost of a call is
-    // structurally not a number — paymaster says so itself: BillingFlatRate
-    // forces CostUSD to 0 and Confidence to Unknown, and $ budgets do not
-    // apply. Rendering "$0.00" there reads as "this was free", which is a
-    // different claim from "this is not measured here".
-    //
-    // The workspace this was built against makes the point: 25 routine runs
-    // carrying $0.83 of adapter-reported usage produced zero ledger rows,
-    // because routine runs on the subscription adapter never reach the
-    // metered path at all. The tile showed the ledger.
-    //
-    // A cost figure comes back when it follows billing_mode and carries a
-    // cost_confidence badge — which is what paymaster's own type comment
-    // requires ("never display a number without a badge telling the operator
-    // how trustworthy it is") and what this surface never did. See #2193.
-    {
-      label: "P95 duration",
-      icon: TimerReset,
-      tone: "text-purple-hover bg-purple/10 border-purple/20",
-      value: data.p95Ms > 0 ? formatDuration(data.p95Ms) : "—",
-      detail: data.p95Ms > 0 ? "95% finish within this" : "no duration samples",
-    },
-    // The fourth tile the grid always had a slot for. It is the metered
-    // LEDGER, and it says so: on a flat-rate subscription paymaster meters
-    // nothing (#2193), and that case renders "not metered", never "$0.00".
-    {
-      label: "Spend",
-      icon: Gauge,
-      tone: "text-warn bg-warn/10 border-warn/20",
-      value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
-      detail: spendUsd === undefined ? "ledger unavailable" : spendUsd === null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
-    },
-  ]
-
-  return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      {cards.map((card, index) => {
-        const Icon = card.icon
-        return (
-          <motion.div
-            key={card.label}
-            whileHover={reduce ? undefined : { y: -2 }}
-            transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="group flex min-h-20 items-center gap-3 rounded-card border border-border bg-card px-4 py-3 transition-colors hover:border-line-strong"
-          >
-            <motion.span
-              initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
-              animate={{ opacity: 1, rotate: 0, scale: 1 }}
-              transition={{ delay: reduce ? 0 : index * 0.06 + 0.18, type: "spring", stiffness: 360, damping: 25 }}
-              className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", card.tone)}
-            >
-              <Icon className="h-5 w-5" />
-            </motion.span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <span className="text-[20px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
-                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
-              </div>
-              <div className="mt-1 line-clamp-2 text-label leading-snug text-muted-foreground">{card.detail}</div>
-            </div>
-          </motion.div>
-        )
-      })}
-    </div>
-  )
-}
-
-export interface FleetHealthRow {
-  crew: CrewSummary
-  status: string
-  detail: string
-  tone: "success" | "warn" | "danger" | "muted" | "blue"
-  agents: number
-  runningAgents: number
-  services: CrewServiceSummary
-}
-
-const FLEET_TONE = {
-  success: { icon: CheckCircle2, className: "text-success" },
-  warn: { icon: Wrench, className: "text-warn" },
-  danger: { icon: ShieldAlert, className: "text-destructive" },
-  muted: { icon: Clock3, className: "text-muted-foreground" },
-  blue: { icon: Play, className: "text-primary-hover" },
-} as const
-
-export function FleetHealth({ rows }: { rows: FleetHealthRow[] }) {
-  return (
-    <DashboardCard title="Fleet health" icon={Bot} hint={`${rows.length} crews`} action={<Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>} className="h-full">
-      {rows.length === 0 ? (
-        <EmptyState icon={Bot} title="No crews yet" detail="Create a crew to start building your fleet." />
-      ) : (
-        <div className="overflow-x-auto">
-          <div className="min-w-[510px]">
-            <div className="grid grid-cols-[minmax(120px,1fr)_minmax(150px,1.3fr)_80px_84px] gap-3 border-b border-border/60 px-2 pb-2 text-label text-muted-foreground">
-              <span>Crew</span><span>Status</span><span>Agents</span><span>Services</span>
-            </div>
-            {rows.slice(0, 6).map((row) => {
-              const meta = FLEET_TONE[row.tone]
-              const Icon = meta.icon
-              return (
-                <MotionLink key={row.crew.id} href={`/crews?crew=${encodeURIComponent(row.crew.slug)}`}>
-                  <div className="group grid grid-cols-[minmax(120px,1fr)_minmax(150px,1.3fr)_80px_84px] items-center gap-3 rounded-md border-b border-border/50 px-2 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
-                    <span className="truncate text-body font-medium text-primary-hover">{row.crew.name}</span>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Icon className={cn("h-4 w-4 shrink-0", meta.className)} />
-                      <span className="min-w-0">
-                        <span className={cn("block truncate text-body", meta.className)}>{row.status}</span>
-                        <span className="block truncate text-micro text-muted-foreground">{row.detail}</span>
-                      </span>
-                    </span>
-                    <span className="font-mono text-label tabular-nums text-muted-foreground">{row.runningAgents}/{row.agents}</span>
-                    <span className={cn("font-mono text-label tabular-nums", row.services.degraded > 0 ? "text-warn" : "text-muted-foreground")}>
-                      {row.services.checked ? `${row.services.running}/${row.services.total}` : "—"}
-                    </span>
-                  </div>
-                </MotionLink>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </DashboardCard>
-  )
-}
-
-const WORK_STATUS: Record<string, { label: string; className: string; Icon: LucideIcon }> = {
-  COMPLETED: { label: "Completed", className: "text-success", Icon: CheckCircle2 },
-  DONE: { label: "Completed", className: "text-success", Icon: CheckCircle2 },
-  FAILED: { label: "Failed", className: "text-destructive", Icon: XCircle },
-  REVIEW: { label: "Review", className: "text-warn", Icon: Clock3 },
-  IN_PROGRESS: { label: "Running", className: "text-primary-hover", Icon: Play },
-}
-
-export function RecentWork({ missions }: { missions: Mission[] }) {
-  return (
-    <DashboardCard title="Recent work" icon={CheckCircle2} hint={missions.length > 0 ? `latest ${Math.min(5, missions.length)}` : "no work yet"} action={<Link href="/issues" className="text-primary-hover hover:underline">Issues →</Link>}>
-      {missions.length === 0 ? (
-        <EmptyState icon={CheckCircle2} title="No recent work" detail="Issues and assignments will appear here." />
-      ) : (
-        <div className="overflow-x-auto">
-          <div className="min-w-[700px]">
-            <div className="grid grid-cols-[72px_minmax(210px,1fr)_130px_100px_80px_72px] gap-3 border-b border-border/60 px-2 pb-2 text-label text-muted-foreground">
-              <span>Issue</span><span>Title</span><span>Owner</span><span>Outcome</span><span>Duration</span><span className="text-right">Est.</span>
-            </div>
-            {missions.slice(0, 5).map((mission) => {
-              const status = WORK_STATUS[mission.status] ?? { label: mission.status.toLowerCase().replace("_", " "), className: "text-muted-foreground", Icon: Clock3 }
-              const Icon = status.Icon
-              const duration = mission.completed_at
-                ? Math.max(0, new Date(mission.completed_at).getTime() - new Date(mission.created_at).getTime())
-                : 0
-              return (
-                <MotionLink key={mission.id} href={mission.identifier ? `/issues/${mission.identifier}` : "/issues"}>
-                  <div className="group grid grid-cols-[72px_minmax(210px,1fr)_130px_100px_80px_72px] items-center gap-3 rounded-md border-b border-border/50 px-2 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
-                    <span className="truncate font-mono text-label text-primary-hover">{mission.identifier ?? "—"}</span>
-                    <span className="truncate text-body text-foreground/85">{mission.title}</span>
-                    <span className="truncate text-label text-muted-foreground">{mission.assignee_name || mission.lead_agent_name || mission.crew_name || "Unassigned"}</span>
-                    <span className={cn("inline-flex items-center gap-1.5 text-label", status.className)}><Icon className="h-3.5 w-3.5" />{status.label}</span>
-                    <span className="font-mono text-label tabular-nums text-muted-foreground">{duration > 0 ? formatDuration(duration) : "—"}</span>
-                    <span className="text-right font-mono text-label tabular-nums text-muted-foreground">
-                      {mission.total_estimated_cost == null ? "—" : `$${mission.total_estimated_cost.toFixed(2)}`}
-                    </span>
-                  </div>
-                </MotionLink>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </DashboardCard>
-  )
-}
-
-function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
-  return (
-    <div className="flex min-h-[150px] flex-col items-center justify-center gap-2 px-4 text-center">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-foreground/[0.025] text-muted-foreground">
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="text-body font-medium text-foreground/80">{title}</span>
-      <span className="max-w-[280px] text-label text-muted-foreground-soft">{detail}</span>
-    </div>
-  )
-}
-
+/**
+ * The attention tiles, in a fixed priority order: decisions, failures,
+ * reviews, capacity, schedules. A kind with nothing waiting has no tile.
+ */
 export function buildAttentionItems({
   inbox,
   heldCrews,
   reviewCount = 0,
+  reviewIdentifiers = [],
   activeByKind,
   decisionCount,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
   reviewCount?: number
+  /** Identifiers of the first issues waiting for review, newest first. */
+  reviewIdentifiers?: string[]
   /** Server-computed exact counts of visible not-resolved items per kind.
-   *  When present the labels count from it — inbox rows are windowed at 100
-   *  and the headline silently plateaued there (#2187). The windowed items
-   *  still supply the single-item deep link below. */
+   *  When present the counts come from it — inbox rows are windowed at 100
+   *  and the headline silently plateaued there (#2187). */
   activeByKind?: Record<string, number>
   decisionCount?: number
-}): AttentionItem[] {
-  const items: AttentionItem[] = []
+}): AttentionTile[] {
+  const items: AttentionTile[] = []
   const decisions = inbox.filter(isBlockingInboxItem)
   const failures = inbox.filter((item) => item.kind === "failed_run" || item.kind === "schedule_circuit_breaker_tripped")
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
-  // Server aggregate wins when the server sent one: exact past any window.
   const decisionsTotal = decisionCount ?? decisions.length
   const failedRunCount = activeByKind
     ? (activeByKind.failed_run ?? 0)
@@ -775,12 +151,323 @@ export function buildAttentionItems({
   const failuresCount = failedRunCount + circuitBreakerCount
   const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
 
-  if (decisionsTotal > 0) items.push({ id: "approvals", label: `${decisionsTotal} decision${decisionsTotal === 1 ? "" : "s"} waiting`, detail: "Your input is needed", href: entityHref({ kind: "inbox", attention: "approvals" }), tone: "warn", icon: Clock3 })
-  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", attention: "run-alerts" }), tone: "danger", icon: XCircle })
-  if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
-  if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
-  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed routines", href: entityHref({ kind: "inbox", attention: "schedule-alerts" }), tone: "blue", icon: CalendarClock })
+  if (decisionsTotal > 0) {
+    items.push({
+      id: "approvals",
+      label: `${decisionsTotal} ${plural(decisionsTotal, "decision", "decisions")} waiting`,
+      count: String(decisionsTotal),
+      title: plural(decisionsTotal, "Decision waiting", "Decisions waiting"),
+      detail: "Approvals and questions",
+      href: entityHref({ kind: "inbox", attention: "approvals" }),
+      tone: "warn",
+    })
+  }
+  if (failuresCount > 0) {
+    const alerts = circuitBreakerCount > 0
+    const first = failures[0]?.title
+    items.push({
+      id: "failures",
+      label: alerts ? `${failuresCount} run ${plural(failuresCount, "alert", "alerts")}` : `${failuresCount} failed ${plural(failuresCount, "run", "runs")}`,
+      count: String(failuresCount),
+      title: alerts ? plural(failuresCount, "Run alert", "Run alerts") : plural(failuresCount, "Failed run", "Failed runs"),
+      detail: first || "Investigate and retry",
+      href: entityHref({ kind: "inbox", attention: "run-alerts" }),
+      tone: "bad",
+    })
+  }
+  if (reviewCount > 0) {
+    const shown = reviewCount >= 12 ? "12+" : String(reviewCount)
+    items.push({
+      id: "reviews",
+      label: `${shown} ${plural(reviewCount, "issue", "issues")} for review`,
+      count: shown,
+      title: plural(reviewCount, "Issue for review", "Issues for review"),
+      detail: reviewIdentifiers.slice(0, 2).join(", ") || "Check agent work and decide",
+      href: entityHref({ kind: "issues", status: "REVIEW" }),
+      tone: "vio",
+    })
+  }
+  if (held > 0) {
+    items.push({
+      id: "capacity",
+      label: `${held} ${plural(held, "crew", "crews")} waiting for capacity`,
+      count: String(held),
+      title: "Waiting for capacity",
+      detail: heldCrews[0]?.detail || "View host admission details",
+      href: "/settings",
+      tone: "warn",
+    })
+  }
+  if (scheduleCount > 0) {
+    items.push({
+      id: "schedules",
+      label: `${scheduleCount} schedule ${plural(scheduleCount, "alert", "alerts")}`,
+      count: String(scheduleCount),
+      title: plural(scheduleCount, "Schedule alert", "Schedule alerts"),
+      detail: "Missed routines",
+      href: entityHref({ kind: "inbox", attention: "schedule-alerts" }),
+      tone: "warn",
+    })
+  }
   return items
+}
+
+const TILE_TONE: Record<AttentionTile["tone"], string> = {
+  warn: "bg-chip-warn-bg text-chip-warn-fg",
+  bad: "bg-chip-danger-bg text-chip-danger-fg",
+  vio: "bg-chip-violet-bg text-chip-violet-fg",
+}
+
+/**
+ * Up to four tiles, each a number in the tone of its state, a title and one
+ * fact; whatever does not fit is named on one line under them. When nothing
+ * waits, one line says so — and only when the inbox answered.
+ */
+export function AttentionTiles({
+  items,
+  inboxLoading = false,
+  inboxError = null,
+  onRetry,
+}: {
+  items: AttentionTile[]
+  inboxLoading?: boolean
+  inboxError?: string | null
+  onRetry?: () => void
+}) {
+  const visible = items.slice(0, ATTENTION_VISIBLE)
+  const overflow = attentionOverflow(items)
+  const { kind, inboxKnown } = attentionState({ items, inboxLoading, inboxError })
+
+  if (kind !== "items") {
+    return (
+      <div data-testid="attention-tiles" data-state={kind} className="mb-4 overflow-hidden rounded-card border border-border bg-card [&>*]:border-t-0">
+        {kind === "clear" ? (
+          <DashNote tone="ok">Nothing needs you right now</DashNote>
+        ) : inboxError ? (
+          <DashNote tone="error" action={onRetry && <Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-11">Retry</Button>}>
+            Could not check the inbox
+          </DashNote>
+        ) : (
+          <DashNote>Checking what needs you…</DashNote>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div data-testid="attention-tiles" data-state="items" className="mb-4">
+      <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+        {visible.map((item) => (
+          <Link
+            key={item.id}
+            href={item.href}
+            data-slot="attention-tile"
+            className="group flex min-w-0 flex-col items-start gap-2 rounded-card border border-border bg-card px-3.5 py-3 text-muted-foreground transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-primary md:flex-row md:items-center md:gap-3"
+          >
+            <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-md text-heading font-semibold tabular-nums", TILE_TONE[item.tone])}>
+              {item.count}
+            </span>
+            <span className="min-w-0 flex-1">
+              <b className="block font-medium text-foreground max-md:whitespace-normal md:truncate">{item.title}</b>
+              <small className="block truncate text-label">{item.detail}</small>
+            </span>
+            <ChevronRight className="hidden size-3.5 shrink-0 md:block" aria-hidden />
+          </Link>
+        ))}
+      </div>
+      {(overflow.length > 0 || !inboxKnown) && (
+        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-label text-muted-foreground">
+          {!inboxKnown && (
+            <span>{inboxError ? "Decisions and failed runs are missing here — the inbox could not be read." : "Still counting decisions and failed runs…"}</span>
+          )}
+          {overflow.length > 0 && (
+            <>
+              <span>+{overflow.length} more:</span>
+              {overflow.map((item) => (
+                <Link key={item.id} href={item.href} className={TEXT_LINK}>
+                  {item.label}
+                </Link>
+              ))}
+              <Link href={entityHref({ kind: "inbox" })} className={TEXT_LINK}>Open Inbox</Link>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Up next ────────────────────────────────────────────────────────────────
+
+/** Pure: when a scheduled run fires, as the card's right column says it —
+ *  "09:30" today, "Thu 22 · 08:00" within a week, "1 Nov" after that. */
+export function upNextTime(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso)
+  const time = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  if (at.toDateString() === now.toDateString()) return time
+  if (at.getTime() - now.getTime() < 7 * 24 * 3_600_000) {
+    return `${at.toLocaleDateString("en-GB", { weekday: "short" })} ${at.getDate()} · ${time}`
+  }
+  return at.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+}
+
+const FAILED_STATUS = new Set(["failed", "error", "timeout"])
+
+export function DashboardUpNext({ schedules, now }: { schedules: PipelineSchedule[]; now?: Date }) {
+  const upcoming = React.useMemo(() => {
+    const t = (now ?? new Date()).getTime()
+    return schedules
+      .filter((schedule) => schedule.enabled && schedule.next_run_at && new Date(schedule.next_run_at).getTime() > t)
+      .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
+      .slice(0, 3)
+  }, [schedules, now])
+
+  return (
+    // "Calendar" names where the link will go; until the Calendar page ships
+    // it opens the routines calendar tab.
+    <DashCard title="Up next" concept="triggers" link={{ label: "Calendar", href: "/routines?tab=calendar" }}>
+      {upcoming.length === 0 ? (
+        <DashNote action={<Link href="/routines" className={TEXT_LINK}>Add a trigger</Link>}>Nothing scheduled.</DashNote>
+      ) : (
+        upcoming.map((schedule) => {
+          const routine = schedule.target_pipeline_slug || schedule.name
+          const failed = schedule.last_status ? FAILED_STATUS.has(schedule.last_status.toLowerCase()) : false
+          return (
+            <DashLine
+              key={schedule.id}
+              lead={<ConceptIcon concept="routines" variant="chip" className="h-7 w-7 rounded-md" />}
+              title={routine}
+              sub={schedule.name !== routine ? schedule.name : undefined}
+              href={entityHref({ kind: "routine", slug: schedule.target_pipeline_slug || "" })}
+              right={
+                <>
+                  {failed && <StatusPill tone="danger" label="Last run failed" />}
+                  <span className="whitespace-nowrap font-mono text-label tabular-nums text-muted-foreground">{upNextTime(schedule.next_run_at!, now)}</span>
+                </>
+              }
+            />
+          )
+        })
+      )}
+    </DashCard>
+  )
+}
+
+// ─── KPIs ───────────────────────────────────────────────────────────────────
+
+export interface DashboardKpiData {
+  completed: number
+  successPct: number | null
+  successOk: number
+  successTotal: number
+  p95Ms: number
+  p50Ms: number
+}
+
+/** A sparkline that stretches to its tile; drawn only from a real series. */
+function KpiSpark({ values, label }: { values: number[]; label: string }) {
+  const pts = sparklinePoints(values, 120, 28)
+  const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")
+  return (
+    <svg data-slot="kpi-spark" viewBox="0 0 120 28" preserveAspectRatio="none" className="mt-1 block h-7 w-full" role="img" aria-label={label}>
+      <polyline points={`2,28 ${line} 118,28`} fill="var(--primary)" fillOpacity={0.1} stroke="none" />
+      <polyline points={line} fill="none" stroke="var(--primary)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+/**
+ * The run summary as one strip of four figures: label, number, one fact of
+ * context. A sparkline is drawn only where a series exists — the run volume
+ * under Completed. Change against the previous window and a workspace budget
+ * have no source yet, so they are not shown.
+ */
+export function DashboardKpis({
+  data,
+  window,
+  // No default: a default of null turned "the ledger has not answered"
+  // (undefined) into "not metered", a claim about the billing mode.
+  spendUsd,
+  spendPerRun = null,
+  completedSeries,
+  completedSeriesLabel,
+}: {
+  data: DashboardKpiData
+  window: DashboardWindow
+  /** Metered spend for the window; null when paymaster answered with no
+   *  ledger rows; undefined while pending or after a failed fetch. */
+  spendUsd: number | null | undefined
+  spendPerRun?: number | null
+  /** Runs per bucket across the window, oldest first. */
+  completedSeries?: number[]
+  completedSeriesLabel?: string
+}) {
+  // Nothing ran in the window: four tiles of zeros and dashes say one thing,
+  // so say it once.
+  if (data.completed === 0 && data.successTotal === 0 && data.p95Ms === 0) {
+    return (
+      <div data-testid="dashboard-kpis" className="mt-4 overflow-hidden rounded-card border border-border bg-card [&>*]:border-t-0">
+        <DashNote action={<Link href="/activity" className={TEXT_LINK}>Activity</Link>}>
+          No agent runs in the last {window}. Routine runs are counted in Activity.
+        </DashNote>
+      </div>
+    )
+  }
+  const failed = data.successTotal - data.successOk
+  const tiles: { label: string; value: string; context?: string; spark?: React.ReactNode }[] = [
+    {
+      label: "Completed",
+      value: String(data.completed),
+      spark: completedSeries && completedSeries.length > 1 && completedSeries.some((v) => v > 0)
+        ? <KpiSpark values={completedSeries} label={completedSeriesLabel ?? "Runs over the window"} />
+        : undefined,
+    },
+    {
+      label: "Success",
+      value: data.successPct == null ? "—" : `${data.successPct}%`,
+      context: data.successTotal > 0 ? `${failed} failed` : "no finished runs",
+    },
+    {
+      label: "P95 duration",
+      value: data.p95Ms > 0 ? formatDuration(data.p95Ms) : "—",
+      context: data.p50Ms > 0 ? `median ${formatDuration(data.p50Ms)}` : undefined,
+    },
+    // The metered LEDGER, and it says so: on a flat-rate subscription
+    // paymaster meters nothing (#2193), and that case renders "not metered",
+    // never "$0.00".
+    {
+      label: "Spend",
+      value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
+      context: spendUsd === undefined ? "unavailable" : spendUsd === null ? "not metered" : spendPerRun != null ? `per run $${spendPerRun.toFixed(2)}` : undefined,
+    },
+  ]
+
+  return (
+    <div data-testid="dashboard-kpis" className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-border xl:grid-cols-4">
+      {tiles.map((tile) => (
+        <div key={tile.label} data-slot="kpi" className="min-w-0 bg-card px-4 py-3.5">
+          <small className="block text-control text-muted-foreground">{tile.label}</small>
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <b className="text-title font-semibold tabular-nums tracking-tight text-foreground">{tile.value}</b>
+            {tile.context && <em className="text-label not-italic text-muted-foreground">{tile.context}</em>}
+          </span>
+          {tile.spark}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Crews ──────────────────────────────────────────────────────────────────
+
+export interface FleetHealthRow {
+  crew: CrewSummary
+  status: string
+  detail: string
+  tone: "success" | "warn" | "danger" | "muted" | "blue"
+  agents: number
+  runningAgents: number
+  services: CrewServiceSummary
 }
 
 export function deriveFleetHealth({
@@ -832,7 +519,7 @@ export function deriveFleetHealth({
 
 export function kpisFromInsights(
   insights: RunInsightsResponse | null,
-): OutcomeKpiData {
+): DashboardKpiData {
   const ok = insights?.totals.succeeded ?? 0
   const failed = insights?.totals.failed ?? 0
   const finished = ok + failed
@@ -844,5 +531,6 @@ export function kpisFromInsights(
     successOk: ok,
     successTotal: finished,
     p95Ms: insights?.duration.p95_ms ?? 0,
+    p50Ms: insights?.duration.p50_ms ?? 0,
   }
 }
