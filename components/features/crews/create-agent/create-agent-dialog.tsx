@@ -6,24 +6,18 @@ import { toast } from "@/lib/toast"
 import {
   ArrowRight,
   Brain,
-  ChevronDown,
   Cpu,
   Bot,
   CreditCard,
   FileText,
   ShieldCheck,
   MessageSquare,
-  Layers,
   Sparkles,
   TriangleAlert,
   Wrench,
 } from "lucide-react"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import {
   CreateSurface,
   CreateSurfaceBody,
@@ -44,9 +38,8 @@ import { ApiError, toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
-import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
+import type { AgentPersona } from "@/lib/entities"
 import { AvatarPickerBody } from "@/components/features/crews/avatar-picker-dialog"
-import { TemplateBrowser } from "./template-browser"
 import {
   AgentAccessSection,
   applyAgentAccess,
@@ -73,6 +66,11 @@ import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-ta
 import type { AgentRecord } from "../agent-canvas-tabs/types"
 import type { AgentDraft } from "./types"
 import { usePageSave } from "@/components/ui/page-save-bar"
+import { WizardSteps } from "@/components/ui/wizard-steps"
+import { getModelLabel } from "@/lib/cli-adapters"
+import { adapterLabel } from "@/lib/credentials/provider-logins"
+import { StartFrom, type AgentStart } from "./start-from"
+import { SkillChips, assignSkills, type WorkspaceSkillLite } from "./skill-chips"
 
 export interface CreateAgentDialogProps {
   workspaceId: string
@@ -92,7 +90,15 @@ export interface CreateAgentDialogProps {
   inlineLabel?: string
 }
 
-export type AgentEditorSection = "identity" | "model" | "instructions" | "access" | "chat"
+export type AgentEditorSection = "identity" | "model" | "toolAccess" | "instructions" | "access" | "chat"
+
+/** New agent is four steps (Who → Model → Access → Instructions); each shows these sections. */
+export const NEW_AGENT_STEPS: Array<{ label: string; sections: AgentEditorSection[] }> = [
+  { label: "Who", sections: ["identity"] },
+  { label: "Model", sections: ["model", "toolAccess"] },
+  { label: "Access", sections: ["access"] },
+  { label: "Instructions", sections: ["instructions", "chat"] },
+]
 
 /** Stands in for CreateSurface when the form is on the page. */
 function InlineSurface({ children }: { children: React.ReactNode } & Record<string, unknown>) {
@@ -115,6 +121,13 @@ const INPUT_CLASS =
   "w-full bg-background border border-foreground/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-12 coarse:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
+
+const WIZARD_HINTS = [
+  "Who it is and which crew it works in.",
+  "Who thinks, which program runs it, and what it may do.",
+  "The account it pays with and the skills it gets.",
+  "How it should behave. Then create it.",
+]
 /** Shared create/edit form with persistent drafts and focused settings sections. */
 export function CreateAgentDialog({
   workspaceId,
@@ -128,7 +141,15 @@ export function CreateAgentDialog({
   inlineLabel = "Agent",
 }: CreateAgentDialogProps) {
   const inline = inlineSections !== undefined
-  const show = (id: AgentEditorSection) => (inline ? inlineSections.includes(id) : section === id)
+  // Creating in the dialog is the four-step wizard; editing keeps sections.
+  const wizard = !agent && !inline
+  const [step, setStep] = useState(0)
+  // Tool access sits with the model in the wizard and with access elsewhere.
+  const show = (id: AgentEditorSection): boolean => {
+    if (inline) return inlineSections.includes(id) || (id === "toolAccess" && inlineSections.includes("access"))
+    if (wizard) return NEW_AGENT_STEPS[step].sections.includes(id)
+    return section === id || (id === "toolAccess" && section === "access")
+  }
   const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
     ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
@@ -158,11 +179,13 @@ export function CreateAgentDialog({
   // before the next render wires up the disabled button.
   const submittingRef = useRef(false)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [browserOpen, setBrowserOpen] = useState(false)
   // Held beside the draft rather than inside it: these are not fields of
   // POST /api/v1/agents, they are two follow-up calls the draft has no shape
   // for, and the submit-body test asserts the draft maps 1:1 to the Go struct.
   const [access, setAccess] = useState<AgentAccessSelection>({ integrationIds: [], channelIds: [] })
+  // New agent: Who > Start from, and Access > Skills (assigned after create).
+  const [start, setStart] = useState<AgentStart>("blank")
+  const [skillDraft, setSkillDraft] = useState<WorkspaceSkillLite[]>([])
   const accessCatalog = useAgentAccessCatalog(workspaceId, open)
   // What the server said when it said no. Rendered in the shell's refusal
   // band between the body and the footer — the toast alone had already
@@ -182,6 +205,10 @@ export function CreateAgentDialog({
     if (open && !wasOpenRef.current) {
       const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
       setSection("identity")
+      setStep(0)
+      setStart("blank")
+      setSkillDraft([])
+      setRestrictedDraft(null)
       setFieldErrors({})
       setProviderConfirmed(!!agent)
       setDraft(next)
@@ -192,7 +219,6 @@ export function CreateAgentDialog({
       setPersona(undefined)
       setBaselineCrewSlug(defaultCrewSlugRef.current)
       setSubmitting(false)
-      setBrowserOpen(false)
       setAccess({ integrationIds: [], channelIds: [] })
       setRefusal(null)
     }
@@ -247,8 +273,26 @@ export function CreateAgentDialog({
   const handlePickPersona = useCallback((persona: AgentPersona) => {
     setDraft((d) => applyPersonaDefaults(d, persona))
     setProviderConfirmed(false)
-    setBrowserOpen(false)
   }, [])
+
+  // Copy an agent: its model, runner, limits, instructions and skills; the
+  // name, slug and avatar stay the new agent's own.
+  const handleCopy = useCallback((src: AgentRecord) => {
+    setDraft((d) => ({
+      ...draftFromAgent(src, crews),
+      name: d.name, slug: d.slug, slugTouched: d.slugTouched,
+      avatarSeed: d.avatarSeed, avatarStyle: d.avatarStyle, avatarTouched: d.avatarTouched,
+      crewSlug: d.crewSlug || (crews.find((c) => c.id === src.crew_id)?.slug ?? ""),
+      agentRole: "AGENT",
+    }))
+    setProviderConfirmed(true)
+    void apiFetch(`/api/v1/agents/${encodeURIComponent(src.id)}/skills?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ skill_id: string; name?: string; skill_name?: string; display_name?: string | null }>) => {
+        if (Array.isArray(rows)) setSkillDraft(rows.map((r) => ({ id: r.skill_id, name: r.skill_name ?? r.name ?? r.skill_id, display_name: r.display_name ?? null })))
+      })
+      .catch(() => undefined)
+  }, [crews, workspaceId])
 
   const handleBlank = useCallback(() => {
     setDraft((d) => ({
@@ -276,7 +320,7 @@ export function CreateAgentDialog({
 
   const submit = useCallback(async () => {
     if (submittingRef.current) return
-    if (!agent && !providerConfirmed) { setSection("model"); return }
+    if (!agent && !providerConfirmed) { setSection("model"); setStep(1); return }
     submittingRef.current = true
     setSubmitting(true)
     setRefusal(null)
@@ -376,10 +420,20 @@ export function CreateAgentDialog({
         !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
           : []
+      // New agent > Access: the seat it pays with and its skills, keyed on
+      // the agent that now exists (credential, then skills).
+      if (!agent && seatDraft) {
+        try {
+          await applyPaysWith(workspaceId, created.id, seatDraft)
+        } catch {
+          failed.push(`pays with ${seatDraft.name}`)
+        }
+      }
+      if (!agent && skillDraft.length) failed.push(...(await assignSkills(workspaceId, created.id, skillDraft)))
 
       if (failed.length) {
         toast.warning(`Agent "${created.name}" created, but ${failed.length} grant${failed.length === 1 ? "" : "s"} did not apply`, {
-          description: `${failed.join(", ")} — add them from the agent's canvas.`,
+          description: `${failed.join(", ")} — add them under the agent's Tools and access.`,
         })
       } else {
         toast.success(`Agent "${created.name}" ${agent ? "updated" : "created"}`)
@@ -397,6 +451,7 @@ export function CreateAgentDialog({
         const field = err.field
         setFieldErrors({ [field]: err.message })
         setSection("identity")
+        setStep(0)
         return
       }
       const message = `Could not ${agent ? "save" : "create"} agent: ${err instanceof Error ? err.message : String(err)}`
@@ -406,7 +461,13 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router, inline])
+  }, [agent, providerConfirmed, persona, baseline, extra, seatDraft, learningDraft, restrictedDraft, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, skillDraft, onOpenChange, onCreated, router, inline])
+
+  // Continue on Who needs a valid identity; on Model, a provider and model.
+  const stepReady = step === 0 ? isIdentityValid(draft) : step === 1 ? providerConfirmed && !!draft.llmModel.trim() : true
+  const stepHint = !stepReady
+    ? step === 0 ? validationHint : "Choose a provider and model"
+    : null
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -415,7 +476,7 @@ export function CreateAgentDialog({
     void submit()
   }, [valid, submitting, submit])
 
-  const dirty = agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0
+  const dirty = agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 || seatDraft !== null || learningDraft !== null || restrictedDraft !== null : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0 || seatDraft !== null || skillDraft.length > 0
 
   // On the page, one save bar commits this form with the others.
   usePageSave({
@@ -444,7 +505,7 @@ export function CreateAgentDialog({
       <Surface
         open={open}
         onOpenChange={onOpenChange}
-        size="xl"
+        size={wizard ? "md" : "xl"}
         className="h-[92dvh] sm:h-[min(85dvh,720px)]"
         dirty={dirty}
         discardLabel="this agent"
@@ -453,6 +514,7 @@ export function CreateAgentDialog({
           // the agent underneath it. Same rule the crew wizard applies to
           // its base-image and icon panels.
           if (pickerOpen) { setPickerOpen(false); return }
+          if (wizard && step < NEW_AGENT_STEPS.length - 1) { if (stepReady) setStep((n) => n + 1); return }
           handleShortcutSubmit()
         }}
       >
@@ -460,18 +522,27 @@ export function CreateAgentDialog({
           concept="crews"
           accent="purple"
           context={crewName}
-          title={pickerOpen ? (agent ? `Avatar — ${agent.name}` : "Avatar — new agent") : agent ? `Edit ${agent.name}` : "New agent"}
+          title={pickerOpen ? (agent ? `Avatar — ${agent.name}` : "Avatar — new agent") : agent ? `Edit ${agent.name}` : crewName ? `New agent in ${crewName}` : "New agent"}
           description={
             pickerOpen
               ? "Pick a style and a seed. The same seed always produces the same face."
-              : agent ? "Changes are saved together when you choose Save changes." : "Pick a template to start fast, or fill in the basics."
+              : agent ? "Changes are saved together when you choose Save changes." : WIZARD_HINTS[step]
           }
           onBack={pickerOpen ? () => setPickerOpen(false) : undefined}
           onClose={() => onOpenChange(false)}
         />}
+        {wizard && !pickerOpen && (
+          <WizardSteps
+            steps={NEW_AGENT_STEPS.map((st) => st.label)}
+            current={step}
+            onStepChange={setStep}
+            freeNavigation
+            className="shrink-0 border-b border-border px-5 py-2.5"
+          />
+        )}
         {inline && pickerOpen && <button type="button" className="text-label text-primary-hover hover:underline" onClick={() => setPickerOpen(false)}>Done with the avatar</button>}
 
-        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen || inline} sections={[
+        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen || inline || wizard} sections={[
           { id: "identity", label: "Identity", icon: Bot },
           { id: "model", label: "Model and execution", icon: Cpu },
           { id: "instructions", label: "Instructions and persona", icon: FileText },
@@ -534,80 +605,21 @@ export function CreateAgentDialog({
               catalogue. The six featured are not lost — they were an
               arbitrary slice of the same thirty, and the catalogue behind
               this row has all of them with search and categories. */}
-          <CreateSurfaceSection
-            title="Template"
-            icon={Sparkles}
-            accent="gold"
-            hint="optional · pre-fills prompt + LLM + avatar"
-          >
-            <div className="flex items-center gap-2">
-              <Popover open={browserOpen} onOpenChange={setBrowserOpen} modal>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Choose a template"
-                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-foreground/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-foreground/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 coarse:min-h-12"
-                  >
-                    {draft.selectedPersona ? (
-                      <>
-                        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full border border-foreground/10 bg-muted">
-                          <img
-                            src={getAgentAvatarUrl(
-                              draft.selectedPersona.suggestedSlug,
-                              draft.selectedPersona.avatarStyle,
-                            )}
-                            alt=""
-                            className="h-full w-full"
-                          />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="font-medium">{draft.selectedPersona.name}</span>
-                          <span className="text-muted-foreground"> · {draft.selectedPersona.roleTitle}</span>
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                          Blank — browse {BUILTIN_PERSONAS.length} templates
-                        </span>
-                      </>
-                    )}
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  sideOffset={6}
-                  className="w-[640px] max-w-[calc(100vw-2rem)] p-0 bg-card border-foreground/[0.08]"
-                >
-                  <div className="p-3 border-b border-foreground/[0.08]">
-                    <div className="text-[13px] font-semibold mb-0.5">All templates</div>
-                    <div className="text-[11.5px] text-muted-foreground">
-                      Pick one — we&apos;ll close this and pre-fill everything below.
-                    </div>
-                  </div>
-                  <TemplateBrowser
-                    selected={draft.selectedPersona}
-                    onSelect={handlePickPersona}
-                  />
-                </PopoverContent>
-              </Popover>
-
-              {/* Only when there is something to clear. As a permanent
-                  "Blank" pill it was a second control competing with the
-                  picker for the same decision even when nothing was picked. */}
-              {draft.selectedPersona !== null && (
-                <button
-                  type="button"
-                  onClick={handleBlank}
-                  className="shrink-0 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground coarse:min-h-12"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </CreateSurfaceSection>
+          {/* Start from: blank, a template (the catalogue on the step) or a
+              copy of an agent. Creation only; an existing agent keeps its
+              settings on its own tabs. */}
+          {!agent && (
+            <CreateSurfaceSection title="Start from" icon={Sparkles} accent="gold" hint="optional · pre-fills model, instructions and avatar">
+              <StartFrom
+                workspaceId={workspaceId}
+                start={start}
+                onStart={(next) => { setStart(next); if (next === "blank") handleBlank() }}
+                selectedPersona={draft.selectedPersona}
+                onPickPersona={handlePickPersona}
+                onCopy={handleCopy}
+              />
+            </CreateSurfaceSection>
+          )}
 
           {/* ─── Identity ─── */}
           <CreateSurfaceSection title="Identity" icon={Bot} accent="purple">
@@ -868,17 +880,45 @@ WORK STYLE: …`}
                 </CreateSurfaceField>
               )}
           </EditorPanel>
-          <EditorPanel active={show("access")}>
+          <EditorPanel active={show("toolAccess")}>
             <CreateSurfaceSection title="Tool access" icon={Wrench} accent="amber" hint="The runner's built-in tools. Credentials and integrations have separate permissions.">
               <CreateSurfaceChoice ariaLabel="Tool access" value={draft.toolProfile} onChange={toolProfile => setDraft({ ...draft, toolProfile })} options={TOOL_PROFILES.map(value => ({ value, label: { MINIMAL: "Read and plan", CODING: "Workspace work", FULL: "Full tool access" }[value] }))} />
               <p className="text-sm text-muted-foreground">{{ MINIMAL: "Requests a restricted tool set or read-only planning mode, depending on the runner.", CODING: "Read and edit workspace files, and run commands inside the crew container.", FULL: "All tools exposed by the runner. Crew permissions and network rules still apply." }[draft.toolProfile]}</p>
               <p className="text-xs text-muted-foreground">Enforcement depends on the selected runner. This setting does not change the crew's network access.</p>
             </CreateSurfaceSection>
+          </EditorPanel>
+          <EditorPanel active={show("access")}>
+            {!agent && (
+              <CreateSurfaceSection title="Pays with" icon={CreditCard} hint="the provider account its runs are charged to">
+                <PaysWithRow workspaceId={workspaceId} agentId="" agentName={draft.name || "this agent"} cliAdapter={draft.cliAdapter} paysWith={null} pending={seatDraft} onPick={setSeatDraft} />
+                <p className="text-xs text-muted-foreground">Left alone, it uses the account shared with {crewName ?? "the workspace"}. Assigned right after the agent is created.</p>
+              </CreateSurfaceSection>
+            )}
+            {!agent && (
+              <CreateSurfaceSection title="Skills" icon={Wrench} accent="amber">
+                <SkillChips workspaceId={workspaceId} value={skillDraft} onChange={setSkillDraft} enabled={open && show("access")} />
+              </CreateSurfaceSection>
+            )}
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
             {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
             {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Tools and access.</p>}
           </EditorPanel>
           <EditorPanel active={show("chat")}>
+            {wizard && (
+              <CreateSurfaceSection title="What Create agent does" icon={ArrowRight}>
+                <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm" data-testid="new-agent-summary">
+                  <dt className="text-muted-foreground">Agent</dt>
+                  <dd>{[draft.name.trim() || "—", crewName ?? "workspace-wide", draft.agentRole === "LEAD" ? "lead" : null].filter(Boolean).join(" · ")}</dd>
+                  <dt className="text-muted-foreground">Model</dt>
+                  <dd>{providerConfirmed && draft.llmModel ? `${getModelLabel(draft.llmModel)} via ${adapterLabel(draft.cliAdapter)}` : "not chosen yet"}</dd>
+                  <dt className="text-muted-foreground">Access</dt>
+                  <dd>{[seatDraft ? `pays with ${seatDraft.name}` : "inherited account", skillDraft.length ? `${skillDraft.length} skill${skillDraft.length === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</dd>
+                  <dt className="text-muted-foreground">Memory</dt>
+                  <dd>{draft.memoryEnabled ? "On · daily notes merged at night" : "Off"}</dd>
+                </dl>
+                <p className="text-xs text-muted-foreground">Creates the agent, then assigns the account and skills: the same calls as <span className="font-mono">crewship agent create</span>, <span className="font-mono">credential binding create</span> and <span className="font-mono">skill assign</span>.</p>
+              </CreateSurfaceSection>
+            )}
             {!agent && <CreateSurfaceSection title="Chat suggestions and forms" icon={MessageSquare}><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async value => { setExtra(current => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={value => { setExtra(current => ({ ...current, ask_forms: value })) }} /></CreateSurfaceSection>}
             {agent && <ConfigTab agent={{ ...agent, ...extra }} patch={async body => { setExtra(current => ({ ...current, ...body })) }} learning={{ draft: learningDraft, onChange: setLearningDraft }} />}
           </EditorPanel>
@@ -889,7 +929,18 @@ WORK STYLE: …`}
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
-        {!inline && <CreateSurfaceFooter
+        {wizard && <CreateSurfaceFooter
+          hint={step === NEW_AGENT_STEPS.length - 1 && validationHint ? <span className="text-warn">{validationHint}</span> : stepHint ?? `Step ${step + 1} of ${NEW_AGENT_STEPS.length}`}
+          lead={<span className="text-xs text-muted-foreground sm:hidden">Step {step + 1} of {NEW_AGENT_STEPS.length}</span>}
+          onCancel={() => onOpenChange(false)}
+          secondary={step > 0 ? <Button type="button" variant="ghost" size="sm" onClick={() => setStep((n) => n - 1)}>Back</Button> : undefined}
+          primaryLabel={step < NEW_AGENT_STEPS.length - 1 ? "Continue" : submitting ? "Saving…" : "Create agent"}
+          primaryIcon={ArrowRight}
+          primaryDisabled={step < NEW_AGENT_STEPS.length - 1 ? !stepReady : !valid || !providerConfirmed}
+          busy={submitting}
+          onPrimary={() => (step < NEW_AGENT_STEPS.length - 1 ? setStep((n) => n + 1) : void submit())}
+        />}
+        {!inline && !wizard && <CreateSurfaceFooter
           hint={validationHint ? <span className="text-warn">{validationHint}</span> : undefined}
           onCancel={() => onOpenChange(false)}
           primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : !providerConfirmed ? "Choose provider" : "Create agent"}
