@@ -5,6 +5,7 @@
 import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { _resetWorkspaceStoreForTests, useWorkspace } from "@/hooks/use-workspace"
 import { clearStaleCache } from "@/lib/stale-cache"
 import { useAppStore } from "@/lib/store"
@@ -122,6 +123,12 @@ function fail(status: number): Response {
 
 interface Routes {
   credentials?: unknown[]
+  /** `?kind=provider_login` — defaults to the rows of `credentials` that carry a login. */
+  logins?: unknown[]
+  pools?: unknown[]
+  poolDetails?: Record<string, unknown>
+  bindings?: unknown[]
+  preferences?: Record<string, unknown>
   crews?: unknown[]
   agents?: unknown[]
   single?: Response
@@ -129,10 +136,17 @@ interface Routes {
   /** Answer the single-secret fetch only after a real timer, like a network round trip. */
   singleDelayMs?: number
 }
-function routeApi({ credentials = [], crews = [], agents = [], single, dependents = {}, singleDelayMs }: Routes = {}) {
+function routeApi({ credentials = [], logins, pools = [], poolDetails = {}, bindings = [], preferences = {}, crews = [], agents = [], single, dependents = {}, singleDelayMs }: Routes = {}) {
   h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+    if (url === "/api/v1/me/preferences") return ok(preferences)
+    if (url.startsWith("/api/v1/me/preferences/")) return ok({})
     if (init?.method === "DELETE" || init?.method === "PATCH") return ok({})
+    if (url === "/api/v1/provider-logins/pools") return ok({ items: pools, next_cursor: null })
+    const pool = /^\/api\/v1\/provider-logins\/pools\/([^/?]+)$/.exec(url)
+    if (pool) return poolDetails[decodeURIComponent(pool[1])] ? ok(poolDetails[decodeURIComponent(pool[1])]) : fail(404)
+    if (url.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings })
+    if (url.startsWith("/api/v1/credentials?") && url.includes("kind=provider_login") && logins) return ok(logins)
     if (url.startsWith("/api/v1/credentials?")) return ok(credentials)
     const dep = /\/api\/v1\/credentials\/([^/?]+)\/dependents/.exec(url)
     if (dep) return ok({ routines: dependents[decodeURIComponent(dep[1])] ?? [] })
@@ -144,6 +158,11 @@ function routeApi({ credentials = [], crews = [], agents = [], single, dependent
     if (url.startsWith("/api/v1/agents?")) return ok(agents)
     return ok([])
   })
+}
+
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  return render(<QueryClientProvider client={client}><CredentialsPage /></QueryClientProvider>)
 }
 
 function table() {
@@ -176,7 +195,7 @@ describe("page states", () => {
       if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
       throw new TypeError("fetch failed")
     })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText("Couldn't load the vault")).toBeInTheDocument()
     expect(screen.queryByText("The vault is empty")).not.toBeInTheDocument()
     routeApi({ credentials: [makeCredential()] })
@@ -186,13 +205,13 @@ describe("page states", () => {
 
   it("names the HTTP status of a failed load", async () => {
     h.apiFetch.mockImplementation(async (url: string) => (url.startsWith("/api/v1/workspaces") ? ok([{ id: "ws1", name: "Test" }]) : fail(500)))
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText(/HTTP 500/)).toBeInTheDocument()
   })
 
   it("shows the empty vault with the CLI that exists", async () => {
     routeApi()
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText("The vault is empty")).toBeInTheDocument()
     expect(screen.getByText("crewship credential create")).toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "Add secret" }).length).toBeGreaterThan(0)
@@ -202,7 +221,7 @@ describe("page states", () => {
   it("says the filters matched nothing, without offering to create", async () => {
     nav.reset("q=nothing-like-this")
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText("Nothing matches these filters")).toBeInTheDocument()
     expect(screen.queryByText("The vault is empty")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
@@ -213,7 +232,7 @@ describe("page states", () => {
   it("a linked secret that is gone shows not found with a way back", async () => {
     nav.reset("id=gone")
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText("This secret doesn’t exist")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Back to Secrets" }))
     expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
@@ -223,14 +242,14 @@ describe("page states", () => {
   it("a linked secret that is gone shows not found even when the lookup is slow", async () => {
     nav.reset("id=gone")
     routeApi({ credentials: [makeCredential()], singleDelayMs: 30 })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByText("This secret doesn’t exist")).toBeInTheDocument()
   })
 
   it("a linked secret outside the list opens even when the lookup is slow", async () => {
     nav.reset("id=cred_far")
     routeApi({ credentials: [makeCredential()], single: ok(makeCredential({ id: "cred_far", name: "FAR_KEY" })), singleDelayMs: 30 })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByTestId("detail-sheet")).toHaveTextContent("FAR_KEY")
   })
 })
@@ -243,14 +262,14 @@ describe("the Secrets table", () => {
         makeCredential({ id: "seat", name: "Claude Max", type: "PROVIDER_LOGIN", provider: "ANTHROPIC", login: { mode: "subscription", provider: "ANTHROPIC", plan: null, plan_label: null, owner_user_id: null, owner_email: null, expires_at: null, refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null, delivery: { kind: "env", target: "CLAUDE_CODE_OAUTH_TOKEN" }, pays_for: { agents: 0, crews: 0 } } }),
       ],
     })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
     expect(table().queryByText("Claude Max")).not.toBeInTheDocument()
   })
 
   it("opens a secret's page through the URL", async () => {
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     fireEvent.click(await findRow("STRIPE_API_KEY"))
     expect(nav.push).toHaveBeenCalledWith("/credentials?id=cred_1", { scroll: false })
     expect(await screen.findByTestId("detail-sheet")).toHaveTextContent("STRIPE_API_KEY")
@@ -259,13 +278,13 @@ describe("the Secrets table", () => {
   it("links: ?id= opens the entity page and ?tab= picks its tab", async () => {
     nav.reset("id=cred_1&tab=history")
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByTestId("detail-sheet")).toHaveAttribute("data-tab", "history")
   })
 
   it("loads 50 rows at a time", async () => {
     routeApi({ credentials: Array.from({ length: 63 }, (_, i) => makeCredential({ id: `c${i}`, name: `KEY_${String(i).padStart(2, "0")}` })) })
-    render(<CredentialsPage />)
+    renderPage()
     await screen.findByRole("table", { name: "Secrets" })
     expect(table().getAllByRole("row")).toHaveLength(51)
     expect(screen.getByText("Showing 50 of 63")).toBeInTheDocument()
@@ -284,7 +303,7 @@ describe("health strip", () => {
         makeCredential({ id: "d", name: "BUSY" }),
       ],
     })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("BUSY")
     const strip = within(screen.getByRole("group", { name: "Vault health" }))
     expect(strip.getByRole("button", { name: /^1 rejected/i })).toBeInTheDocument()
@@ -314,7 +333,7 @@ describe("URL filters from other pages", () => {
       crews: [{ id: "crew-r", name: "Research", slug: "research" }],
       agents: [{ id: "ag-scout", slug: "scout", name: "Scout", crew_id: "crew-r" }],
     })
-    render(<CredentialsPage />)
+    renderPage()
     await waitFor(() => expect(screen.getByRole("table", { name: "Secrets" })).toBeInTheDocument())
     await waitFor(() => expect(table().queryByText("OTHER")).not.toBeInTheDocument())
     await waitFor(() => expect(table().getByText("HELD_BY_SCOUT")).toBeInTheDocument())
@@ -325,7 +344,7 @@ describe("URL filters from other pages", () => {
   it("links: ?class= filters by classification and the chip removes it", async () => {
     nav.reset("class=SEALED")
     routeApi({ credentials: [makeCredential({ id: "a", name: "SEALED_ONE", sensitivity: "SEALED" }), makeCredential({ id: "b", name: "PLAIN" })] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await findRow("SEALED_ONE")).toBeInTheDocument()
     expect(table().queryByText("PLAIN")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Remove filter Classification: Sealed" }))
@@ -336,7 +355,7 @@ describe("URL filters from other pages", () => {
   it("links: ?tab=providers opens AI providers for owners", async () => {
     nav.reset("tab=providers")
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await screen.findByRole("heading", { level: 1, name: "AI providers" })).toBeInTheDocument()
   })
 
@@ -344,17 +363,126 @@ describe("URL filters from other pages", () => {
     h.role = "MEMBER"
     nav.reset("tab=providers")
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.getByRole("note")).toHaveTextContent("AI provider accounts are managed by owners and admins.")
     expect(screen.queryByRole("navigation", { name: "Vault spaces" })).not.toBeInTheDocument()
   })
 })
 
+function seat(id: string, name: string, over: Record<string, unknown> = {}) {
+  return makeCredential({
+    id, name, type: "PROVIDER_LOGIN", provider: (over.provider as string) ?? "ANTHROPIC",
+    login: {
+      mode: "subscription", provider: (over.provider as string) ?? "ANTHROPIC", plan: null, plan_label: "Max",
+      owner_user_id: "u-pavel", owner_email: "pavel@example.test", expires_at: null,
+      refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null,
+      delivery: { kind: "env", target: "CLAUDE_CODE_OAUTH_TOKEN" }, pays_for: { agents: 1, crews: 0 },
+      ...over,
+    },
+  })
+}
+
+describe("AI providers space", () => {
+  const SEATS = [
+    seat("s1", "Claude Max · Pavel"),
+    seat("s2", "Gemini · Tomas", { provider: "GOOGLE", owner_email: "tomas@example.test", owner_user_id: "u-tomas", refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: "invalid_grant" } }),
+    seat("s3", "OpenRouter", { provider: "OPENROUTER", mode: "api_key", pays_for: { agents: 0, crews: 0 } }),
+  ]
+
+  it("shows the health strip, the cards and the account groups in the panel", async () => {
+    nav.reset("space=providers")
+    routeApi({ credentials: [makeCredential(), ...SEATS], pools: [{ id: "p1", name: "Claude seats", provider: "ANTHROPIC", mode: "subscription", revision: 1, allow_cross_owner: false, member_count: 1 }], poolDetails: { p1: { id: "p1", name: "Claude seats", provider: "ANTHROPIC", mode: "subscription", revision: 1, allow_cross_owner: false, member_count: 1, members: [{ credential_id: "s1", priority: 0 }] } } })
+    renderPage()
+    expect(await screen.findByRole("heading", { level: 1, name: "AI providers" })).toBeInTheDocument()
+    const health = screen.getByRole("group", { name: "AI providers health" })
+    expect(within(health).getByRole("button", { name: /^1 need a new sign-in/i })).toBeInTheDocument()
+    expect(within(health).getByRole("button", { name: /^1 pay for nothing/i })).toBeInTheDocument()
+    // Three accounts: cards, the group named on its member.
+    expect(document.querySelector("[data-slot=provider-accounts]")).toHaveAttribute("data-layout", "cards")
+    expect(await screen.findByText("· Claude seats")).toBeInTheDocument()
+    const panel = document.querySelector('[data-slot="secondary-panel"]') as HTMLElement
+    fireEvent.click(within(panel).getByText("Claude seats"))
+    expect(query().get("pool")).toBe("p1")
+    expect(await screen.findByRole("heading", { level: 1, name: "Claude seats" })).toBeInTheDocument()
+  })
+
+  it("views and the health tiles live in the URL", async () => {
+    nav.reset("space=providers")
+    routeApi({ credentials: SEATS })
+    renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: /^1 need a new sign-in/i }))
+    expect(query().get("view")).toBe("attention")
+    expect(await screen.findByRole("heading", { level: 1, name: "Needs attention" })).toBeInTheDocument()
+    expect(screen.getByText("Gemini · Tomas")).toBeInTheDocument()
+    expect(screen.queryByText("Claude Max · Pavel")).not.toBeInTheDocument()
+  })
+
+  it("one provider chosen is that provider's page", async () => {
+    nav.reset("space=providers&provider=GOOGLE")
+    routeApi({ credentials: SEATS, bindings: [{ id: "b1", credential_id: "s2", credential_name: "Gemini · Tomas", scope: "WORKSPACE", crew_id: null, agent_id: null, slot: "GEMINI_API_KEY" }] })
+    renderPage()
+    expect(await screen.findByRole("heading", { level: 1, name: "Gemini / Google" })).toBeInTheDocument()
+    expect(screen.getByText("Gemini CLI, OpenCode")).toBeInTheDocument()
+    expect(await screen.findByText("Gemini · Tomas", { selector: "dd" })).toBeInTheDocument()
+  })
+
+  it("keys 1 and 2 switch the spaces, never while typing", async () => {
+    routeApi({ credentials: [makeCredential(), ...SEATS] })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    fireEvent.keyDown(window, { key: "2" })
+    expect(query().get("space")).toBe("providers")
+    expect(await screen.findByRole("heading", { level: 1, name: "AI providers" })).toBeInTheDocument()
+    const search = screen.getByRole("textbox", { name: "Search AI provider accounts" })
+    fireEvent.keyDown(search, { key: "1" })
+    expect(query().get("space")).toBe("providers")
+    fireEvent.keyDown(window, { key: "1" })
+    expect(query().get("space")).toBeNull()
+  })
+
+  it("a MEMBER's key 2 does nothing", async () => {
+    h.role = "MEMBER"
+    routeApi({ credentials: [makeCredential()] })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    fireEvent.keyDown(window, { key: "2" })
+    expect(query().get("space")).toBeNull()
+  })
+
+  it("remembers the last space and a bare /credentials opens it", async () => {
+    routeApi({ credentials: [makeCredential(), ...SEATS], preferences: { "vault.lastSpace": "providers" } })
+    renderPage()
+    await waitFor(() => expect(query().get("space")).toBe("providers"))
+    expect(nav.replace).toHaveBeenCalled()
+    // Switching back writes the new space.
+    fireEvent.keyDown(window, { key: "1" })
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith("/api/v1/me/preferences/vault.lastSpace", expect.objectContaining({ method: "PUT", body: JSON.stringify("secrets") })), { timeout: 2000 })
+  })
+
+  it("an address that names a space wins over the memory", async () => {
+    nav.reset("type=API_KEY")
+    routeApi({ credentials: [makeCredential()], preferences: { "vault.lastSpace": "providers" } })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    expect(query().get("space")).toBeNull()
+  })
+
+  it("Add AI provider opens its own dialog", async () => {
+    nav.reset("space=providers")
+    routeApi({ credentials: SEATS })
+    renderPage()
+    await screen.findByRole("heading", { level: 1, name: "AI providers" })
+    fireEvent.click(screen.getAllByRole("button", { name: "Add AI provider" })[0])
+    expect(await screen.findByRole("dialog", { name: /Add AI provider/ })).toBeInTheDocument()
+    expect(screen.queryByTestId("add-secret-sheet")).not.toBeInTheDocument()
+  })
+})
+
 describe("roles", () => {
   it("OWNER can tick rows, change the tier and delete", async () => {
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("STRIPE_API_KEY")
     fireEvent.click(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
     const bar = screen.getByRole("toolbar", { name: "Change the selected secrets" })
@@ -366,7 +494,7 @@ describe("roles", () => {
   it("MANAGER can change the tier but not delete (DELETE is OWNER/ADMIN)", async () => {
     h.role = "MANAGER"
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("STRIPE_API_KEY")
     fireEvent.click(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
     const bar = screen.getByRole("toolbar", { name: "Change the selected secrets" })
@@ -377,7 +505,7 @@ describe("roles", () => {
   it("MEMBER without credential.create sees the list without actions", async () => {
     h.role = "MEMBER"
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("STRIPE_API_KEY")
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Add secret" })).not.toBeInTheDocument()
@@ -388,7 +516,7 @@ describe("roles", () => {
     h.role = "MEMBER"
     h.capabilities = ["credential.create"]
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("STRIPE_API_KEY")
     fireEvent.click(screen.getByRole("button", { name: "Add secret" }))
     expect(screen.getByTestId("add-secret-sheet")).toHaveAttribute("data-kind", "secret")
@@ -399,7 +527,7 @@ describe("roles", () => {
 describe("bulk delete from the page", () => {
   it("counts only the visible selection and keeps failures selected", async () => {
     routeApi({ credentials: [makeCredential({ id: "a", name: "ALPHA" }), makeCredential({ id: "b", name: "BETA" })] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("ALPHA")
     fireEvent.click(screen.getByRole("checkbox", { name: "Select ALPHA" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Select BETA" }))
@@ -429,7 +557,8 @@ describe("workspace switch", () => {
         </>
       )
     }
-    return render(<Harness />)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    return render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
   }
 
   it("ignores a slow response from the previous workspace (#1156)", async () => {
@@ -476,7 +605,7 @@ describe("readiness", () => {
       if (url.includes("/credential-readiness")) return ok({ gaps: [{ credential_id: "gh", tool: "gh" }] })
       return ok([])
     })
-    render(<CredentialsPage />)
+    renderPage()
     const missing = await screen.findByText("Missing tool")
     fireEvent.click(missing)
     expect(query().get("view")).toBe("missing-tool")
@@ -488,7 +617,7 @@ describe("readiness", () => {
 describe("the panel is the shared SecondaryPanel", () => {
   it("renders inside the vault panel with spaces and views", async () => {
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await findRow("STRIPE_API_KEY")
     const panel = document.querySelector('[data-slot="secondary-panel"]') as HTMLElement
     expect(panel).toHaveAttribute("data-panel-id", "vault")
@@ -501,7 +630,7 @@ describe("the panel is the shared SecondaryPanel", () => {
   it("on a phone the panel is the sheet, and a space switch sits above the content", async () => {
     h.mobile = true
     routeApi({ credentials: [makeCredential()] })
-    render(<CredentialsPage />)
+    renderPage()
     await waitFor(() => expect(useAppStore.getState().secondaryPanel).toEqual({ id: "vault", label: "Vault" }))
     expect(document.querySelector('[data-slot="secondary-panel"]')).toBeNull()
     fireEvent.click(await screen.findByRole("radio", { name: "AI providers" }))

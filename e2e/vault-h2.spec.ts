@@ -28,9 +28,32 @@ const SECRETS = [
   ...Array.from({ length: 60 }, (_, i) => secret(`g${i}`, `Service key ${String(i).padStart(2, "0")}`)),
 ]
 
-interface Stub { role?: string; failList?: boolean }
+function seat(id: string, name: string, provider = "ANTHROPIC", over: Record<string, unknown> = {}) {
+  return secret(id, name, {
+    type: "PROVIDER_LOGIN", provider,
+    login: {
+      mode: "subscription", provider, plan: null, plan_label: "Max", owner_user_id: "user", owner_email: "demo@example.test",
+      expires_at: null, refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null,
+      delivery: { kind: "env", target: "CLAUDE_CODE_OAUTH_TOKEN" }, pays_for: { agents: 1, crews: 0 },
+      ...over,
+    },
+  })
+}
 
-async function stub(page: Page, { role = "OWNER", failList = false }: Stub = {}) {
+const SEATS = [
+  seat("seat-max", "Claude Max · Demo"),
+  seat("seat-gem", "Gemini · Demo", "GOOGLE", { refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: "invalid_grant" } }),
+  seat("seat-or", "OpenRouter", "OPENROUTER", { mode: "api_key", pays_for: { agents: 0, crews: 0 } }),
+]
+const MANY_SEATS = Array.from({ length: 13 }, (_, i) => seat(`many-${i}`, `Claude seat ${String(i).padStart(2, "0")}`))
+const POOL = {
+  id: "pool-1", name: "Claude seats", provider: "ANTHROPIC", mode: "subscription", revision: 2, allow_cross_owner: false, member_count: 1,
+  members: [{ credential_id: "seat-max", priority: 0 }],
+}
+
+interface Stub { role?: string; failList?: boolean; seats?: unknown[] }
+
+async function stub(page: Page, { role = "OWNER", failList = false, seats = [] }: Stub = {}) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -40,16 +63,19 @@ async function stub(page: Page, { role = "OWNER", failList = false }: Stub = {})
     else if (path === "/api/v1/workspaces") body = [{ id: "ws", name: "Fixture", slug: "fixture", currentUserRole: role, currentUserCapabilities: [] }]
     else if (path === "/api/v1/credentials") {
       if (failList) { status = 503; body = { error: "unavailable" } }
-      else body = url.searchParams.get("kind") === "provider_login" ? [] : SECRETS
+      else body = url.searchParams.get("kind") === "provider_login" ? seats : [...SECRETS, ...seats]
     }
     else if (path === "/api/v1/crews") body = [{ id: "crew-review", name: "Code review", slug: "code-review" }]
-    else if (path === "/api/v1/agents") body = [{ id: "ag-rev", slug: "reviewer", name: "Reviewer", crew_id: "crew-review" }]
+    else if (path === "/api/v1/agents") body = [{ id: "ag-rev", slug: "reviewer", name: "Reviewer", crew_id: "crew-review", cli_adapter: "CLAUDE_CODE" }]
+    else if (path === "/api/v1/provider-logins/pools") body = { items: [POOL], next_cursor: null }
+    else if (path === `/api/v1/provider-logins/pools/${POOL.id}`) body = POOL
+    else if (path === "/api/v1/me/preferences") body = {}
     else if (/^\/api\/v1\/credentials\/[^/]+\/access\/me$/.test(path)) body = { actions: { read: { state: "allowed" }, edit: { state: "allowed" } } }
     else if (/^\/api\/v1\/credentials\/[^/]+\/dependents$/.test(path)) body = { routines: [] }
     else if (/^\/api\/v1\/credentials\/bindings$/.test(path)) body = { bindings: [] }
     else if (/^\/api\/v1\/credentials\/([^/]+)$/.test(path)) {
       const id = path.split("/").pop()
-      const hit = SECRETS.find((s) => s.id === id)
+      const hit = [...SECRETS, ...(seats as { id: string }[])].find((s) => s.id === id)
       if (hit) body = hit
       else { status = 404; body = { error: "Credential not found" } }
     }
@@ -141,4 +167,95 @@ test("Q03 secret page at 390 is full width with back", async ({ page }) => {
   await pageEl.getByRole("button", { name: "Secrets", exact: true }).click()
   await expect(table(page)).toBeVisible()
   await page.screenshot({ path: "/tmp/vault-h2-secret-phone.png" })
+})
+
+// ── AI providers (Harbor 2, VLT-E/F) ────────────────────────────────────────
+
+for (const [width, height, label] of [[1440, 1000, "desktop"], [390, 844, "phone"]] as const) {
+  test(`Q02 AI providers space at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height })
+    await stub(page, { seats: SEATS })
+    await page.goto("/credentials?space=providers")
+    await expect(page.getByRole("heading", { level: 1, name: "AI providers" })).toBeVisible()
+    const health = page.getByRole("group", { name: "AI providers health" })
+    await expect(health.getByRole("button", { name: /^1 need a new sign-in/i })).toBeVisible()
+    await expect(page.locator("[data-slot=account-card]")).toHaveCount(3)
+    // No quota from the server: said, never drawn.
+    await expect(page.getByText("No usage data yet").first()).toBeVisible()
+    await expect(page.getByRole("progressbar")).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: `/tmp/vault-h2-providers-${label}.png` })
+  })
+}
+
+test("Q02 cards→list switch at 13 accounts", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: MANY_SEATS })
+  await page.goto("/credentials?space=providers")
+  const list = page.locator("[data-slot=provider-accounts]")
+  await expect(list).toHaveAttribute("data-layout", "list")
+  await expect(page.getByRole("table", { name: "AI provider accounts" }).getByRole("row")).toHaveCount(14)
+  await page.getByRole("radio", { name: "Cards" }).click()
+  await expect(list).toHaveAttribute("data-layout", "cards")
+  await expect(page).toHaveURL(/layout=cards/)
+})
+
+test("Q02 account group page: accounts, order, settings", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  await page.goto("/credentials?space=providers")
+  await page.locator("[data-slot=secondary-panel]").getByText("Claude seats").click()
+  await expect(page).toHaveURL(/pool=pool-1/)
+  const groupPage = page.locator("[data-slot=account-group-page]")
+  await expect(groupPage.getByRole("heading", { level: 1, name: "Claude seats" })).toBeVisible()
+  await expect(groupPage.getByText("Claude Max · Demo")).toBeVisible()
+  await groupPage.getByRole("tab", { name: "Order" }).click()
+  await expect(groupPage.getByRole("list", { name: "Account order" })).toBeVisible()
+  await groupPage.getByRole("tab", { name: "Settings" }).click()
+  await groupPage.getByRole("button", { name: /Delete…/ }).click()
+  await expect(page.getByRole("alertdialog")).toContainText("Delete Claude seats?")
+  await page.screenshot({ path: "/tmp/vault-h2-account-group.png" })
+})
+
+test("links: ?space=providers&provider= opens the provider's page", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  await page.goto("/credentials?space=providers&provider=GOOGLE")
+  await expect(page.getByRole("heading", { level: 1, name: "Gemini / Google" })).toBeVisible()
+  await expect(page.getByText("Gemini CLI, OpenCode")).toBeVisible()
+})
+
+test("Q03 account page: Pays for lists fitting agents with switches", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  await page.goto("/credentials?space=providers&id=seat-max&tab=access")
+  const pageEl = page.locator("[data-slot=secret-page]")
+  await expect(pageEl.getByRole("tab", { name: "Pays for" })).toHaveAttribute("aria-selected", "true")
+  await expect(pageEl.getByRole("switch", { name: "Claude Max · Demo pays for Reviewer" })).toBeVisible()
+  await pageEl.getByRole("button", { name: "AI providers", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "AI providers" })).toBeVisible()
+})
+
+test("Q05 Add AI provider dialog lists the backend catalog", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  await page.goto("/credentials?space=providers")
+  await page.getByRole("button", { name: "Add AI provider", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: /Add AI provider/ })
+  await expect(dialog.getByRole("group", { name: "Choose AI provider" })).toBeVisible()
+  await expect(dialog.getByText(/Mistral/i)).toHaveCount(0)
+  await expect(dialog.getByRole("navigation", { name: "Add credential steps" })).toContainText("Pays for")
+  await page.screenshot({ path: "/tmp/vault-h2-add-provider.png" })
+})
+
+test("shortcuts: keys 1 and 2 switch the spaces", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  await page.goto("/credentials")
+  await expect(page.getByRole("heading", { level: 1, name: "All secrets" })).toBeVisible()
+  await page.keyboard.press("2")
+  await expect(page).toHaveURL(/space=providers/)
+  await expect(page.getByRole("heading", { level: 1, name: "AI providers" })).toBeVisible()
+  await page.keyboard.press("1")
+  await expect(page.getByRole("heading", { level: 1, name: "All secrets" })).toBeVisible()
 })

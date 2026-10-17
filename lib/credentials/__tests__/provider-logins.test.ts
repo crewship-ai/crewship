@@ -24,7 +24,13 @@ import {
   planLabel,
   sortLogins,
   UNOWNED,
+  accountState,
+  buildProviderHealth,
+  providerRunners,
+  runnerFits,
   type LoginCredential,
+  type LoginFilters,
+  type LoginMe,
   type ProviderLogin,
 } from "../provider-logins"
 
@@ -200,6 +206,39 @@ describe("the tiles", () => {
 
   it("an empty tab is all zeroes, not a crash", () => {
     expect(loginTotals([], NOW)).toMatchObject({ seats: 0, atLimit: 0, expiring: 0, unassigned: 0, nextReset: null })
+  })
+})
+
+describe("the AI providers space", () => {
+  it("views: needs attention, not paying for anything, my accounts", () => {
+    const names = (status: LoginFilters["status"], me: LoginMe | null = null) =>
+      applyLoginFilters(all, { ...EMPTY_LOGIN_FILTERS, status }, NOW, me).map((c) => c.name)
+    expect(names("attention")).toEqual(["Claude Max · jana", "ChatGPT Plus · jana", "Gemini · jana"])
+    expect(names("unassigned")).toEqual(["Cursor Pro · pavel"])
+    expect(names("mine", { email: "JANA@unify.cz" })).toEqual(["ChatGPT Plus · jana", "Gemini · jana"])
+    expect(names("mine", { id: "u1" })).toHaveLength(5)
+    // Nobody signed in: an empty view, never everything.
+    expect(names("mine")).toEqual([])
+  })
+
+  it("health counts accounts, sign-ins, idle accounts and owners", () => {
+    expect(buildProviderHealth(all, NOW)).toEqual({ accounts: 5, subscriptions: 5, apiKeys: 0, signIn: 1, idle: 1, people: 2 })
+    expect(buildProviderHealth([], NOW)).toMatchObject({ accounts: 0, people: 0 })
+  })
+
+  it("card pill: Sign in again, Not used, Ready", () => {
+    expect(accountState(relogin, NOW)).toMatchObject({ key: "signin", label: "Sign in again", tone: "destructive" })
+    expect(accountState(unassigned, NOW)).toMatchObject({ key: "idle", label: "Not used" })
+    expect(accountState(active, NOW)).toMatchObject({ key: "ready", label: "Ready", tone: "success" })
+    expect(accountState(row("x", { expires_at: new Date(NOW - DAY).toISOString() }), NOW).key).toBe("signin")
+  })
+
+  it("only runners that fit the provider pay with it; OpenCode fits all", () => {
+    expect(runnerFits("CLAUDE_CODE", "ANTHROPIC")).toBe(true)
+    expect(runnerFits("CODEX_CLI", "ANTHROPIC")).toBe(false)
+    expect(runnerFits("OPENCODE", "OPENROUTER")).toBe(true)
+    expect(providerRunners("OPENAI")).toEqual(["Codex CLI", "OpenCode"])
+    expect(providerRunners("DEEPSEEK")).toEqual(["OpenCode"])
   })
 })
 

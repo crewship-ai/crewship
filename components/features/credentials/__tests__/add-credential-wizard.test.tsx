@@ -319,7 +319,8 @@ describe("provider login (#2428)", () => {
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Grok account" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     expect(screen.queryByRole("group", { name: "How closely Keeper guards it" })).not.toBeInTheDocument()
-    expect(screen.getByText("How will you use it?")).toBeInTheDocument()
+    // An AI provider's last step asks who it pays for.
+    expect(screen.getByRole("button", { name: "Nobody yet" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -452,7 +453,7 @@ describe("provider login (#2428)", () => {
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     if (scope === "CREW") {
-      fireEvent.click(screen.getByRole("button", { name: /assign now/i }))
+      fireEvent.click(screen.getByRole("button", { name: /choose now/i }))
       fireEvent.click(screen.getByRole("button", { name: /selected crews/i }))
       fireEvent.click(screen.getByRole("combobox"))
       fireEvent.click(await screen.findByRole("option", { name: "Engineering" }))
