@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { RoutineCalendar } from "./routine-calendar"
 import { RoutinesDashboard, windowCoverage } from "./routines-dashboard"
+import { RoutinesIntro } from "./routines-intro"
 
 // The server caps a run list at 200 rows.
 const DASHBOARD_RUN_LIMIT = 200
@@ -180,13 +181,17 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
             {/* The catalog lives in the panel; this pane is the week at a
                 glance. An empty workspace still needs the way in. */}
             {!visible.length && !props.loading && !props.error ? (
-              <PageEmpty
-                icon={Workflow}
-                title="No routines yet"
-                description="Describe a job once; a crew runs it on a schedule or a trigger."
-                primary={props.onNew ? { label: "New routine", onClick: props.onNew } : undefined}
-                cli="crewship routine init"
-              />
+              <>
+                <PageEmpty
+                  icon={Workflow}
+                  title="No routines yet"
+                  description="Describe a job once; a crew runs it on a schedule or a trigger."
+                  primary={props.onNew ? { label: "New routine", onClick: props.onNew } : undefined}
+                  cli="crewship routine init"
+                />
+                {/* RT-INTRO as the empty state's guide (no templates, no figures). */}
+                <RoutinesIntro compact />
+              </>
             ) : (
               <RoutinesDashboard
                 routines={displayed}

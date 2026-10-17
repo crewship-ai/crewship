@@ -1,0 +1,103 @@
+"use client"
+
+// "How routines work" (Harbor 2 RT-INTRO, routines.js intro()): what a routine
+// is, why it is safe to let go, and the three steps from a sentence to a
+// running routine. Opened from the top bar (?view=intro) and shown under the
+// empty state of a workspace without routines.
+//
+// Left out on purpose (ODCH-RT-08): the template gallery (there is no
+// template catalogue), "In this workspace this week" (numbers an empty
+// workspace does not have) and the animated demo run (example data).
+
+import { Hand, Lock, Play, Plus, Workflow } from "lucide-react"
+import { Button } from "@/components/ui/button"
+
+const WHY = [
+  {
+    icon: Play,
+    title: "Runs without you",
+    text: "On a schedule, when GitHub or another app calls, when an issue starts, or from a chat command. Nobody has to remember.",
+  },
+  {
+    icon: Hand,
+    title: "Asks you only when it matters",
+    text: "A decision comes with what the agent found and what it wants to do. Until you answer, nothing after that step runs.",
+  },
+  {
+    icon: Lock,
+    title: "Safe to let go",
+    text: "Changes are tested before they go live. Risky actions need a Manager. Each run has a cost cap, and every run keeps its steps.",
+  },
+]
+
+const HOW = [
+  { title: "Describe", text: "Write what should happen, or ask a crew lead in Chat. You get a draft you can read." },
+  { title: "Test", text: "The draft runs once without side effects: no messages, nothing published. You see what it would do." },
+  { title: "Publish", text: "Turn it on. Every run gets its own page: each step, what it produced, what it cost and where it stopped." },
+]
+
+export function RoutinesIntro({ onNew, compact = false }: { onNew?: () => void; compact?: boolean }) {
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-6 md:px-6" data-testid="routines-intro">
+      {!compact && (
+        <section aria-labelledby="routines-intro-title" className="flex flex-col gap-3">
+          <p className="inline-flex items-center gap-1.5 text-label font-medium text-muted-foreground">
+            <Workflow className="h-3.5 w-3.5" aria-hidden /> Routines
+          </p>
+          <h1 id="routines-intro-title" className="text-display font-semibold tracking-tight text-foreground">
+            Work that repeats, done by your crew.
+          </h1>
+          <p className="max-w-[60ch] text-body text-muted-foreground">
+            Say what should happen and when. Your agents do it on time, ask you only when it matters, and show you every step.
+          </p>
+          {onNew && (
+            <div>
+              <Button type="button" onClick={onNew} className="gap-1.5 coarse:h-11">
+                <Plus className="h-3.5 w-3.5" aria-hidden /> New routine
+              </Button>
+            </div>
+          )}
+          <p className="text-label text-muted-foreground-soft">
+            Or ask a crew lead in Chat: “every Thursday, check competitor prices”.
+          </p>
+        </section>
+      )}
+
+      <section aria-label="Why routines" className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {WHY.map(({ icon: Icon, title, text }) => (
+          <div key={title} className="flex flex-col gap-2 rounded-lg border border-hairline bg-card p-4">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-foreground/[0.05]">
+              <Icon className="h-4 w-4 text-foreground/80" aria-hidden />
+            </span>
+            <h3 className="text-body font-semibold text-foreground">{title}</h3>
+            <p className="text-label text-muted-foreground">{text}</p>
+          </div>
+        ))}
+      </section>
+
+      <section aria-labelledby="routines-intro-how" className="flex flex-col gap-3">
+        <h2 id="routines-intro-how" className="text-heading font-semibold text-foreground">
+          From a sentence to a routine in three steps
+        </h2>
+        <ol className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {HOW.map((step, i) => (
+            <li key={step.title} className="flex gap-3 rounded-lg border border-hairline bg-card p-4">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-label font-semibold text-primary" aria-hidden>
+                {i + 1}
+              </span>
+              <span className="flex flex-col gap-1">
+                <b className="text-body font-semibold text-foreground">{step.title}</b>
+                <span className="text-label text-muted-foreground">{step.text}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        {!compact && (
+          <p className="text-label text-muted-foreground-soft">
+            On the command line: <code className="font-mono">crewship routine init</code>.
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}

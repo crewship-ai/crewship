@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Workflow, Plus, Upload, List } from "lucide-react"
+import { Workflow, Plus, Upload, List, HelpCircle } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
@@ -25,6 +25,7 @@ import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineNewWizard } from "./routine-new-wizard"
 import { RoutinesViewPane, needsYou } from "./routines-views"
+import { RoutinesIntro } from "./routines-intro"
 import { ImportRoutineDialog } from "./routine-import-dialog"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useRoutinePanelIndex } from "@/hooks/use-routine-panel-index"
@@ -131,8 +132,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // that is open; leaving or switching routines clears them.
   const [, setTabParam] = useUrlSelection("tab")
   const [, setVersionParam] = useUrlSelection("version")
+  // `?view=intro` is "How routines work": a page of its own, not one of the five panel views.
+  const showIntro = !selectedSlug && !selectedRun && viewParam === "intro"
   const listView: RoutinesView = !selectedSlug && !selectedRun && LIST_VIEWS.has(viewParam as RoutinesView) ? (viewParam as RoutinesView) : "overview"
-  const panelView: RoutinesView | null = selectedSlug || selectedRun ? null : listView
+  const panelView: RoutinesView | null = selectedSlug || selectedRun || showIntro ? null : listView
   const clearRoutineView = () => {
     setViewParam(null, { replace: true })
     setTabParam(null, { replace: true })
@@ -263,7 +266,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     ? [selectedRoutine?.name || selectedSlug || "Routine", "Run"].join(" › ")
     : selectedSlug
       ? [crewName, selectedRoutine?.name || selectedSlug].filter(Boolean).join(" › ")
-      : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
+      : showIntro
+        ? "How routines work"
+        : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
 
   const createActions = (
     <>
@@ -272,6 +277,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           {CREATE_ROUTINE_REASON}
         </span>
       )}
+      {/* v67: a ghost "How routines work" beside Import and New routine. */}
+      <SubBarSecondary icon={HelpCircle} className="max-sm:hidden" aria-pressed={showIntro} onClick={() => setViewParam(showIntro ? null : "intro")}>
+        How routines work
+      </SubBarSecondary>
       <span title={canCreate ? undefined : CREATE_ROUTINE_REASON} className="max-sm:hidden">
         <SubBarSecondary
           icon={Upload}
@@ -385,6 +394,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                       }}
                     />
                   </div>
+                </motion.div>
+              ) : showIntro ? (
+                <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-auto">
+                  <RoutinesIntro onNew={canCreate ? () => setCreateDialogOpen(true) : undefined} />
                 </motion.div>
               ) : listView !== "overview" ? (
                 <motion.div key={`view-${listView}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-hidden">
