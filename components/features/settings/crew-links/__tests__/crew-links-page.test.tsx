@@ -164,12 +164,36 @@ describe("Crew links side panel and profile", () => {
     expect(within(panel()).queryByRole("button", { name: /^Engineering/ })).toBeNull()
     expect(within(panel()).getByRole("button", { name: /^Collector/ })).toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
+    // The facets open inside the panel, each folded until picked (COM-01).
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Agents/ }))
     fireEvent.click(screen.getByRole("button", { name: /With agents/ }))
     expect(within(panel()).queryByRole("button", { name: /^Collector/ })).toBeNull()
     expect(new URLSearchParams(window.location.search).get("agents")).toBe("with")
     fireEvent.click(screen.getByRole("button", { name: "Remove filter No links" }))
     expect(within(panel()).getByRole("button", { name: /^Engineering/ })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get("links")).toBeNull()
+  })
+
+  // #3487 SET-10 (PRD PNL-02, kit COM-01): Filter opens the facets INSIDE
+  // the panel, under the toolbar — not a floating popover.
+  it("opens the Agents and Network facets inside the panel, each clearing alone", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Engineering profile" })
+    const filter = within(panel()).getByRole("button", { name: /Filter/ })
+    expect(filter).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(filter)
+    expect(filter).toHaveAttribute("aria-expanded", "true")
+    const block = within(panel()).getByRole("group", { name: "Filter crews" })
+    expect(block).toHaveAttribute("data-slot", "facet-block")
+    expect(document.querySelector("[data-slot=popover-content]")).toBeNull()
+    fireEvent.click(within(block).getByRole("button", { name: /^Network/ }))
+    fireEvent.click(within(block).getByRole("button", { name: /^Restricted/ }))
+    expect(new URLSearchParams(window.location.search).get("net")).toBe("restricted")
+    expect(within(panel()).queryByRole("button", { name: /^Ops/ })).toBeNull()
+    expect(within(block).getByRole("button", { name: /^Network/ })).toHaveTextContent("Restricted")
+    fireEvent.click(within(block).getByRole("button", { name: "Clear Network" }))
+    expect(new URLSearchParams(window.location.search).get("net")).toBeNull()
+    expect(within(panel()).getByRole("button", { name: /^Ops/ })).toBeInTheDocument()
   })
 
   it("the link map shows who hands work in and out, and a node opens that crew", async () => {
