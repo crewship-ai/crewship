@@ -66,7 +66,7 @@ function DocumentWorkspace({ slug, name, available, onDirtyChange, sync }: Docum
   }, [sync.doc,sync.state?.schema])
   useEffect(() => { editor?.setEditable(sync.editable) }, [editor, sync.editable])
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
-  return <section aria-label="Doc page" className="space-y-3 overflow-auto">
+  return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><span role="status" aria-live="polite" className="text-sm">{!available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}</span></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
     {(sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your local draft is retained in this tab. Download it before reopening the current document.</p><Button onClick={() => download(`${slug}-recovery.json`, JSON.stringify(editor?.getJSON(), null, 2))}>Download unsaved draft</Button><Button variant="outline" onClick={() => window.location.reload()}>Reopen saved document</Button></div>}

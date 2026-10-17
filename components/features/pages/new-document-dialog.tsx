@@ -50,7 +50,7 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
     await client.invalidateQueries({queryKey:pagesKeys.all(workspaceId)})
     onCreated(saved);onClose()
   }})
-  return <Dialog open onOpenChange={open=>{if(!open && !create.isPending)onClose()}}><DialogContent>
+  return <Dialog open onOpenChange={open=>{if(!open && !create.isPending)onClose()}}><DialogContent className="touch-form">
     <DialogHeader><DialogTitle>New Doc</DialogTitle><DialogDescription>Create a private document owned by you.</DialogDescription></DialogHeader>
     <form className="space-y-4" onSubmit={event=>{event.preventDefault();create.mutate()}}>
       <div className="space-y-2"><label htmlFor="document-name">Name</label><Input id="document-name" autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></div>

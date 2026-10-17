@@ -311,6 +311,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
+        className="coarse:[&>div]:min-h-12"
         icon={CONCEPT_ICON.pages}
         title="Artifacts"
         section={editing ? "Edit" : undefined}
@@ -384,7 +385,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-12" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
