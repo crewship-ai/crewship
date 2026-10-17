@@ -67,6 +67,8 @@ function DashboardBar({ value, onChange }: { value: DashboardWindow; onChange: (
       icon={LayoutDashboard}
       title="Dashboard"
       ariaLabel="Dashboard"
+      // The greeting below is the page's h1; the top bar only names the area.
+      heading={false}
       actions={<DashSegment label="Dashboard time window" options={WINDOWS} value={value} onChange={onChange} className="max-md:hidden" />}
     />
   )
@@ -279,7 +281,7 @@ export default function DashboardPage() {
     return (
       <>
         {bar}
-        <PageLoading variant="cards" />
+        <PageLoading variant="cards" onRetry={() => { void agentsQ.refetch(); void crewsQ.refetch() }} />
       </>
     )
   }

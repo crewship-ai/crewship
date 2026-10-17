@@ -73,10 +73,10 @@ export function useMinuteClock(): Date {
 export function DashboardHead({ title, meta }: { title: string; meta: string }) {
   return (
     <div className="mb-4 min-w-0 md:mb-5">
-      {/* h2: the top bar's SubBar already owns the page's one h1 ("Dashboard"). */}
-      <h2 data-testid="dashboard-greeting" className="text-heading font-semibold tracking-tight text-foreground text-balance md:text-title">
+      {/* The page's one h1: the top bar's SubBar renders its title without one. */}
+      <h1 data-testid="dashboard-greeting" className="text-heading font-semibold tracking-tight text-foreground text-balance md:text-title">
         {title}
-      </h2>
+      </h1>
       <p className="mt-0.5 text-control text-muted-foreground">{meta}</p>
     </div>
   )
