@@ -110,8 +110,8 @@ it("zero crews renders one EmptyState and no section cards", async () => {
 it.each(["24h", "7d", "30d"])("uses the selected %s period for both insights and chart buckets", async (period) => {
   render(<DashboardPage />)
   await loaded()
-  fireEvent.click(screen.getByRole("button", { name: period }))
-  expect(screen.getByRole("button", { name: period })).toHaveAttribute("aria-pressed", "true")
+  fireEvent.click(screen.getByRole("radio", { name: period }))
+  expect(screen.getByRole("radio", { name: period })).toHaveAttribute("aria-checked", "true")
   expect(state.volumeCalls).toHaveBeenLastCalledWith("a", { metric: "runs_count", window: period, bucket: period === "24h" ? "1h" : "1d", group_by: "crew" }, { enabled: true })
   expect(state.insightsCalls).toHaveBeenLastCalledWith("a", period, { enabled: true })
   expect(screen.getByRole("region", { name: `Run volume · ${period} · by crew` })).toBeInTheDocument()
@@ -124,12 +124,17 @@ it("no DashboardPeriodBar; window segment rendered into top-bar actions", async 
   act(() => useAppStore.getState().setPageBarSlot(slot))
   const view = render(<DashboardPage />)
   await loaded()
-  const segment = within(slot).getByRole("group", { name: "Dashboard time window" })
-  expect(within(segment).getAllByRole("button").map((b) => b.textContent)).toEqual(["24h", "7d", "30d"])
+  const segment = within(slot).getByRole("radiogroup", { name: "Dashboard time window" })
+  // The kit Segmented (COM-02), not a local copy: one radio group whose
+  // arrow keys move and select.
+  expect(segment).toHaveAttribute("data-slot", "segmented")
+  expect(within(segment).getAllByRole("radio").map((b) => b.textContent)).toEqual(["24h", "7d", "30d"])
+  fireEvent.keyDown(within(segment).getByRole("radio", { name: "24h" }), { key: "ArrowRight" })
+  expect(within(segment).getByRole("radio", { name: "7d" })).toHaveAttribute("aria-checked", "true")
   // Nothing sticky of the page's own above the content, and the page body
   // carries no window control of its own.
   expect(view.container.querySelector(".sticky")).toBeNull()
-  expect(within(view.container).queryByRole("group", { name: "Dashboard time window" })).toBeNull()
+  expect(within(view.container).queryByRole("radiogroup", { name: "Dashboard time window" })).toBeNull()
   slot.remove()
 })
 
@@ -137,7 +142,7 @@ it("keeps the window in the top bar while the page is still loading", async () =
   state.workspace.loading = true
   const view = render(<DashboardPage />)
   await act(async () => {})
-  expect(screen.getByRole("group", { name: "Dashboard time window" })).toBeInTheDocument()
+  expect(screen.getByRole("radiogroup", { name: "Dashboard time window" })).toBeInTheDocument()
   expect(view.container.querySelector('[data-state="loading"]')).not.toBeNull()
   expect(screen.queryByRole("button", { name: "Retry results" })).not.toBeInTheDocument()
 })
