@@ -6,8 +6,9 @@ require a human-owned Page without existing panels or application source.
 
 The initial storage foundation supports initialization and reading of schema 1
 state. It adds no public endpoint, editor, background service or enabled runtime.
-The storage API also supports writer leases, atomic edits and receipt lookup.
-Checkpoint operations and public endpoint wiring are delivered separately.
+The storage API also supports writer leases, atomic edits, receipt lookup,
+pinned checkpoints and explicit restoration. Public endpoint wiring is
+delivered separately.
 
 Callers provide an authorization function. Every operation runs that function
 inside a transaction after acquiring the document writer fence. Initialization
@@ -28,6 +29,19 @@ An identical retry returns its original receipt; a changed actor, payload or
 precondition conflicts. The request digest excludes lease credentials so a
 confirmed edit can be retried after boot fencing with a new lease. Requests
 without a generation condition preserve their original digest representation.
+
+A checkpoint pins the snapshot and projection at the confirmed revision.
+Restoration creates a new head revision, advances its epoch and generation,
+and clears the writer lease. It replaces the replay log while retaining pinned
+checkpoints and retry receipts. Checkpoint and restore retries bind the original
+generation when supplied; changing that condition conflicts, while requests
+without it retain their previous digest representation. Authorization still
+runs before retry lookup, including after a writer lease has rotated.
+
+Logical storage statistics distinguish the current snapshot, replay updates,
+pinned checkpoint bytes and receipt counts. They do not measure SQLite file or
+WAL allocation. History limits reject new operations without deleting confirmed
+checkpoints or receipts.
 
 The database migration prevents attaching documents to existing panels or
 application drafts, and prevents removing a document's human owner. Additional
@@ -50,3 +64,5 @@ Backup tests exercise encrypted workspace bundles, forks, physical instance
 recovery and rollback after corrupt binary input.
 Mutation tests cover concurrent revision checks, lease renewal and release,
 boot fencing, immutable transaction guards, exact retries and revoked authority.
+Checkpoint and restore tests also cover generation-bound retries, scoped reads,
+pinned history, and transaction rollback that preserves the original writer.
