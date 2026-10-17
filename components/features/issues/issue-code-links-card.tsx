@@ -42,6 +42,7 @@ import {
   GitPullRequest,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  Plus,
   RefreshCw,
   X,
 } from "lucide-react"
@@ -309,6 +310,7 @@ function AttachCodeLinkPicker({ edit }: { edit: CodeLinkEdit }) {
   const [url, setUrl] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const inputId = React.useId()
 
   async function submit() {
     const value = url.trim()
@@ -339,52 +341,53 @@ function AttachCodeLinkPicker({ edit }: { edit: CodeLinkEdit }) {
       }}
     >
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Attach a pull request"
-          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-        >
-          <GitPullRequest className="h-3.5 w-3.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={4} className="w-[320px] space-y-2 p-3">
-        <input
-          aria-label="Pull request URL"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter confirms an IME candidate before it means "submit". Firing
-            // mid-composition posts a half-composed URL and answers with a
-            // parse failure for something the reader never finished typing.
-            if (isImeComposing(e)) return
-            if (e.key === "Enter") void submit()
-          }}
-          placeholder="https://github.com/acme/thing/pull/7"
-          className="h-7 w-full rounded border border-border/60 bg-card px-2 text-[12px] outline-none focus:border-primary/50"
-        />
-        {error ? (
-          <p
-            role="alert"
-            data-testid="code-link-attach-error"
-            className="text-[11px] leading-relaxed text-destructive"
-          >
-            {error}
-          </p>
-        ) : (
-          <p className="text-[11px] leading-relaxed text-muted-foreground-soft">
-            A GitHub {codeLinkNoun("GITHUB")} or a GitLab {codeLinkNoun("GITLAB")}, on the public
-            service or a self-hosted instance.
-          </p>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 w-full text-[11px]"
-          disabled={!url.trim() || busy}
-          onClick={() => void submit()}
-        >
-          {busy ? "Attaching…" : "Attach"}
+        <Button type="button" variant="ghost" size="xs" aria-label="Attach a pull request" className="gap-1">
+          <Plus className="size-3.5" aria-hidden />
+          Attach PR URL
         </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={4} className="w-80 p-0">
+        <div className="flex flex-col gap-2 p-3">
+          <h3 className="text-body font-semibold">Attach a pull request</h3>
+          <label htmlFor={inputId} className="text-label font-medium text-muted-foreground">URL</label>
+          <input
+            id={inputId}
+            autoFocus
+            aria-label="Pull request URL"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter confirms an IME candidate before it means "submit". Firing
+              // mid-composition posts a half-composed URL and answers with a
+              // parse failure for something the reader never finished typing.
+              if (isImeComposing(e)) return
+              if (e.key === "Enter") void submit()
+            }}
+            placeholder="https://github.com/acme/thing/pull/7"
+            className="h-[var(--control-sm)] w-full rounded-md border border-border bg-card px-2 text-body outline-none focus:border-ring"
+          />
+          {error ? (
+            <p role="alert" data-testid="code-link-attach-error" className="text-label leading-relaxed text-destructive">
+              {error}
+            </p>
+          ) : (
+            <p className="text-label leading-relaxed text-muted-foreground-soft">
+              A GitHub {codeLinkNoun("GITHUB")} or a GitLab {codeLinkNoun("GITLAB")}, on the public
+              service or a self-hosted instance.
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          <span className="min-w-0 flex-1 text-label text-muted-foreground-soft">
+            Uses your stored GitHub or GitLab credential to read its state.
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" disabled={!url.trim() || busy} onClick={() => void submit()}>
+            {busy ? "Attaching…" : "Attach"}
+          </Button>
+        </div>
       </PopoverContent>
     </Popover>
   )

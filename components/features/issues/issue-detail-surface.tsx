@@ -675,6 +675,19 @@ export function IssueDetailSurface({
     [base, qs, fetchSubResources],
   )
 
+  // Add relation's issue picker: the workspace search, minus this issue.
+  const searchIssues = React.useCallback(
+    async (q: string) => {
+      const res = await apiFetch(`/api/v1/issues?${qs}&limit=8&q=${encodeURIComponent(q)}`)
+      if (!res.ok) return []
+      const rows = (await res.json()) as Mission[]
+      return rows
+        .filter((r) => r.id !== issue?.id && r.identifier)
+        .map((r) => ({ identifier: r.identifier as string, title: r.title, status: r.status }))
+    },
+    [qs, issue?.id],
+  )
+
   const removeRelation = React.useCallback(
     async (relationId: string) => {
       try {
@@ -912,6 +925,7 @@ export function IssueDetailSurface({
       onTitleDraft: write ? (title) => { void stage({ title }) } : undefined,
       createLabel: can("edit_fields") ? createLabel : undefined,
       addRelation,
+      searchIssues,
       removeRelation,
       runRoutine: executionActions && can("start_work") && issue.routine_slug ? runRoutine : undefined,
       busy: busy || routineRunBusy,
@@ -931,6 +945,7 @@ export function IssueDetailSurface({
     write,
     createLabel,
     addRelation,
+    searchIssues,
     removeRelation,
     runRoutine,
     busy,
