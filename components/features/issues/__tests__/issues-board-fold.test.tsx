@@ -86,8 +86,16 @@ describe("IssuesBoardView", () => {
   it("a column's + opens New issue with its status", () => {
     const create = vi.fn()
     render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={create} />)
-    fireEvent.click(screen.getByRole("button", { name: "New issue in In review" }))
-    expect(create).toHaveBeenCalledWith("REVIEW")
+    fireEvent.click(screen.getByRole("button", { name: "New issue in In progress" }))
+    expect(create).toHaveBeenCalledWith("IN_PROGRESS")
+  })
+
+  // POST /crews/{c}/issues takes BACKLOG or one step from it; a + on In
+  // review, Done or Failed would make a Backlog issue in disguise.
+  it("offers + only on columns an issue can be created in", () => {
+    render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={vi.fn()} />)
+    for (const name of ["Backlog", "Todo", "In progress"]) expect(screen.getByRole("button", { name: `New issue in ${name}` })).toBeInTheDocument()
+    for (const name of ["In review", "Done", "Failed"]) expect(screen.queryByRole("button", { name: `New issue in ${name}` })).toBeNull()
   })
 })
 
@@ -136,6 +144,51 @@ describe("IssuesBoardView drag and drop", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("ENG-1 stays in Todo: 2 sub-issues are still open"))
     expect(moved).not.toHaveBeenCalled()
     expect(within(screen.getByRole("region", { name: "Todo" })).getByRole("button", { name: /^Issue ENG-1/ })).toBeInTheDocument()
+  })
+})
+
+// Drag and drop has no keyboard path, so each card carries a "Move to"
+// menu that goes through the same PATCH and the same confirmation.
+describe("IssuesBoardView Move to (keyboard)", () => {
+  beforeEach(() => {
+    apiFetch.mockReset()
+    toastError.mockReset()
+  })
+  const card = { ...issue(1, "TODO"), crew_id: "c1" } as Mission
+  const openMenu = () => {
+    const trigger = screen.getByRole("button", { name: "Move ENG-1 to…" })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: "Enter" })
+    return screen.getByRole("menu")
+  }
+
+  it("moves a card from the keyboard with the same PATCH a drop sends", async () => {
+    apiFetch.mockResolvedValue(new Response("{}", { status: 200 }))
+    const moved = vi.fn()
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" onMoved={moved} />)
+    const menu = openMenu()
+    // The column it is already in is not offered.
+    expect(within(menu).queryByRole("menuitem", { name: "Todo" })).toBeNull()
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "In progress" }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/crews/c1/issues/ENG-1?workspace_id=ws",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "IN_PROGRESS" }) }),
+      ),
+    )
+    await waitFor(() => expect(moved).toHaveBeenCalled())
+  })
+
+  it("asks before Done, like a drop", () => {
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" />)
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Done" }))
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Move ENG-1 to Done?")
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it("has no Move to menu when the board cannot move cards", () => {
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} />)
+    expect(screen.queryByRole("button", { name: "Move ENG-1 to…" })).toBeNull()
   })
 })
 

@@ -53,7 +53,7 @@ function DeletionConfirmation({current,path,disabled,onRefresh}:{current:Review;
     <p className="text-sm">{review?.title}</p>
     {stale && <p role="status" className="text-sm">This issue changed after you opened the confirmation. Close it and review the current issue.</p>}
     {remove.isError && <p role="alert" className="text-sm">{remove.error.message}</p>}
-    <AlertDialogFooter><AlertDialogCancel>Keep issue</AlertDialogCancel><AlertDialogAction disabled={unavailable || stale || remove.isPending} onClick={event=>{event.preventDefault();if(!unavailable && !stale && !remove.isPending)remove.mutate()}}>Permanently delete issue</AlertDialogAction></AlertDialogFooter>
+    <AlertDialogFooter><AlertDialogCancel>Keep issue</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={unavailable || stale || remove.isPending} onClick={event=>{event.preventDefault();if(!unavailable && !stale && !remove.isPending)remove.mutate()}}>Permanently delete issue</AlertDialogAction></AlertDialogFooter>
    </AlertDialogContent>
  </AlertDialog>
  )

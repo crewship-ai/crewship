@@ -68,16 +68,17 @@ could.
 | **Title** | Click the pencil. Enter saves, Escape abandons. |
 | **Description** | A WYSIWYG editor (Tiptap). Saves on blur, and only when the markdown actually changed. |
 | **Status, Priority** | Pickers in the Properties card. |
-| **Owner, Delegate** | Two separate chips on the identity card and two rows in Properties: the **owner** is the accountable person, the **delegate** is the agent doing the work. They are independent — delegating never clears the owner, and an owner is not enough to Start; that needs a delegate. `crewship issue update <id> --assignee <email> --assignee-type user` sets the owner, `--assignee <agent>` the delegate. |
-| **Current work** | Who holds the issue right now (a person or an agent), the latest execution's stage and workers, the acceptance policy, and the buttons that move work between people and agents. See [Work, hand-offs and Lead review](#work-hand-offs-and-lead-review). |
+| **Session** | The block under the title says who is working on the issue and offers only the verbs that fit: *Nobody is working on this* (Take it myself · Delegate…), *delegated, not started* (Start work), *Working* (Take over · Stop), *Awaiting input* (Open request in Inbox), *Ready for review* (Request changes · Approve, or a note that the Lead closes it when no client acceptance is required), *Needs a person* (Reopen to Todo · Take over · Retry with a note…), *Accepted* (Reopen) and *a person holds it* (Hand off… · Submit result). Stop asks whether to stop **after this step** (cooperative) or **now** (`stop?hard=true`, `crewship issue stop --hard`). |
+| **Owner, Delegate** | Two separate rows in Properties: the **owner** is the accountable person, the **delegate** is the agent doing the work. They are independent — delegating never clears the owner, and an owner is not enough to Start; that needs a delegate. `crewship issue update <id> --assignee <email> --assignee-type user` sets the owner, `--assignee <agent>` the delegate. |
+| **Work & control** | First in the side column: who holds the issue right now (a person or an agent) and the work revision, the buttons that move work between people and agents, the Lead review rule, the **client acceptance** switch (locked, with the reason, outside Todo and Backlog or while a run is active) and the bound routine. See [Work, hand-offs and Lead review](#work-hand-offs-and-lead-review). |
 | **Due date, Estimate, Milestone** | Same card. Milestone existed only on the inline panel; the shipped page never had it. |
 | **Project** | Picker in the Project card, with a link through to the project board. |
 | **Labels** | Add, remove, or **create** one that does not exist yet, from the Labels card. |
 | **Routine** | Bind, unbind, and **Run now** when one is bound. Below it, **Recent runs started by** — how the bound routine's runs actually began, grouped by source, so "starting this issue runs that routine" is not the only half of the story you get. |
 | **Automations** | The [rules](/guides/automations) an event from this issue could set off, with the event each one watches. Absent when none are in scope. |
-| **Links** | Add a relation by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. Sub-issues are listed alongside. |
-| **Comments** | With `@` mentions — see [Issue mentions](/guides/issue-mentions). |
-| **Workflow** | Start work · Stop · Approve · Request changes (with a reason) · Reopen, top-right of the identity card, gated on status the way the server gates them. |
+| **Sub-issues, Relations** | Two cards: the sub-issues with how many are done (a parent cannot move to Done or In review while one is open), and the relations — add one by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. |
+| **Timeline** | Comments and activity in one stream, newest first, with All / Comments / Activity. Comments take `@` mentions — see [Issue mentions](/guides/issue-mentions). |
+| **Technical details** | Collapsed at the end of the side column: the routine's run sources, the automations in scope, the figures band and the metadata. |
 | **Run activity** | The live agent-work timeline while the issue is running. See [Activity](/guides/activity). |
 
 Two of these did not work before this landed, and now do:
@@ -109,7 +110,7 @@ them together would report that a schedule did something a
 
 ## Work, hand-offs and Lead review
 
-The **Current work** card is the issue's work contract (#2448): at any
+The **Work & control** card is the issue's work contract (#2448): at any
 moment the issue is either *with an agent* (`work_mode: agent` — Start may
 open runs) or *with a person* (`work_mode: human` — automatic work is
 paused). Every change to that state is a compare-and-set on
@@ -122,6 +123,14 @@ assignments and open plan tasks are cancelled, pending `@mention`
 deliveries are superseded, and the issue goes back to `TODO` held by you.
 While the runs are still winding down the card reads *Taking over ·
 stopping agent runs* (`work_stopping: true`) and hand-back/submit wait.
+
+**Hand off…**, **Delegate…**, **Submit result** and **Request changes** open
+dialogs. Each transfer carries the revision you saw and an operation id that
+stays the same if you retry the same request, so a double submit is one
+transfer; a `409` refreshes the page and keeps what you typed. The dialog's
+footer shows the revision. **Delegate…** is a handoff to an agent with
+**Start work now** on by default; Request changes says which of the Lead's two
+correction rounds it is.
 
 **Hand off** names the next worker and carries a note. To a person, the
 issue stays paused and they get a targeted Inbox message. To an agent, that
@@ -220,6 +229,11 @@ purpose, since a failure is not the same thing as the work being finished.
 
 ## The layout
 
+The page is two columns from `xl` up: the main column (ID, status, project,
+title, session, brief, sub-issues, relations, pull requests, runs, timeline)
+and a 320 px side column (Work & control, properties, files, related links,
+technical details). Below `xl` the side column follows the main one.
+
 Everything on the surface is a card, including **Run activity** — it used to
 render bare, a heading and a list of steps sitting on the page background in
 the middle of a stack of cards. It is now a card like the rest, with the step
@@ -288,8 +302,18 @@ minus the editing, which is the defect this replaced.
 
 ## The project detail
 
-`/issues?project=<id>` renders the matching project card:
-identity → figures → the project's issues → breakdown → health → properties.
+`/issues?project=<id>` opens the project page: a hero (icon, dates, name,
+description, status, health, lead, crews) and the tabs **Overview** (done of
+total, issues by status, milestones, team), **Tree** (milestone → issue →
+sub-issue), **Issues** (the project's rows; a row opens the peek), **Files**
+(project files with their revision, and a download) and **Settings**
+(properties, Access with Share, and — for admins and owners — Delete, behind a
+red confirmation; the issues stay, without a project). The tab is in the URL
+as `?tab=`, so a link can open Settings and a refresh keeps Files. A
+`?project=` that names no project shows *This project doesn't exist* with Back
+to issues, rather than quietly opening the list. Updates, budget and archive
+are not shown: the backend has none of them yet.
+
 Name, icon, colour, status, priority, health, lead and **dates** are all
 editable. Dates are new: the old rail drew a row reading "Set dates" that had
 nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and

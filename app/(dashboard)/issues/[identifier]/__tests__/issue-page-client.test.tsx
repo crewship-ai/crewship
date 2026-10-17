@@ -108,20 +108,20 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
     expect(calledUrls.some((u) => u.includes("/api/v1/issues/_"))).toBe(false)
   })
 
-  it("renders the card, not the old two-column page", async () => {
-    // The convergence, asserted at the route a link actually lands on: the
-    // deep link and the centre pane of /issues are the same component now,
-    // so the figures band and the card headings have to be here too.
+  it("renders the Harbor 2 issue page: session, Work & control and the cards", async () => {
+    // Asserted at the route a link actually lands on: the main column with
+    // the session block and the brief, the aside with Work & control and the
+    // properties, and the figures band under Technical details.
     render(<IssuePageClient />)
     await waitFor(() => expect(screen.getByText(/Fetch current weather data/)).toBeInTheDocument(), {
       timeout: 3000,
     })
-    for (const heading of ["Description", "Links", "Properties", "Routine", "Project", "Labels"]) {
+    expect(screen.getByRole("region", { name: "Session" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Work & control" })).toBeInTheDocument()
+    for (const heading of ["Brief", "Sub-issues", "Relations", "Timeline", "Properties", "Routine", "Project", "Labels"]) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
-    // The figures band — the thing the old page had no equivalent of.
     expect(screen.getByText("Opened")).toBeInTheDocument()
-    expect(screen.getByText("Sub-issues")).toBeInTheDocument()
   })
 
   it("keeps the editors on the deep link, not just in the centre pane", async () => {

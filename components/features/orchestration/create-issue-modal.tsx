@@ -50,6 +50,8 @@ import { LabelBadge } from "@/components/features/issues/label-badge"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { StatusIcon } from "@/components/features/issues/status-icon"
+import { isCreatableStatus } from "@/components/features/issues/issue-constants"
+import { STATUS_TEXT } from "@/components/features/issues/issues-view-model"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
@@ -126,6 +128,11 @@ interface CreateIssueModalProps {
   /** Refetch the workspace label list after one is created here. Optional —
    *  without it the Create action is hidden rather than silently useless. */
   onLabelsChanged?: () => void
+  /** The status the issue starts in — a list group's or board column's +.
+   *  Only BACKLOG, TODO and IN_PROGRESS are honoured; anything else is Backlog. */
+  initialStatus?: string | null
+  /** The project the issue is filed under — New issue opened from a project's page. */
+  initialProjectId?: string | null
 }
 
 export function CreateIssueModal({
@@ -138,7 +145,10 @@ export function CreateIssueModal({
   workspaceId,
   onCreated,
   onLabelsChanged,
+  initialStatus,
+  initialProjectId = null,
 }: CreateIssueModalProps) {
+  const startStatus = isCreatableStatus(initialStatus) ? initialStatus : "BACKLOG"
   const [crewId, setCrewId] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
@@ -285,6 +295,12 @@ export function CreateIssueModal({
     setCrewId((staffed ?? crews[0]).id)
   }, [open, crewId, crews])
 
+  // Opened from a project's page: start filed under it. Re-applied on every
+  // open, so a dialog closed elsewhere does not keep the last project.
+  useEffect(() => {
+    if (open) setProjectId(initialProjectId)
+  }, [open, initialProjectId])
+
   // Focus title on open
   useEffect(() => {
     if (open) {
@@ -402,7 +418,7 @@ export function CreateIssueModal({
     setPriority("none")
     setAssigneeType(null)
     setAssigneeId(null)
-    setProjectId(null)
+    setProjectId(initialProjectId)
     setSelectedLabels([])
     setRoutineId(null)
     setDueDate("")
@@ -419,7 +435,7 @@ export function CreateIssueModal({
     description.trim() !== "" ||
     priority !== "none" ||
     assigneeId !== null ||
-    projectId !== null ||
+    projectId !== initialProjectId ||
     dueDate !== "" ||
     estimate !== null ||
     parentIssueId !== null ||
@@ -454,6 +470,8 @@ export function CreateIssueModal({
             title: title.trim(),
             description: description.trim() || undefined,
             priority,
+            // Absent = BACKLOG on the server, so the default stays off the wire.
+            status: startStatus !== "BACKLOG" ? startStatus : undefined,
             labels: selectedLabels.length > 0 ? selectedLabels : undefined,
             assignee_type: assigneeType ?? undefined,
             assignee_id: assigneeId ?? undefined,
@@ -495,7 +513,7 @@ export function CreateIssueModal({
       setSaving(false)
       submittingRef.current = false
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange])
+  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus])
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((prev) =>
@@ -585,8 +603,8 @@ export function CreateIssueModal({
       <CreateSurfacePills>
         {/* Status (read-only) */}
         <CreateSurfacePill readOnly>
-          <StatusIcon status="BACKLOG" className="h-3.5 w-3.5" />
-          <span>Backlog</span>
+          <StatusIcon status={startStatus} className="h-3.5 w-3.5" />
+          <span>{STATUS_TEXT[startStatus]}</span>
         </CreateSurfacePill>
 
         {/* Priority */}
