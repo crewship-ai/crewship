@@ -1844,5 +1844,11 @@ body {
     border: 1px solid var(--border);
     box-shadow: none;
     overflow: hidden;
+    /* Pages size themselves as 100dvh − top bar − --mobile-tab-bar-h. A
+       desktop has no tab bar, but the frame takes 2 × 8 px of margin and
+       2 × 1 px of border; without this every page overflows by 18 px and
+       its bottom (the crews dock, panel footers) is cut off. */
+    --app-frame-y: 18px;
+    --mobile-tab-bar-h: var(--app-frame-y);
   }
 }
