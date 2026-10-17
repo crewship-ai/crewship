@@ -14,10 +14,19 @@ import (
 // Only trusted human-chat admission can create this immutable binding. Neither
 // crew IPC nor general run metadata can nominate a human principal.
 func captureArtifactChatPrincipal(r *http.Request, db *sql.DB, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+	return captureArtifactChatPrincipalQuery(r, db, run, ws, agent, crew, chat, message, receipt)
+}
+
+type artifactPrincipalQueryer interface {
+	pageAuthQueryer
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
 	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || receipt == nil || message == "" {
 		return errors.New("host human admission required")
 	}
-	current, err := chataudience.CaptureTrusted(r.Context(), db, chat, receipt.UserID, receipt)
+	current, err := chataudience.CaptureTrustedQuery(r.Context(), db, chat, receipt.UserID, receipt)
 	if err != nil {
 		return err
 	}
