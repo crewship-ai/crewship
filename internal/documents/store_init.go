@@ -26,6 +26,21 @@ func (s *Store) Init(ctx context.Context, k Key, schema int, snap []byte, p json
 }
 func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, schema int, snap []byte, p json.RawMessage, a Authorize) (v State, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
+		v, e = s.InitRequestTx(ctx, t, k, id, fingerprint, schema, snap, p, actor)
+		return e
+	})
+	return
+}
+
+// InitRequestTx initializes inside a caller-owned, writer-fenced creation
+// transaction. The caller must authorize the exact current principal before
+// invoking it and commit Page, document and creation allowance atomically.
+// Existing human initialization keeps using InitRequest's authority wrapper.
+func (s *Store) InitRequestTx(ctx context.Context, t *sql.Tx, k Key, id, fingerprint string, schema int, snap []byte, p json.RawMessage, actor string) (v State, e error) {
+	if t == nil || actor == "" || k.WorkspaceID == "" || k.PageID == "" {
+		return v, errors.New("document transaction, key and authorized actor required")
+	}
+	e = func() error {
 		if id == "" || len(id) > 256 || len(fingerprint) > 256 {
 			return errors.New("initialization request id required")
 		}
@@ -52,6 +67,11 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 			return lookupErr
 		}
 
+		if _, err := state(ctx, t, k); err == nil {
+			return ErrConflict
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		if err := s.valid(schema, snap, p); err != nil {
 			return err
 		}
@@ -71,8 +91,6 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 		}
 		v, err = state(ctx, t, k)
 		return err
-	})
+	}()
 	return
 }
-
-// Schema admission remains at the initial storage boundary until validators land.

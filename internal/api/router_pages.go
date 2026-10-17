@@ -52,6 +52,7 @@ import (
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	p.artifactMasterToken = r.internalToken
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
 	// create/update/delete paths that write wake-gate rules, and the freshness
