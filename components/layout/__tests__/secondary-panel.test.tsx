@@ -89,6 +89,62 @@ describe("SecondaryPanel", () => {
     expect(toolbar).toContainElement(screen.getByRole("button", { name: "Hide Issues views" }))
   })
 
+  // COM-05 (#3481, PNL-01/05): at 768–1279 the panel starts closed, opens
+  // from the top bar's panel button (v67 panelBtn) and floats over the
+  // content instead of taking 272 px from it.
+  describe("on a tablet", () => {
+    let tablet = true
+    beforeEach(() => {
+      tablet = true
+      vi.stubGlobal("matchMedia", (q: string) => ({
+        matches: q.includes("1279") ? tablet : false,
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }))
+    })
+
+    it("starts closed, out of the layout, and registers for the top bar", () => {
+      render(<SecondaryPanel id="routines" label="Routines views"><p>Views</p></SecondaryPanel>)
+      expect(screen.queryByText("Views")).toBeNull()
+      expect(screen.queryByRole("complementary")).toBeNull()
+      expect(useAppStore.getState().secondaryPanel).toEqual({ id: "routines", label: "Routines views" })
+    })
+
+    it("ignores a remembered desktop collapse", () => {
+      store.set("crewship.pref.panel.routines.collapsed", "true")
+      render(<SecondaryPanel id="routines" label="Routines views"><p>Views</p></SecondaryPanel>)
+      act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+      expect(screen.getByText("Views")).toBeInTheDocument()
+    })
+
+    it("opens floating over the content and closes from its button, Escape or the scrim", () => {
+      render(<SecondaryPanel id="routines" label="Routines views"><p>Views</p></SecondaryPanel>)
+      act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+      const aside = screen.getByRole("complementary", { name: "Routines views" })
+      expect(aside).toHaveAttribute("data-float", "true")
+      expect(aside).toHaveClass("secondary-panel-float")
+      fireEvent.click(screen.getByRole("button", { name: "Close Routines views" }))
+      expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+      expect(screen.queryByText("Views")).toBeNull()
+
+      act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+      fireEvent.keyDown(screen.getByText("Views"), { key: "Escape" })
+      expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+
+      act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+      fireEvent.click(screen.getByTestId("secondary-panel-scrim"))
+      expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+    })
+
+    it("stays a column on a desktop", () => {
+      tablet = false
+      render(<SecondaryPanel id="routines" label="Routines views"><p>Views</p></SecondaryPanel>)
+      expect(screen.getByRole("complementary")).not.toHaveAttribute("data-float")
+      expect(screen.getByText("Views")).toBeInTheDocument()
+    })
+  })
+
   it("on a phone can be the page itself (list first), without a sheet button", () => {
     mobile = true
     render(<SecondaryPanel id="inbox" label="Inbox list" phoneInline><p>Rows</p></SecondaryPanel>)
