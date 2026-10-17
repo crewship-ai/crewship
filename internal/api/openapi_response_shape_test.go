@@ -45,6 +45,15 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
+	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
+	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
+	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},
+	{name: "DocumentBlockHash", pointer: "/components/schemas/DocumentState/properties/blocks/items", value: DocumentBlockHash{}},
+	{name: "DocumentMutationResponse", pointer: "/components/schemas/DocumentReceipt", value: DocumentMutationResponse{}},
+	{name: "DocumentInitializationState", pointer: "/components/schemas/DocumentInitializationState", value: DocumentInitializationState{}},
+	{name: "DocumentInitializeResponse", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
 	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
 	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
 	{name: "ChatProposalResponse", pointer: "/components/schemas/ChatProposalResponse", value: proposalResponse{}},

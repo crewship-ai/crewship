@@ -1,0 +1,58 @@
+---
+title: "Document Commands"
+description: "Create, read and update saved documents with explicit revision checks."
+icon: "file-text"
+stability: experimental
+tag: Experimental
+---
+
+# crewship doc
+
+Work with a native document attached to a human-owned Page in the selected
+workspace. The document service must be enabled on that instance. The service
+rechecks your current credential and document permissions before reading or
+saving. Scoped credentials need `pages:read` for reads and both `pages:read` and
+`pages:write` for editing; `pages:*` covers both. These scopes do not grant access
+to somebody else's document.
+
+## `crewship doc status`
+
+Read whether document support is configured on the selected instance. This
+command takes no Page argument. A disabled instance returns `enabled: false`.
+
+## `crewship doc initialize <page-slug>`
+
+Populate an empty human-owned Page with its first document. Create the Page with
+`crewship page create --file page.yaml --allow-empty`, then supply a JSON request
+containing an operation `id`, explicit `schema` (2 or 3), and a `body` document
+tree. Schema 3 also requires the original `page_id`. Headings and paragraphs use
+schema 2; initialization does not silently upgrade an existing document.
+
+`--file` is required. Use `--file -` to read stdin. The file must contain one JSON
+object of at most 2 MiB. Keep the same operation ID and contents when retrying
+an operation whose confirmation was lost.
+
+## `crewship doc read <page-slug>`
+
+Read the currently confirmed document, content tree, block outline and revision.
+Use the returned opaque `epoch`, `rev` and target block hash when preparing an
+edit. Read after initialization to obtain the editing epoch.
+
+## `crewship doc outline <page-slug>`
+
+Print a JSON array of current block IDs, types, text and hashes. This command
+reads the same confirmed document as `read`; it does not mutate it.
+
+## `crewship doc patch <page-slug>`
+
+Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
+Supply one JSON object of at most 2 MiB. A semantic text replacement contains
+`id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
+`ifRev` and `ifHash`. Schema 3 also requires the original `page_id`. The editor's
+binary update form uses `kind: "human"` and a base64 `update` instead.
+
+A changed revision, target hash or epoch refuses the edit. Read the confirmed
+state again and decide on a new edit; the command never rebases it automatically.
+For a lost confirmation, resend the original request with its original ID.
+The receipt identifies the durable revision; a successful exact retry does not
+create another write. Revoked credentials cannot replay saved requests.
