@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, FieldLabel } from "./_shared"
+import { Card, FieldLabel } from "./_shared"
+import { EmptyState } from "@/components/layout/empty-state"
 import { StatusPill } from "@/components/ui/status-pill"
 import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -139,6 +140,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest =
       {ours.length === 0 && !formOpen ? (
         <Card title="Webhooks">
           <EmptyState
+            size="compact"
             icon={Webhook}
             title="No webhooks yet"
             description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
