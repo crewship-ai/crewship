@@ -327,6 +327,12 @@ describe.each(["day", "night"] as const)("Harbor 2 %s contrast matrix", (theme) 
     for (const s of SURFACES) expect(contrast(lum("icon-faint"), lum(s)), `icon-faint on ${s}`).toBeGreaterThanOrEqual(3)
   })
 
+  it("control-border ≥ 3:1 on every surface (WCAG 1.4.11, ODCH-16)", () => {
+    // scripts/check-control-accessibility.tsx measures the same thing in a
+    // browser in CI; it caught #8792AB at 2.96:1 on the day sidebar ground.
+    for (const s of SURFACES) expect(contrast(lum("control-border"), lum(s)), `control-border on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
   it.each(["ok", "warn", "danger", "violet"])("chip %s text ≥ 4.5:1 on its fill and on card", (tone) => {
     expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
     expect(contrast(lum(`chip-${tone}-fg`), lum("card"))).toBeGreaterThanOrEqual(4.5)
