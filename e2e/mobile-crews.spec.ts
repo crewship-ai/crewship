@@ -1,128 +1,53 @@
-import { test, expect, request as plwRequest } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
 
-const E2E_EMAIL = process.env.E2E_EMAIL
-const E2E_PASSWORD = process.env.E2E_PASSWORD
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
+// /crews on a phone (Harbor 2, #3398): the panel is the page while nothing is
+// open, a crew or an agent is a full page with its tabs in one scrolling
+// strip, the only top-bar action is Chat, and nothing scrolls sideways.
+// Uses the session global-setup stores.
 
+test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
 
-test.use({
-  viewport: { width: 390, height: 844 },
-  deviceScaleFactor: 3,
-  isMobile: true,
-  hasTouch: true,
-  storageState: { cookies: [], origins: [] },
-})
-
-let cachedCookies: Awaited<ReturnType<Awaited<ReturnType<typeof plwRequest.newContext>>["storageState"]>>["cookies"] = []
-
-test.beforeAll(async () => {
-  // Refuse to embed demo credentials in source — skip the whole suite
-  // unless E2E_EMAIL and E2E_PASSWORD are supplied through the environment.
-  test.skip(
-    !E2E_EMAIL || !E2E_PASSWORD,
-    "mobile-crews: set E2E_EMAIL and E2E_PASSWORD to run this suite",
-  )
-  const ctx = await plwRequest.newContext({ baseURL: BASE_URL })
-  const { csrfToken } = (await (await ctx.get("/api/auth/csrf")).json()) as { csrfToken: string }
-  const loginRes = await ctx.post("/api/auth/callback/credentials", {
-    form: { csrfToken, email: E2E_EMAIL!, password: E2E_PASSWORD!, callbackUrl: "/", json: "true" },
-  })
-  if (!loginRes.ok()) throw new Error(`login ${loginRes.status()}`)
-  const storage = await ctx.storageState()
-  cachedCookies = storage.cookies
-  await ctx.dispose()
-})
-
-async function login(page: import("@playwright/test").Page) {
-  await page.context().addCookies(cachedCookies)
-  await page.goto("/")
-  await page.waitForLoadState("domcontentloaded")
+async function noSideScroll(page: Page) {
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(over, "horizontal overflow").toBeLessThanOrEqual(1)
 }
 
-test("mobile /crews: explorer opens from hamburger, no horizontal scroll", async ({ page }) => {
-  await login(page)
+async function firstCrew(page: Page): Promise<string | null> {
   await page.goto("/crews")
-  await page.waitForLoadState("networkidle")
+  const row = page.locator("[data-crew-row]").first()
+  if (!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false))) return null
+  return row.getAttribute("data-crew-row")
+}
 
-  // No horizontal overflow on the page
-  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
-  const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
-  expect(scrollWidth - clientWidth).toBeLessThanOrEqual(1) // 1px tolerance
+test("mobile /crews: the list is the page, no horizontal scroll", async ({ page }) => {
+  await page.goto("/crews")
+  await expect(page.locator("[data-slot=secondary-panel][data-phone=inline]")).toBeVisible()
+  await expect(page.getByPlaceholder("Search crews and agents…")).toBeVisible()
+  await noSideScroll(page)
 })
 
-test("mobile agent detail: hero and actions fit, no horizontal scroll", async ({ page }) => {
-  await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    const d = await r.json()
-    return Array.isArray(d) ? d[0]?.id : d.id
-  })
-  const agentList = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
-  if (!Array.isArray(agentList) || agentList.length === 0) {
-    test.skip(true, "no seeded agents")
-    return
+test("mobile: tapping a crew opens its page with the six tabs in a scrolling strip", async ({ page }) => {
+  const crew = await firstCrew(page)
+  test.skip(!crew, "no seeded crews")
+  await page.locator(`[data-crew-row="${crew}"] [role=button]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`crew=${crew}`))
+  await expect(page.getByTestId("crew-header")).toBeVisible()
+  for (const tab of ["Overview", "Team", "Tools and access", "Environment", "Memory", "Settings"]) {
+    await expect(page.getByRole("tab", { name: new RegExp(`^${tab}`) })).toHaveCount(1)
   }
-
-  // Agent cards now live on /crews/agents list. A crew click on mobile
-  // navigates to the full /crews/<id> page rather than setting a preview
-  // param, so the 'click crew → click agent inside crew preview' flow
-  // from the pre-10 layout no longer applies on mobile either.
-  await page.goto(`/crews?agent=${agentList[0].slug}`)
-  await page.waitForLoadState("networkidle")
-  await page.waitForTimeout(1500)
-
-  // Agent detail (CrewsAgentInline) should be visible — hero has Chat link,
-  // icon-only actions have aria-label. We don't require the mobile-overlay
-  // wrapper here because useIsMobile uses a matchMedia effect that may lag
-  // the first render; the responsive concern is "content fits".
-  await expect(page.locator("a[aria-label='Chat']").first()).toBeVisible({ timeout: 10_000 })
-  await expect(page.locator("a[aria-label='Open full agent page']").first()).toBeVisible()
-
-  // No horizontal overflow — this is the actual responsive health check.
-  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
-  const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
-  expect(scrollWidth - clientWidth, `scrollWidth=${scrollWidth} clientWidth=${clientWidth}`).toBeLessThanOrEqual(1)
+  await noSideScroll(page)
 })
 
-test("mobile crew page renders all 6 tabs in horizontal scroll strip", async ({ page }) => {
-  await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    const d = await r.json()
-    return Array.isArray(d) ? d[0]?.id : d.id
-  })
-  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
-  if (!Array.isArray(crews) || crews.length === 0) {
-    test.skip(true, "no crews")
-    return
-  }
-  await page.goto(`/crews/${crews[0].id}`)
-  for (const tab of ["Overview", "Members", "Network", "Runtime", "Journal", "Settings"]) {
-    await expect(page.getByRole("tab", { name: tab })).toBeVisible({ timeout: 5_000 })
-  }
-})
-
-test("mobile agent full page: 7-tab bottom sheet from Pages button", async ({ page }) => {
-  await login(page)
-  await page.goto("/crews/agents")
-  await page.waitForLoadState("networkidle")
-  const agentLink = page
-    .locator("a[href^='/crews/agents/']:not([href$='/new']):not([href*='/agents/new'])")
-    .first()
-  if ((await agentLink.count()) === 0) {
-    test.skip(true, "no seeded agents")
-    return
-  }
-  const href = await agentLink.getAttribute("href")
-  await page.goto(href!)
-  await page.waitForLoadState("networkidle")
-
-  // AgentMobileTabsBar has a "Pages" button
-  const pagesBtn = page.getByRole("button", { name: "Agent pages" })
-  await expect(pagesBtn).toBeVisible({ timeout: 10_000 })
-  await pagesBtn.click()
-
-  for (const label of ["Overview", "Sessions", "Runs", "Workspace", "Tools", "Logs", "Settings"]) {
-    await expect(page.locator(`a:has-text('${label}')`).first()).toBeVisible({ timeout: 5_000 })
-  }
+test("mobile agent page: Chat is the only action, content fits", async ({ page }) => {
+  const crew = await firstCrew(page)
+  test.skip(!crew, "no seeded crews")
+  await page.goto(`/crews?crew=${crew}&tab=team`)
+  const row = page.locator("[data-agent-row]").first()
+  test.skip(!(await row.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false)), "crew has no agents")
+  const agent = (await row.getAttribute("data-agent-row"))!
+  await page.goto(`/crews?agent=${agent}&crew=${crew}`)
+  await expect(page.getByTestId("agent-header")).toBeVisible()
+  await expect(page.getByRole("link", { name: /^Chat with / })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Activity" })).toHaveCount(0)
+  await noSideScroll(page)
 })

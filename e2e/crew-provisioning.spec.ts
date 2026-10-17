@@ -31,7 +31,7 @@ async function waitForBadge(page: Page) {
 
 async function pickAnyCrew(page: Page): Promise<string> {
   await page.goto("/crews")
-  const crewRow = page.locator("aside button").filter({ hasText: /^(Research|DevOps|Engineering|Quality)/ }).first()
+  const crewRow = page.locator("[data-crew-row] > [role=button]").first()
   await expect(crewRow).toBeVisible({ timeout: QUICK })
   await crewRow.click()
   await expect(page).toHaveURL(/[?&]crew=/, { timeout: QUICK })
@@ -52,7 +52,7 @@ test.describe("Toolbar provisioning popover — end-to-end", () => {
     const slug = await pickAnyCrew(page)
 
     // Open Settings tab on the canvas.
-    await page.getByRole("tab", { name: /Settings/i }).click()
+    await page.getByRole("tab", { name: /^Settings$/i }).click()
     // Container & features section is collapsible — open it explicitly.
     const containerSection = page.getByText(/Container image|Container & features/i).first()
     await containerSection.click().catch(() => {

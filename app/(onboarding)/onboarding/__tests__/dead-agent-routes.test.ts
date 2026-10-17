@@ -233,7 +233,6 @@ const REPAIRED = [
   "components/features/journal/runs-view.tsx",
   "components/features/journal/journal-entry-card.tsx",
   "components/features/agents/agent-card.tsx",
-  "components/features/crews/crew-agents.tsx",
   "components/features/onboarding/setup-nudge.tsx",
   "hooks/use-active-runs.ts",
   // Index-route sweep: these two linked at /crews/agents itself, which the
