@@ -218,6 +218,7 @@ export function AuditLogPage() {
   return (
     <DrillPage
       parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+      panelId="drill-audit"
       title="Audit log"
       icon={Activity}
       description="Every state-changing action, immutably recorded"

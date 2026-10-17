@@ -214,6 +214,7 @@ export function CrewLinksPage() {
   return (
     <DrillPage
       parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+      panelId="drill-crew-links"
       title="Crew links"
       icon={Link2}
       description="Who hands work to whom, and whose shared files they see"

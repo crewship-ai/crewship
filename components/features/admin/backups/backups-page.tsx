@@ -437,6 +437,7 @@ export function BackupsPage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-backups"
       title="Backups"
       icon={Database}
       description="What is kept, where, and whether a restore really works"
@@ -450,7 +451,7 @@ export function BackupsPage() {
             <TimeRangePicker value={range} onChange={(r) => { setSlice(null); setQuery({ period: RANGE_PERIOD[r] ?? "" }) }}
               presets={["24h", "7d", "30d", "90d", "all"]} triggerClassName="h-7" />
           )}
-          {/* Icons only on a phone, so the sub-bar keeps room for Filters. */}
+          {/* Icons only on a phone, so the actions fit the sub-bar. */}
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New plan" onClick={newPlan}><Plus /><span className="max-md:hidden">New plan</span></Button>
           <Button size="sm" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="Back up now"
             title={scope === "instance" ? "Back up the whole instance now" : `Back up ${selected.size === 1 ? workspaces.find((w) => selected.has(w.id))?.name ?? "1 workspace" : `${selected.size} workspaces`} now`}
