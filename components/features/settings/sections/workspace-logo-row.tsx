@@ -89,29 +89,32 @@ export function WorkspaceLogoRow({ workspaceId, name, logoUrl, canEdit, onChange
   }, [send, landed])
 
   return (
-    <SettingsRow label="Workspace logo" description={canEdit ? undefined : "Shown in the workspace switcher and Admin"}>
-      <div className="flex flex-col items-end gap-1.5">
-        <div className="flex items-center gap-2.5">
-          <WorkspaceMark name={name} logoUrl={url}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground ring-2 ring-border" />
-          {canEdit && (
-            <>
-              <input ref={input} type="file" accept={LOGO_TYPES.join(",")} className="hidden" onChange={onPick} aria-label="Upload workspace logo" />
-              <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => input.current?.click()} disabled={busy}>
-                {busy ? <Spinner className="h-3 w-3" /> : url ? "Change" : "Upload"}
-              </Button>
-              {url && (
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive" onClick={() => void remove()} disabled={busy}>
-                  Remove
-                </Button>
-              )}
-            </>
+    // The rule (and a refusal) is the row's hint, under the label: an upload
+    // saves at once, so there is nothing for the save bar.
+    <SettingsRow
+      label="Workspace logo"
+      lock={canEdit ? undefined : "Admins and owners"}
+      description={!canEdit
+        ? "Shown in the workspace switcher and Admin"
+        : error
+          ? <span role="alert" className="text-destructive">{error}</span>
+          : "PNG, JPEG, or WebP · max 2MB · saves at once"}
+    >
+      <WorkspaceMark name={name} logoUrl={url}
+        className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground ring-2 ring-border" />
+      {canEdit && (
+        <>
+          <input ref={input} type="file" accept={LOGO_TYPES.join(",")} className="hidden" onChange={onPick} aria-label="Upload workspace logo" />
+          <Button size="sm" variant="outline" onClick={() => input.current?.click()} disabled={busy}>
+            {busy ? <Spinner className="h-3 w-3" /> : url ? "Change" : "Upload"}
+          </Button>
+          {url && (
+            <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => void remove()} disabled={busy}>
+              Remove
+            </Button>
           )}
-        </div>
-        {canEdit && (error
-          ? <span className="text-label text-destructive">{error}</span>
-          : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>)}
-      </div>
+        </>
+      )}
     </SettingsRow>
   )
 }
