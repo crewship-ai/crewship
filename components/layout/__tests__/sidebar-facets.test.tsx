@@ -61,7 +61,12 @@ function Stateful() {
 }
 
 describe("sidebar facet block (COM-01)", () => {
-  beforeEach(() => cleanup())
+  beforeEach(() => {
+    cleanup()
+    // jsdom lacks what cmdk's list calls; environment only.
+    Element.prototype.scrollIntoView ??= vi.fn()
+    globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver
+  })
 
   it("stays out of the panel until Filter opens it, and the trigger names the block it opens", () => {
     render(<Harness />)
@@ -148,10 +153,11 @@ describe("sidebar facet block (COM-01)", () => {
     render(<Stateful />)
     fireEvent.click(screen.getByRole("button", { name: /^Filter/ }))
     fireEvent.click(screen.getByRole("button", { name: /^Status/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Paused/ }))
-    expect(screen.getByRole("button", { name: /Paused/ })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: /Paused/, pressed: false }))
+    // The header now names the choice too, so ask for the value by its state.
+    expect(screen.getByRole("button", { name: /Paused/, pressed: true })).toBeInTheDocument()
     expect(screen.getByRole("group", { name: "Filter routines" })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /Active/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Active/, pressed: false }))
     expect(screen.getByRole("button", { name: /^Status/ })).toHaveTextContent("2 selected")
   })
 
