@@ -74,3 +74,6 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 	})
 	return
 }
+
+// Schema admission remains at the initial storage boundary until validators land.
+func supportedSchema(schema int) bool { return schema == 1 }

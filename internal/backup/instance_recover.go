@@ -711,7 +711,30 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents')`).Scan(&documentsExist); err != nil {
 			return err
 		} else if documentsExist {
-			if _, err := db.ExecContext(ctx, `UPDATE documents SET epoch=epoch+1,writer='',owner='',lease_until=0`); err != nil {
+			// Older D1a physical bundles predate the editor generation column.
+			query := `UPDATE documents SET epoch=epoch+1,writer='',owner='',lease_until=0`
+			columns, err := db.QueryContext(ctx, `PRAGMA table_info(documents)`)
+			if err != nil {
+				return err
+			}
+			for columns.Next() {
+				var cid, notnull, pk int
+				var name, kind string
+				var def any
+				if err := columns.Scan(&cid, &name, &kind, &notnull, &def, &pk); err != nil {
+					columns.Close()
+					return err
+				}
+				if name == "generation" {
+					query = `UPDATE documents SET epoch=epoch+1,generation=generation+1,writer='',owner='',lease_until=0`
+				}
+			}
+			if err := columns.Err(); err != nil {
+				columns.Close()
+				return err
+			}
+			columns.Close()
+			if _, err := db.ExecContext(ctx, query); err != nil {
 				return fmt.Errorf("backup: reset document writer leases: %w", err)
 			}
 			rep.RuntimeReset = append(rep.RuntimeReset, "document writer leases and epochs")
