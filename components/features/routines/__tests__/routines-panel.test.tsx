@@ -234,6 +234,55 @@ describe("<RoutinesExplorer> triggers, next run and spend (RT-02)", () => {
   })
 })
 
+describe("<RoutinesExplorer> select several (RT-03, PNL-03)", () => {
+  const bulk = () => ({ canTurnOff: true, onTurnOff: vi.fn(async () => {}), onRunNow: vi.fn(async () => {}) })
+
+  it("Select several turns rows into checkboxes and shows the bulk bar at the bottom", () => {
+    const b = bulk()
+    const props = renderPanel({ bulk: b })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    const bar = screen.getByRole("toolbar", { name: "Selected routines" })
+    expect(within(bar).getByText("Pick routines")).toBeInTheDocument()
+    expect(within(bar).getByRole("button", { name: "Turn off" })).toBeDisabled()
+    expect(within(bar).getByRole("button", { name: "Run now" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Weekly report" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select News digest" }))
+    // Picking a row selects it; it does not open the routine.
+    expect(props.onSelectRoutine).not.toHaveBeenCalled()
+    expect(within(bar).getByText("2 selected")).toBeInTheDocument()
+    fireEvent.click(within(bar).getByRole("button", { name: "Run now" }))
+    expect(b.onRunNow).toHaveBeenCalledWith(["weekly", "news"])
+  })
+
+  it("Turn off asks first and then turns off the selected routines", async () => {
+    const b = bulk()
+    renderPanel({ bulk: b })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Weekly report" }))
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Selected routines" })).getByRole("button", { name: "Turn off" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("Turn off 1 routine?")).toBeInTheDocument()
+    expect(b.onTurnOff).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Turn off" }))
+    await waitFor(() => expect(b.onTurnOff).toHaveBeenCalledWith(["weekly"]))
+  })
+
+  it("Turn off is not offered without Owner or Admin; Done leaves selection", () => {
+    renderPanel({ bulk: { ...bulk(), canTurnOff: false } })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    const bar = screen.getByRole("toolbar", { name: "Selected routines" })
+    expect(within(bar).queryByRole("button", { name: "Turn off" })).not.toBeInTheDocument()
+    fireEvent.click(within(bar).getByRole("button", { name: "Done selecting" }))
+    expect(screen.queryByRole("toolbar", { name: "Selected routines" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  })
+
+  it("without bulk actions (a phone) there is no Select several", () => {
+    renderPanel()
+    expect(screen.queryByRole("button", { name: "Select several" })).not.toBeInTheDocument()
+  })
+})
+
 describe("routineRowState", () => {
   it.each([
     [{ status: "proposed" }, null, "Proposed"],
