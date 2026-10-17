@@ -1,422 +1,301 @@
+import * as React from "react"
 import type { ComponentProps } from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import type { JournalEntry } from "@/lib/types/journal"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
 import type { ChainSummary } from "@/hooks/use-chains"
 import type { JournalLookupValue } from "@/hooks/use-journal-lookup"
-import type { ActivitySidebar } from "../activity-sidebar"
-import type { ActivityHome } from "../activity-home"
-import type { ActivityDetail } from "../activity-detail"
-import type { WorkflowPage } from "../workflow-page"
-import type { RoutineRunsPage } from "../routine-runs-page"
-import type { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "../lens-overviews"
-import type { AgentDrillDown, IssueDrillDown } from "../drill-downs"
+import type { JournalEntry } from "@/lib/types/journal"
 import type { ActivityRunPage } from "../activity-run-page"
-import type { ActivityWorkPage } from "../activity-work-page"
-import type { FeedRow } from "../feed-row"
+import type { ActivityDetail } from "../activity-detail"
+
 const mock = vi.hoisted(() => ({
-  list: vi.fn(), stream: vi.fn(), chains: vi.fn(), fetch: vi.fn(), lookup: vi.fn(), mobile: false,
-  refresh: vi.fn(), loadMore: vi.fn(), prepend: vi.fn(), refreshChains: vi.fn(),
-  sidebar: vi.fn<(p: ComponentProps<typeof ActivitySidebar>) => React.ReactNode>(),
-  home: vi.fn<(p: ComponentProps<typeof ActivityHome>) => React.ReactNode>(),
-  detail: vi.fn<(p: ComponentProps<typeof ActivityDetail>) => React.ReactNode>(),
-  workflow: vi.fn<(p: ComponentProps<typeof WorkflowPage>) => React.ReactNode>(),
-  routine: vi.fn<(p: ComponentProps<typeof RoutineRunsPage>) => React.ReactNode>(),
-  agents: vi.fn<(p: ComponentProps<typeof AgentsOverview>) => React.ReactNode>(),
-  issues: vi.fn<(p: ComponentProps<typeof IssuesOverview>) => React.ReactNode>(),
-  routines: vi.fn<(p: ComponentProps<typeof RoutinesLensOverview>) => React.ReactNode>(),
-  agent: vi.fn<(p: ComponentProps<typeof AgentDrillDown>) => React.ReactNode>(),
-  issue: vi.fn<(p: ComponentProps<typeof IssueDrillDown>) => React.ReactNode>(),
+  list: vi.fn(),
+  stream: vi.fn(),
+  chains: vi.fn(),
+  lookup: vi.fn(),
+  records: vi.fn(),
+  mobile: false,
+  role: "ADMIN" as string | null,
+  refreshChains: vi.fn(async () => {}),
+  refreshList: vi.fn(async () => {}),
+  prepend: vi.fn(),
   run: vi.fn<(p: ComponentProps<typeof ActivityRunPage>) => React.ReactNode>(),
-  work: vi.fn<(p: ComponentProps<typeof ActivityWorkPage>) => React.ReactNode>(),
-  row: vi.fn<(p: ComponentProps<typeof FeedRow>) => React.ReactNode>(),
+  detail: vi.fn<(p: ComponentProps<typeof ActivityDetail>) => React.ReactNode>(),
 }))
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search), usePathname: () => window.location.pathname }))
+
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mock.mobile }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: mock.fetch }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => new Response("{}")) }))
+vi.mock("@/hooks/use-user-preference", async () => {
+  const R = await import("react")
+  return { useUserPreference: <T,>(_k: string, d: T) => R.useState<T>(d) }
+})
 vi.mock("@/hooks/use-journal-list", () => ({ useJournalList: mock.list }))
 vi.mock("@/hooks/use-journal-stream", () => ({ useJournalStream: mock.stream }))
 vi.mock("@/hooks/use-journal-lookup", () => ({ useJournalLookup: mock.lookup }))
 vi.mock("@/hooks/use-chains", () => ({ useChains: mock.chains }))
-vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: [{ id: "p1", slug: "triage", name: "Triage", invocation_count: 2 }] }) }))
-vi.mock("@/hooks/use-pipeline-schedules", () => ({ usePipelineSchedules: () => ({ schedules: [] }) }))
-vi.mock("../activity-sidebar", async (original) => ({ ...await original<typeof import("../activity-sidebar")>(), ActivitySidebar: mock.sidebar }))
-vi.mock("../activity-overview", () => ({ iconFor: () => () => null }))
-vi.mock("../activity-home", () => ({ ActivityHome: mock.home }))
-vi.mock("../activity-detail", () => ({ ActivityDetail: mock.detail }))
-vi.mock("../workflow-page", () => ({ WorkflowPage: mock.workflow }))
-vi.mock("../routine-runs-page", () => ({ RoutineRunsPage: mock.routine }))
-vi.mock("../lens-overviews", () => ({ AgentsOverview: mock.agents, IssuesOverview: mock.issues, RoutinesLensOverview: mock.routines }))
-vi.mock("../drill-downs", () => ({ AgentDrillDown: mock.agent, IssueDrillDown: mock.issue }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mock.role }) }))
+vi.mock("@/hooks/use-pipelines", () => ({
+  usePipelines: () => ({ pipelines: [{ id: "p1", slug: "triage", name: "Nightly triage" }, { id: "p2", slug: "digest", name: "Daily digest" }] }),
+}))
+vi.mock("@/hooks/use-pipeline-run-records", () => ({ usePipelineRunRecords: mock.records }))
 vi.mock("../activity-run-page", () => ({ ActivityRunPage: mock.run }))
-vi.mock("../activity-work-page", () => ({ ActivityWorkPage: mock.work }))
-// The rail focus fetches its own runs; the sidebar is mocked, its import is not.
-vi.mock("../activity-rail-focus", () => ({ RailRoutineFocus: () => null }))
-vi.mock("../feed-row", () => ({ FeedRow: mock.row }))
+vi.mock("../activity-work-page", () => ({ ActivityWorkPage: () => <div>Work page</div> }))
+vi.mock("../workflow-page", () => ({ WorkflowPage: () => <div>Workflow page</div> }))
+vi.mock("../activity-detail", () => ({ ActivityDetail: mock.detail }))
+
 import { ActivityStreamView } from "../activity-stream-view"
-import { useAppStore } from "@/lib/store"
-import { EMPTY_FACETS } from "../activity-sidebar"
-const event = (id: string, extra: Partial<JournalEntry> = {}): JournalEntry => ({ id, workspace_id: "ws", ts: "2026-10-02T20:00:00Z", entry_type: "run.completed", severity: "info", actor_type: "system", summary: id, ...extra })
-const entries = [event("e1", { crew_id: "c1", agent_id: "a1", mission_id: "m1", payload: { run_id: "r1", pipeline_slug: "triage", step_id: "step1" } }), event("e2", { payload: { run_id: "r2", routine_slug: "other", step: "step2" } })]
-const chain: ChainSummary = { origin: "r1", started_by_kind: "schedule", started_by: "nightly", runs: 1, max_chain_depth: 0, failed_runs: 0, failed: false, first_activity: "2026-10-02T20:00:00Z", last_activity: "2026-10-02T20:00:01Z", duration_ms: 1000, issue_count: 0, agent_count: 0, routine_slug: "triage" }
-// A chain rooted in agent work: no routine run to open, so it keeps the chain page.
-const agentChain: ChainSummary = { ...chain, origin: "w1", started_by_kind: "user", routine_slug: undefined }
-// Agent work started outside any routine (#2989): its own page.
-const workChain: ChainSummary = { ...chain, origin: "asg1", kind: "assignment", task: "Draft the reply", started_by_kind: "agent", routine_slug: undefined }
-const lookup: JournalLookupValue = { crews: new Map([["c1", { id: "c1", name: "Builders", slug: "builders", icon: null, color: "blue" }]]), agents: new Map([["a1", { id: "a1", name: "Alice", slug: "alice", crew_id: "c1", avatar_seed: null, avatar_style: null }]]), missions: new Map([["m1", { id: "m1", title: "Fix the failing integration in the workspace", status: "IN_PROGRESS" }]]), loading: false, refresh: vi.fn() }
-const sidebar = () => mock.sidebar.mock.calls.at(-1)![0]
-const home = () => mock.home.mock.calls.at(-1)![0]
-const detail = () => mock.detail.mock.calls.at(-1)![0]
-const listState = (over: Record<string, unknown> = {}) => ({ entries, loading: false, loadingMore: false, error: null, nextCursor: null, refresh: mock.refresh, loadMore: mock.loadMore, prependLive: mock.prepend, ...over })
-const show = () => render(<ActivityStreamView workspaceId="ws & a" />)
+
+const NOW = Date.now()
+const ago = (min: number) => new Date(NOW - min * 60_000).toISOString()
+
+const chain = (origin: string, over: Partial<ChainSummary> = {}): ChainSummary => ({
+  origin,
+  started_by_kind: "schedule",
+  started_by: "nightly",
+  runs: 1,
+  max_chain_depth: 0,
+  failed_runs: 0,
+  failed: false,
+  first_activity: ago(30),
+  last_activity: ago(29),
+  duration_ms: 42_000,
+  issue_count: 0,
+  agent_count: 0,
+  routine_slug: "triage",
+  ...over,
+})
+
+const yesterday = (h: number) => {
+  const d = new Date(NOW)
+  d.setDate(d.getDate() - 1)
+  d.setHours(h, 0, 0, 0)
+  return d.toISOString()
+}
+
+const CHAINS: ChainSummary[] = [
+  chain("run_live", { running_runs: 1, routine_slug: "triage", agents: [{ id: "a1", name: "Scout", assignments: 1 }], agent_count: 1 }),
+  chain("run_bad", { failed: true, failed_runs: 1, routine_slug: "triage", first_activity: ago(60) }),
+  chain("run_d1", { routine_slug: "digest", first_activity: yesterday(9) }),
+  chain("run_d2", { routine_slug: "digest", first_activity: yesterday(8) }),
+  chain("run_d3", { routine_slug: "digest", first_activity: yesterday(7) }),
+]
+
+const change: JournalEntry = {
+  id: "e1",
+  workspace_id: "ws",
+  ts: ago(45),
+  entry_type: "mission.status_change",
+  severity: "info",
+  actor_type: "user",
+  summary: "CRW-1 moved to In review",
+  mission_id: "m1",
+  payload: { from: "In progress", to: "In review" },
+}
+
+const lookup: JournalLookupValue = {
+  crews: new Map([["c1", { id: "c1", name: "Research", slug: "research", icon: null, color: "teal" }]]),
+  agents: new Map([["a1", { id: "a1", name: "Scout", slug: "scout", crew_id: "c1", avatar_seed: null, avatar_style: null }]]),
+  missions: new Map([["m1", { id: "m1", title: "Fix flaky login", status: "IN_REVIEW", identifier: "CRW-1" }]]),
+  loading: false,
+  refresh: vi.fn(),
+}
+
+const chainsState = (over: Record<string, unknown> = {}) => ({
+  chains: CHAINS,
+  loading: false,
+  error: null,
+  hasUnrecordedRuns: false,
+  hasMore: false,
+  refresh: mock.refreshChains,
+  ...over,
+})
+const listState = (over: Record<string, unknown> = {}) => ({
+  entries: [change],
+  loading: false,
+  loadingMore: false,
+  error: null,
+  nextCursor: null,
+  refresh: mock.refreshList,
+  loadMore: vi.fn(),
+  prependLive: mock.prepend,
+  ...over,
+})
+
+const show = () => render(<ActivityStreamView workspaceId="ws" />)
+// Queried by selector: an open Peek hides the page from the accessibility tree.
+const table = () => document.querySelector<HTMLElement>("[role=table][aria-label=Activity]")!
+
 beforeEach(() => {
-  vi.clearAllMocks(); mock.mobile = false
-  try { window.localStorage.removeItem("crewship.pref.panel.activity.collapsed") } catch { /* no storage */ }
-  useAppStore.getState().setSecondaryPanelOpen(false)
+  vi.clearAllMocks()
+  mock.mobile = false
+  mock.role = "ADMIN"
   window.history.replaceState(null, "", "/activity")
+  mock.chains.mockReturnValue(chainsState())
   mock.list.mockReturnValue(listState())
-  mock.stream.mockReturnValue({ status: "connected" })
-  mock.chains.mockReturnValue({ chains: [chain, agentChain, workChain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
+  mock.stream.mockReturnValue({ status: "connected", reconnect: vi.fn() })
   mock.lookup.mockReturnValue(lookup)
-  mock.fetch.mockImplementation(async () => new Response(JSON.stringify({ missions: [{ id: "m1", title: "Fix", status: "IN_PROGRESS", priority: "high" }] })))
-  mock.sidebar.mockImplementation((p) => <div><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /></div>)
-  mock.home.mockImplementation(() => <div>Activity home</div>)
-  mock.detail.mockImplementation((p) => <div>Record {p.entry.id}<button onClick={p.onBack}>Close record</button></div>)
-  mock.workflow.mockImplementation((p) => <div>Workflow {p.chain.origin}</div>)
-  mock.routine.mockImplementation((p) => <div>Routine {p.slug}</div>)
-  mock.agents.mockImplementation(() => <div>Agent overview</div>)
-  mock.issues.mockImplementation(() => <div>Issue overview</div>)
-  mock.routines.mockImplementation(() => <div>Routine overview</div>)
-  mock.agent.mockImplementation((p) => <div>Agent {p.name}</div>)
-  mock.issue.mockImplementation((p) => <div>Issue {p.issueId}</div>)
-  mock.run.mockImplementation((p) => <div>Run {p.runId}</div>)
-  mock.work.mockImplementation((p) => <div>Work {p.chain.origin}</div>)
-  mock.row.mockImplementation((p) => <button onClick={p.onSelect}>Row {p.entry.id}</button>)
+  mock.records.mockReturnValue({ records: [] })
+  mock.run.mockImplementation((p) => <div>Run page {p.runId}</div>)
+  mock.detail.mockImplementation((p) => <div>Record {p.entry.id}</div>)
 })
-afterEach(async () => { await act(async () => {}); cleanup() })
-
-it("shares counts and metadata and wires live entries to the same journal window", async () => {
-  show()
-  await waitFor(() => expect(sidebar().issues).toHaveLength(1))
-  expect(screen.getByText("Activity home")).toBeVisible()
-  expect(sidebar().crewCounts).toEqual({ c1: 1 })
-  expect(sidebar().issueCounts).toEqual({ m1: 1 })
-  expect(sidebar().routineCounts).toEqual({ triage: 1, other: 1 })
-  expect(mock.fetch).toHaveBeenCalledWith("/api/v1/missions?workspace_id=ws%20%26%20a&limit=200")
-  expect(mock.list.mock.calls.at(-1)![0]).toMatchObject({ workspaceId: "ws & a", limit: 300, maxEntries: 2000 })
-  expect(mock.stream.mock.calls.at(-1)![0].onEntry).toBe(mock.prepend)
-  // The home reads runs, not the journal window: it is handed the chain index.
-  expect(home()).toMatchObject({ workspaceId: "ws & a" })
-  expect(home().chains.map((c) => c.origin)).toEqual(["r1", "w1"])
-  act(() => sidebar().onRetryChains?.())
-  expect(mock.refreshChains).toHaveBeenCalledOnce()
-})
-it.each(["polling", "connecting"])("reports %s transport without hiding the window", (status) => {
-  mock.stream.mockReturnValue({ status }); show()
-  expect(screen.getByText(status)).toBeVisible()
-})
-it("requests answer events with waiting asks and uses the larger waiting window", async () => {
-  show()
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, scope: "waiting" }))
-  const request = mock.list.mock.calls.at(-1)![0]
-  expect(request.limit).toBe(500)
-  expect(request.params.entry_type).toContain("approval.requested")
-  expect(request.params.entry_type).toContain("approval.granted")
-  expect(mock.row).not.toHaveBeenCalled()
-  await waitFor(() => expect(screen.getByText("Nothing here")).toBeVisible())
-  fireEvent.click(screen.getByRole("button", { name: "Reset" }))
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-it("combines server facets, debounces search and removes individual chips", async () => {
-  show()
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"], severities: ["warn"], crewIDs: ["c1"], agentIDs: ["a1"], range: "7d", showTelemetry: true }))
-  fireEvent.change(screen.getByRole("textbox", { name: "Activity search" }), { target: { value: " needle " } })
-  await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBe("needle"))
-  expect(mock.list.mock.calls.at(-1)![0].params).toMatchObject({ crew_ids: "c1", agent_ids: "a1", severity: "warn", exclude_entry_type: undefined })
-  fireEvent.click(screen.getAllByRole("button", { name: "Remove filter" })[0])
-  await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBeUndefined())
-  for (let i = 0; i < 5; i++) fireEvent.click(screen.getAllByRole("button", { name: "Remove filter" })[0])
-  await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBeUndefined())
-  expect(sidebar().facets).toMatchObject({ crewIDs: [], agentIDs: [], severities: [], sources: [], range: "24h" })
-})
-it.each(["routine", "run", "step", "issue"] as const)("pins a %s crumb and clears it", (kind) => {
-  show()
-  const id = { routine: "triage", run: "r1", step: "step1", issue: "m1" }[kind]
-  // Pinned from a record's spine. A pin narrows the page, so the filtered
-  // list answers it instead of the workspace-wide home (#2979).
-  fireEvent.keyDown(window, { key: "j" })
-  act(() => detail().onSpineClick({ kind, id, label: "Pinned" }))
-  if (kind === "issue") expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
-  else {
-    expect(screen.getByText("Row e1")).toBeInTheDocument()
-    expect(screen.queryByText("Row e2")).toBeNull()
-  }
-  expect(screen.queryByText("Activity home")).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-it("clears intersecting filters atomically instead of showing reassuring empty totals", () => {
-  show()
-  act(() => {
-    sidebar().onChange({ ...EMPTY_FACETS, crewIDs: ["c1"], agentIDs: ["a1"] })
-  })
-  fireEvent.keyDown(window, { key: "j" })
-  act(() => {
-    detail().onSpineClick({ kind: "run", id: "missing", label: "Unknown" })
-  })
-  expect(screen.getByText("No activity matches these filters")).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Clear all filters" }))
-  expect(sidebar().facets).toEqual(EMPTY_FACETS)
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-it("opens records from the keyboard, moves between them, and ignores typing in inputs", () => {
-  show()
-  fireEvent.keyDown(window, { key: "j" })
-  expect(screen.getByText("Record e1")).toBeVisible()
-  fireEvent.keyDown(window, { key: "j" })
-  expect(screen.getByText("Record e2")).toBeVisible()
-  fireEvent.keyDown(window, { key: "k" })
-  expect(screen.getByText("Record e1")).toBeVisible()
-  const input = screen.getByRole("textbox", { name: "Activity search" }); input.focus()
-  fireEvent.keyDown(input, { key: "Escape" })
-  expect(screen.getByText("Record e1")).toBeVisible()
-  input.blur()
-  fireEvent.keyDown(window, { key: "Escape" })
-  expect(screen.queryByText("Record e1")).toBeNull()
-  fireEvent.keyDown(window, { key: "x" })
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-it("restores a record URL and popstate, and forgets records outside the loaded window", () => {
-  window.history.replaceState(null, "", "/activity?entry=e1")
-  show()
-  expect(screen.getByText("Record e1")).toBeVisible()
-  act(() => detail().onSpineClick({ kind: "run", id: "r1", label: "Run" }))
-  expect(screen.queryByText("Record e1")).toBeNull()
-  act(() => { window.history.replaceState(null, "", "/activity?entry=missing&lens=agents"); window.dispatchEvent(new PopStateEvent("popstate")) })
-  expect(window.location.search).not.toContain("entry=")
-  expect(screen.getByText("Agent overview")).toBeVisible()
-})
-it("renders failed and done buckets, pagination, and selection from a row", () => {
-  mock.list.mockReturnValue(listState({ nextCursor: "older" }))
-  const view = show()
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, scope: "failed" }))
-  expect(mock.list.mock.calls.at(-1)![0].params.severity).toBe("error")
-  fireEvent.click(screen.getByRole("button", { name: "Load older" }))
-  expect(mock.loadMore).toHaveBeenCalledOnce()
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, scope: "done" }))
-  fireEvent.click(screen.getByRole("button", { name: "Row e1" }))
-  expect(screen.getByText("Record e1")).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Close record" }))
-  mock.list.mockReturnValue(listState({ nextCursor: "older", loadingMore: true }))
-  view.rerender(<ActivityStreamView workspaceId="ws & a" />)
-  expect(screen.getByRole("button", { name: "Load older" })).toBeDisabled()
-})
-it("renders loading and errors as such and retries a failed journal read", () => {
-  mock.list.mockReturnValue(listState({ entries: [], loading: true }))
-  const view = show()
-  expect(screen.getByText("Loading activity…")).toBeVisible()
-  mock.list.mockReturnValue(listState({ entries: [], error: "offline" }))
-  view.rerender(<ActivityStreamView workspaceId="ws & a" />)
-  expect(screen.getByText("Could not load activity")).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }))
-  expect(mock.refresh).toHaveBeenCalledOnce()
-})
-// Harbor 2 M3 (#3350): the rail is the section's SecondaryPanel.
-it("puts the rail in the activity SecondaryPanel, which collapses it", () => {
-  show()
-  const panel = document.querySelector("[data-slot=secondary-panel]")!
-  expect(panel).toHaveAttribute("data-panel-id", "activity")
-  expect(within(panel as HTMLElement).getByRole("textbox", { name: "Activity search" })).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Hide Activity views" }))
-  expect(panel).toHaveAttribute("data-collapsed", "true")
-  expect(screen.queryByRole("textbox", { name: "Activity search" })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Show Activity views" }))
-  expect(screen.getByRole("textbox", { name: "Activity search" })).toBeVisible()
-})
-it("on a phone keeps the rail in the panel sheet, closed until asked and closed again by a pick", () => {
-  mock.mobile = true; show()
-  expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
-  expect(screen.queryByRole("textbox", { name: "Activity search" })).toBeNull()
-  act(() => useAppStore.getState().setSecondaryPanelOpen(true))
-  const sheet = screen.getByRole("dialog", { name: "Activity views" })
-  expect(within(sheet).getByRole("textbox", { name: "Activity search" })).toBeInTheDocument()
-  act(() => sidebar().onOpenEntity("issue", "m1", "m1"))
-  expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
-})
-
-it("walks from workflow through named nodes, back, and breadcrumb jumps", () => {
-  show()
-  act(() => sidebar().onSelectChain("w1"))
-  expect(screen.getByText("Workflow w1")).toBeVisible()
-  expect(screen.queryByText("Activity home")).toBeNull()
-  const workflow = () => mock.workflow.mock.calls.at(-1)![0]
-  for (const [kind, id, label] of [["agent", "a1", "Alice"], ["crew", "c1", "Builders"], ["issue", "m1", "Fix the failing integration i…"], ["routine", "p1", "Triage"], ["step", "step1", "step1"]]) {
-    act(() => workflow().onOpenNode(kind, id))
-    expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent(label)
-    // One stop up is Escape or the previous crumb; the back-bar's button is
-    // the way OUT, as "Back to issues" is on /issues.
-    fireEvent.keyDown(window, { key: "Escape" })
-    expect(screen.getByText("Workflow w1")).toBeVisible()
-  }
-  act(() => workflow().onOpenNode("run", "r1"))
-  expect(mock.run.mock.calls.at(-1)![0]).toMatchObject({ runId: "r1", routineName: "Triage" })
-  fireEvent.keyDown(window, { key: "Escape" })
-  expect(screen.getByText("Workflow w1")).toBeVisible()
-  act(() => workflow().onOpenNode("agent", "a1"))
-  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-
-it("opens a chain that starts at a routine run as that run's page", () => {
-  // #2979: the rail row leads to the run — status, steps, what it caused —
-  // not to a chain page listing run ids to click a second time.
-  show()
-  act(() => sidebar().onSelectChain("r1"))
-  expect(screen.getByText("Run r1")).toBeVisible()
-  expect(mock.workflow).not.toHaveBeenCalled()
-  expect(mock.run.mock.calls.at(-1)![0]).toMatchObject({ runId: "r1", routineName: "Triage", chain: { origin: "r1" } })
-  act(() => mock.run.mock.calls.at(-1)![0].onOpenNode("issue", "m1"))
-  expect(screen.getByText("Issue m1")).toBeVisible()
-  fireEvent.keyDown(window, { key: "Escape" })
-  expect(screen.getByText("Run r1")).toBeVisible()
-})
-
-it.each(["agents", "issues", "routines"] as const)("gives the %s lens its own overview and entity drill-down", (lens) => {
-  show()
-  act(() => sidebar().onLens(lens))
-  if (lens === "agents") {
-    expect(screen.getByText("Agent overview")).toBeVisible()
-    act(() => mock.agents.mock.calls.at(-1)![0].onOpenEntity("agent", "a1", "Alice"))
-    expect(screen.getByText("Agent Alice")).toBeVisible()
-    act(() => mock.agent.mock.calls.at(-1)![0].onOpenWorkflow("r1"))
-    expect(screen.getByText("Run r1")).toBeVisible()
-  } else if (lens === "issues") {
-    expect(screen.getByText("Issue overview")).toBeVisible()
-    act(() => mock.issues.mock.calls.at(-1)![0].onOpenEntity("issue", "m1", "Fix"))
-    expect(screen.getByText("Issue m1")).toBeVisible()
-    expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
-  } else {
-    expect(screen.getByText("Routine overview")).toBeVisible()
-    act(() => mock.routines.mock.calls.at(-1)![0].onOpenRoutine("triage", "Triage"))
-    expect(screen.getByText("Routine triage")).toBeVisible()
-    act(() => mock.routine.mock.calls.at(-1)![0].onOpenRun("child-run"))
-    expect(mock.run.mock.calls.at(-1)![0].runId).toBe("child-run")
-    expect(window.location.search).toContain("run=child-run")
-  }
-})
-it("resolves a deep-linked run's routine from the workflow index", () => {
-  window.history.replaceState(null, "", "/activity?run=r1")
-  show()
-  expect(screen.getByText("Run r1")).toBeVisible()
-  expect(mock.run.mock.calls.at(-1)![0].routineName).toBe("Triage")
-  // The trail names the routine, not the run id the link carried.
-  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Triage")
-  expect(screen.getByRole("navigation", { name: "Activity trail" })).not.toHaveTextContent("r1")
-})
-it("relabels inbound issue and routine IDs and preserves unknown node identities", () => {
-  window.history.replaceState(null, "", "/activity?pipeline=triage&lens=routines")
-  show()
-  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Triage")
-  act(() => sidebar().onOpenEntity("issue", "m1", "m1"))
-  expect(screen.getByRole("navigation", { name: "Activity trail" })).toHaveTextContent("Fix the failing integration i…")
-  act(() => sidebar().onSelectChain("w1"))
-  act(() => mock.workflow.mock.calls.at(-1)![0].onOpenNode("agent", "unknown"))
-  expect(screen.getByText("Agent #known")).toBeVisible()
-})
-it("handles a workflow swept from the index and returns to overview", () => {
-  show()
-  act(() => sidebar().onSelectChain("gone"))
-  expect(screen.getByText("This workflow is no longer in the index")).toBeVisible()
-  fireEvent.click(screen.getAllByRole("button", { name: "Back" }).at(-1)!)
-  expect(screen.getByText("Activity home")).toBeVisible()
-  act(() => sidebar().onSelectChain(null))
-  expect(screen.queryByRole("navigation", { name: "Activity trail" })).toBeNull()
-})
-it("uses the same narrowed chain index for sidebar and lens overview", () => {
-  show()
-  act(() => sidebar().onLens("routines"))
-  fireEvent.change(screen.getByRole("textbox", { name: "Activity search" }), { target: { value: "unmatched" } })
-  expect(sidebar().chains).toEqual([])
-  expect(mock.routines.mock.calls.at(-1)![0].chains).toEqual([])
-  fireEvent.change(screen.getByRole("textbox", { name: "Activity search" }), { target: { value: "Triage" } })
-  expect(sidebar().chains).toEqual([chain])
-  expect(mock.routines.mock.calls.at(-1)![0].chains).toEqual([chain])
-})
-it.each(["array", "http", "network"])("handles %s issue metadata responses", async (kind) => {
-  if (kind === "network") mock.fetch.mockRejectedValue(new Error("offline"))
-  // A fresh body per call: the panel's preference read shares this fetch.
-  else mock.fetch.mockImplementation(async () => new Response(JSON.stringify(kind === "array" ? [{ id: "new" }] : {}), { status: kind === "http" ? 503 : 200 }))
-  show()
+afterEach(async () => {
   await act(async () => {})
-  expect(sidebar().issues).toEqual(kind === "array" ? [{ id: "new" }] : [])
+  cleanup()
+  vi.useRealTimers()
 })
-it("steps to the next and previous run with the arrow keys, in the rail's order (#2988)", () => {
-  show()
-  act(() => sidebar().onSelectChain("r1"))
-  expect(screen.getByText("Run r1")).toBeVisible()
-  fireEvent.keyDown(window, { key: "ArrowDown" })
-  expect(screen.getByText("Workflow w1")).toBeVisible()
-  fireEvent.keyDown(window, { key: "ArrowUp" })
-  expect(screen.getByText("Run r1")).toBeVisible()
-  // The ends stay put rather than wrapping round.
-  fireEvent.keyDown(window, { key: "ArrowUp" })
-  expect(screen.getByText("Run r1")).toBeVisible()
-  // Typing in the search box is not navigation.
-  const input = screen.getByRole("textbox", { name: "Activity search" })
-  input.focus()
-  fireEvent.keyDown(input, { key: "ArrowDown" })
-  expect(screen.getByText("Run r1")).toBeVisible()
-})
-it("keeps agent work outside routines out of Activity for now (#3007)", () => {
-  show()
-  expect(sidebar().chains.map((c) => c.origin)).not.toContain("asg1")
-  expect(home().chains.map((c) => c.origin)).not.toContain("asg1")
-})
-it("keeps the routine focus while one of its runs is open (#2998)", () => {
-  show()
-  act(() => sidebar().onFocusRoutine?.("triage"))
-  expect(sidebar().focusedRoutine).toBe("triage")
-  act(() => sidebar().onOpenRun?.("r_old"))
-  expect(screen.getByText("Run r_old")).toBeVisible()
-  expect(sidebar().focusedRoutine).toBe("triage")
-  expect(sidebar().openRunId).toBe("r_old")
-  act(() => sidebar().onFocusRoutine?.(null))
-  expect(sidebar().focusedRoutine).toBeNull()
-})
-it("keeps the home for a crew filter, narrowed to the rail's chains, and the event list for a source (#3002)", () => {
-  show()
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, crewIDs: ["c1"] }))
-  expect(screen.getByText("Activity home")).toBeInTheDocument()
-  expect(home().scope?.label).toBe("Builders")
-  expect([...(home().scope?.origins ?? [])]).toEqual(home().chains.map((c) => c.origin))
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"] }))
-  expect(screen.queryByText("Activity home")).toBeNull()
-})
-it("narrows the rail to the runs a journal-only filter's events belong to (#3007)", () => {
-  show()
-  // e1 carries run r1; e2 carries run r2, which is no chain in the index.
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, sources: ["run"] }))
-  expect(sidebar().chains.map((c) => c.origin)).toEqual(["r1"])
-  expect(sidebar().chainsBeforeStatus.map((c) => c.origin)).toEqual(["r1"])
-  // No event left → no run in the rail.
-  mock.list.mockReturnValue(listState({ entries: [] }))
-  act(() => sidebar().onChange({ ...EMPTY_FACETS, severities: ["warn"] }))
-  expect(sidebar().chains).toEqual([])
-})
-it("opens a run under the Issues back-bar: the way out, then only the stops walked", () => {
-  // #2979: /issues reads "‹ Back to issues › OPS-1". The home crumb would
-  // repeat the button beside it ("Back to activity › Overview › …").
-  show()
-  act(() => sidebar().onSelectChain("r1"))
-  const trail = screen.getByRole("navigation", { name: "Activity trail" })
-  expect(trail).toHaveTextContent("Back to activity")
-  expect(within(trail).queryByRole("button", { name: "Overview" })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }))
-  expect(screen.getByText("Activity home")).toBeVisible()
-})
-it("hands the ledger opener to the rail", () => {
-  const onOpenSection = vi.fn()
-  render(<ActivityStreamView workspaceId="ws" onOpenSection={onOpenSection} />)
-  sidebar().onOpenSection?.("deliveries")
-  expect(onOpenSection).toHaveBeenCalledWith("deliveries")
+
+describe("ActivityStreamView", () => {
+  it("renders Everything list with summary line and Display", async () => {
+    show()
+    expect(screen.getByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+    const summary = await screen.findByTestId("activity-summary")
+    // 2 work rows today, 1 bundle of 3 runs yesterday, 1 change.
+    expect(summary).toHaveTextContent("4 items")
+    expect(summary).toHaveTextContent("1 could not finish")
+    expect(within(summary).getByText("Live")).toBeVisible()
+    expect(within(summary).getByRole("button", { name: /Display/ })).toBeVisible()
+
+    const t = table()
+    expect(within(t).getByText("Active now")).toBeVisible()
+    expect(within(t).getByText("Yesterday")).toBeVisible()
+    expect(within(t).getByText("×3 runs")).toBeVisible()
+    expect(within(t).getByText("CRW-1 Fix flaky login")).toBeVisible()
+    expect(within(t).getByText("In progress → In review")).toBeVisible()
+    for (const h of ["Work", "Agent", "Took", "Started"]) expect(within(t).getByRole("columnheader", { name: h })).toBeInTheDocument()
+
+    // The views count over the same window.
+    // Everything folds repeated runs the way the list does.
+    expect(screen.getByRole("button", { name: /Everything\s*4/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Running\s*1/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Could not finish\s*1/ })).toBeInTheDocument()
+  })
+
+  it("j/k moves selection and opens Peek", async () => {
+    show()
+    await screen.findByTestId("activity-summary")
+    fireEvent.keyDown(window, { key: "j" })
+    const peek = await screen.findByTestId("activity-peek-work")
+    expect(peek).toHaveTextContent("How it connects")
+    expect(table().querySelector("[data-selected=true]")).toHaveAttribute("data-row-id", "run_live")
+    expect(window.location.search).toBe("?run=run_live")
+    // Inside the Peek, J steps to the next row in the order the table shows:
+    // the change 45 min ago, written as ?entry=.
+    fireEvent.keyDown(screen.getByTestId("activity-peek-work"), { key: "j" })
+    expect(await screen.findByTestId("activity-peek-change")).toHaveTextContent("In progress")
+    expect(window.location.search).toBe("?entry=e1")
+  })
+
+  it("?run=<id> opens the Peek and closing it drops run from the URL", async () => {
+    window.history.replaceState(null, "", "/activity?run=run_bad")
+    show()
+    expect(await screen.findByTestId("activity-peek-work")).toHaveTextContent("Could not finish")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByTestId("activity-peek-work")).toBeNull())
+    expect(window.location.search).toBe("")
+  })
+
+  it("Open run walks to the run's page", async () => {
+    window.history.replaceState(null, "", "/activity?run=run_bad")
+    show()
+    await screen.findByTestId("activity-peek-work")
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
+    expect(await screen.findByText("Run page run_bad")).toBeVisible()
+    expect(window.location.search).toContain("walk=workflow%3Arun_bad")
+    fireEvent.click(screen.getByRole("button", { name: /Back to activity/ }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+  })
+
+  it("keys 1–4 switch views and the view is written to the URL", async () => {
+    show()
+    await screen.findByTestId("activity-summary")
+    fireEvent.keyDown(window, { key: "4" })
+    expect(await screen.findByRole("heading", { level: 1, name: "Could not finish" })).toBeVisible()
+    expect(window.location.search).toBe("?view=failed")
+    // Changes belong to Everything only.
+    expect(within(table()).queryByText("CRW-1 Fix flaky login")).toBeNull()
+    fireEvent.keyDown(window, { key: "1" })
+    expect(await screen.findByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+  })
+
+  it("Display › Group repeated runs off lists the runs one by one", async () => {
+    show()
+    await screen.findByTestId("activity-summary")
+    fireEvent.click(screen.getByRole("button", { name: /Display/ }))
+    fireEvent.click(await screen.findByRole("switch", { name: "Group repeated runs" }))
+    await waitFor(() => expect(within(table()).queryByText("×3 runs")).toBeNull())
+    expect(screen.getByTestId("activity-summary")).toHaveTextContent("6 items")
+    expect(window.location.search).toBe("?bundle=off")
+  })
+
+  it("old lens links group the list", async () => {
+    window.history.replaceState(null, "", "/activity?lens=agents")
+    show()
+    expect(await within(table()).findByText("Scout")).toBeVisible()
+    expect(within(table()).getByText("No agent")).toBeVisible()
+    expect(window.location.search).toBe("?group=who")
+  })
+
+  it("a walk ending on an issue narrows the list to that issue", async () => {
+    window.history.replaceState(null, "", "/activity?walk=issue:m1")
+    show()
+    expect(await screen.findByRole("heading", { level: 1, name: "CRW-1 Fix flaky login" })).toBeVisible()
+    expect(screen.getByText(/Everything about this issue/)).toBeVisible()
+    expect(screen.getByRole("link", { name: /Open issue/ })).toHaveAttribute("href", "/issues/CRW-1")
+    expect(mock.list.mock.calls.at(-1)![0].params.mission_id).toBe("m1")
+  })
+
+  it("keeps work rows and changes live from one stream", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    show()
+    const onEntry = mock.stream.mock.calls.at(-1)![0].onEntry as (e: JournalEntry) => void
+    act(() => onEntry({ ...change, id: "e2", entry_type: "mission.comment" }))
+    expect(mock.prepend).toHaveBeenCalledWith(expect.objectContaining({ id: "e2" }))
+    act(() => onEntry({ ...change, id: "e3", entry_type: "pipeline.run.completed" }))
+    expect(mock.prepend).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      vi.advanceTimersByTime(1_600)
+    })
+    expect(mock.refreshChains).toHaveBeenCalled()
+  })
+
+  it("shows the empty workspace", async () => {
+    mock.chains.mockReturnValue(chainsState({ chains: [] }))
+    mock.list.mockReturnValue(listState({ entries: [] }))
+    const { rerender } = show()
+    // The index answers once.
+    mock.chains.mockReturnValue(chainsState({ chains: [], loading: true }))
+    rerender(<ActivityStreamView workspaceId="ws" />)
+    mock.chains.mockReturnValue(chainsState({ chains: [] }))
+    rerender(<ActivityStreamView workspaceId="ws" />)
+    expect(await screen.findByText("No activity yet")).toBeVisible()
+    expect(screen.getByText("crewship activity")).toBeVisible()
+  })
+
+  it("says when filters hide everything and clears them", async () => {
+    window.history.replaceState(null, "", "/activity?source=webhook")
+    show()
+    expect(await screen.findByText("Nothing matches these filters")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+  })
+
+  it("keeps the changes when only the runs fail to load", async () => {
+    mock.chains.mockReturnValue(chainsState({ chains: [], error: "HTTP 503" }))
+    show()
+    expect(await screen.findByText("Could not load runs and agent work")).toBeVisible()
+    expect(within(table()).getByText("CRW-1 Fix flaky login")).toBeVisible()
+    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0])
+    expect(mock.refreshChains).toHaveBeenCalled()
+  })
+
+  it("dims the list and offers a reconnect while live updates are down", async () => {
+    const reconnect = vi.fn()
+    mock.stream.mockReturnValue({ status: "error", reconnect })
+    show()
+    expect(await screen.findByText("Reconnecting…")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }))
+    expect(reconnect).toHaveBeenCalled()
+  })
 })

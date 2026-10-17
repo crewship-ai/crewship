@@ -1,525 +1,637 @@
 "use client"
 
-// /activity — the shell: SubBar, rail, and whichever main surface the
-// current scope calls for.
+// /activity — one list of work and changes (Harbor 2, #3389).
 //
-// Two modes, one page:
+//   panel      SecondaryPanel: search, Filter, Views with counts, Ledgers
+//   top bar    Activity › {view}, the time range, Export
+//   content    heading, summary line + Display, the table (grouped), Load more
+//   Peek       the row's story on the right; its own page one click away
 //
-//   scope = all   → the overview dashboard. What is running, what is stuck
-//                   on a person, what broke, what it cost, is today normal.
-//   scope = one   → that bucket as a list, still in cards, so "3 failed"
-//                   is a place you can go rather than a number you read.
+// The list is built from two sources and merged by time (lib/activity-feed):
+// the chain index for WORK — a routine run and what it caused, agent work on
+// an issue — and the journal for CHANGES somebody made. The journal stream
+// keeps both live: a change is prepended as it lands, and a run event
+// re-reads the chain index (debounced) so a run's row moves on its own.
 //
-// Selecting any row replaces both with the activity's own page: the run's
-// node graph, the chain under its trace id, and the raw record. Not a side
-// panel — see activity-detail.tsx for why.
+// A run's own page (steps, inputs, output, the chain graph) is still a full
+// page: "Open run" walks to it and the URL then reads `?walk=…`, which every
+// older drill-down link also uses. Issues, routines, agents and crews are no
+// longer pages of their own here; they narrow the list.
 
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
-import { Activity, ChevronLeft, ChevronRight, FilterX } from "lucide-react"
+import { Activity, ChevronLeft, ChevronRight, CircleDot, Download, ExternalLink, Filter, List, Workflow } from "lucide-react"
+import Link from "next/link"
 
 import { SubBar } from "@/components/layout/sub-bar"
-import { SidebarActiveChip, SidebarActiveChips } from "@/components/layout/sidebar-kit"
-import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Appear } from "@/components/ui/detail"
-import { EmptyState } from "@/components/layout/empty-state"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { OfflineBanner, PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound, StaleData } from "@/components/layout/page-state"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Switch } from "@/components/ui/switch"
+import { routineViewHref } from "@/components/features/routines/routine-navigation"
+import { useAbilities } from "@/hooks/use-abilities"
+import { useChains } from "@/hooks/use-chains"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { usePipelines } from "@/hooks/use-pipelines"
-import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
-import { apiFetch } from "@/lib/api-fetch"
 import {
-  ACTIVE_ENTRY_TYPES,
-  STOPPED_ENTRY_TYPES,
-  ACTIVITY_SCOPES,
-  NOISE_ENTRY_TYPES,
-  entriesInScope,
-  narrowToFocus,
-  scopeByEntry,
-  shortId,
-  sourceEntryTypes,
-  sourceMeta,
-  waitingEntryTypes,
-  type SpineLabels,
-  type SpineLink,
-} from "@/lib/activity-stream"
-import {
-  ACTIVITY_HOME,
-  activitySurface,
-  activityTrail,
-  backFrom,
-  currentStop,
-  jumpTo,
-  openStop,
-  selectStop,
-  stopMatcher,
-  workflowAnchor,
-  workflowLabel,
-  type ActivityPath,
-  type ActivityStop,
-} from "@/lib/activity-selection"
+  ACTIVITY_VIEWS,
+  CHANGE_KIND_LABEL,
+  EMPTY_FILTERS,
+  GROUP_BY_LABEL,
+  WORK_SOURCE_LABEL,
+  WORK_STATUS_LABEL,
+  activeFacetCount,
+  bundleRepeats,
+  changeEntryTypes,
+  changeFromEntry,
+  changeKindOf,
+  changePasses,
+  feedCsv,
+  feedUrlParams,
+  groupFeed,
+  inRange,
+  mergeFeed,
+  parseFeedUrl,
+  rangeBounds,
+  rangeLabel,
+  runHistory,
+  viewCounts,
+  viewOfStatus,
+  workFromChain,
+  workPasses,
+  type ChangeItem,
+  type ChangeKind,
+  type FeedFilters,
+  type FeedItem,
+  type GroupBy,
+  type TimeRange,
+  type WorkItem,
+  type WorkSource,
+} from "@/lib/activity-feed"
+import { runTone } from "@/lib/activity-run"
+import { ACTIVITY_HOME, activityTrail, backFrom, currentStop, jumpTo, openStop, selectStop, type ActivityPath, type ActivityStop } from "@/lib/activity-selection"
+import { NOISE_ENTRY_TYPES, shortId, type SpineLabels } from "@/lib/activity-stream"
+import { activityUrlParams, parseActivityUrl } from "@/lib/activity-url"
+import { useAppStore } from "@/lib/store"
+import { toast } from "@/lib/toast"
 import type { JournalEntry } from "@/lib/types/journal"
 import { cn } from "@/lib/utils"
 
-import {
-  ActivitySidebar,
-  EMPTY_FACETS,
-  TIME_RANGES,
-  type FacetState,
-  type SidebarIssue,
-  type SidebarRoutine,
-} from "./activity-sidebar"
-import { useChains } from "@/hooks/use-chains"
-import { bucketChains, narrowChains, type LensKey } from "@/lib/activity-lenses"
-import { activityUrl, parseActivityUrl, type ActivityUrlState } from "@/lib/activity-url"
-import { iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
-import { WorkflowPage } from "./workflow-page"
-import { ActivityHome } from "./activity-home"
+import { FeedTable, RunHistoryStrip, type AgentResolver } from "./activity-feed-table"
+import { ActivityPanel } from "./activity-panel"
+import { ActivityPeek } from "./activity-peek"
+import { ActivityRange } from "./activity-range"
 import { ActivityRunPage } from "./activity-run-page"
 import { ActivityWorkPage } from "./activity-work-page"
-import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
-import { RoutineRunsPage } from "./routine-runs-page"
-import { AgentDrillDown, IssueDrillDown } from "./drill-downs"
-import { FeedRow } from "./feed-row"
+import { WorkflowPage } from "./workflow-page"
 
-/** Connection state as a word, not a button. */
-function LiveBadge({ status }: { status: string }) {
-  const connected = status === "connected"
-  const degraded = status === "polling"
+/** The chain index the list reads: the server's maximum page. */
+const CHAIN_LIMIT = 200
+const PAGE = 50
+const JOURNAL_PAGE = 300
+const MAX_BUFFERED = 2_000
+
+/** Stops that are a place of their own; every other kind narrows the list. */
+const PAGE_KINDS = new Set(["workflow", "run"])
+
+/** Journal events that move a work row: re-read the chain index on them. */
+function movesWork(entryType: string): boolean {
+  return /^(run|pipeline\.run|pipeline\.step|assignment|approval|peer\.escalation|keeper\.request)\b/.test(entryType)
+}
+
+interface InitialState {
+  path: ActivityPath
+  filters: FeedFilters
+  group: GroupBy
+  bundle: boolean
+  range: TimeRange
+  peek?: string
+  entryId?: string
+}
+
+/**
+ * Read the URL once. `?walk=` keeps its meaning for a run or a workflow (the
+ * full page); a walk that ends on an issue, routine, agent or crew narrows
+ * the list to that object instead, because those have no page here now.
+ */
+function readInitial(params: URLSearchParams): InitialState {
+  const feed = parseFeedUrl(params)
+  const legacy = parseActivityUrl(params)
+  let path: ActivityPath = ACTIVITY_HOME
+  const filters = { ...feed.filters }
+  if (params.get("walk")) {
+    const last = currentStop(legacy.path)
+    if (last && PAGE_KINDS.has(last.kind)) path = legacy.path
+    else if (last) applyStop(filters, last)
+  }
+  return { path, filters, group: feed.group, bundle: feed.bundle, range: feed.range, peek: feed.peek, entryId: legacy.entryId }
+}
+
+function applyStop(f: FeedFilters, s: ActivityStop): boolean {
+  if (s.kind === "issue") f.issue = s.id
+  else if (s.kind === "routine") f.routine = s.id
+  else if (s.kind === "agent") f.agent = s.id
+  else if (s.kind === "crew") f.crew = s.id
+  else return false
+  return true
+}
+
+/** Connection state as a word beside the counts. */
+function LiveState({ status }: { status: string }) {
+  const live = status === "connected"
+  const polling = status === "polling"
   return (
     <span
-      title={
-        connected
-          ? "Streaming over SSE"
-          : degraded
-            ? "The stream is unavailable; falling back to polling every 5s"
-            : "Connecting to the activity stream"
-      }
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider",
-        connected && "text-success",
-        degraded && "text-warn",
-        !connected && !degraded && "text-muted-foreground-soft",
-      )}
+      className={cn("inline-flex items-center gap-1.5 text-label", live ? "text-muted-foreground" : polling ? "text-warn" : "text-muted-foreground-soft")}
+      title={live ? "Updates arrive as they happen" : polling ? "The stream is unavailable; checking every 5 s" : "Connecting to live updates"}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          connected && "bg-success animate-pulse",
-          degraded && "bg-warn animate-pulse",
-          !connected && !degraded && "bg-muted-foreground/40",
-        )}
-      />
-      {connected ? "live" : degraded ? "polling" : "connecting"}
+      <span aria-hidden className={cn("size-[7px] rounded-full", live ? "animate-pulse bg-success motion-reduce:animate-none" : polling ? "bg-warn" : "bg-muted-foreground/40")} />
+      {live ? "Live" : polling ? "Polling" : "Connecting…"}
     </span>
   )
 }
 
-const MAX_BUFFERED = 2_000
-const PAGE_SIZE = 300
-
-/**
- * The waiting scope pages deeper — the backend's ceiling (#2036).
- *
- * The window is a fixed ROW count taken from the newest end (`ORDER BY ts
- * DESC LIMIT n`), and the waiting fetch now spends part of it on the ANSWERS
- * it needs to retire a row. At the same 300 it therefore reaches back less
- * far in asks than it used to, and an open ask pushed past the boundary
- * disappears from "Waiting on you" entirely — the opposite of the bias this
- * join is built on, which is to over-report a row rather than hide something
- * a person is blocking on.
- *
- * A row cap cannot make that impossible, but 500 restores well over the ask
- * depth the pre-#2036 query had: the answers are a minority of the rows, so
- * 500 mixed rows hold more asks than 300 ask-only ones did. Only this scope
- * pays the larger response, and 500 is both the API's documented maximum and
- * `useJournalList`'s own default.
- */
-const WAITING_PAGE_SIZE = 500
+function DisplayMenu({
+  group,
+  onGroup,
+  bundle,
+  onBundle,
+}: {
+  group: GroupBy
+  onGroup: (g: GroupBy) => void
+  bundle: boolean
+  onBundle: (b: boolean) => void
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline">
+          <List className="size-3.5" aria-hidden />
+          Display
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[280px] p-2">
+        <div className="px-1.5 pb-1.5 text-label font-semibold text-muted-foreground">Group by</div>
+        <div role="group" aria-label="Group by" className="grid grid-cols-4 gap-0.5 rounded-md bg-muted p-0.5">
+          {(Object.keys(GROUP_BY_LABEL) as GroupBy[]).map((g) => (
+            <button
+              key={g}
+              type="button"
+              aria-pressed={group === g}
+              onClick={() => onGroup(g)}
+              className={cn(
+                "kit-tap h-[var(--control-xs)] rounded-sm text-label",
+                group === g ? "bg-card font-semibold text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {GROUP_BY_LABEL[g]}
+            </button>
+          ))}
+        </div>
+        <label className="kit-tap mt-2 flex items-center justify-between gap-3 rounded-md border-t border-border px-1.5 pt-2.5 text-body">
+          <span>Group repeated runs</span>
+          <Switch checked={bundle} onCheckedChange={onBundle} aria-label="Group repeated runs" />
+        </label>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export function ActivityStreamView({
   workspaceId,
   onOpenSection,
-  railEntersFromLeft,
 }: {
   workspaceId: string
   /** Open one of the ledgers (work queue, webhook deliveries). See ActivityWorkspace. */
   onOpenSection?: (section: "work" | "deliveries") => void
-  /** The overview is coming back from a ledger: its rail enters from the left. */
-  railEntersFromLeft?: boolean
 }) {
+  const isMobile = useIsMobile()
   const lookup = useJournalLookup()
+  const { role } = useAbilities()
+  const openPanelSheet = useAppStore((s) => s.setSecondaryPanelOpen)
 
-  // The URL is the state: the walk, the lens, the status bucket and the
-  // opened record are read from the query string at mount and written back
-  // on every change (lib/activity-url). It used to be read once and never
-  // written, so a reload lost the walk, Back left the page, and no
-  // drill-down had a URL a person could send. Every legacy inbound link
-  // (?run, ?pipeline, ?mission, ?status — see lib/activity-deeplink) still
-  // lands, and a single run or issue is written back in that same spelling.
-  //
-  // Read once at mount rather than subscribed to: after that this view owns
-  // the selection and mirrors it out; the only way the URL changes without
-  // the view is the browser's Back/Forward, which the popstate listener
-  // below reads back in.
   const searchParams = useSearchParams()
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- read once at mount by design; see above
-  const initialUrl = React.useMemo(() => parseActivityUrl(searchParams), [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- read once at mount; Back/Forward is read by the popstate listener
+  const initial = React.useMemo(() => readInitial(searchParams), [])
 
-  const [facets, setFacets] = React.useState<FacetState>(() =>
-    initialUrl.scope ? { ...EMPTY_FACETS, scope: initialUrl.scope as FacetState["scope"] } : EMPTY_FACETS,
-  )
-  // The record the URL named, until the window that holds it has loaded.
-  const [pendingEntryId, setPendingEntryId] = React.useState<string | undefined>(initialUrl.entryId)
-  const [search, setSearch] = React.useState("")
-  const [debouncedSearch, setDebouncedSearch] = React.useState("")
-  const [pinned, setPinned] = React.useState<SpineLink | null>(null)
-  const [selected, setSelected] = React.useState<JournalEntry | null>(null)
-  // The rail is the section's SecondaryPanel: it owns collapse and, on a
-  // phone, a sheet that starts closed. A rail row that opens a page closes it.
-  const closePanelSheet = useCloseSecondaryPanelSheet()
-  // Which catalogue the rail lists. Owned HERE rather than inside the rail so
-  // it survives a drill-down: walking into an agent out of a chain graph and
-  // pressing back must land the reader on the list they left, not reset them to
-  // Workflows.
-  const [lens, setLens] = React.useState<LensKey>(initialUrl.lens)
+  const [path, setPath] = React.useState<ActivityPath>(initial.path)
+  const [filters, setFiltersRaw] = React.useState<FeedFilters>(initial.filters)
+  const [group, setGroup] = React.useState<GroupBy>(initial.group)
+  const [bundle, setBundle] = React.useState(initial.bundle)
+  const [range, setRange] = React.useState<TimeRange>(initial.range)
+  const [peekId, setPeekId] = React.useState<string | null>(initial.peek ?? null)
+  const [pendingEntryId, setPendingEntryId] = React.useState<string | undefined>(initial.entryId)
+  const [record, setRecord] = React.useState<JournalEntry | null>(null)
+  const [limit, setLimit] = React.useState(PAGE)
+  const [debouncedQ, setDebouncedQ] = React.useState(initial.filters.q)
 
-  // Where the reader is — ONE value, whether they picked a workflow out of the
-  // rail, focused an issue, or walked down into a node of a chain.
-  //
-  // It was two independent states: an EntityFocus for the rail and a
-  // selectedChain for the graph. Neither cleared the other, so the chips could
-  // read "routine: Normalize dates to ISO 8601" over a card still drawing the
-  // on-close-file-followup chain — two answers to "what am I looking at", and
-  // the graph was the stale one. Making them notify each other would have kept
-  // two sources of truth, which is the shape of that bug; there is one, and
-  // the rail's highlight, the query's narrowing, the main column, the trail
-  // and the chip are all derived from it in lib/activity-selection.
-  //
-  // The path is that same one value grown a memory: its LAST stop is the
-  // selection, the ones before it are only there so back has somewhere to go.
-  const [path, setPath] = React.useState<ActivityPath>(initialUrl.path)
-  const stop = React.useMemo(() => currentStop(path), [path])
-  // The routine the rail is narrowed to (#2998). Not part of the path: the
-  // focus is where the reader is LOOKING, and it survives opening a run.
-  const [focusedRoutine, setFocusedRoutine] = React.useState<string | null>(null)
-  const surface = React.useMemo(() => activitySurface(stop), [stop])
-  const focus = surface.focus
-  const trail = React.useMemo(() => activityTrail(path), [path])
-
-  const goBack = React.useCallback(() => setPath(backFrom), [])
-
-  // The rail follows the workflow the reader is INSIDE, not the stop they are
-  // standing on, so the highlight does not blink off the moment they open a
-  // node of it.
-  const railChain = React.useMemo(() => workflowAnchor(path), [path])
-
-  // A node has no server-side expression — an agent id is a column but a run
-  // or an assignment id lives inside the payload — so it narrows the loaded
-  // window here, the same way a pinned crumb does.
-  const nodeMatch = React.useMemo(
-    () => (surface.node ? stopMatcher(surface.node) : null),
-    [surface.node],
-  )
-
-  // Entities for the rail. The journal lookup already carries crews, agents
-  // and missions; routines come from the pipelines list so the rows can show
-  // the same icon + colour the Routines rail does.
-  const { pipelines } = usePipelines(workspaceId)
-  // Only the Routines lens reads these; the hook is cheap and shared, and
-  // gating the fetch on the lens would make the card empty on first paint
-  // every time the reader switches to it.
-  const { schedules } = usePipelineSchedules(workspaceId)
-  const [issues, setIssues] = React.useState<SidebarIssue[]>([])
+  // The clock the list is grouped against; a minute is fine-grained enough.
+  const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
-    let cancelled = false
-    apiFetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`)
-      .then(async (r) => (r.ok ? await r.json() : []))
-      .then((d: unknown) => {
-        if (cancelled) return
-        const arr = Array.isArray(d) ? d : ((d as { missions?: unknown[] })?.missions ?? [])
-        setIssues(arr as SidebarIssue[])
-      })
-      .catch(() => {
-        if (!cancelled) setIssues([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId])
+    const t = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Any narrowing returns to the list and to its first page.
+  const setFilters = React.useCallback((f: FeedFilters) => {
+    setFiltersRaw(f)
+    setPath(ACTIVITY_HOME)
+    setRecord(null)
+  }, [])
+  React.useEffect(() => setLimit(PAGE), [filters, group, bundle, range])
 
   React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search.trim()), 280)
+    const t = setTimeout(() => setDebouncedQ(filters.q.trim()), 280)
     return () => clearTimeout(t)
-  }, [search])
+  }, [filters.q])
 
-  const range = TIME_RANGES.find((r) => r.key === facets.range) ?? TIME_RANGES[1]
+  /* ---------------- data ---------------- */
 
-  // Server-side wherever the endpoint can express it: the journal already
-  // filters on entry_type, severity, crew_ids, agent_ids, since, q and
-  // mission_id, so the page filters the whole table, not the page it holds.
-  const params = React.useMemo<Record<string, string | undefined>>(() => {
-    const entryTypes =
-      facets.scope === "active"
-        ? ACTIVE_ENTRY_TYPES
-        : facets.scope === "stopped"
-          ? STOPPED_ENTRY_TYPES
-        : facets.scope === "waiting"
-          ? // The ask types AND the answers that retire them. Asking for the
-            // human facet alone excluded `approval.granted` and friends
-            // server-side, so `entriesInScope` below had nothing to join
-            // against and listed answered asks under "Waiting on you" (#2036).
-            waitingEntryTypes()
-          : facets.sources.length > 0
-            ? facets.sources.flatMap((s) => sourceEntryTypes(s))
-            : []
+  const { pipelines } = usePipelines(workspaceId)
+  const routineName = React.useCallback((slug: string) => pipelines.find((p) => p.slug === slug)?.name, [pipelines])
+  const crewOfAgent = React.useCallback((id: string) => lookup.agents.get(id)?.crew_id ?? undefined, [lookup.agents])
+  const filterCtx = React.useMemo(() => ({ routineName, crewOfAgent }), [routineName, crewOfAgent])
 
-    const severities =
-      facets.scope === "failed" ? ["error"] : facets.severities.length > 0 ? facets.severities : []
+  const chainsQ = useChains(workspaceId, CHAIN_LIMIT)
+  // Whether the index has answered once. Before its first request starts the
+  // hook reads "not loading, no chains", which is not "this workspace is empty".
+  const chainsAsked = React.useRef(false)
+  const [chainsSettled, setChainsSettled] = React.useState(false)
+  React.useEffect(() => {
+    if (chainsQ.loading) chainsAsked.current = true
+    else if (chainsAsked.current || chainsQ.chains.length > 0 || chainsQ.error) setChainsSettled(true)
+  }, [chainsQ.loading, chainsQ.chains.length, chainsQ.error])
+  const bounds = React.useMemo(() => rangeBounds(range, now), [range, now])
 
-    return {
-      since: new Date(Date.now() - range.ms).toISOString(),
-      entry_type: entryTypes.length > 0 ? entryTypes.join(",") : undefined,
-      severity: severities.length > 0 ? severities.join(",") : undefined,
-      // Per-minute container/exec telemetry is excluded unless asked for.
-      // Without this the eight most recent rows are eight CPU samples — a
-      // feed that is live and says nothing.
-      exclude_entry_type: facets.showTelemetry ? undefined : NOISE_ENTRY_TYPES.join(","),
-      crew_ids: facets.crewIDs.length > 0 ? facets.crewIDs.join(",") : undefined,
-      agent_ids: facets.agentIDs.length > 0 ? facets.agentIDs.join(",") : undefined,
-      // An issue focus IS expressible server-side, so it narrows the whole
-      // table rather than the loaded page.
-      mission_id: focus?.kind === "issue" ? focus.id : pinned?.kind === "issue" ? pinned.id : undefined,
-      crew_id: focus?.kind === "crew" ? focus.id : undefined,
-      q: debouncedSearch || undefined,
+  // Changes only ever show in Everything without a work-only facet; the
+  // journal is not asked otherwise.
+  const changesWanted = !filters.status && !filters.source && filters.what !== "work"
+  const changeKind: ChangeKind | null = filters.what && filters.what !== "work" && filters.what !== "changes" ? filters.what : null
+  const journalParams = React.useMemo<Record<string, string | undefined>>(
+    () => ({
+      since: new Date(bounds.since).toISOString(),
+      until: bounds.until != null ? new Date(bounds.until).toISOString() : undefined,
+      entry_type: changeEntryTypes(changeKind).join(","),
+      mission_id: filters.issue ?? undefined,
+      q: debouncedQ || undefined,
+    }),
+    // `now` moves every minute; the window's start is fixed by the range until the range changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [range, changeKind, filters.issue, debouncedQ],
+  )
+  const journal = useJournalList({ workspaceId, params: journalParams, limit: JOURNAL_PAGE, maxEntries: MAX_BUFFERED, enabled: changesWanted })
+
+  // One stream for both: a change is prepended, a run event re-reads the index.
+  const refreshChainsRef = React.useRef(chainsQ.refresh)
+  React.useEffect(() => {
+    refreshChainsRef.current = chainsQ.refresh
+  }, [chainsQ.refresh])
+  const chainTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  React.useEffect(() => () => {
+    if (chainTimer.current) clearTimeout(chainTimer.current)
+  }, [])
+  const prependLive = journal.prependLive
+  const onLiveEntry = React.useCallback(
+    (e: JournalEntry) => {
+      const kind = changeKindOf(e.entry_type)
+      if (kind && changesWanted && (!changeKind || kind === changeKind) && (!filters.issue || e.mission_id === filters.issue)) prependLive(e)
+      if (movesWork(e.entry_type)) {
+        if (chainTimer.current) clearTimeout(chainTimer.current)
+        chainTimer.current = setTimeout(() => void refreshChainsRef.current(), 1_500)
+      }
+    },
+    [prependLive, changesWanted, changeKind, filters.issue],
+  )
+  const streamParams = React.useMemo(() => ({ exclude_entry_type: NOISE_ENTRY_TYPES.join(",") }), [])
+  const stream = useJournalStream({ workspaceId, params: streamParams, enabled: true, onEntry: onLiveEntry })
+
+  /* ---------------- rows ---------------- */
+
+  const allWork = React.useMemo(
+    () => chainsQ.chains.map((c) => workFromChain(c, { routineName })).filter((w) => w.active || inRange(w.ts, range, now)),
+    [chainsQ.chains, routineName, range, now],
+  )
+  const issueLabel = React.useCallback((id: string) => {
+    const m = lookup.missions.get(id)
+    return m ? [m.identifier, m.title].filter(Boolean).join(" ") : undefined
+  }, [lookup.missions])
+  const agentName = React.useCallback((id?: string) => (id ? lookup.agents.get(id)?.name : undefined), [lookup.agents])
+  const allChanges = React.useMemo(() => {
+    if (!changesWanted) return []
+    const out: ChangeItem[] = []
+    for (const e of journal.entries) {
+      const c = changeFromEntry(e, { agentName: (id) => agentName(id), issueLabel, routineName })
+      if (c && inRange(c.ts, range, now)) out.push(c)
     }
-  }, [facets, pinned, focus, range.ms, debouncedSearch])
+    return out
+  }, [changesWanted, journal.entries, agentName, issueLabel, routineName, range, now])
 
-  const { entries, loading, loadingMore, error, nextCursor, refresh, loadMore, prependLive } =
-    useJournalList({
-      workspaceId,
-      params,
-      limit: facets.scope === "waiting" ? WAITING_PAGE_SIZE : PAGE_SIZE,
-      maxEntries: MAX_BUFFERED,
-    })
+  const effective = React.useMemo(() => ({ ...filters, q: debouncedQ }), [filters, debouncedQ])
+  const feed = React.useMemo(() => {
+    const merged = mergeFeed(
+      allWork.filter((w) => workPasses(w, effective, filterCtx)),
+      allChanges.filter((c) => changePasses(c, effective, filterCtx)),
+    )
+    return bundle ? bundleRepeats(merged, now) : merged
+  }, [allWork, allChanges, effective, filterCtx, bundle, now])
+  const shown = React.useMemo(() => feed.slice(0, limit), [feed, limit])
+  const groups = React.useMemo(() => groupFeed(shown, group, now, { routineName }), [shown, group, now, routineName])
+  const counts = React.useMemo(
+    () =>
+      viewCounts(allWork, allChanges, effective, filterCtx, bundle ? (xs) => bundleRepeats(xs, now) : undefined),
+    [allWork, allChanges, effective, filterCtx, bundle, now],
+  )
 
-  // The workflow index. Independent of the journal query on purpose: the rail
-  // must answer "where can I go" even when the current filters answer nothing,
-  // and tying it to the same window is what made the rail collapse to a single
-  // row the moment an issue was focused.
-  const {
-    chains: indexChains,
-    hasUnrecordedRuns: chainsHaveUnrecorded,
-    hasMore: chainsHaveMore,
-    error: chainsError,
-    refresh: refreshChains,
-  } = useChains(workspaceId)
-  // Agent work started outside a routine (kind "assignment", #2997) stays out
-  // of Activity for now, at the owner's call (#3007). The index keeps it.
-  const chains = React.useMemo(() => indexChains.filter((c) => c.kind !== "assignment"), [indexChains])
+  /* ---------------- panel options ---------------- */
 
-  // Picking a workflow is a selection like any other, so it goes through the
-  // same setter — which is what makes it impossible for the graph to outlive
-  // the thing that opened it. The label is resolved here, at the click, rather
-  // than looked up again at render: a heading read from a list that has since
-  // refreshed is the same class of staleness this whole change removes.
-  const selectChain = React.useCallback(
-    (origin: string | null) => {
-      if (!origin) {
-        setPath(ACTIVITY_HOME)
+  const panelOptions = React.useMemo(() => {
+    const routines = new Map<string, number>()
+    const agents = new Map<string, { name: string; n: number }>()
+    const crews = new Map<string, number>()
+    const sources = new Map<WorkSource, number>()
+    for (const w of allWork) {
+      if (w.routineSlug) routines.set(w.routineSlug, (routines.get(w.routineSlug) ?? 0) + 1)
+      sources.set(w.source, (sources.get(w.source) ?? 0) + 1)
+      const seen = new Set<string>()
+      for (const a of w.agents) {
+        agents.set(a.id, { name: a.name, n: (agents.get(a.id)?.n ?? 0) + 1 })
+        const crew = crewOfAgent(a.id)
+        if (crew && !seen.has(crew)) {
+          seen.add(crew)
+          crews.set(crew, (crews.get(crew) ?? 0) + 1)
+        }
+      }
+    }
+    // A link can name a routine, agent or crew with nothing in the range; it
+    // stays pickable so the facet can be cleared where it was set.
+    if (filters.routine && !routines.has(filters.routine)) routines.set(filters.routine, 0)
+    if (filters.agent && !agents.has(filters.agent)) agents.set(filters.agent, { name: agentName(filters.agent) ?? shortId(filters.agent), n: 0 })
+    if (filters.crew && !crews.has(filters.crew)) crews.set(filters.crew, 0)
+    const byCount = <T extends { count: number; label: string }>(a: T, b: T) => b.count - a.count || a.label.localeCompare(b.label)
+    return {
+      routines: [...routines].map(([id, count]) => ({ id, label: routineName(id) ?? id, count })).sort(byCount),
+      agents: [...agents].map(([id, a]) => ({ id, label: a.name, count: a.n })).sort(byCount),
+      crews: [...crews].map(([id, count]) => ({ id, label: lookup.crews.get(id)?.name ?? shortId(id), count })).sort(byCount),
+      sources: [...sources].map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count),
+    }
+  }, [allWork, crewOfAgent, routineName, lookup.crews, agentName, filters.routine, filters.agent, filters.crew])
+
+  const resolveAgent = React.useCallback<AgentResolver>(
+    (id) => {
+      const a = lookup.agents.get(id)
+      return a ? { seed: a.avatar_seed || a.slug || a.id, style: a.avatar_style, name: a.name } : undefined
+    },
+    [lookup.agents],
+  )
+
+  /* ---------------- the Peek ---------------- */
+
+  // J / K follow the rows in the order the table draws them.
+  const flat = React.useMemo(() => groups.flatMap((g) => g.items), [groups])
+  const findItem = React.useCallback(
+    (id: string | null): FeedItem | null => {
+      if (!id) return null
+      for (const x of feed) {
+        if (x.id === id) return x
+        if (x.type === "work" && x.runs) {
+          const r = x.runs.find((y) => y.id === id)
+          if (r) return r
+        }
+      }
+      const loose = allWork.find((w) => w.id === id)
+      if (loose) return loose
+      // Outside the range but in the index: still opens in the Peek.
+      const c = chainsQ.chains.find((x) => x.origin === id)
+      return c ? workFromChain(c, { routineName }) : null
+    },
+    [feed, allWork, chainsQ.chains, routineName],
+  )
+  const peekItem = findItem(peekId)
+
+  // A run the link named that the index does not hold (older than the 200
+  // newest workflows, or outside the range) opens as its own page instead.
+  React.useEffect(() => {
+    if (!peekId || peekItem || !chainsSettled || chainsQ.loading || journal.loading) return
+    if (journal.entries.some((e) => e.id === peekId)) return
+    setPath((p) => (p.stops.length === 0 ? selectStop({ kind: "run", id: peekId, label: peekId }) : p))
+    setPeekId(null)
+  }, [peekId, peekItem, chainsSettled, chainsQ.loading, journal.loading, journal.entries])
+
+  // `?entry=<id>`: a change opens in the Peek, any other record as its page.
+  React.useEffect(() => {
+    if (!pendingEntryId || journal.loading) return
+    const hit = journal.entries.find((e) => e.id === pendingEntryId)
+    if (hit) {
+      if (changeKindOf(hit.entry_type)) setPeekId(hit.id)
+      else setRecord(hit)
+    }
+    setPendingEntryId(undefined)
+  }, [pendingEntryId, journal.loading, journal.entries])
+
+  const peekIndex = peekItem ? flat.findIndex((x) => x.id === peekItem.id) : -1
+  const step = React.useCallback(
+    (dir: 1 | -1) => {
+      if (flat.length === 0) return
+      const i = peekIndex < 0 ? (dir === 1 ? -1 : flat.length) : peekIndex
+      const next = flat[Math.min(Math.max(i + dir, 0), flat.length - 1)]
+      if (next) setPeekId(next.id)
+    },
+    [flat, peekIndex],
+  )
+
+  const openFull = React.useCallback((w: WorkItem) => {
+    setPeekId(null)
+    setPath(selectStop({ kind: "workflow", id: w.id, label: w.title }))
+  }, [])
+
+  /** A node clicked inside a run page: a run walks deeper, an object narrows the list. */
+  const openNode = React.useCallback(
+    (kind: string, ref: string) => {
+      if (PAGE_KINDS.has(kind)) {
+        setPath((p) => openStop(p, { kind, id: ref, label: kind === "run" ? (routineName(chainsQ.chains.find((c) => c.origin === ref)?.routine_slug ?? "") ?? shortId(ref)) : shortId(ref) }))
         return
       }
-      setPath(
-        selectStop({
-          kind: "workflow",
-          id: origin,
-          label: workflowLabel(
-            chains.find((c) => c.origin === origin),
-            pipelines.find((p) => p.slug === chains.find((c) => c.origin === origin)?.routine_slug)?.name,
-          ),
-        }),
-      )
+      const next = { ...EMPTY_FILTERS, status: null }
+      if (applyStop(next, { kind, id: ref, label: ref })) {
+        if (kind === "routine") setRange({ key: "30d" })
+        setFilters(next)
+      }
     },
-    [chains, pipelines],
+    [chainsQ.chains, routineName, setFilters],
   )
 
-  /** The chain the workflow column draws, or undefined once the index has moved on. */
-  const openChain = React.useMemo(
-    () => (surface.chainAnchor ? chains.find((c) => c.origin === surface.chainAnchor) : undefined),
-    [chains, surface.chainAnchor],
+  const showRoutine = React.useCallback(
+    (slug: string, oneByOne = false) => {
+      setPeekId(null)
+      setFilters({ ...EMPTY_FILTERS, routine: slug })
+      setRange({ key: "30d" })
+      if (oneByOne) setBundle(false)
+    },
+    [setFilters],
+  )
+  const showIssue = React.useCallback(
+    (id: string) => {
+      setPeekId(null)
+      setFilters({ ...EMPTY_FILTERS, issue: id })
+    },
+    [setFilters],
   )
 
-  const { status: streamStatus } = useJournalStream({
-    workspaceId,
-    params,
-    enabled: true,
-    onEntry: prependLive,
-  })
+  /* ---------------- the URL ---------------- */
 
-  // Routine / run / step ids live inside the payload, which the API cannot
-  // filter on — so a crumb of those kinds narrows here, over the loaded
-  // window, and the chip says so rather than implying a full-table match.
-  // Narrowed by the pinned crumb and the entity focus, but NOT by the status
-  // facet — this is the set the rail's status counts are taken over, so each
-  // count answers "how many would I get if I also clicked this".
-  const focusScoped = React.useMemo(() => {
-    let out = entries
-    if (pinned && pinned.kind !== "issue") {
-      out = out.filter((e) => {
-        const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
-        if (pinned.kind === "routine") {
-          return bag["pipeline_slug"] === pinned.id || bag["routine_slug"] === pinned.id
-        }
-        if (pinned.kind === "run") return bag["run_id"] === pinned.id
-        return bag["step_id"] === pinned.id || bag["step"] === pinned.id
-      })
+  const url = React.useMemo(() => {
+    if (path.stops.length > 0) return activityUrlParams({ path, lens: "workflows" }).toString()
+    // A change in the Peek is written as its journal record, a run as ?run=.
+    const peekIsChange = peekItem?.type === "change"
+    const p = feedUrlParams({ filters, group, bundle, range, peek: peekIsChange ? undefined : (peekId ?? undefined) })
+    if (record) p.set("entry", record.id)
+    else if (peekIsChange) p.set("entry", peekItem.id)
+    return p.toString()
+  }, [path, filters, group, bundle, range, peekId, peekItem, record])
+  const position = `${path.stops.map((s) => s.id).join("/")}|${peekId ?? ""}|${record?.id ?? ""}`
+  const lastPosition = React.useRef(position)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const next = url ? `${window.location.pathname}?${url}` : window.location.pathname
+    const moved = lastPosition.current !== position
+    lastPosition.current = position
+    if (window.location.pathname + window.location.search === next) return
+    if (moved) window.history.pushState(null, "", next)
+    else window.history.replaceState(null, "", next)
+  }, [url, position])
+
+  React.useEffect(() => {
+    const onPop = () => {
+      const s = readInitial(new URLSearchParams(window.location.search))
+      lastPosition.current = `${s.path.stops.map((x) => x.id).join("/")}|${s.peek ?? ""}|${s.entryId ?? ""}`
+      setPath(s.path)
+      setFiltersRaw(s.filters)
+      setGroup(s.group)
+      setBundle(s.bundle)
+      setRange(s.range)
+      setPeekId(s.peek ?? null)
+      setRecord(null)
+      setPendingEntryId(s.entryId)
     }
-    // The node the reader walked into, if any. Same reason as the crumb: an
-    // assignment or a run id is payload, not a column.
-    if (nodeMatch) out = out.filter(nodeMatch)
-    // A routine focus cannot go to the server: the slug lives inside the
-    // payload, which the journal does not index. Narrowed here, over the
-    // loaded window, and the chip says so.
-    return narrowToFocus(out, focus)
-  }, [entries, pinned, focus, nodeMatch])
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
 
-  // What the feed shows and the cards count: the focused set with the status
-  // facet applied on top.
-  //
-  // The split matters because the two were computed from different windows
-  // before. The cards were built from the focused set while the rail's counts
-  // came from the whole loaded window, so a screen focused on one routine read
-  // "FAILED 0 — nothing broke" beside a rail reading "Failed 9" — one screen,
-  // two answers to "did anything break", and the reassuring one was wrong.
-  const visible = React.useMemo(() => {
-    // `done` has no server-side expression (it is "everything else"), so it
-    // is narrowed client-side.
-    //
-    // `waiting` is narrowed here too (#1876). The fetch asks for the ask
-    // types AND their answers, because the journal is an event log: a granted
-    // approval's request and a terminal escalation both stay in it, and only
-    // the answer beside a row proves that row is closed. The narrowing is
-    // what keeps the answers out of the feed — listing them under "Waiting on
-    // you" is the rail contradicting the card beside it, which counts asks
-    // that are still open. Same join, one function.
-    if (facets.scope === "done" || facets.scope === "waiting") {
-      return entriesInScope(focusScoped, facets.scope)
+  /* ---------------- keys ---------------- */
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // The Peek drives its own J / K / Enter / Esc while it is open.
+      if (peekId || document.querySelector("[data-slot=peek]")) return
+      if (e.key === "Escape") {
+        if (record) setRecord(null)
+        else if (path.stops.length > 0) setPath(backFrom)
+        return
+      }
+      if (record || path.stops.length > 0) return
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault()
+        step(e.key === "j" ? 1 : -1)
+        return
+      }
+      const n = Number(e.key)
+      if (n >= 1 && n <= ACTIVITY_VIEWS.length) {
+        e.preventDefault()
+        setFilters({ ...filters, status: ACTIVITY_VIEWS[n - 1].status })
+      }
     }
-    return focusScoped
-  }, [focusScoped, facets.scope])
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [peekId, record, path.stops.length, step, filters, setFilters])
 
-  // Each row's dot, resolved over the window it is rendered in. A row cannot
-  // see its neighbours, and "is this ask still open" is a question about them.
-  const scopes = React.useMemo(() => scopeByEntry(visible), [visible])
+  /* ---------------- what the page is ---------------- */
 
-  const crewCounts = React.useMemo(() => {
-    const c: Record<string, number> = {}
-    for (const e of focusScoped) if (e.crew_id) c[e.crew_id] = (c[e.crew_id] ?? 0) + 1
-    return c
-  }, [focusScoped])
+  const view = viewOfStatus(filters.status)
+  const facets = activeFacetCount(filters)
+  const issueObj = filters.issue ? { id: filters.issue, label: issueLabel(filters.issue) ?? lookup.missions.get(filters.issue)?.title ?? shortId(filters.issue), identifier: lookup.missions.get(filters.issue)?.identifier } : null
+  const routineObj = filters.routine ? { slug: filters.routine, label: routineName(filters.routine) ?? filters.routine } : null
+  const objectOnly = facets === 1 && (issueObj || routineObj)
+  const title = issueObj
+    ? issueObj.label
+    : routineObj
+      ? routineObj.label
+      : filters.what === "changes"
+        ? "Changes"
+        : filters.what === "work"
+          ? "Runs and agent work"
+          : filters.what
+            ? CHANGE_KIND_LABEL[filters.what]
+            : filters.agent
+              ? (agentName(filters.agent) ?? "Agent")
+              : facets > 0
+                ? "Filtered activity"
+                : view && view !== "all"
+                  ? ACTIVITY_VIEWS.find((v) => v.key === view)!.label
+                  : filters.status
+                    ? WORK_STATUS_LABEL[filters.status]
+                    : "Everything"
+  const description = issueObj
+    ? "Everything about this issue: its work, the changes to it and what they caused"
+    : routineObj
+      ? "Everything about this routine: its runs, the changes to it and what they caused"
+      : facets > 0
+        ? `${facets} filter${facets === 1 ? "" : "s"} · ${rangeLabel(range).toLowerCase()}`
+        : "Everything your crews and people did: runs, agent work, and every change to issues, routines, pages, crews and access"
 
-  const issueCounts = React.useMemo(() => {
-    const c: Record<string, number> = {}
-    for (const e of entries) if (e.mission_id) c[e.mission_id] = (c[e.mission_id] ?? 0) + 1
-    return c
-  }, [entries])
+  const filterWords = [
+    filters.q && `“${filters.q}”`,
+    filters.status && WORK_STATUS_LABEL[filters.status],
+    filters.what && (filters.what === "work" ? "Runs and agent work" : filters.what === "changes" ? "Changes" : CHANGE_KIND_LABEL[filters.what]),
+    routineObj && `Routine: ${routineObj.label}`,
+    issueObj && `Issue: ${issueObj.label}`,
+    filters.agent && `Who: ${agentName(filters.agent) ?? shortId(filters.agent)}`,
+    filters.crew && `Crew: ${lookup.crews.get(filters.crew)?.name ?? shortId(filters.crew)}`,
+    filters.source && `Started by: ${WORK_SOURCE_LABEL[filters.source]}`,
+    rangeLabel(range),
+  ].filter(Boolean)
 
-  const routineCounts = React.useMemo(() => {
-    const c: Record<string, number> = {}
-    for (const e of entries) {
-      const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
-      const slug = bag["pipeline_slug"] ?? bag["routine_slug"]
-      if (typeof slug === "string" && slug) c[slug] = (c[slug] ?? 0) + 1
-    }
-    return c
-  }, [entries])
+  const nNeed = feed.filter((x) => x.type === "work" && x.status === "waiting").length
+  const nFailed = feed.filter((x) => x.type === "work" && x.status === "failed").length
+  const initialLoading = !chainsSettled && chainsQ.chains.length === 0 && (!changesWanted || journal.entries.length === 0)
+  const workspaceEmpty =
+    chainsSettled && !chainsQ.loading && !chainsQ.error && chainsQ.chains.length === 0 && !chainsQ.hasUnrecordedRuns && allChanges.length === 0 && !journal.loading && facets === 0 && !filters.q && !filters.status
+  const offline = stream.status === "error"
 
-  // Status and priority for the issues the Issues lens draws. The chain index
-  // carries neither — ChainIssueRef is id, identifier, title and `created` — so
-  // without this an issue in Activity wears a generic dot while the same issue
-  // one page away wears its status glyph.
-  const issueMeta = React.useMemo(
-    () => new Map(issues.map((i) => [i.id, { status: i.status, priority: i.priority }])),
-    [issues],
-  )
+  const routineRecords = usePipelineRunRecords(workspaceId, routineObj?.slug ?? null)
+  const routineHistory = React.useMemo(() => runHistory(routineRecords.records, null), [routineRecords.records])
 
-  const routines = React.useMemo<SidebarRoutine[]>(
-    () =>
-      pipelines.map((p) => ({
-        id: p.id,
-        slug: p.slug,
-        name: p.name,
-        icon: (p as { icon?: string | null }).icon ?? null,
-        color: (p as { color?: string | null }).color ?? null,
-        invocation_count: p.invocation_count,
-        last_invocation_status: p.last_invocation_status ?? null,
-      })),
-    [pipelines],
-  )
+  const sentinel = React.useRef<HTMLDivElement | null>(null)
+  React.useEffect(() => {
+    const el = sentinel.current
+    if (!el || typeof IntersectionObserver === "undefined") return
+    const io = new IntersectionObserver((xs) => {
+      if (xs.some((x) => x.isIntersecting)) setLimit((n) => (n < feed.length ? n + PAGE : n))
+    })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [feed.length])
 
-  // The routine behind a chain, for a row's icon, colour and human name — and
-  // for resolving that name when the search matches against it. Built HERE
-  // rather than inside the rail because both the rail and the narrowing below
-  // need it, and a map built in two places is a map with two contents the day
-  // one of them grows a rule.
-  const routineBySlug = React.useMemo(() => {
-    const m = new Map<string, SidebarRoutine>()
-    for (const r of routines) m.set(r.slug, r)
-    return m
-  }, [routines])
-
-  // ONE narrowing of the chain index, read by every surface on the page.
-  //
-  // The rail used to do this privately while the shell handed the unnarrowed
-  // array to the three lens dashboards beside it — so typing in the search box
-  // left the rail showing two rows next to a dashboard reporting twenty, under a
-  // comment in lens-overviews.tsx promising the two could not disagree because
-  // they read "the SAME ChainSummary[]". They did not. They do now.
-  //
-  // `visible` goes to every list, dashboard and drill-down. `searched` goes to
-  // the status segments alone, so their counts survive their own selection.
-  // The Filter popover's facets narrow the chains too (#3000), not only the
-  // journal: with a crew picked, the rail listed every run beside a column
-  // that showed one crew's.
-  const narrowedChains = React.useMemo(
-    () =>
-      narrowChains(chains, search, facets.scope, (slug) => routineBySlug.get(slug)?.name, {
-        crewIDs: facets.crewIDs,
-        agentIDs: facets.agentIDs,
-        focus: focus ? { kind: focus.kind, id: focus.id } : null,
-        crewOfAgent: (id) => lookup.agents.get(id)?.crew_id ?? undefined,
-        crewOfRoutine: (slug) => pipelines.find((p) => p.slug === slug)?.author_crew_id ?? undefined,
-      }),
-    [chains, search, facets.scope, facets.crewIDs, facets.agentIDs, focus, routineBySlug, lookup.agents, pipelines],
-  )
-  // A filter only the journal can express — a source, a severity, the
-  // telemetry switch, a pinned node — narrows the rail to the runs its events
-  // belong to (#3007): the run an event carries (trace_id, payload.run_id) and
-  // the issue it names. With no event left, no run is left either; the rail
-  // used to keep listing every run beside an empty column.
-  const journalOnlyNarrowing =
-    !!pinned || facets.sources.length > 0 || facets.severities.length > 0 || facets.showTelemetry
-  const railChains = React.useMemo(() => {
-    if (!journalOnlyNarrowing) return narrowedChains
-    const runs = new Set<string>()
-    const missions = new Set<string>()
-    for (const e of visible) {
-      if (e.trace_id) runs.add(e.trace_id)
-      const rid = e.payload?.run_id
-      if (typeof rid === "string" && rid) runs.add(rid)
-      if (e.mission_id) missions.add(e.mission_id)
-    }
-    const keep = (c: (typeof chains)[number]) =>
-      runs.has(c.origin) || (c.issues ?? []).some((i) => missions.has(i.id))
-    return { searched: narrowedChains.searched.filter(keep), visible: narrowedChains.visible.filter(keep) }
-  }, [journalOnlyNarrowing, narrowedChains, visible])
-  const visibleChains = railChains.visible
+  function exportCsv() {
+    const blob = new Blob([feedCsv(feed)], { type: "text/csv;charset=utf-8" })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = href
+    a.download = `activity-${new Date(now).toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(href)
+    toast.success(`Exported ${feed.length} ${feed.length === 1 ? "row" : "rows"} as CSV`)
+  }
 
   const labels = React.useMemo<SpineLabels>(() => {
     const issues: Record<string, string> = {}
@@ -529,848 +641,299 @@ export function ActivityStreamView({
     return { issues }
   }, [lookup.missions])
 
-  const crews = React.useMemo(
-    () => [...lookup.crews.values()].map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color })),
-    [lookup.crews],
+  const stop = currentStop(path)
+  const trail = activityTrail(path)
+  const openChain = stop ? chainsQ.chains.find((c) => c.origin === stop.id) : undefined
+
+  /* ---------------- render ---------------- */
+
+  const listBody = (
+    <>
+      {chainsQ.error && (
+        <PageError
+          title="Could not load runs and agent work"
+          description={changesWanted ? "Changes below still load. One part failed; the rest works." : "Retry to load the runs again."}
+          detail={chainsQ.error}
+          onRetry={() => void chainsQ.refresh()}
+        />
+      )}
+      {changesWanted && journal.error && (
+        <PageError
+          title="Could not load changes"
+          description="Runs and agent work below are up to date. One part failed; the rest works."
+          detail={journal.error}
+          onRetry={() => void journal.refresh()}
+        />
+      )}
+      {initialLoading ? (
+        <PageLoading rows={7} />
+      ) : workspaceEmpty ? (
+        <PageEmpty
+          icon={Activity}
+          title="No activity yet"
+          description="Every routine run, agent task and change shows up here."
+          primary={{ label: "Run a routine", href: "/routines", icon: Workflow }}
+          cli="crewship activity"
+        />
+      ) : feed.length === 0 && !chainsQ.error ? (
+        <PageNoResults
+          filters={filterWords.join(" · ")}
+          onClear={facets > 0 || filters.q || filters.status ? () => setFilters({ ...EMPTY_FILTERS }) : undefined}
+          onWiden={range.key !== "30d" ? () => setRange({ key: "30d" }) : undefined}
+          widenLabel="Show last 30 days"
+        />
+      ) : feed.length > 0 ? (
+        <StaleData stale={offline}>
+          <FeedTable groups={groups} now={now} selectedId={peekItem?.id ?? null} onSelect={(x) => setPeekId((cur) => (cur === x.id ? null : x.id))} resolveAgent={resolveAgent} />
+        </StaleData>
+      ) : null}
+      {feed.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-1">
+          {feed.length > limit ? (
+            <Button size="sm" variant="outline" onClick={() => setLimit((n) => n + PAGE)}>
+              Load {Math.min(PAGE, feed.length - limit)} more
+            </Button>
+          ) : changesWanted && journal.nextCursor ? (
+            <Button size="sm" variant="outline" disabled={journal.loadingMore} onClick={() => void journal.loadMore()}>
+              Load older changes
+            </Button>
+          ) : null}
+          <p className="text-label text-muted-foreground">
+            Showing {Math.min(limit, feed.length)} of {feed.length} · {rangeLabel(range).toLowerCase()}
+            {chainsQ.hasMore && ` · runs from the ${CHAIN_LIMIT} most recent workflows`}
+            {chainsQ.hasUnrecordedRuns && " · older runs predate chain recording and are not listed"}
+          </p>
+          <div ref={sentinel} aria-hidden className="h-px w-full" />
+        </div>
+      )}
+    </>
   )
-  const agents = React.useMemo(
-    () => [...lookup.agents.values()].map((a) => ({ id: a.id, name: a.name, crew_id: a.crew_id })),
-    [lookup.agents],
-  )
-
-  const agentName = React.useCallback(
-    (id?: string) => (id ? lookup.agents.get(id)?.name : undefined),
-    [lookup.agents],
-  )
-  const crewName = React.useCallback(
-    (id?: string) => (id ? lookup.crews.get(id)?.name : undefined),
-    [lookup.crews],
-  )
-  const crewMeta = React.useCallback(
-    (id?: string) => {
-      const c = id ? lookup.crews.get(id) : undefined
-      return c ? { icon: c.icon, color: c.color } : undefined
-    },
-    [lookup.crews],
-  )
-
-  // A node clicked in a chain graph arrives as "kind:ref" and nothing else —
-  // the walker's payload is deliberately thin. The name is resolved HERE, at
-  // the click, from what the page already holds, for the same reason the
-  // workflow's label is: a breadcrumb that reads "agent: agt_01H8…" tells the
-  // reader nothing about where they are, and re-reading the name at render
-  // time from a list that has since refreshed is the staleness this whole
-  // change removes.
-  const resolveStop = React.useCallback(
-    (kind: string, ref: string): ActivityStop => {
-      if (kind === "agent") return { kind, id: ref, label: lookup.agents.get(ref)?.name ?? shortId(ref) }
-      if (kind === "crew") return { kind, id: ref, label: lookup.crews.get(ref)?.name ?? shortId(ref) }
-      if (kind === "issue") return { kind, id: ref, label: labels.issues?.[ref] ?? shortId(ref) }
-      if (kind === "routine") {
-        // The graph refs a routine by id on some nodes and by slug on others;
-        // the journal only ever carries the slug, so the stop is keyed on the
-        // slug or it narrows to nothing.
-        const r = routines.find((x) => x.id === ref || x.slug === ref)
-        return { kind, id: r?.slug ?? ref, label: r?.name ?? ref }
-      }
-      if (kind === "run") {
-        // A run that starts a chain is named after its routine — "Check form
-        // delivery", not "run: run_cmuz7so7…" in the trail and the header.
-        const slug = chains.find((c) => c.origin === ref)?.routine_slug
-        const name = slug ? (routines.find((x) => x.slug === slug)?.name ?? slug) : undefined
-        if (name) return { kind, id: ref, label: name }
-      }
-      return { kind, id: ref, label: shortId(ref) }
-    },
-    [lookup.agents, lookup.crews, labels.issues, routines, chains],
-  )
-
-  /** Walk one level down. Bounded and loop-collapsing — see openStop. */
-  const openNode = React.useCallback(
-    (kind: string, ref: string) => setPath((p) => openStop(p, resolveStop(kind, ref))),
-    [resolveStop],
-  )
-
-  // Mirror the state out to the URL. A change of POSITION — the walk or the
-  // opened record — is a history entry, so Back closes what was just opened;
-  // a change of lens or bucket replaces, so Back does not step through every
-  // tab the reader tried. Writes go through the History API, not the router:
-  // a same-path router.push re-evaluates the dashboard layout and flashes
-  // the auth spinner (see hooks/use-shallow-search-param).
-  const urlState = React.useMemo<ActivityUrlState>(
-    () => ({ path, lens, scope: facets.scope, entryId: selected?.id ?? pendingEntryId }),
-    [path, lens, facets.scope, selected?.id, pendingEntryId],
-  )
-  const lastPosition = React.useRef<{ path: ActivityPath; entryId?: string }>({ path, entryId: selected?.id })
-  React.useEffect(() => {
-    if (typeof window === "undefined") return
-    const url = activityUrl(window.location.pathname, urlState)
-    const positionChanged =
-      lastPosition.current.path !== urlState.path || lastPosition.current.entryId !== urlState.entryId
-    lastPosition.current = { path: urlState.path, entryId: urlState.entryId }
-    if (window.location.pathname + window.location.search === url) return
-    if (positionChanged) window.history.pushState(null, "", url)
-    else window.history.replaceState(null, "", url)
-  }, [urlState])
-
-  // Back and Forward read the URL back in. The mirror above then finds the
-  // address already matches and writes nothing, so the two never chase each
-  // other.
-  React.useEffect(() => {
-    if (typeof window === "undefined") return
-    const onPop = () => {
-      const next = parseActivityUrl(new URLSearchParams(window.location.search))
-      lastPosition.current = { path: next.path, entryId: next.entryId }
-      setPath(next.path)
-      setLens(next.lens)
-      setFacets((f) => ({ ...f, scope: (next.scope ?? "all") as FacetState["scope"] }))
-      setSelected(null)
-      setPendingEntryId(next.entryId)
-    }
-    window.addEventListener("popstate", onPop)
-    return () => window.removeEventListener("popstate", onPop)
-  }, [])
-
-  // The record a link named opens once the window holding it has loaded. A
-  // record outside the window is forgotten rather than waited for forever:
-  // the URL then reads as the walk alone, which is what is on screen.
-  React.useEffect(() => {
-    if (!pendingEntryId || loading) return
-    const hit = entries.find((e) => e.id === pendingEntryId)
-    if (hit) setSelected(hit)
-    setPendingEntryId(undefined)
-  }, [pendingEntryId, loading, entries])
-
-  // A stop read from the URL carries its id as its label until the entity it
-  // names has loaded; re-label it then, once, so the trail and the header say
-  // "Page watch" rather than the slug. Only stops still wearing their id are
-  // touched, so a label the reader clicked through is never overwritten.
-  React.useEffect(() => {
-    setPath((p) => {
-      let changed = false
-      const stops = p.stops.map((s) => {
-        if (s.label !== s.id) return s
-        const resolved =
-          s.kind === "workflow"
-            ? {
-                ...s,
-                label: workflowLabel(
-                  chains.find((c) => c.origin === s.id),
-                  routines.find((r) => r.slug === chains.find((c) => c.origin === s.id)?.routine_slug)?.name,
-                ),
-              }
-            : resolveStop(s.kind, s.id)
-        if (resolved.label === s.label || resolved.label === shortId(s.id)) return s
-        changed = true
-        return { ...s, label: resolved.label }
-      })
-      return changed ? { stops, dropped: p.dropped } : p
-    })
-  }, [resolveStop, chains, routines])
-
-  // Keyboard: a surface you can only drive with a mouse is one you abandon
-  // on the second screenful.
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
-      if (e.key === "Escape") {
-        // An opened record first, then one stop back up the walk. Escape is
-        // the key readers press to undo the last thing they opened, and until
-        // now it stopped working the moment they were already at the top.
-        if (selected) setSelected(null)
-        else setPath(backFrom)
-        return
-      }
-      // ↑ / ↓ step through the rail's runs from an opened run (#2988), in
-      // the order the rail draws them — Active now, Today, Earlier — so the
-      // key moves to the row the reader sees above or below. The ends stay
-      // put rather than wrapping round.
-      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !selected) {
-        const current = stop?.kind === "workflow" || stop?.kind === "run" ? stop.id : null
-        if (!current) return
-        const order = bucketChains(visibleChains, Date.now()).flatMap((b) => b.chains)
-        const i = order.findIndex((c) => c.origin === current)
-        if (i < 0) return
-        const next = order[e.key === "ArrowDown" ? i + 1 : i - 1]
-        if (!next) return
-        e.preventDefault()
-        selectChain(next.origin)
-        return
-      }
-      if (e.key !== "j" && e.key !== "k") return
-      e.preventDefault()
-      const i = selected ? visible.findIndex((x) => x.id === selected.id) : -1
-      const next = e.key === "j" ? Math.min(i + 1, visible.length - 1) : Math.max(i - 1, 0)
-      if (visible[next]) setSelected(visible[next])
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [visible, selected, stop, visibleChains, selectChain])
-
-  // Every chip carries whether it NARROWS the feed. All of them do except a
-  // workflow, which re-points the graph: the journal has no chain_origin
-  // column, so a chain is not expressible as a filter over journal rows. The
-  // distinction is not cosmetic — the empty-result banner counts filters, and
-  // a chip that filters nothing must not be counted there.
-  const chips: { label: string; narrows: boolean; onClear: () => void; position?: boolean }[] = []
-  if (debouncedSearch)
-    chips.push({ label: `“${debouncedSearch}”`, narrows: true, onClear: () => setSearch("") })
-  if (pinned) {
-    chips.push({
-      label:
-        pinned.kind === "issue" ? `issue: ${pinned.label}` : `${pinned.kind}: ${pinned.label} (loaded window)`,
-      narrows: true,
-      onClear: () => setPinned(null),
-    })
-  }
-  // The selection is one chip, because it is one selection — but it is the
-  // reader's POSITION, and the trail above already names it and is the way
-  // back out of it, so it is not drawn a second time as a removable filter.
-  // It is still counted: an issue focus or a node really does narrow the
-  // window, and the empty-result banner's "none satisfies all N filters"
-  // would be a lie if the filter doing the narrowing went uncounted.
-  if (surface.chip) {
-    chips.push({ ...surface.chip, position: true, onClear: () => setPath(ACTIVITY_HOME) })
-  }
-  if (facets.range !== "24h") {
-    chips.push({ label: range.label, narrows: true, onClear: () => setFacets({ ...facets, range: "24h" }) })
-  }
-  for (const s of facets.sources) {
-    chips.push({
-      label: sourceMeta(s).label,
-      narrows: true,
-      onClear: () => setFacets({ ...facets, sources: facets.sources.filter((x) => x !== s) }),
-    })
-  }
-  for (const s of facets.severities) {
-    chips.push({
-      label: s,
-      narrows: true,
-      onClear: () => setFacets({ ...facets, severities: facets.severities.filter((x) => x !== s) }),
-    })
-  }
-  for (const id of facets.crewIDs) {
-    chips.push({
-      label: lookup.crews.get(id)?.name ?? id,
-      narrows: true,
-      onClear: () => setFacets({ ...facets, crewIDs: facets.crewIDs.filter((x) => x !== id) }),
-    })
-  }
-  for (const id of facets.agentIDs) {
-    chips.push({
-      label: lookup.agents.get(id)?.name ?? id,
-      narrows: true,
-      onClear: () => setFacets({ ...facets, agentIDs: facets.agentIDs.filter((x) => x !== id) }),
-    })
-  }
-
-  const narrowingChips = chips.filter((c) => c.narrows).length
-
-  // The window holds events and this question returns none of them. Told
-  // apart from a genuinely quiet system, because the overview's copy for zero
-  // is reassurance — "nothing broke", "all clear", "Nothing has failed. Nice."
-  // — and every word of it is false when the answer is simply unasked.
-  const emptyByFilters = narrowingChips > 0 && visible.length === 0 && entries.length > 0
-
-  // One click out. Clearing them one crumb at a time is the state a reader is
-  // already lost in.
-  //
-  // NOT a loop over each chip's onClear. Every facet chip's closure captures
-  // the SAME `facets` from this render and spreads it, so calling them in
-  // sequence makes each one compute from the original state and the last write
-  // wins — "clear all filters" left every earlier facet in place, which is the
-  // exact opposite of what the button promises and is invisible unless two
-  // facets are on at once. One write, from the known-empty state.
-  const clearAllChips = React.useCallback(() => {
-    setSearch("")
-    setPinned(null)
-    setPath(ACTIVITY_HOME)
-    setFacets((f) => ({ ...EMPTY_FACETS, scope: f.scope }))
-  }, [])
-
-  const scopeMeta = ACTIVITY_SCOPES.find((s) => s.key === facets.scope)
-
-  // One boolean, so the overview and a workflow cannot both be true. They were
-  // stacked: picking a workflow re-pointed the graph at the top and left the
-  // global overview under it, unchanged — same "56 events · past 24 hours ·
-  // every crew, agent, routine and issue in one place" for every workflow, two
-  // screenshots identical below the graph. One selection, one column.
-  // A routine picked out of the Routines lens. Its own surface, because thirty
-  // runs of one routine is a different question from any chain: the workflow
-  // page answers "what did this one run cause", and this answers "which of the
-  // thirty was the one at ten past two".
-  const openRoutineSlug =
-    stop?.kind === "routine" && lens === "routines" ? stop.id : null
-
-  // A row in a lens leads to that THING, not to the feed narrowed by its id.
-  // Every kind landed on the feed before, which for an issue meant a card
-  // headed "Activity · 0 in past 24 hours" over the words "Nothing here" — a
-  // mission's own events do not carry the entry types that query asks for, so
-  // the one kind with the most to show showed nothing.
-  const openIssue = stop?.kind === "issue" ? stop : null
-  const openAgent = stop?.kind === "agent" ? stop : null
-  const openRun = stop?.kind === "run" ? stop : null
-
-  // The home is the whole workspace's runs, so it shows only while nothing
-  // narrows the page. A crew, an agent, a search or a pinned crumb asks a
-  // narrower question, and the filtered list below answers it (#2979).
-  // Narrowings only the journal can express — a source, a severity, the
-  // telemetry switch, a pinned node — get the event list. Chain-level ones —
-  // a crew, an agent, an issue or routine focus, the search — keep the home,
-  // narrowed to the same chains as the rail (#3002).
-  const eventOnlyNarrowing =
-    !!pinned || facets.sources.length > 0 || facets.severities.length > 0 || facets.showTelemetry
-  const chainNarrowing =
-    !!debouncedSearch || facets.crewIDs.length > 0 || facets.agentIDs.length > 0 || !!focus
-  const homeScope = React.useMemo(() => {
-    if (!chainNarrowing) return null
-    const label = [
-      ...facets.crewIDs.map((id) => lookup.crews.get(id)?.name ?? id),
-      ...facets.agentIDs.map((id) => lookup.agents.get(id)?.name ?? id),
-      ...(focus ? [focus.label ?? focus.id] : []),
-      ...(debouncedSearch ? [`“${debouncedSearch}”`] : []),
-    ].join(", ")
-    return { origins: new Set(visibleChains.map((c) => c.origin)), label }
-  }, [chainNarrowing, facets.crewIDs, facets.agentIDs, focus, debouncedSearch, visibleChains, lookup.crews, lookup.agents])
-
-  const overviewShown =
-    !loading &&
-    !error &&
-    !eventOnlyNarrowing &&
-    surface.main === "overview" &&
-    facets.scope === "all" &&
-    lens === "workflows"
-
-  // Each lens owns the column. They were four tabs over one Overview: the same
-  // four KPIs and the same "what is broken" whichever was pressed, which is a
-  // control that changes what is SELECTED without changing what is SHOWN — the
-  // same defect as a graph left pointing at the previous chain.
-  //
-  // `stop == null` is load-bearing and was missing. An issue is an ENTITY kind,
-  // so activitySurface answers "overview" for it exactly as it does for no
-  // selection at all — which meant clicking an issue row in the Issues lens
-  // re-rendered the same Issues dashboard, unchanged, over a breadcrumb that
-  // said the reader had gone somewhere. A row that leads back to the page it is
-  // on is a dead end wearing a link's clothes.
-  //
-  // An agent row never had the bug because "agent" is not an entity kind and
-  // fell through to the narrowed feed. Requiring no selection here puts issues
-  // and routines on that same path, so every lens row leads somewhere for the
-  // same reason.
-  const lensOverviewShown =
-    !loading &&
-    !error &&
-    !emptyByFilters &&
-    surface.main === "overview" &&
-    stop == null &&
-    lens !== "workflows"
-  // The feed as a list: one scope bucket, or one node of a chain. Same shape,
-  // different heading — a bucket is "everything that failed", a node is
-  // "everything this agent touched" — so it is one branch, not two that can
-  // both draw.
-  const listShown =
-    !loading &&
-    !error &&
-    !emptyByFilters &&
-    surface.main !== "workflow" &&
-    !overviewShown &&
-    !lensOverviewShown &&
-    openRoutineSlug == null &&
-    openIssue == null &&
-    openAgent == null &&
-    openRun == null
-  const listTitle = surface.node ? surface.node.label : (scopeMeta?.label ?? "Activity")
-  const listCaption = surface.node
-    ? `${visible.length.toLocaleString()} ${visible.length === 1 ? "event" : "events"} mentioning this ${
-        surface.node.kind
-      } in ${range.label.toLowerCase()}`
-    : `${visible.length.toLocaleString()} in ${range.label.toLowerCase()}`
-  const filterChips = chips.filter((c) => !c.position)
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <SubBar
         icon={Activity}
         title="Activity"
-        // The header names the reader's position, not a fixed page. In a
-        // workflow the event count is not what is on screen — it counted the
-        // whole window while the column showed one chain, which is the same
-        // lie the stacked overview told underneath it.
-        section={stop ? stop.label : scopeMeta?.label}
+        section={path.stops.length > 0 ? (stop?.label ?? "Run") : title}
         ariaLabel="Activity"
-        description={
-          surface.main === "workflow" ? (
-            openChain ? (
-              <>
-                {openChain.runs.toLocaleString()} {openChain.runs === 1 ? "run" : "runs"} · started by{" "}
-                {openChain.started_by}
-              </>
-            ) : (
-              <>workflow</>
-            )
-          ) : overviewShown ? (
-            // The home counts activities — the rail's rows — not journal
-            // events; "139 events" described a list this page no longer shows.
-            <>
-              {chains.length.toLocaleString()} {chains.length === 1 ? "activity" : "activities"}
-              {chains.some((c) => (c.waiting_runs ?? 0) > 0) && (
-                <span className="text-warn">
-                  {" "}· {chains.filter((c) => (c.waiting_runs ?? 0) > 0).length} needs you
-                </span>
-              )}
-            </>
-          ) : (
-            <>
-              {visible.length.toLocaleString()} {visible.length === 1 ? "event" : "events"} ·{" "}
-              {range.label.toLowerCase()}
-            </>
-          )
-        }
         actions={
-          // No Pause, no Refresh. This surface is always live: the journal
-          // pushes over SSE and falls back to polling on its own, so a
-          // Refresh button would only ever advertise a staleness that is
-          // not there, and a Pause is a way to be shown old numbers by
-          // accident. The status word next to the count is the whole
-          // control surface.
-          <LiveBadge status={streamStatus} />
+          <>
+            {!isMobile && <ActivityRange value={range} onChange={setRange} now={now} />}
+            <Button size="icon-sm" variant="ghost" aria-label="Export CSV" title="Export CSV" onClick={exportCsv} disabled={feed.length === 0}>
+              <Download className="size-4" aria-hidden />
+            </Button>
+          </>
         }
       />
-
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {/* The one SecondaryPanel (Harbor 2, #3350). The rail's kit toolbar
-            becomes the panel toolbar and carries the collapse button; on a
-            phone the rail is a bottom sheet from the top bar. Rows that open a
-            page close that sheet; filters and lenses keep it open. */}
+      <div className="flex min-h-0 flex-1">
         <SecondaryPanel id="activity" label="Activity views">
-          <ActivitySidebar
-            chains={visibleChains}
-            chainsBeforeStatus={railChains.searched}
-            loadedChainCount={chains.length}
-            chainsHaveMore={chainsHaveMore}
-            chainsHaveUnrecorded={chainsHaveUnrecorded}
-            chainsError={chainsError}
-            onRetryChains={() => void refreshChains()}
-            routineBySlug={routineBySlug}
-            selectedChain={railChain}
-            onSelectChain={(origin) => {
-              if (origin) closePanelSheet()
-              selectChain(origin)
-            }}
-            search={search}
-            onSearchChange={setSearch}
-            facets={facets}
-            onChange={setFacets}
-            crews={crews}
-            agents={agents}
-            issues={issues}
-            routines={routines}
-            crewCounts={crewCounts}
-            issueCounts={issueCounts}
-            routineCounts={routineCounts}
-            focus={focus}
-            // The rail chooses which walk you are on, so it starts a new
-            // path rather than pushing onto the current one.
-            onFocus={(f) => setPath(selectStop(f))}
-            lens={lens}
-            onLens={setLens}
-            // Same rule as onFocus: a row in the rail is where a walk BEGINS.
-            onOpenEntity={(kind, id, label) => {
-              closePanelSheet()
-              setPath(selectStop({ kind, id, label }))
-            }}
-            onOpenSection={onOpenSection && ((section) => {
-              closePanelSheet()
-              onOpenSection(section)
-            })}
-            entersFromLeft={railEntersFromLeft}
-            // The routine focus (#2998): the rail narrows to one routine and
-            // lists its runs; opening one keeps the focus.
-            workspaceId={workspaceId}
-            focusedRoutine={focusedRoutine}
-            onFocusRoutine={setFocusedRoutine}
-            openRunId={stop?.kind === "run" || stop?.kind === "workflow" ? stop.id : null}
-            onOpenRun={(id) => {
-              closePanelSheet()
-              setPath(selectStop({ kind: "run", id, label: id }))
-            }}
+          <ActivityPanel
+            filters={filters}
+            onFilters={setFilters}
+            viewCounts={counts}
+            routines={panelOptions.routines}
+            agents={panelOptions.agents}
+            crews={panelOptions.crews}
+            sources={panelOptions.sources}
+            onOpenLedger={onOpenSection}
           />
         </SecondaryPanel>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* An opened activity takes the whole content area. It was a 340px
-              right panel first, and an execution graph does not fit in a
-              column — the shape of a run IS the information. */}
-          {selected ? (
-            <div className="min-h-0 flex-1 overflow-y-auto animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto" aria-label="Activity">
+          {offline && <OfflineBanner onRetry={stream.reconnect} />}
+
+          {record ? (
+            <div className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
               <ActivityDetail
-                entry={selected}
+                entry={record}
                 workspaceId={workspaceId}
                 labels={labels}
                 agentName={agentName}
-                crewName={crewName}
-                crewMeta={crewMeta}
-                onBack={() => setSelected(null)}
-                onSelectEntry={setSelected}
+                crewName={(id) => (id ? lookup.crews.get(id)?.name : undefined)}
+                crewMeta={(id) => {
+                  const c = id ? lookup.crews.get(id) : undefined
+                  return c ? { icon: c.icon, color: c.color } : undefined
+                }}
+                onBack={() => setRecord(null)}
+                onSelectEntry={setRecord}
                 onSpineClick={(l) => {
-                  setSelected(null)
-                  setPinned(l)
+                  setRecord(null)
+                  if (l.kind === "issue") showIssue(l.id)
+                  else if (l.kind === "routine") showRoutine(l.id)
+                  else if (l.kind === "run") setPath(selectStop({ kind: "run", id: l.id, label: l.label }))
                 }}
               />
             </div>
-          ) : (
-          <div className="flex min-h-0 min-w-0 flex-col">
-            {/* Where you are, and every place you came through to get here.
-                Rendered whenever the reader has left the overview, because a
-                column that can be four levels deep and cannot say which level
-                it is on is a place people stop trusting. */}
-            {path.stops.length > 0 && (
-              // The Issues back-bar, to the class (#2979): "‹ Back to
-              // activity" is the way out, as "‹ Back to issues" is, and the
-              // crumbs after it are only the stops walked — the home crumb
-              // would repeat the button beside it. One stop up is Escape or
-              // the previous crumb.
-              <nav
-                aria-label="Activity trail"
-                className="flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-4 py-2 text-xs"
-              >
-                <button
-                  type="button"
-                  onClick={() => setPath(ACTIVITY_HOME)}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
+          ) : path.stops.length > 0 ? (
+            <div className="flex min-h-0 flex-col">
+              <nav aria-label="Activity trail" className="flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-4 py-2 text-label">
+                <Button size="sm" variant="ghost" onClick={() => setPath(ACTIVITY_HOME)}>
+                  <ChevronLeft className="size-3.5" aria-hidden />
                   Back to activity
-                </button>
-                {/* The walk is longer than the trail: stops fell off the front
-                    at the depth cap, and a breadcrumb that quietly began in the
-                    middle would claim the reader started there. */}
-                {trail.truncated && (
-                  <>
-                    <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                    <span className="text-muted-foreground/60" title="Earlier stops were dropped">
-                      …
-                    </span>
-                  </>
-                )}
+                </Button>
+                {trail.truncated && <span className="text-muted-foreground">…</span>}
                 {trail.crumbs
                   .filter((c) => c.depth > 0)
                   .map((c) => (
                     <React.Fragment key={c.depth}>
-                      <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                      <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground-soft" />
                       <button
                         type="button"
                         onClick={() => setPath((p) => jumpTo(p, c.depth))}
                         aria-current={c.current ? "page" : undefined}
-                        className={cn(
-                          "max-w-[26ch] truncate rounded px-1.5 py-0.5 transition-colors hover:bg-muted",
-                          c.current ? "font-mono text-foreground" : "text-muted-foreground",
-                        )}
+                        className={cn("kit-tap max-w-[26ch] truncate rounded px-1.5 py-0.5 hover:bg-muted", c.current ? "font-mono text-foreground" : "text-muted-foreground")}
                       >
                         {c.label}
                       </button>
                     </React.Fragment>
                   ))}
               </nav>
-            )}
-
-            {/* Filters, not position — the trail owns position. Hidden in a
-                workflow, where none of them describes what is on screen. */}
-            {filterChips.length > 0 && surface.main !== "workflow" && (
-              <SidebarActiveChips className="shrink-0 border-b border-foreground/[0.06] px-4 py-1.5">
-                {filterChips.map((c) => (
-                  <SidebarActiveChip key={c.label} onRemove={c.onClear}>
-                    {c.label}
-                  </SidebarActiveChip>
-                ))}
-              </SidebarActiveChips>
-            )}
-
-            {/* Each stop enters the way an opened issue does — 12px in from the
-                right over 0.2s — so moving through runs reads as one surface
-                rather than hard swaps. Keyed on the stop, so the overview's own
-                filter changes do not replay it. */}
-            <div
-              key={stop ? `${stop.kind}:${stop.id}` : "home"}
-              className="min-h-0 flex-1 overflow-y-auto animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out"
-            >
-              {/* A routine out of the Routines lens: its runs, by the hour.
-                  Placed before every other branch because it is a whole
-                  surface, not a narrowing of the feed — the same reason the
-                  workflow page is. */}
-              {openIssue && (
-                <IssueDrillDown
-                  workspaceId={workspaceId}
-                  // The mission ID, not the label. The label is
-                  // `identifier || title || id`, so on a workspace without issue
-                  // identifiers it is the TITLE — nothing matched, and the deep
-                  // link pointed at a URL-encoded sentence.
-                  issueId={openIssue.id}
-                  label={openIssue.label}
-                  chains={visibleChains}
-                  onOpenWorkflow={selectChain}
-                  onOpenRun={(runID) => openNode("run", runID)}
-                />
-              )}
-
-              {openAgent && (
-                <AgentDrillDown
-                  workspaceId={workspaceId}
-                  agentID={openAgent.id}
-                  agentSlug={lookup.agents.get(openAgent.id)?.slug}
-                  name={openAgent.label}
-                  chains={visibleChains}
-                  onOpenWorkflow={selectChain}
-                />
-              )}
-
-              {openRun && (
-                // Every run opens the same page, whichever way it was reached:
-                // a sub-run in a tree, a dot in Previous runs, or `?run=` from
-                // the inbox and the bell. A run that is not a routine run falls
-                // back inside to the typed detail (agent work).
-                <ActivityRunPage
-                  key={openRun.id}
-                  workspaceId={workspaceId}
-                  runId={openRun.id}
-                  chain={chains.find((c) => c.origin === openRun.id)}
-                  routineName={(() => {
-                    const slug = chains.find((c) => c.origin === openRun.id)?.routine_slug
-                    return slug ? routines.find((r) => r.slug === slug)?.name : undefined
-                  })()}
-                  onOpenNode={openNode}
-                />
-              )}
-
-              {openRoutineSlug && (
-                <RoutineRunsPage
-                  workspaceId={workspaceId}
-                  slug={openRoutineSlug}
-                  label={stop?.label ?? openRoutineSlug}
-                  routine={routines.find((r) => r.slug === openRoutineSlug)}
-                  onOpenRun={(runID) => openNode("run", runID)}
-                />
-              )}
-
-              {openRoutineSlug == null && openIssue == null && openAgent == null && openRun == null && surface.main !== "workflow" && loading && entries.length === 0 && (
-                <div className="flex items-center justify-center gap-2 py-20 text-xs text-muted-foreground">
-                  <Spinner className="h-3.5 w-3.5" /> Loading activity…
-                </div>
-              )}
-
-              {surface.main !== "workflow" && error && !loading && (
-                <div className="px-6 py-14">
-                  <EmptyState
-                    size="compact"
-                    icon={Activity}
-                    title="Could not load activity"
-                    description={error}
-                    action={
-                      <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                        Try again
-                      </Button>
-                    }
-                  />
-                </div>
-              )}
-
-              {/* A filter combination that matches nothing must SAY so.
-                  Two crumbs can intersect to the empty set — a run pinned from
-                  the spine plus an issue focused in the rail is one click
-                  away — and the overview then renders a wall of reassuring
-                  zeros: "nothing broke", "all clear", "Nothing has failed.
-                  Nice." Every one of those is false; the truth is that nothing
-                  was ASKED. The window has events, this question has none. */}
-              {/* A picked workflow IS the column — the payoff of the whole
-                  trace layer: one picture that crosses from the rule that
-                  started it, through the routine runs, into the agent work
-                  those dispatched. It used to be glued above the global
-                  overview, which then answered a question nobody asked; the
-                  overview is gone here, not pushed down. */}
-              {surface.main === "workflow" &&
-                (openChain && openChain.kind === "assignment" ? (
-                  // Agent work started outside any routine (#2989).
-                  <ActivityWorkPage
-                    key={openChain.origin}
+              <div key={stop ? `${stop.kind}:${stop.id}` : "page"} className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
+                {stop?.kind === "run" ? (
+                  <ActivityRunPage
+                    key={stop.id}
                     workspaceId={workspaceId}
+                    runId={stop.id}
                     chain={openChain}
+                    routineName={openChain?.routine_slug ? routineName(openChain.routine_slug) : undefined}
                     onOpenNode={openNode}
                   />
-                ) : openChain && openChain.routine_slug ? (
-                  // A chain that starts at a routine run opens THAT run — the
-                  // approved detail (#2979). The chain page below stays for
-                  // chains rooted in agent work, which have no run to open.
+                ) : openChain?.kind === "assignment" ? (
+                  <ActivityWorkPage key={openChain.origin} workspaceId={workspaceId} chain={openChain} onOpenNode={openNode} />
+                ) : openChain?.routine_slug ? (
                   <ActivityRunPage
                     key={openChain.origin}
                     workspaceId={workspaceId}
                     runId={openChain.origin}
                     chain={openChain}
-                    routineName={routines.find((r) => r.slug === openChain.routine_slug)?.name}
+                    routineName={routineName(openChain.routine_slug)}
                     onOpenNode={openNode}
                   />
                 ) : openChain ? (
                   <WorkflowPage
                     workspaceId={workspaceId}
                     chain={openChain}
-                    routineName={routines.find((r) => r.slug === openChain.routine_slug)?.name}
-                    onBack={goBack}
+                    routineName={openChain.routine_slug ? routineName(openChain.routine_slug) : undefined}
+                    onBack={() => setPath(backFrom)}
                     onOpenNode={openNode}
                   />
+                ) : chainsQ.loading ? (
+                  <PageLoading rows={5} />
                 ) : (
-                  // Reachable: the chains index is fetched once and not
-                  // streamed, so a row can be picked and then swept from the
-                  // list. Saying so beats a graph-shaped hole.
-                  <div className="px-6 py-14">
-                    <EmptyState
-                      size="compact"
-                      icon={Activity}
-                      title="This workflow is no longer in the index"
-                      description={`“${surface.chainLabel ?? "It"}” was picked from a list that has since moved on. The runs it holds are still in the activity feed.`}
-                      action={
-                        <Button size="sm" variant="outline" onClick={goBack}>
-                          Back
-                        </Button>
-                      }
+                  <PageNotFound
+                    what="run"
+                    description="It is not among the most recent workflows, or it was removed. Its events are still in the Journal."
+                    back={{ label: "Back to activity", onClick: () => setPath(ACTIVITY_HOME) }}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="mx-auto grid min-w-0 max-w-[1240px] gap-3.5 p-4 md:p-6">
+              {isMobile && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openPanelSheet(true)}
+                    className="kit-tap inline-flex h-[var(--control-sm)] items-center gap-1.5 rounded-full border border-border bg-card px-3 text-label"
+                  >
+                    <Filter className="size-3.5" aria-hidden />
+                    {title}
+                  </button>
+                  <ActivityRange value={range} onChange={setRange} now={now} compact />
+                </div>
+              )}
+
+              <header className="flex flex-wrap items-center gap-3.5">
+                {(issueObj || routineObj) && (
+                  <span className="page-tile page-tile-40" aria-hidden>
+                    {issueObj ? <CircleDot /> : <Workflow />}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-title font-semibold tracking-tight text-balance">{title}</h1>
+                  <p className="mt-0.5 text-body text-muted-foreground">{description}</p>
+                </div>
+                {objectOnly && routineObj && (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={routineViewHref(routineObj.slug, "definition")}>
+                      <ExternalLink className="size-3.5" aria-hidden />
+                      Open routine
+                    </Link>
+                  </Button>
+                )}
+                {objectOnly && issueObj?.identifier && (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/issues/${encodeURIComponent(issueObj.identifier)}`}>
+                      <ExternalLink className="size-3.5" aria-hidden />
+                      Open issue
+                    </Link>
+                  </Button>
+                )}
+              </header>
+
+              {!initialLoading && !workspaceEmpty && (
+                <div className="flex flex-wrap items-center gap-2" data-testid="activity-summary">
+                  <span className="text-body text-muted-foreground">
+                    <b className="font-semibold text-foreground">{feed.length}</b> {feed.length === 1 ? "item" : "items"}
+                    {nNeed > 0 && <b className="font-semibold text-warn"> · {nNeed} need a person</b>}
+                    {nFailed > 0 && <b className="font-semibold text-destructive"> · {nFailed} could not finish</b>}
+                  </span>
+                  <LiveState status={stream.status} />
+                  <span className="flex-1" />
+                  <DisplayMenu group={group} onGroup={setGroup} bundle={bundle} onBundle={setBundle} />
+                </div>
+              )}
+
+              {routineObj && routineHistory.bars.length > 0 && (
+                <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-3.5 py-3">
+                  <span className="page-tile page-tile-40" aria-hidden>
+                    <Workflow />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <b className="block font-semibold">Run history</b>
+                    <small className="text-label text-muted-foreground">
+                      Last {routineHistory.bars.length} runs of this routine
+                      {routineHistory.successPct != null && ` · ${routineHistory.successPct} % completed`}
+                    </small>
+                    <RunHistoryStrip
+                      bars={routineHistory.bars.map((b) => ({
+                        id: b.id,
+                        tone: runTone(b.status),
+                        durationMs: b.durationMs,
+                        label: `${new Date(b.startedAt).toLocaleString("en-GB")} · ${b.status}`,
+                      }))}
+                      onPick={(id) => setPeekId(id)}
                     />
                   </div>
-                ))}
-
-              {surface.main !== "workflow" && !loading && !error && emptyByFilters && !overviewShown && (
-                <div className="px-6 py-14">
-                  <EmptyState
-                    size="compact"
-                    icon={FilterX}
-                    title="No activity matches these filters"
-                    description={`The loaded window holds ${entries.length.toLocaleString()} ${
-                      entries.length === 1 ? "event" : "events"
-                    }, and none of them satisfies all ${narrowingChips} filter${
-                      narrowingChips === 1 ? "" : "s"
-                    } at once. This is an empty question, not a quiet system.`}
-                    action={
-                      <Button size="sm" variant="outline" onClick={clearAllChips}>
-                        Clear {narrowingChips === 1 ? "the filter" : "all filters"}
-                      </Button>
-                    }
-                  />
                 </div>
               )}
 
-              {lensOverviewShown && lens === "issues" && (
-                <IssuesOverview
-                  chains={visibleChains}
-                  rangeLabel={range.label}
-                  issueMeta={issueMeta}
-                  onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
-                  onOpenWorkflow={selectChain}
-                />
-              )}
-
-              {lensOverviewShown && lens === "agents" && (
-                <AgentsOverview
-                  chains={visibleChains}
-                  rangeLabel={range.label}
-                  hiredCount={agents.length}
-                  onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
-                  onOpenWorkflow={selectChain}
-                />
-              )}
-
-              {lensOverviewShown && lens === "routines" && (
-                <RoutinesLensOverview
-                  chains={visibleChains}
-                  routines={routines}
-                  rangeLabel={range.label}
-                  catalogueCount={pipelines.length}
-                  schedules={schedules}
-                  onOpenRoutine={(slug, label) => setPath(selectStop({ kind: "routine", id: slug, label }))}
-                />
-              )}
-
-              {overviewShown && (
-                // Built from runs, not journal events (#2979): what needs you,
-                // what is live, what ran, what broke, what changed.
-                <ActivityHome
-                  workspaceId={workspaceId}
-                  chains={visibleChains}
-                  scope={homeScope}
-                  onOpenRun={(id) => openNode("run", id)}
-                  onOpenIssue={(id) => openNode("issue", id)}
-                />
-              )}
-
-              {listShown && (
-                <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
-                  <Appear order={0}>
-                    <div>
-                      <h1 className="text-lg font-semibold tracking-tight">{listTitle}</h1>
-                      <p className="text-xs text-muted-foreground">{listCaption}</p>
-                    </div>
-                  </Appear>
-                  <Appear order={1}>
-                    <DashboardCard title={listTitle} icon={Activity} hint={`${visible.length}`}>
-                      {visible.length === 0 ? (
-                        <div className="py-8">
-                          <EmptyState
-                            size="compact"
-                            icon={Activity}
-                            title="Nothing here"
-                            description={
-                              surface.node
-                                ? `Nothing in the loaded window mentions this ${surface.node.kind}. Widen the range, or go back.`
-                                : "No event in this window matches. Widen the range or clear a filter."
-                            }
-                            action={
-                              surface.node ? (
-                                <Button size="sm" variant="outline" onClick={goBack}>
-                                  Back
-                                </Button>
-                              ) : (
-                                <Button size="sm" variant="outline" onClick={() => setFacets(EMPTY_FACETS)}>
-                                  Reset
-                                </Button>
-                              )
-                            }
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex flex-col">
-                          {visible.map((e) => (
-                            <FeedRow
-                              key={e.id}
-                              entry={e}
-                              scope={scopes.get(e.id)}
-                              icon={iconFor(e)}
-                              labels={labels}
-                              actorName={agentName(e.agent_id)}
-                              crewName={crewName(e.crew_id)}
-                              agentId={e.agent_id}
-                              crewIcon={crewMeta(e.crew_id)?.icon}
-                              crewColor={crewMeta(e.crew_id)?.color}
-                              selected={false}
-                              onSelect={() => setSelected(e)}
-                              onSpineClick={setPinned}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </DashboardCard>
-                  </Appear>
-                  {nextCursor && (
-                    <div className="flex justify-center">
-                      <Button size="sm" variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
-                        {loadingMore && <Spinner className="mr-1.5 h-3 w-3" />}
-                        Load older
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
+              {listBody}
             </div>
-          </div>
           )}
-        </div>
+        </main>
       </div>
+
+      <ActivityPeek
+        workspaceId={workspaceId}
+        item={record || path.stops.length > 0 ? null : peekItem}
+        onClose={() => setPeekId(null)}
+        onPrev={flat.length > 1 ? () => step(-1) : undefined}
+        onNext={flat.length > 1 ? () => step(1) : undefined}
+        now={now}
+        role={role}
+        routineName={routineName}
+        onOpenFull={openFull}
+        onPickRun={(id) => setPeekId(id)}
+        onShowRoutine={showRoutine}
+        onShowIssue={showIssue}
+        onOpenRecord={(c) => {
+          setPeekId(null)
+          setRecord(c.entry)
+        }}
+        onChanged={() => void chainsQ.refresh()}
+      />
     </div>
   )
 }
