@@ -38,6 +38,49 @@ const ROWS = [
 ]
 
 
+// #3330: browser pairing is account security for a verified Guest session.
+// These fixtures exercise visible menu/dialog behavior; real session/token
+// authority remains covered by the Router and deployed acceptance separately.
+for (const width of [1280, 390]) {
+  test(`Guest CLI pairing from the account menu at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const forbidden: string[] = []
+    let starts = 0
+    let consumed = false
+    await page.route("**/api/**", async route => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname
+      const key = `${request.method()} ${path}`
+      let body: unknown = []
+      if (key === "POST /api/v1/auth/pair/start") {
+        starts++
+        body = { code: "GUEST-PAIR", expires_at: new Date(Date.now() + 600_000).toISOString() }
+      } else if (key === "GET /api/v1/auth/pair/poll") {
+        expect(new URL(request.url()).searchParams.get("code")).toBe("GUEST-PAIR")
+        body = { status: consumed ? "consumed" : "pending" }
+      } else if (!ALLOWED.some(pattern => pattern.test(key))) {
+        forbidden.push(key)
+        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Resource not found" }) })
+      } else if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
+      else if (path === "/api/v1/workspaces") body = ROWS
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/routines")
+    await expect(page.getByRole("heading", { name: "Private routines" })).toBeVisible()
+    await page.getByRole("button", { name: "User menu" }).click()
+    await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Connect CLI" })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR --server=${new URL(page.url()).origin}`)
+    expect(starts).toBe(1)
+    consumed = true
+    await expect(dialog.getByRole("status")).toHaveText(/CLI connected/)
+    expect(forbidden).toEqual([])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  })
+}
+
 // CHAT19 visible flow uses the existing isolated static UI fixture. Backend,
 // source authority and prompt recall are covered by real Go/CLI tests.
 for (const width of [1280, 390]) {

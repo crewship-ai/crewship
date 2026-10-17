@@ -601,6 +601,7 @@ get/set`](/cli/policy).
 |-------|--------|---------|
 | `autonomy_level` | `strict` / `guided` / `trusted` / `full` | How much an agent can do without operator approval. `strict` queues everything; `full` auto-applies most decisions. |
 | `behavior_mode` | `warn` / `block` | What the behavior monitor does on a flagged action — `warn` lets it through with a journal entry, `block` rejects. |
+| `whole_run_approval` | boolean, default `false` | Explicitly match the existing whole-run `agent_run` approval rule. Strict/guided block, trusted reviews asynchronously, full bypasses it. Omitted/null in PUT preserves the saved setting. |
 
 ### Get Crew Policy
 
@@ -615,6 +616,7 @@ GET /api/v1/crews/{crewId}/policy
   "crew_id": "crew-uuid",
   "autonomy_level": "guided",
   "behavior_mode": "warn",
+  "whole_run_approval": false,
   "set_by_user_id": "user-uuid",
   "set_at": "2026-05-26T14:22:10Z",
   "reason": "Default for newly-onboarded crews"
@@ -637,7 +639,7 @@ Replaces the policy. Records the audit triple (`set_by_user_id`, `set_at`,
 `reason`) atomically with the value change and invalidates the resolver cache
 so the next decision sees the new state.
 
-**Auth:** Session or CLI token + workspace membership (no additional role gate)
+**Auth:** Session or CLI token + workspace membership, MANAGER or higher. Scoped CLI tokens also need `crews:write`.
 
 **Request:**
 

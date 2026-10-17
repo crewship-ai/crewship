@@ -96,8 +96,7 @@ func (a *hooksAdapter) Dispatch(ctx context.Context, event string, ec orchestrat
 // approvalGateAdapter wraps harbormaster.Gate so orchestrator.ApprovalGate
 // has a single point of entry. The Evaluator is configured with the
 // default rule set (destructive ops, cost thresholds, production
-// hostnames); workspace admins extend it via DB-backed rules in a
-// follow-up iteration.
+// hostnames), extended by the current crew's explicit whole-run opt-in.
 type approvalGateAdapter struct {
 	db        *sql.DB
 	journ     journal.Emitter
@@ -124,7 +123,15 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 	case "sync":
 		mode = harbormaster.ModeSync
 	}
-	dec, err := harbormaster.Gate(ctx, a.db, a.journ, a.evaluator, harbormaster.GateInput{
+	evaluator := a.evaluator
+	if mode != harbormaster.ModeNone && a.db != nil {
+		var err error
+		evaluator, err = harbormaster.EvaluatorForCrew(ctx, a.db, in.WorkspaceID, in.CrewID, evaluator)
+		if err != nil {
+			return orchestrator.ApprovalDecision{}, err
+		}
+	}
+	dec, err := harbormaster.Gate(ctx, a.db, a.journ, evaluator, harbormaster.GateInput{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,
 		AgentID:     in.AgentID,

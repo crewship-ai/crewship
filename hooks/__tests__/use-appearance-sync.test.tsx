@@ -289,3 +289,54 @@ describe("useAppearanceSync — appearance.style", () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 })
+
+describe("sync off and on again (APR-05, independent review 2026-10-17)", () => {
+  it("does not issue another PUT after sync is switched off", async () => {
+    apiFetch.mockImplementation((url: string) => Promise.resolve(url === PREFS ? ok({ appearance: fullAppearance }) : { ok: false, status: 503 }))
+    const hook = renderSync()
+    await waitFor(() => expect(hook.result.current.textSize).toBe("small"))
+    vi.useFakeTimers()
+    try {
+      act(() => hook.result.current.setAccent("teal"))
+      await act(async () => { await vi.advanceTimersByTimeAsync(450) })
+      expect(puts()).toHaveLength(1)
+      act(() => hook.result.current.setSyncEnabled(false))
+      await act(async () => { await vi.advanceTimersByTimeAsync(5100) })
+      expect(puts()).toHaveLength(1)
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it("switched off during a request: nothing follows it; switched on: the unsent choice is sent and kept", async () => {
+    let releasePut!: (r: { ok: boolean; status: number }) => void
+    apiFetch.mockImplementation((url: string) => {
+      if (url === PREFS) return Promise.resolve(ok({ appearance: fullAppearance }))
+      if (puts().length === 1) return new Promise((resolve) => { releasePut = resolve })
+      return Promise.resolve({ ok: true, status: 204 })
+    })
+    const hook = renderSync()
+    await waitFor(() => expect(hook.result.current.textSize).toBe("small"))
+    vi.useFakeTimers()
+    try {
+      act(() => hook.result.current.setAccent("teal"))
+      await act(async () => { await vi.advanceTimersByTimeAsync(450) })
+      expect(puts()).toHaveLength(1)
+      // Off while the PUT is still on the wire; the server then fails it.
+      act(() => hook.result.current.setSyncEnabled(false))
+      await act(async () => { releasePut({ ok: false, status: 503 }); await vi.advanceTimersByTimeAsync(130_000) })
+      expect(puts()).toHaveLength(1)
+      // On again: the pull must not overwrite the unsent local choice, and
+      // the outbox sends it.
+      act(() => hook.result.current.setSyncEnabled(true))
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(hook.result.current.accent).toBe("teal")
+      expect(puts()).toHaveLength(2)
+      expect(JSON.parse(puts()[1][1].body).accent).toBe("teal")
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+})
