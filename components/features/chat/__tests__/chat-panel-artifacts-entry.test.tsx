@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 
+const documentSurface = vi.hoisted(() => ({ virtual: false }))
+vi.mock("../virtual-conversation", () => ({ virtualChatEnabled: () => documentSurface.virtual, VirtualConversation: ({ footer }: { footer?: ReactNode }) => <div data-testid="virtual-document-footer">{footer}</div> }))
+
 const chatStub = vi.hoisted(() => ({
   turns: [] as unknown[], sendMessage: vi.fn(), stopGeneration: vi.fn(),
   regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(),
@@ -33,6 +36,7 @@ import { useArtifactStore } from "@/stores/artifact-store"
 const props = { agentId: "agent-1", agentSlug: "riley", sessionId: "sess-1", askForms: null }
 
 beforeEach(() => {
+  documentSurface.virtual = false
   chatStub.turns = []
   toastError.mockReset()
   useDrawerStore.setState({ open: false, activeTab: "artifacts" })
@@ -42,6 +46,28 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("chat artifact entry points", () => {
+  it.each([false, true])("shows a server-confirmed Document link in the conversation (virtual=%s)", async virtual => {
+    documentSurface.virtual = virtual
+    chatStub.turns = [{ id: "turn-1", role: "assistant", parts: [], timestamp: new Date() }]
+    const prior = global.fetch
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.includes("/documents/status")) return Promise.resolve(new Response(JSON.stringify({ enabled: true })))
+      if (path.includes("/document-results")) return Promise.resolve(new Response(JSON.stringify({ results: [{ page_id: "saved-document", type: "document", page_slug: "saved-report", title: "Saved launch report", revision: 0, created_at: "2026-10-17T00:00:00Z", agent_id: "agent-1", agent_name: "Riley", run_id: "ended-run", on_behalf_of_user_id: "user-1" }] })))
+      return prior(input, init)
+    }) as typeof fetch
+    render(<ChatPanel {...props} />)
+    const link = await screen.findByRole("link", { name: "Open document Saved launch report" })
+    expect(link).toHaveAttribute("href", "/pages?ref=saved-document&workspace_id=ws-test")
+    expect(screen.getByText("On behalf of you")).toBeInTheDocument()
+    expect(screen.queryByTestId("artifact-pane")).not.toBeInTheDocument()
+  })
+  it("does not request saved Documents when the service is unconfirmed", async () => {
+    render(<ChatPanel {...props} />)
+    await screen.findByTestId("context-tab")
+    expect(screen.queryByRole("region", { name: "Saved documents from this conversation" })).not.toBeInTheDocument()
+    expect(vi.mocked(global.fetch).mock.calls.some(([url]) => String(url).includes("/document-results"))).toBe(false)
+  })
   it("hides cached agent-wide artifacts while the conversation authority is pending", () => {
     render(<ChatPanel {...props} mobilePanel="artifacts" />)
     expect(screen.queryByTestId("context-tab")).not.toBeInTheDocument()
