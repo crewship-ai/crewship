@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 import { asCrewColor, normalizeSlug, type CrewStart, type WizardState } from "./types"
 import type { AISuggestResponse } from "./api"
 
-/** The four ways to start a crew (v67 New crew, step 1). */
+/** The four ways to start a crew (New crew, step 1). */
 export const CREW_STARTS: { id: CrewStart; icon: typeof Plus; title: string; sub: string; team: string }[] = [
   { id: "suggest", icon: Sparkles, title: "Suggest a team", sub: "From your description, with AI; you review it", team: "Team" },
   { id: "template", icon: Layers, title: "From a template", sub: "Tested teams with their tools", team: "Template" },

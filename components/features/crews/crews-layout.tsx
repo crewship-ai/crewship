@@ -290,7 +290,7 @@ export function CrewsLayout({
           </div>
         )}
       </div>
-      {/* Terminal and Files of the crew container (v67); a phone has no dock. */}
+      {/* Terminal and Files of the crew container; a phone has no dock. */}
       {!isMobile && !nothingOpen && (
         <BottomPanel
           workspaceId={workspaceId}

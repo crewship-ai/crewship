@@ -7,7 +7,7 @@ export type WizardStep = 1 | 2 | 3 | 4
  *  description, empty = no agents yet (also an imported manifest). */
 export type LineupMode = "browse" | "empty" | "suggest"
 
-/** How New crew starts (v67 "Start with"). */
+/** How New crew starts ("Start with"). */
 export type CrewStart = "suggest" | "template" | "yaml" | "empty"
 
 export function modeForStart(start: CrewStart): LineupMode {

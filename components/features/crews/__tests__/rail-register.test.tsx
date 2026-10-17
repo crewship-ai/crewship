@@ -35,7 +35,7 @@ describe("crews rail type register", () => {
   })
 
   it("draws the Harbor 2 panel sizes: 20 px crew tiles, 18 px agent portraits", () => {
-    // The v67 panel row is one line: the crew's tile at 20 px, and under the
+    // The Harbor 2 panel row is one line: the crew's tile at 20 px, and under the
     // open crew its agents at 18 px with the lead's star and the hire's time.
     const rail = read("components/features/crews/crews-panel.tsx")
     expect(rail).toContain("size-5 rounded-md")

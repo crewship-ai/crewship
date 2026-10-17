@@ -38,7 +38,7 @@ export function CrewsRootBar() {
 }
 
 /**
- * Crew page actions in the top bar (v67): Activity, Terminal, Chat with the
+ * Crew page actions in the top bar: Activity, Terminal, Chat with the
  * lead, the crew menu and New. On a phone only Chat stays.
  */
 export function CrewPageBar({
@@ -99,7 +99,7 @@ export function CrewPageBar({
 }
 
 /**
- * Agent page actions (v67): Activity, Terminal, Stop while it runs, and
+ * Agent page actions: Activity, Terminal, Stop while it runs, and
  * Chat with the agent as the primary. On a phone only Chat stays.
  */
 export function AgentPageBar({

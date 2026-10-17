@@ -48,7 +48,7 @@ export function StepIdentity({ state, setState, onPickIcon, start, onStart }: Pr
       <CreateSurfaceSection title="Name" concept="crews">
         <div className="flex items-start gap-3">
           {/* Editing keeps the icon tile that opens the full picker; New crew
-              picks icon and colour inline below (v67). */}
+              picks icon and colour inline below. */}
           {!start && (
             <button
               type="button"

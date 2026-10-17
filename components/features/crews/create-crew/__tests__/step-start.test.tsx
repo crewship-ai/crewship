@@ -7,7 +7,7 @@ import { INITIAL_STATE, type WizardState } from "../types"
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-describe("New crew — step 1 (v67)", () => {
+describe("New crew — step 1", () => {
   it("picks icon and colour inline and offers four ways to start", () => {
     const setState = vi.fn()
     const onStart = vi.fn()

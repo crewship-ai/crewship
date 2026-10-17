@@ -92,7 +92,7 @@ export function CrewsCreateProvider({
     router.replace(`${url.pathname}${url.search}`, { scroll: false })
   }, [newParam, crewParam, router, api])
 
-  // C = New crew, A = New agent in the open crew (v67 New menu).
+  // C = New crew, A = New agent in the open crew (Harbor 2 New menu).
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || typing(e.target)) return
@@ -127,7 +127,7 @@ export function CrewsCreateProvider({
   )
 }
 
-/** The page's one primary action: New ▾ (v67 P-NEW). */
+/** The page's one primary action: New ▾ (Harbor 2). */
 export function CrewsNewMenu({ crewName, crewSlug, onHire, compact = false }: {
   crewName?: string | null
   crewSlug?: string | null

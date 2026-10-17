@@ -6,7 +6,7 @@ import { restartsContainer } from "@/components/features/crews/crew-environment"
 import { crewCommands } from "@/components/features/crews/crew-settings"
 
 describe("crew and agent tabs", () => {
-  it("are the v67 sets, in order", () => {
+  it("are the Harbor 2 sets, in order", () => {
     expect(CREW_TABS.map((t) => t.label)).toEqual(["Overview", "Team", "Tools and access", "Environment", "Memory", "Settings"])
     expect(AGENT_TABS.map((t) => t.label)).toEqual(["Overview", "Instructions", "Model and limits", "Tools and access", "Memory", "Settings"])
   })

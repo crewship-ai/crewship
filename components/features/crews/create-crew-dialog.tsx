@@ -46,7 +46,7 @@ export interface CreateCrewDialogProps {
   initialStart?: CrewStart
 }
 
-/** New crew in three steps (v67): Name, the team (named after how it
+/** New crew in three steps: Name, the team (named after how it
  *  starts), Environment. Editing uses focused settings sections. */
 function crewSteps(start: CrewStart): CreateSurfaceStep[] {
   return [
