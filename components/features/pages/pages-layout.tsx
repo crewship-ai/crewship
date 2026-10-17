@@ -498,8 +498,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
                 {nativeDocument ? (
-                  detail.error || !nativePageId ? <p role="alert" className="p-6">{detail.error ? "Document access is unavailable." : "The original Page identity is unavailable."}</p> :
+                  detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">{detail.accessDenied ? "Document access is unavailable." : "The original Page identity is unavailable."}</p> : <>
+                  {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
                   <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
+                  </>
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}

@@ -1119,6 +1119,8 @@ export interface UsePageResult {
   raw: WirePage | null
   loading: boolean
   error: string | null
+  /** An explicit authorization or missing-resource refusal, unlike a transient metadata failure. */
+  accessDenied: boolean
   /** True for a 404 — a slug that names nothing gets its own empty state. */
   notFound: boolean
   /**
@@ -1159,6 +1161,7 @@ export function usePage(
     raw: query.data ?? null,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
+    accessDenied: err instanceof PagesRequestError && [401,403,404].includes(err.status),
     notFound: err instanceof PagesRequestError && err.status === 404,
     live: pageLiveness(status, channel),
   }
