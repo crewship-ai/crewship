@@ -1,14 +1,18 @@
 "use client"
 
-import { ChevronRight, Mail, TriangleAlert } from "lucide-react"
+import { useState } from "react"
+import { ChevronRight, Copy, Lock, Mail, TriangleAlert } from "lucide-react"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { StatusPill } from "@/components/ui/status-pill"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 import { ROLE_LABEL, aboveRole, type Member } from "./members-model"
 import { AreaChips, AreaIcons, RestrictedPill, RolePill } from "./member-bits"
-import { daysUntil, expiryText, type Invitation } from "./use-invitations"
+import { daysUntil, expiryText, reissueInvitation, revokeInvitation, type Invitation } from "./use-invitations"
 
 export interface PeopleGroup {
   key: string
@@ -177,27 +181,117 @@ export function PeopleList({ groups, caps, currentUserId, onOpen }: {
 
 /** Pending invitations: who, the role they will get, who sent it and when it
  *  runs out. */
-export function InvitationList({ invitations }: { invitations: Invitation[] }) {
+/**
+ * Pending invitations. With `manage` (OWNER/ADMIN, as the server requires)
+ * each row offers Reissue — a new link, shown once, valid 7 days; the old one
+ * stops working — and Revoke after a confirmation. An ADMIN invitation is the
+ * owner's to manage: for anyone else the row says so instead.
+ */
+export function InvitationList({ invitations, workspaceId, manage = false, callerRole, onChanged }: {
+  invitations: Invitation[]
+  workspaceId?: string
+  manage?: boolean
+  callerRole?: string | null
+  /** Re-read the list after a reissue or revoke. */
+  onChanged?: () => void
+}) {
+  const [links, setLinks] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState<string | null>(null)
+  const [revoking, setRevoking] = useState<Invitation | null>(null)
+
   if (invitations.length === 0) {
-    return <p className="px-4 py-6 text-center text-label text-muted-foreground">No invitations are waiting. Invite people from the button above.</p>
+    return <p className="px-4 py-6 text-center text-label text-muted-foreground">No pending invitations.</p>
   }
+
+  async function reissue(inv: Invitation) {
+    if (!workspaceId) return
+    setBusy(inv.id)
+    try {
+      const { link } = await reissueInvitation(workspaceId, inv.id)
+      setLinks((l) => ({ ...l, [inv.id]: link }))
+      toast.success(`New link for ${inv.email}`, { description: "Valid 7 days. The old link no longer works." })
+      onChanged?.()
+    } catch (e) {
+      toast.error(`Couldn’t reissue the invitation for ${inv.email}`, { description: e instanceof Error ? e.message : undefined })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function revoke() {
+    if (!workspaceId || !revoking) return
+    try {
+      await revokeInvitation(workspaceId, revoking.id)
+    } catch (e) {
+      toast.error(`Couldn’t revoke the invitation for ${revoking.email}`, { description: e instanceof Error ? e.message : undefined })
+      throw e
+    }
+    toast.success(`Invitation for ${revoking.email} revoked`)
+    onChanged?.()
+  }
+
   return (
+    <>
     <ul data-slot="members-invitations">
       {invitations.map((inv) => {
         const days = daysUntil(inv.expires_at)
         const inviter = inv.inviter ? personLabel(inv.inviter.full_name ?? null, inv.inviter.email) : null
+        const ownersOnly = inv.role === "ADMIN" && callerRole !== "OWNER"
+        const link = links[inv.id]
         return (
-          <li key={inv.id} className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-2.5 last:border-b-0">
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-dashed border-border text-muted-foreground"><Mail className="h-3.5 w-3.5" aria-hidden /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-control">{inv.email}</span>
-              <span className="block truncate font-mono text-micro text-muted-foreground-soft">{inviter ? `invited by ${inviter} · ` : ""}{joinedDate(inv.created_at)}</span>
-            </span>
-            <RolePill role={inv.role} />
-            <StatusPill tone={days < 0 ? "danger" : days <= 2 ? "warn" : "muted"} label={expiryText(inv.expires_at)} />
+          <li key={inv.id} className="border-b border-border/60 px-4 py-2.5 last:border-b-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-dashed border-border text-muted-foreground"><Mail className="h-3.5 w-3.5" aria-hidden /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-control">{inv.email}</span>
+                <span className="block truncate font-mono text-micro text-muted-foreground-soft">{inviter ? `invited by ${inviter} · ` : ""}{joinedDate(inv.created_at)}</span>
+              </span>
+              <RolePill role={inv.role} />
+              <StatusPill tone={days < 0 ? "danger" : days <= 2 ? "warn" : "muted"} label={expiryText(inv.expires_at)} />
+              {manage && (ownersOnly ? (
+                <span className="inline-flex items-center gap-1 text-label text-muted-foreground">
+                  <Lock className="h-3 w-3" aria-hidden />Only the owner manages an Admin invitation
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <Button variant="outline" size="sm" disabled={busy === inv.id} aria-label={`Reissue ${inv.email}`} onClick={() => void reissue(inv)}>
+                    {days < 0 ? "Invite again" : "Reissue"}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Revoke ${inv.email}`} onClick={() => setRevoking(inv)}>
+                    Revoke
+                  </Button>
+                </span>
+              ))}
+            </div>
+            {link && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 pl-10" data-slot="invitation-link">
+                <input readOnly value={link} aria-label={`New invitation link for ${inv.email}`} onFocus={(e) => e.currentTarget.select()}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-control-border bg-surface-subtle px-2.5 font-mono text-label text-foreground" />
+                <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+                  navigator.clipboard.writeText(link).then(() => toast.success("Link copied"), () => toast.error("Couldn’t copy the link", { duration: 6000 }))
+                }}>
+                  <Copy className="h-3 w-3" aria-hidden />Copy
+                </Button>
+                <span className="w-full text-label text-muted-foreground">Copy it now — it won’t be shown again. Valid 7 days.</span>
+              </div>
+            )}
           </li>
         )
       })}
     </ul>
+    <ConfirmDialog
+      open={revoking !== null}
+      onOpenChange={(o) => { if (!o) setRevoking(null) }}
+      title={`Revoke the invitation for ${revoking?.email ?? ""}?`}
+      description="The link stops working at once."
+      consequences={[
+        { tone: "lost", text: "They can no longer join with the link they have" },
+        { tone: "kept", text: "You can invite the same address again later" },
+      ]}
+      confirmLabel="Revoke invitation"
+      destructive
+      onConfirm={revoke}
+    />
+    </>
   )
 }
