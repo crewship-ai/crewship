@@ -1,131 +1,99 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, X } from "lucide-react"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { PriorityIcon, priorityLabel } from "./priority-icon"
-import { StatusIcon, statusLabel } from "./status-icon"
-import { LabelBadge } from "./label-badge"
-import { useUserPreference } from "@/hooks/use-user-preference"
-import { formatRelativeTime } from "@/lib/time"
+import { Plus, X } from "lucide-react"
+
 import { apiFetch } from "@/lib/api-fetch"
-import { getIssueWorker } from "@/lib/issue-execution"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { IssueCard } from "./issue-card"
+import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import type { IssuePriority, Mission, Project } from "@/lib/types/mission"
+import { IssueRow } from "./issue-row"
+import { PriorityIcon } from "./priority-icon"
+import { StatusIcon } from "./status-icon"
+import {
+  DEFAULT_ROW_FIELDS,
+  PRIORITY_TEXT,
+  STATUS_TEXT,
+  groupIssues,
+  type GroupBy,
+  type RowFields,
+} from "./issues-view-model"
 
 interface IssuesListViewProps {
+  /** Already filtered and ordered. */
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
+  /** The issue the peek shows. */
   selectedIssueId?: string | null
   onBulkAction?: (ids: string[], updates: Record<string, unknown>) => void
   workspaceId?: string | null
+  groupBy?: GroupBy
+  fields?: RowFields
+  /** Projects the bulk bar can move issues into. */
+  projects?: Project[]
+  /** A group header's +. Gets the group's status when grouped by status. */
+  onCreate?: (status?: string) => void
+  /** After the server accepted a bulk change. */
+  onBulkApplied?: () => void
 }
 
-const PRIORITY_ORDER: Record<IssuePriority, number> = {
-  urgent: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  none: 4,
-}
+// DONE, not the retired COMPLETED: the bulk endpoint validates each move
+// against the issue transition table, which only knows DONE.
+export const BULK_STATUSES = ["BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED"] as const
+const BULK_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
 
-const STATUS_ORDER: Record<MissionStatus, number> = {
-  BACKLOG: 0,
-  TODO: 1,
-  PLANNING: 2,
-  IN_PROGRESS: 3,
-  REVIEW: 4,
-  COMPLETED: 5,
-  DONE: 5,
-  FAILED: 6,
-  CANCELLED: 7,
-  DUPLICATE: 8,
-}
+type Pending = { updates: Record<string, unknown>; label: string; field: "status" | "priority" | "project" }
 
-type SortKey = "identifier" | "title" | "status" | "priority" | "assignee" | "crew" | "updated"
-type SortDir = "asc" | "desc"
-
-const BULK_STATUSES: { value: MissionStatus; label: string }[] = [
-  { value: "BACKLOG", label: "Backlog" },
-  { value: "TODO", label: "Todo" },
-  { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "REVIEW", label: "In Review" },
-  { value: "COMPLETED", label: "Done" },
-  { value: "CANCELLED", label: "Cancelled" },
-]
-
-const BULK_PRIORITIES: { value: IssuePriority; label: string }[] = [
-  { value: "urgent", label: "Urgent" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "none", label: "None" },
-]
-
-export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAction, workspaceId }: IssuesListViewProps) {
-  // Sort preference is sticky across sessions — viewers tend to settle
-  // on one column (updated / priority / status) and reverse it for
-  // worst-first sweeps. Resetting on reload makes the table feel
-  // amnesiac.
-  const [sortKey, setSortKey] = useUserPreference<SortKey>(
-    "issues.list.sortKey",
-    "updated",
-  )
-  const [sortDir, setSortDir] = useUserPreference<SortDir>(
-    "issues.list.sortDir",
-    "desc",
-  )
+/**
+ * The list: grouped 38 px rows under sticky group headers, and a bulk bar at
+ * the bottom while issues are selected. A bulk change asks first, and a
+ * refused one keeps both the selection and the server's reason on screen.
+ */
+export function IssuesListView({
+  issues,
+  onIssueClick,
+  selectedIssueId,
+  onBulkAction,
+  workspaceId,
+  groupBy = "status",
+  fields = DEFAULT_ROW_FIELDS,
+  projects = [],
+  onCreate,
+  onBulkApplied,
+}: IssuesListViewProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkMenuOpen, setBulkMenuOpen] = useState<"status" | "priority" | null>(null)
-  // Why the last bulk edit was refused. Lives next to the selection it
-  // applies to, because the toast that carries the same sentence is gone by
-  // the time you are deciding whether to retry.
   const [bulkError, setBulkError] = useState<string | null>(null)
+  const [pending, setPending] = useState<Pending | null>(null)
 
-  // The refusal names the issues it refused ("3 of 2 are locked by a running
-  // mission"). Change the selection and it is describing something that is no
-  // longer on screen, so it goes with the selection it belonged to.
-  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const groups = useMemo(() => groupIssues(issues, groupBy), [issues, groupBy])
+
+  // Selecting something else makes the last refusal describe rows that are no
+  // longer the selection, so it goes with it.
+  const setChecked = useCallback((id: string, on: boolean) => {
     setBulkError(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (on) next.add(id)
+      else next.delete(id)
       return next
     })
   }, [])
 
-  const toggleAll = useCallback(() => {
+  const selectAll = useCallback(() => {
     setBulkError(null)
-    if (selectedIds.size === issues.length) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(issues.map((i) => i.id)))
-    }
-  }, [issues, selectedIds.size])
-
-  // A bulk change asks first: a status change can set off automations on
-  // every selected issue, and one click in the menu used to commit it.
-  const [pendingBulk, setPendingBulk] = useState<{ updates: Record<string, unknown>; label: string; field: "status" | "priority" } | null>(null)
-  const askBulk = useCallback((field: "status" | "priority", value: string, label: string) => {
-    setBulkMenuOpen(null)
-    setPendingBulk({ updates: { [field]: value }, label, field })
-  }, [])
+    setSelectedIds(new Set(issues.map((i) => i.id)))
+  }, [issues])
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
-    setBulkMenuOpen(null)
     setBulkError(null)
   }, [])
 
@@ -139,15 +107,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
         return
       }
       if (!workspaceId) return
-
       setBulkError(null)
-      // Close the menu on the way out — the error belongs in the bar the
-      // dropdown was covering.
-      setBulkMenuOpen(null)
-      // A refused bulk edit used to be indistinguishable from an applied one:
-      // apiFetch resolves on 4xx/5xx, the response was discarded, and the
-      // selection was cleared regardless — taking away the one thing a retry
-      // needs (#1563).
       const refuse = (message: string) => {
         setBulkError(message)
         toast.error(message)
@@ -159,12 +119,8 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
           body: JSON.stringify({ ids, updates }),
         })
         if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as
-            | { error?: unknown; detail?: unknown }
-            | null
-          // The server's words: it knows which of the selected issues it
-          // refused and why, and a generic "bulk update failed" would throw
-          // that away.
+          const body = (await res.json().catch(() => null)) as { error?: unknown; detail?: unknown } | null
+          // The server knows which of the selected issues it refused and why.
           const said = [body?.error, body?.detail].find((m) => typeof m === "string" && m.trim())
           refuse(
             typeof said === "string"
@@ -173,375 +129,158 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
           )
           return
         }
+        // The endpoint skips an issue it cannot change (a status it cannot
+        // move to, a project in another workspace) and still answers 200 with
+        // how many it did change. Fewer than asked is a partial refusal.
+        const done = (await res.json().catch(() => null)) as { updated?: unknown } | null
+        if (typeof done?.updated === "number" && done.updated < ids.length) {
+          const skipped = ids.length - done.updated
+          refuse(
+            `${skipped} of ${ids.length} ${ids.length === 1 ? "issue was" : "issues were"} not changed: the server refused the change for ${skipped === 1 ? "it" : "them"}, for example a status the workflow does not allow from where ${skipped === 1 ? "it is" : "they are"}.`,
+          )
+          onBulkApplied?.()
+          return
+        }
       } catch (e) {
         refuse(e instanceof Error ? e.message : "Could not reach the server")
         return
       }
       // Only a write the server accepted may drop the selection.
       clearSelection()
+      onBulkApplied?.()
     },
-    [selectedIds, onBulkAction, workspaceId, clearSelection],
+    [selectedIds, onBulkAction, workspaceId, clearSelection, onBulkApplied],
   )
 
-  const handleSort = useCallback(
-    (key: SortKey) => {
-      if (sortKey === key) {
-        setSortDir(sortDir === "asc" ? "desc" : "asc")
-      } else {
-        setSortKey(key)
-        setSortDir(key === "updated" ? "desc" : "asc")
-      }
-    },
-    [sortKey, sortDir, setSortDir, setSortKey],
-  )
-
-  const sorted = useMemo(() => {
-    const arr = [...issues]
-    const dir = sortDir === "asc" ? 1 : -1
-    arr.sort((a, b) => {
-      switch (sortKey) {
-        case "identifier":
-          return dir * ((a.number ?? 0) - (b.number ?? 0))
-        case "title":
-          return dir * a.title.localeCompare(b.title)
-        case "status":
-          return dir * ((STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99))
-        case "priority":
-          return (
-            dir *
-            ((PRIORITY_ORDER[a.priority || "none"] ?? 4) -
-              (PRIORITY_ORDER[b.priority || "none"] ?? 4))
-          )
-        case "assignee":
-          return dir * (getIssueWorker(a).name || "").localeCompare(getIssueWorker(b).name || "")
-        case "crew":
-          return dir * (a.crew_name || "").localeCompare(b.crew_name || "")
-        case "updated":
-          return dir * (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
-        default:
-          return 0
-      }
-    })
-    return arr
-  }, [issues, sortKey, sortDir])
-
-  const renderSortIcon = useCallback((column: SortKey) => {
-    if (sortKey !== column)
-      return <ArrowUpDown className="h-3 w-3 text-foreground/40" />
-    return sortDir === "asc" ? (
-      <ArrowUp className="h-3 w-3" />
-    ) : (
-      <ArrowDown className="h-3 w-3" />
-    )
-  }, [sortKey, sortDir])
-
-  /**
-   * `@md` on a container is 28rem. Measured, not guessed at from the viewport:
-   * this view also renders in a narrowed pane beside an open issue.
-   */
-  const [wide, setWide] = useState<boolean | undefined>(undefined)
-  // A callback ref, not an effect: the root below unmounts whenever the list
-  // is empty and comes back as a new element. An effect that observed the
-  // first root once kept watching a detached node, and a remount into a
-  // narrower pane inherited `wide` from the old one — table hidden by the
-  // container query, cards never built, nothing on screen.
-  const scopeRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el || typeof ResizeObserver === "undefined") return
-    const ro = new ResizeObserver(([entry]) => setWide(entry.contentRect.width >= 448))
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      setWide(undefined)
-    }
-  }, [])
-
-  if (issues.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 py-16 text-center">
-        <p className="text-sm text-muted-foreground">No issues found</p>
-        <p className="text-xs text-muted-foreground/60">
-          Create your first issue to get started.
-        </p>
-      </div>
-    )
-  }
+  const n = selectedIds.size
+  const plural = (k: number) => `${k} ${k === 1 ? "issue" : "issues"}`
 
   return (
-    <div ref={scopeRef} data-slot="issues-list" className="@container/issues overflow-hidden rounded-card border border-border bg-card">
+    <div data-slot="issues-list" className="relative min-h-full pb-24">
       <ConfirmDialog
-        open={pendingBulk !== null}
-        onOpenChange={(o) => { if (!o) setPendingBulk(null) }}
-        title={pendingBulk ? `Set ${selectedIds.size} ${selectedIds.size === 1 ? "issue" : "issues"} to ${pendingBulk.label}?` : ""}
-        description={pendingBulk?.field === "status"
-          ? "Automations that react to a status change may run for each of them, and their people are notified."
-          : "Each issue's priority changes; the order of the board follows."}
-        confirmLabel={pendingBulk ? `Set to ${pendingBulk.label}` : "Set"}
+        open={pending !== null}
+        onOpenChange={(o) => {
+          if (!o) setPending(null)
+        }}
+        title={pending ? (pending.field === "project" ? `Move ${plural(n)} to ${pending.label}?` : `Set ${plural(n)} to ${pending.label}?`) : ""}
+        description={
+          pending?.field === "status"
+            ? "Automations that react to a status change may run for each of them, and their people are notified."
+            : pending?.field === "project"
+              ? "Each issue leaves the project it is in now."
+              : "Each issue's priority changes; the order of the board follows."
+        }
+        confirmLabel={pending ? (pending.field === "project" ? `Move to ${pending.label}` : `Set to ${pending.label}`) : "Set"}
         onConfirm={() => {
-          const p = pendingBulk
-          setPendingBulk(null)
+          const p = pending
+          setPending(null)
           if (p) void handleBulkUpdate(p.updates)
         }}
       />
-      {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
-          <span className="text-xs font-medium text-primary">{selectedIds.size} selected</span>
-          <div className="flex gap-1 ml-2">
-            <div className="relative">
-              <button
-                onClick={() => setBulkMenuOpen(bulkMenuOpen === "status" ? null : "status")}
-                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
+
+      {groups.map((g) => (
+        <section key={g.key} aria-label={`${g.label}: ${plural(g.issues.length)}`} data-slot="issue-group">
+          <div className="sticky top-0 z-[1] flex h-9 items-center gap-2 border-b border-border bg-surface-subtle px-4">
+            {g.status && <StatusIcon status={g.status} className="size-3.5 shrink-0" />}
+            {g.priority && <PriorityIcon priority={g.priority} className="size-3.5 shrink-0" />}
+            <b className="truncate text-label font-semibold text-foreground">{g.label}</b>
+            <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{g.issues.length}</span>
+            <span className="flex-1" />
+            {onCreate && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onCreate(g.status)}
+                aria-label={g.status ? `New issue in ${g.label}` : "New issue"}
               >
-                Status
-              </button>
-              {bulkMenuOpen === "status" && (
-                <div className="absolute top-full left-0 mt-1 z-50 w-40 bg-popover border border-border rounded-md shadow-lg py-1">
-                  {BULK_STATUSES.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => askBulk("status", s.value, s.label)}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
-                    >
-                      <StatusIcon status={s.value} className="h-3 w-3" />
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="relative">
-              <button
-                onClick={() => setBulkMenuOpen(bulkMenuOpen === "priority" ? null : "priority")}
-                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
-              >
-                Priority
-              </button>
-              {bulkMenuOpen === "priority" && (
-                <div className="absolute top-full left-0 mt-1 z-50 w-40 bg-popover border border-border rounded-md shadow-lg py-1">
-                  {BULK_PRIORITIES.map((p) => (
-                    <button
-                      key={p.value}
-                      onClick={() => askBulk("priority", p.value, p.label)}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
-                    >
-                      <PriorityIcon priority={p.value} className="h-3 w-3" />
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                <Plus className="size-3.5" />
+              </Button>
+            )}
           </div>
-          {/* Outlives the toast: the reason the edit was refused has to still
-              be readable next to the selection you retry with. */}
-          {bulkError && (
-            <span role="alert" className="ml-2 min-w-0 truncate text-[11px] text-destructive">
-              {bulkError}
-            </span>
-          )}
-          <div className="flex-1" />
-          <button onClick={clearSelection} className="p-1 rounded hover:bg-foreground/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          {g.issues.map((issue) => (
+            <IssueRow
+              key={issue.id}
+              issue={issue}
+              fields={fields}
+              active={selectedIssueId === issue.id}
+              checked={selectedIds.has(issue.id)}
+              onCheckedChange={(on) => setChecked(issue.id, on)}
+              onOpen={onIssueClick}
+            />
+          ))}
+        </section>
+      ))}
+
+      {n > 0 && (
+        <div className="pointer-events-none sticky bottom-4 z-10 mt-4 flex justify-center px-4">
+          <div
+            role="toolbar"
+            aria-label="Bulk actions"
+            className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-xl bg-foreground py-1.5 pl-3.5 pr-2 text-body text-background shadow-lg"
+          >
+            <span className="shrink-0 whitespace-nowrap">{n} selected</span>
+            {n < issues.length && (
+              <Button variant="ghost" size="sm" className="text-background/70 hover:bg-background/15 hover:text-background" onClick={selectAll}>
+                Select all {issues.length}
+              </Button>
+            )}
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-background/25" />
+            <BulkMenu label="Status">
+              {BULK_STATUSES.map((s) => (
+                <DropdownMenuItem key={s} onSelect={() => setPending({ field: "status", updates: { status: s }, label: STATUS_TEXT[s] })}>
+                  <StatusIcon status={s} className="size-3.5" />
+                  {STATUS_TEXT[s]}
+                </DropdownMenuItem>
+              ))}
+            </BulkMenu>
+            <BulkMenu label="Priority">
+              {BULK_PRIORITIES.map((p) => (
+                <DropdownMenuItem key={p} onSelect={() => setPending({ field: "priority", updates: { priority: p }, label: PRIORITY_TEXT[p] })}>
+                  <PriorityIcon priority={p} className="size-3.5" />
+                  {PRIORITY_TEXT[p]}
+                </DropdownMenuItem>
+              ))}
+            </BulkMenu>
+            {projects.length > 0 && (
+              <BulkMenu label="Project">
+                {projects.map((p) => (
+                  <DropdownMenuItem key={p.id} onSelect={() => setPending({ field: "project", updates: { project_id: p.id }, label: p.name })}>
+                    {p.name}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem onSelect={() => setPending({ field: "project", updates: { project_id: "" }, label: "No project" })}>
+                  No project
+                </DropdownMenuItem>
+              </BulkMenu>
+            )}
+            {bulkError && (
+              <span role="alert" className="ml-1 min-w-0 max-w-80 truncate text-label text-chip-danger-bg" title={bulkError}>
+                {bulkError}
+              </span>
+            )}
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-background/25" />
+            <Button variant="ghost" size="sm" className="gap-1 text-background hover:bg-background/15 hover:text-background" onClick={clearSelection}>
+              <X className="size-3.5" aria-hidden />
+              Clear
+            </Button>
+          </div>
         </div>
       )}
-      {/*
-       * Nine columns of fixed pixel widths come to roughly 760px, so on a
-       * phone this was a data grid you scrolled sideways through. The same
-       * rows render as cards below the container's `md`, reusing the board's
-       * IssueCard rather than growing a second card layout to keep in step.
-       *
-       * A container query, not a viewport one: this view also renders inside a
-       * narrowed pane next to an open issue, where the width that matters is
-       * the pane's, not the window's — which is the mistake the pages panel
-       * (components/features/pages/panels/table-panel.tsx) already avoided.
-       *
-       * What the card form does not carry: the per-row checkbox and the
-       * sortable headers. Bulk editing and column sorting are desktop
-       * workflows — the board has neither either — and the sort chosen on a
-       * desktop still applies here, since both forms render the same `sorted`
-       * array. What a phone gains over the board is a flat list rather than
-       * one grouped by status.
-       */}
-      <div className="hidden @md/issues:block">
-      {/* Fixed layout: the title column takes what is left and every cell
-          truncates, instead of the table growing past the card and clipping
-          the Crew column off its right edge. */}
-      <Table className="min-w-[60rem] table-fixed">
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="w-[40px]">
-              <input
-                type="checkbox"
-                checked={issues.length > 0 && selectedIds.size === issues.length}
-                onChange={toggleAll}
-                className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-primary"
-              />
-            </TableHead>
-            <TableHead
-              className="w-[90px] cursor-pointer select-none"
-              onClick={() => handleSort("identifier")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                ID {renderSortIcon("identifier")}
-              </span>
-            </TableHead>
-            <TableHead
-              className="cursor-pointer select-none"
-              onClick={() => handleSort("title")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Title {renderSortIcon("title")}
-              </span>
-            </TableHead>
-            <TableHead
-              className="w-[110px] cursor-pointer select-none"
-              onClick={() => handleSort("status")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Status {renderSortIcon("status")}
-              </span>
-            </TableHead>
-            <TableHead
-              className="w-[90px] cursor-pointer select-none"
-              onClick={() => handleSort("priority")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Priority {renderSortIcon("priority")}
-              </span>
-            </TableHead>
-            <TableHead
-              className="w-[120px] cursor-pointer select-none"
-              onClick={() => handleSort("assignee")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Assignee {renderSortIcon("assignee")}
-              </span>
-            </TableHead>
-            <TableHead
-              className="w-[100px] cursor-pointer select-none"
-              onClick={() => handleSort("crew")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Crew {renderSortIcon("crew")}
-              </span>
-            </TableHead>
-            <TableHead className="w-[120px]"><span className="eyebrow">Labels</span></TableHead>
-            <TableHead
-              className="w-[90px] cursor-pointer select-none"
-              onClick={() => handleSort("updated")}
-            >
-              <span className="eyebrow flex items-center gap-1">
-                Updated {renderSortIcon("updated")}
-              </span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.map((issue) => {
-            const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
-            const isHighlighted = selectedIssueId != null && issue.id === selectedIssueId
-            return (
-              <TableRow
-                key={issue.id}
-                className={cn(
-                  "cursor-pointer row-hover transition-colors",
-                  isDimmed && "opacity-40",
-                  (isHighlighted || selectedIds.has(issue.id)) && "row-selected",
-                  issue.status === "IN_PROGRESS" && "border-l-2 border-l-primary agent-active-card",
-                )}
-                onClick={() => onIssueClick(issue)}
-              >
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(issue.id)}
-                    onClick={(e) => toggleSelect(issue.id, e)}
-                    onChange={() => {}}
-                    className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-primary"
-                  />
-                </TableCell>
-                <TableCell className="text-xs font-mono text-muted-foreground">
-                  {issue.identifier || "--"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="min-w-0 truncate text-sm font-medium">
-                      {issue.title}
-                    </span>
-                    {/* Sub-issues counter — small pill next to title. Hidden
-                        when zero so the row stays clean for leaf issues. */}
-                    {(issue.sub_issues_count ?? 0) > 0 && (
-                      <span
-                        title={`${issue.sub_issues_count} sub-issues`}
-                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-foreground/[0.05] border border-foreground/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
-                      >
-                        {issue.sub_issues_count}
-                      </span>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1.5">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                    <span className="text-xs text-muted-foreground">
-                      {statusLabel[issue.status] || issue.status}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1.5">
-                    <PriorityIcon
-                      priority={issue.priority || "none"}
-                      className="h-3.5 w-3.5"
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      {priorityLabel[issue.priority || "none"]}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground truncate">
-                  {getIssueWorker(issue).name || "--"}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground truncate">
-                  {issue.crew_name || "--"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {issue.labels && issue.labels.length > 0
-                      ? issue.labels
-                          .slice(0, 2)
-                          .map((label) => (
-                            <LabelBadge key={label.id} label={label} />
-                          ))
-                      : <span className="text-xs text-muted-foreground/50">--</span>}
-                  </div>
-                </TableCell>
-                <TableCell className="truncate font-mono text-[11px] text-muted-foreground-soft">
-                  {formatRelativeTime(issue.updated_at)}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-      </div>
-
-      {/* The container query still decides what is SEEN — that is what keeps
-          the switch flash-free and correct inside a narrowed pane. This only
-          decides what is BUILT: once we have measured a wide container, the
-          cards are not rendered at all, because `display:none` still costs a
-          React render and a DOM node per row. Before the first measurement
-          both exist, so the first paint is never wrong. */}
-      {wide !== true && (
-        <ul className="flex flex-col gap-2 p-2 @md/issues:hidden">
-          {sorted.map((issue) => (
-            <li key={issue.id}>
-              <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
+  )
+}
+
+function BulkMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className={cn("shrink-0 text-background hover:bg-background/15 hover:text-background")}>
+          {label}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" side="top" className="w-48">
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
