@@ -13,6 +13,7 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
+import { AgentSkillsPicker } from "./agent-skills-picker"
 
 interface WorkspaceSkill {
   id: string
@@ -24,9 +25,8 @@ interface WorkspaceSkill {
   icon?: string | null
 }
 
-function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId: string; agentSlug: string; workspaceId: string; onChange: () => void }) {
+function SkillsManager({ agentId, agentSlug, agentName, workspaceId, onChange }: { agentId: string; agentSlug: string; agentName?: string; workspaceId: string; onChange: () => void }) {
   const [assigned, setAssigned] = useState<AgentSkillRow[] | null>(null)
-  const [available, setAvailable] = useState<WorkspaceSkill[] | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -44,40 +44,6 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
 
   useEffect(() => { void refresh() }, [refresh])
 
-  const openPicker = useCallback(async () => {
-    setPickerOpen(true)
-    if (available !== null) return
-    try {
-      const r = await apiFetch(`/api/v1/skills?workspace_id=${workspaceId}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data: WorkspaceSkill[] = await r.json()
-      setAvailable(Array.isArray(data) ? data : [])
-    } catch (err) {
-      toast.error(`Could not load workspace skills: ${err instanceof Error ? err.message : err}`)
-      setAvailable([])
-    }
-  }, [available, workspaceId])
-
-  const assign = useCallback(async (skillId: string) => {
-    setBusy(true)
-    try {
-      const r = await apiFetch(`/api/v1/agents/${agentId}/skills`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_id: skillId }),
-      })
-      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
-      toast.success("Skill assigned")
-      setPickerOpen(false)
-      await refresh()
-      onChange()
-    } catch (err) {
-      toast.error(`Assign failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [agentId, refresh, onChange])
-
   const [pendingRemove, setPendingRemove] = useState<{ id: string; name: string } | null>(null)
   const remove = useCallback(async (assignmentId: string, name: string) => {
     setBusy(true)
@@ -94,27 +60,24 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     }
   }, [agentId, refresh, onChange])
 
-  const assignedIds = useMemo(() => new Set((assigned ?? []).map((a) => a.skill_id)), [assigned])
-  const pickable = useMemo(() => (available ?? []).filter((s) => !assignedIds.has(s.id)), [available, assignedIds])
-
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between">
         <h2 className="text-lg font-semibold">Skills</h2>
         <button
           type="button"
-          onClick={openPicker}
+          onClick={() => setPickerOpen(true)}
           className="text-xs px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 flex items-center gap-1.5"
         >
           <Plus className="h-3 w-3" />
-          Assign skill
+          Add skill
         </button>
       </div>
       <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden divide-y divide-foreground/5">
         {assigned === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
         ) : assigned.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground italic">No skills assigned. Click <em>Assign skill</em> to attach one from the workspace library.</div>
+          <div className="px-4 py-6 text-xs text-muted-foreground italic">No skills yet. <em>Add skill</em> gives it one from the workspace library.</div>
         ) : (
           assigned.map((row) => (
             <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.025]">
@@ -143,21 +106,15 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         )}
       </div>
 
-      {pickerOpen && (
-        <PickerSheet
-          title="Assign skill"
-          subtitle="Pick a workspace skill to attach to this agent."
-          items={pickable}
-          renderItem={(s) => ({
-            primary: s.display_name ?? s.name,
-            secondary: [s.category, s.description].filter(Boolean).join(" · "),
-          })}
-          onPick={(s) => assign(s.id)}
-          onClose={() => setPickerOpen(false)}
-          loading={available === null}
-          busy={busy}
-        />
-      )}
+      <AgentSkillsPicker
+        open={pickerOpen}
+        agentId={agentId}
+        agentName={agentName ?? agentSlug}
+        workspaceId={workspaceId}
+        assigned={assigned ?? []}
+        onClose={() => setPickerOpen(false)}
+        onApplied={() => { void refresh(); onChange() }}
+      />
       <ConfirmDialog
         open={pendingRemove !== null}
         onOpenChange={(open) => { if (!open) setPendingRemove(null) }}

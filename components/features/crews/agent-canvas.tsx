@@ -409,6 +409,7 @@ export function AgentCanvas({
                 agentName={agent.name}
                 crew={agent.crew_id && agent.crew ? { id: agent.crew_id, name: agent.crew.name } : null}
                 canEdit={canEditPersona}
+                memoryEnabled={agent.memory_enabled !== false}
                 onReset={() => setPersonaRev((n) => n + 1)}
               />
             </>
