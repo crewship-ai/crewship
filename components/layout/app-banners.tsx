@@ -105,7 +105,43 @@ export function useAppBannerSlot(kind: AppBannerKind, wanted: boolean): boolean 
   return wanted && queue.winner === id
 }
 
-export type AppBannerTone = "warn" | "ok" | "info"
+export type AppBannerTone = "warn" | "ok" | "info" | "bad"
+
+/**
+ * The banner's look in a page, without the app slot's inset (COM-03): a
+ * page's own state, such as the Inbox's "two sources failed to load". `bad`
+ * is an alert; the quiet tones are a status. At most one banner per page
+ * (KIT-04).
+ */
+export function PageBanner({
+  tone,
+  icon: Icon,
+  children,
+  action,
+  className,
+  ...rest
+}: {
+  tone: AppBannerTone
+  icon: LucideIcon
+  children: React.ReactNode
+  /** One button or link (Retry, Open settings). */
+  action?: React.ReactNode
+  className?: string
+} & Omit<React.ComponentProps<"div">, "children">) {
+  return (
+    <div
+      role={tone === "bad" ? "alert" : "status"}
+      data-tone={tone}
+      className={cn("page-banner", `page-banner-${tone}`, className)}
+      {...rest}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span className="page-banner-text">{children}</span>
+      <span className="page-banner-spacer" />
+      {action}
+    </div>
+  )
+}
 
 /**
  * The one look of an app banner (v67 `.rt-banner`): tinted strip, icon, a

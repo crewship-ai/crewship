@@ -66,3 +66,26 @@ test.describe("phone", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   })
 })
+
+// CHR-05 (#3482, inventory Z01/Z02): old links redirect without JavaScript
+// too, through the exported page's <noscript> meta refresh.
+test.describe("legacy links without JavaScript", () => {
+  test.use({ javaScriptEnabled: false })
+
+  for (const [from, to] of [["/agents", "/crews"], ["/audit", "/settings/audit"]] as const) {
+    test(`${from} lands on ${to}`, async ({ page }) => {
+      await page.goto(from)
+      await expect(page).toHaveURL(new RegExp(`${to.replace(/\//g, "\\/")}(\\.html)?(\\?|$)`))
+    })
+  }
+})
+
+// Dashboard offline (#3505 note): the page's own OfflineBanner joins the app
+// banner queue, so Reconnecting is said once even where the page has one.
+test("Dashboard offline shows one Reconnecting banner", async ({ page }) => {
+  await page.routeWebSocket(/\/ws/, (ws) => { ws.close() })
+  await page.goto("/")
+  await expect(page.locator('[data-state="offline"]').first()).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(1_000)
+  await expect(page.getByText(/Reconnecting…/)).toHaveCount(1)
+})

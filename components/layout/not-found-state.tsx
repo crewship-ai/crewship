@@ -12,9 +12,26 @@ import { useAppStore } from "@/lib/store"
 const TITLE = "This page doesn’t exist"
 const DESCRIPTION = "The link may be old, or the page was moved."
 
+/**
+ * The missing path as words to search: "/routnes/weekly-scan" becomes
+ * "routnes weekly scan", so the palette finds the routine that was meant.
+ */
+export function paletteQueryForPath(pathname: string): string {
+  let path = pathname
+  try {
+    path = decodeURIComponent(pathname)
+  } catch {
+    // A malformed escape: search the raw text.
+  }
+  return path.split(/[/\-_\s]+/).filter(Boolean).join(" ")
+}
+
 /** The 404 inside the app: the shell stays, the content says what happened. */
 export function NotFoundInShell() {
-  const openPalette = useAppStore((s) => s.setCommandPaletteOpen)
+  const openCommandPalette = useAppStore((s) => s.openCommandPalette)
+  // Search opens the palette with the missing path typed in (CHR-03, G05).
+  const openPalette = () =>
+    openCommandPalette(typeof window === "undefined" ? "" : paletteQueryForPath(window.location.pathname))
   return (
     <>
       <SubBar icon={Search} title="Not found" ariaLabel="Not found" />
@@ -22,7 +39,7 @@ export function NotFoundInShell() {
         title={TITLE}
         description={DESCRIPTION}
         primary={{ label: "Go to Dashboard", href: "/" }}
-        secondary={{ label: "Search", icon: Search, onClick: () => openPalette(true) }}
+        secondary={{ label: "Search", icon: Search, onClick: openPalette }}
       />
     </>
   )
