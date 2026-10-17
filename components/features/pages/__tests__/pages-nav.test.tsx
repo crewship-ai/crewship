@@ -50,7 +50,8 @@ function planGroup(): HTMLElement {
 describe("Pages in the nav rail", () => {
   beforeEach(() => cleanup())
 
-  it("registers Pages in Work, immediately after Routines", () => {
+  // F-01 puts Calendar between Routines and Pages.
+  it("registers Pages in Work, after Routines and Calendar", () => {
     render(
       <SidebarProvider>
         <AppSidebar />
@@ -59,7 +60,7 @@ describe("Pages in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Issues", "Routines", "Pages"])
+    expect(items).toEqual(["Issues", "Routines", "Calendar", "Pages"])
   })
 
   it("points it at /pages", () => {
