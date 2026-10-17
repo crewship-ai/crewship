@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 import { InboxActError, type InboxActResult, type InboxItem } from "@/hooks/use-inbox"
 
@@ -180,21 +180,38 @@ describe("take_over / dismiss", () => {
     expect(rec).toHaveTextContent("#14")
   })
 
-  it("confirms first when the action is irreversible, and does nothing on cancel", async () => {
-    mount(card({ actions: [{ ...ACTIONS[2], irreversible: true }] }))
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-    const dialog = await screen.findByRole("alertdialog", { name: "Dismiss?" })
-    expect(dialog).toHaveTextContent(/cannot be undone/i)
-    expect(dialog).toHaveTextContent(ACTIONS[2].effect)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
-    expect(onAct).not.toHaveBeenCalled()
+  it("confirms first in the shared dialog when the action is irreversible, and does nothing on cancel", async () => {
+    // Harbor 2 (POP-02): the browser's confirm() is gone; the kit's
+    // ConfirmDialog says what happens, in the page, and can be tested.
+    const original = window.confirm
+    const confirm = vi.fn().mockReturnValue(true)
+    window.confirm = confirm
+    try {
+      mount(card({ actions: [{ ...ACTIONS[2], irreversible: true }] }))
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+      expect(confirm).not.toHaveBeenCalled()
+      const dialog = await screen.findByRole("alertdialog")
+      expect(dialog).toHaveTextContent(/cannot be undone/i)
+      expect(onAct).not.toHaveBeenCalled()
 
-    onAct.mockResolvedValueOnce(receipt("dismiss"))
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-    const again = await screen.findByRole("alertdialog", { name: "Dismiss?" })
-    fireEvent.click(within(again).getByRole("button", { name: "Dismiss" }))
-    await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+      expect(onAct).not.toHaveBeenCalled()
+
+      onAct.mockResolvedValueOnce(receipt("dismiss"))
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+      await screen.findByRole("alertdialog")
+      fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" }).at(-1)!)
+      await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
+    } finally {
+      window.confirm = original
+    }
+  })
+
+  it("docks the actions with the answer last, where the primary sits", () => {
+    mount(card())
+    const labels = screen.getAllByRole("button").map((b) => b.textContent?.trim())
+    expect(labels).toEqual(["Dismiss", "Take over", "Answer"])
   })
 })
 
