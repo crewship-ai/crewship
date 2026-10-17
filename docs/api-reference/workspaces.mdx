@@ -2631,3 +2631,20 @@ Catalog responses: `200` returns the definitions; `400` rejects invalid workspac
 ### Informational preset selections
 
 Administrative member access GET/PUT responses include `preset_selections: []` or saved selection entries (`id`, `kind`, `resource_id`, `preset_id`, `version`, `level`, `definition_hash`, `selected_at`, optional `selected_by`, and `state`). Entries describe saved intent, not effective authority. A manual PUT may round-trip this read-only field but cannot create or rewrite a selection through it; the response is computed from stored canonical state. Own-access responses omit the administrative metadata.
+
+
+## Preview member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` is read-only. It requires current active trusted OWNER/ADMIN authority, the existing administrative GET credential boundary (`workspace:admin` for scoped credentials) and an existing restricted member. Responses use `Cache-Control: no-store`. Submit:
+
+```json
+{"membership_id":"current-member-row","revision":9,"resource":{"kind":"project","id":"project-id"},"preset_id":"project-levels","preset_version":1,"level":"manage","reissue":[]}
+```
+
+Only this resource's managed operations change in the proposed policy. Unrelated and orthogonal rights remain intact. Explicit reissue names a retained managed right, never an unrelated or newly added right. Bounded strict JSON rejects unknown and trailing input.
+
+The response includes `selection`, `definition_hash`, nullable `current_selection`, complete `before` provenance, `changes`, `after_rights`, `orthogonal_rights`, `warnings` and `confirmation_digest`. One snapshot binds membership incarnation/revision, caller/issuer authority, role floors, resource state and exact consequences. Display names and future application timestamps are not authority; the digest never authorizes a write.
+
+Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. No apply route is enabled by this slice.
+
+Malformed/version/reissue/trusted-target input returns400; stale membership revision returns409 requiring a fresh preview; hidden/foreign targets return404 without their identities; administrative credential denial returns403. Database errors return500.
