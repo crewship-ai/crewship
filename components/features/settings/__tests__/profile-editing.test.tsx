@@ -87,7 +87,7 @@ describe("ProfileSection editing (#867.1)", () => {
       expect(call).toBeTruthy()
       expect(JSON.parse(call![1].body)).toEqual({ current_password: "oldpassword1", new_password: "brandnew123", revoke_cli_tokens: false })
     })
-    await waitFor(() => expect(screen.getByText(/other browser sessions have been signed out/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/other sessions signed out/i)).toBeTruthy())
   })
 
   it("blocks a password change when the confirmation does not match", async () => {

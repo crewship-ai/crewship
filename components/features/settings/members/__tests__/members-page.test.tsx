@@ -461,3 +461,49 @@ describe("Members — drafts stay where they were made", () => {
     expect(writes()).toHaveLength(0)
   })
 })
+
+// Harbor 2: the Invited view offers Reissue (a new link, shown once, valid 7
+// days) and Revoke (after a confirmation) on each pending invitation. An
+// ADMIN invitation is the owner's to manage, as the server enforces.
+describe("Members — pending invitations", () => {
+  const pending = (id: string, role: string, email: string) => ({
+    id, email, role,
+    expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    created_at: new Date().toISOString(),
+    inviter: null,
+  })
+
+  it("reissues an invitation and shows the new link once", async () => {
+    invitations = [pending("i1", "MEMBER", "pat@x.io")]
+    nextWrite = ok({ id: "i1", email: "pat@x.io", role: "MEMBER", token: "wi1_new", expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString() })
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    fireEvent.click(within(list).getByRole("button", { name: "Reissue pat@x.io" }))
+    await waitFor(() => expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/invitations/i1/reissue?workspace_id=ws1"))
+    expect(await within(list).findByDisplayValue(`${window.location.origin}/join#invitation_token=wi1_new`)).toBeInTheDocument()
+    expect(list).toHaveTextContent(/won’t be shown again/)
+  })
+
+  it("revokes an invitation after a confirmation", async () => {
+    invitations = [pending("i1", "MEMBER", "pat@x.io")]
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    fireEvent.click(within(list).getByRole("button", { name: "Revoke pat@x.io" }))
+    expect(writes()).toHaveLength(0)
+    await confirmWith(/^Revoke invitation$/)
+    await waitFor(() => expect(writes()[0]).toEqual(["/api/v1/workspaces/ws1/invitations/i1?workspace_id=ws1", { method: "DELETE" }]))
+  })
+
+  it("leaves an Admin invitation to the owner", async () => {
+    invitations = [pending("i2", "ADMIN", "boss@x.io")]
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    expect(within(list).queryByRole("button", { name: "Revoke boss@x.io" })).toBeNull()
+    expect(within(list).getByText(/Only the owner manages an Admin invitation/)).toBeInTheDocument()
+  })
+
+  it("says when nothing is pending", async () => {
+    renderPage("/settings/members?status=invited")
+    expect(await screen.findByText("No pending invitations.")).toBeInTheDocument()
+  })
+})

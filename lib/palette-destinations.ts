@@ -100,7 +100,9 @@ const ENTRIES: Entry[] = [
   // ── Settings cards ────────────────────────────────────────────────────
   settingsCard("profile", "Profile", "Account", User, ["profile picture", "avatar", "email", "name", "password", "change password"]),
   settingsCard("profile", "Profile", "Workspace", Building2, ["my role", "organization", "joined"]),
-  settingsCard("profile", "Profile", "Sessions & access", Lock, ["sessions", "devices", "browsers", "sign out everywhere", "cli tokens", "api tokens", "new token", "revoke"]),
+  // Sessions & tokens is its own section with two cards (Harbor 2).
+  settingsCard("sessions", "Sessions & tokens", "Browsers & devices", Lock, ["sessions", "devices", "browsers", "sign out everywhere", "revoke session"]),
+  settingsCard("sessions", "Sessions & tokens", "CLI tokens", KeyRound, ["cli tokens", "api tokens", "new token", "revoke token"]),
   settingsCard("sounds", "Notification sounds", "Notification sounds", Volume2, ["sound", "do not disturb", "dnd", "volume", "mute"]),
   settingsCard("general", "General", "Identity", Building2, ["workspace name", "workspace logo", "slug", "agent language", "rename workspace"]),
   settingsCard("general", "General", "Usage", Gauge, ["counts", "agent avatars", "store missing avatars"]),
@@ -176,7 +178,7 @@ const ENTRIES: Entry[] = [
   // ── Actions behind a button ───────────────────────────────────────────
   { id: "act:issue", kind: "action", title: "Create issue", trail: "Issues", href: "/issues?create=1", icon: Plus, keywords: ["new issue", "add issue", "ticket", "task"] },
   { id: "act:invite", kind: "action", title: "Invite member", trail: "Settings › Members", href: "/settings/members", icon: UserPlus, keywords: ["add person", "add user", "invite"], visible: (ctx) => isAdminTier(ctx.role) },
-  { id: "act:token", kind: "action", title: "Create CLI token", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Sessions & access")}`, icon: KeyRound, keywords: ["new token", "api key", "cli login"] },
+  { id: "act:token", kind: "action", title: "Create CLI token", trail: "Settings › Sessions & tokens", href: `/settings?tab=sessions&card=${settingsCardSlug("CLI tokens")}`, icon: KeyRound, keywords: ["new token", "api key", "cli login"] },
   { id: "act:password", kind: "action", title: "Change password", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Account")}`, icon: Lock, keywords: ["reset password"] },
   { id: "act:avatars", kind: "action", title: "Store missing avatars", trail: "Settings › General", href: `/settings?tab=general&card=${settingsCardSlug("Usage")}`, icon: Users, keywords: ["agent avatars", "faces"], visible: (ctx) => isAdminTier(ctx.role) },
 

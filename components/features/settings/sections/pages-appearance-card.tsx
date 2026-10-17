@@ -4,7 +4,8 @@ import { useState } from "react"
 import { Eye, Palette, Plus, RotateCcw } from "lucide-react"
 import { toast } from "@/lib/toast"
 
-import { SettingsCard, controlHeight } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsCardFooter, controlHeight } from "@/components/features/settings/shared"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -204,8 +205,8 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
   />}
   <SettingsCard icon={Palette} title="Pages appearance"
     actions={<span className="flex flex-wrap items-center justify-end gap-2">
-      <span data-testid="pages-theme-status" className="rounded-full bg-primary/10 px-2 py-0.5 text-micro font-semibold text-primary-hover">{status}</span>
-      <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-pressed={previewOpen} onClick={() => setPreviewOpen((v) => !v)}><Eye className="h-3.5 w-3.5" />Preview</Button>
+      <StatusPill data-testid="pages-theme-status" tone={status === "Crewship default" ? "success" : "blue"} label={status} />
+      <Button variant="ghost" size="sm" className="gap-1.5" aria-pressed={previewOpen} onClick={() => setPreviewOpen((v) => !v)}><Eye className="h-3.5 w-3.5" />Preview</Button>
     </span>}
     description="Colours your agents use when they build Page apps. Until you pick something else, Pages wear the Crewship palette.">
     {editable && <div className="border-b border-border p-4">
@@ -248,11 +249,11 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
       </div>
     </div>
     {editable && !followsDefault && !form.isDirty && (
-      <div className="flex justify-start border-t border-border px-4 py-2.5">
-        <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground" disabled={resetting} onClick={() => void resetToDefault()}>
+      <SettingsCardFooter>
+        <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" disabled={resetting} onClick={() => void resetToDefault()}>
           <RotateCcw className="h-3.5 w-3.5" />Reset to Crewship default
         </Button>
-      </div>
+      </SettingsCardFooter>
     )}
     {editable && <SaveFooter dirty={form.isDirty} count={form.dirtyCount} status={form.status} error={form.error} canSave={valid} onCancel={form.reset} onSave={() => void form.submit(async draft => {
       const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pages_theme: draft }) })

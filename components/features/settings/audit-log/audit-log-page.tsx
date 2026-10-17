@@ -31,6 +31,10 @@ import { addDays, auditSeverity, facetCounts, tallyByDay, utcDay } from "./audit
 import { AuditTimePicker } from "./audit-time"
 import { useAuditActivity } from "./use-audit-activity"
 import { useAuditFilters } from "./use-audit-filters"
+import { JournalVerifyBanner } from "./journal-verify-banner"
+import { SettingsPageHead } from "@/components/features/settings/shared"
+import { PageNoAccess } from "@/components/layout/page-state"
+import { formatStatus } from "@/lib/format-status"
 import { useWorkspacePeople } from "./use-workspace-people"
 
 const TRAIL_ICONS: Record<AuditSource, LucideIcon> = { workspace: Building2, crews: Link2, credentials: KeyRound, keeper: Shield }
@@ -230,11 +234,16 @@ export function AuditLogPage() {
     >
       <div className="flex flex-col gap-3 p-4 md:p-6">
         {!allowed ? (
-          <p className="rounded-card border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-            The audit log is readable by workspace Admins and the Owner.
-          </p>
+          <PageNoAccess
+            area="Audit log"
+            role={role ? formatStatus(role).label : undefined}
+            needed="Admin"
+            primary={{ label: "Back to Settings", href: "/settings" }}
+          />
         ) : workspaceId && (
           <>
+            <SettingsPageHead icon={Activity} title="Audit log" description="Every state-changing action, immutably recorded. Readable by Admins and the Owner." className="mb-1" />
+            <JournalVerifyBanner workspaceId={workspaceId} />
             {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5" data-slot="audit-chips">
               {chips.map((c) => (
                 <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">

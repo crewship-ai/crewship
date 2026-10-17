@@ -21,12 +21,12 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AlertTriangle, ChevronRight, Eye, FolderLock, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react"
+import { AlertTriangle, Building, ChevronRight, Eye, FolderLock, Layers, Lock, Shield, UserCheck, Users, type LucideIcon } from "lucide-react"
 
 import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { SettingsCard, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsCounts, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { Capability } from "@/lib/capabilities"
@@ -53,32 +53,13 @@ interface CredentialSummary {
   sensitivity?: string
 }
 
-const CLASSES: { id: string; label: string; description: string; rule: React.ReactNode }[] = [
-  { id: "STANDARD", label: "Standard", description: "Dev tokens, read-only keys.", rule: "Revealable with the full ceremony" },
-  { id: "RESTRICTED", label: "Restricted", description: "Production API keys, deploy keys.", rule: "Revealable today; earmarked for a second approver" },
-  {
-    id: "SEALED",
-    label: "Sealed",
-    description: "Production databases, root credentials, anything an agent created.",
-    rule: <span className="inline-flex items-center gap-1.5 text-destructive"><ShieldAlert className="h-3 w-3 shrink-0" />Never revealable — rotate instead</span>,
-  },
+const CLASSES: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: "STANDARD", label: "Standard", icon: Shield },
+  { id: "RESTRICTED", label: "Restricted", icon: Lock },
+  { id: "SEALED", label: "Sealed", icon: AlertTriangle },
 ]
 
-/** Up to `max` credential links, then "+N more" — each opens the
- *  credential's detail sheet, where its class and crews are changed. */
-function CredentialLinks({ items, max = 4 }: { items: CredentialSummary[]; max?: number }) {
-  if (items.length === 0) return <span className="text-label text-muted-foreground-soft">None</span>
-  return (
-    <span className="flex flex-wrap justify-end gap-1.5">
-      {items.slice(0, max).map((c) => (
-        <Link key={c.id} href={`/credentials?id=${encodeURIComponent(c.id)}`} className="max-w-[12rem] truncate rounded-md border border-border px-1.5 py-0.5 font-mono text-micro text-foreground/85 hover:border-line-strong hover:text-foreground">
-          {c.name}
-        </Link>
-      ))}
-      {items.length > max && <span className="px-1 text-micro text-muted-foreground">+{items.length - max} more</span>}
-    </span>
-  )
-}
+const OWNER_ONLY = "Only a workspace OWNER can move this switch — the API refuses everyone else, including ADMIN."
 
 interface BulkCapabilities {
   members?: { user_id: string; role: string; capabilities: string[] }[]
@@ -94,11 +75,10 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
   // The bulk capabilities read is ADMIN+; a MANAGER cannot see the grants.
   const [capsHidden, setCapsHidden] = React.useState(false)
   const [capsFailed, setCapsFailed] = React.useState(false)
-  // The credentials this caller can see, and the crews they belong to — for
-  // the class counts and the "where they live" overview. Both are reads the
-  // Credentials page already makes; a failure just hides the summaries.
+  // The credentials this caller can see — for the class counts and the
+  // "where they live" counts. The same read the Credentials page makes; a
+  // failure just shows the summaries as empty.
   const [creds, setCreds] = React.useState<CredentialSummary[] | null>(null)
-  const [crewNames, setCrewNames] = React.useState<Record<string, { name: string; slug: string }>>({})
 
   React.useEffect(() => {
     let cancelled = false
@@ -150,14 +130,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         setCreds(list as CredentialSummary[])
       })
       .catch(() => { if (!cancelled) setCreds([]) })
-    apiFetch(`/api/v1/crews?workspace_id=${ws}`)
-      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
-      .then((body) => {
-        if (cancelled) return
-        const list = (Array.isArray(body) ? body : Array.isArray((body as { data?: unknown } | null)?.data) ? (body as { data: unknown[] }).data : []) as { id: string; name: string; slug: string }[]
-        setCrewNames(Object.fromEntries(list.map((c) => [c.id, { name: c.name, slug: c.slug }])))
-      })
-      .catch(() => {})
     return () => { cancelled = true }
   }, [workspaceId])
 
@@ -194,32 +166,30 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
   // folder — its members see its credentials (credentialVisibilityFilter).
   const placement = React.useMemo(() => {
     if (!creds) return null
-    const workspaceWide = creds.filter((c) => c.scope !== "CREW")
-    const byCrew = new Map<string, CredentialSummary[]>()
-    const unlinked: CredentialSummary[] = []
-    for (const c of creds) {
-      if (c.scope !== "CREW") continue
-      const ids = c.crew_ids ?? []
-      if (ids.length === 0) unlinked.push(c)
-      for (const id of ids) byCrew.set(id, [...(byCrew.get(id) ?? []), c])
-    }
-    return { workspaceWide, byCrew: [...byCrew.entries()].sort((a, b) => b[1].length - a[1].length), unlinked }
+    const crewScoped = creds.filter((c) => c.scope === "CREW")
+    const unlinked = crewScoped.filter((c) => (c.crew_ids ?? []).length === 0).length
+    return { workspaceWide: creds.length - crewScoped.length, perCrew: crewScoped.length - unlinked, unlinked }
   }, [creds])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SettingsCard icon={Eye}
         title="Value reveal"
-        description="Whether anyone in this workspace may read a stored secret back in plaintext."
+        description="Whether anyone in this workspace can show a stored value in clear"
       >
         <SettingsRow
           label="Reveal is enabled"
+          lock="Owner"
+          lockTitle={OWNER_ONLY}
+          border={!policyError}
           description={
-            enabled === null
+            enabled === null && !policyError
               ? "Reading the current setting…"
-              : enabled
-                ? "Holders of the capability can reveal a value, with a written reason, recorded in the journal."
-                : "A new workspace starts with reveal off. Turning it on is itself a journaled event."
+              : !isOwner
+                ? OWNER_ONLY
+                : enabled
+                  ? "Holders of the capability can reveal a value, with a fresh sign-in and a written reason, recorded in the audit log first."
+                  : "Off for new workspaces. Each reveal still needs a fresh sign-in and a reason, and is written to the audit log first."
           }
         >
           {enabled === null && !policyError ? (
@@ -234,12 +204,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             />
           )}
         </SettingsRow>
-        {!isOwner && (
-          <SettingsRow label="Read-only for your role" border={false}
-            description="Only a workspace OWNER can move this switch — the API refuses everyone else, including ADMIN.">
-            <span />
-          </SettingsRow>
-        )}
         {policyError && (
           <SettingsRow label="Problem" border={false} description={<span role="alert" className="text-destructive">{policyError}</span>}>
             <span />
@@ -252,7 +216,13 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
           there, instead of keeping a second editable list of the same rows. */}
       <SettingsCard icon={UserCheck}
         title="Who may reveal"
-        description="Reveal is granted per person in Members. OWNER and ADMIN hold it by default unless their membership has an explicit set."
+        description="People who hold credentials:reveal"
+        footer={holders && holders.length > 2 ? (
+          <span className="flex items-start gap-1.5 text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+            {holders.length} people can read secrets in plaintext. The recommendation for a corporate workspace is two.
+          </span>
+        ) : undefined}
       >
         {capsHidden ? (
           <SettingsEmpty>
@@ -269,91 +239,62 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             on, no value can be revealed until someone is granted it in Members.
           </SettingsEmpty>
         ) : (
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-slot="reveal-holders">
-            <span className="flex shrink-0 -space-x-1.5" aria-hidden>
+          <SettingsRow
+            label={<><span className="font-mono tabular-nums">{holders.length}</span> {holders.length === 1 ? "person can" : "people can"} reveal secrets</>}
+            description={<>
+              {holders.slice(0, 4).map((m) => personLabel(m.user.full_name, m.user.email)).join(", ")}{holders.length > 4 ? ` and ${holders.length - 4} more` : ""}
+              <span className="block">Owners and admins by default. More than 2 shows a warning.</span>
+            </>}
+            border={false}
+          >
+            <span className="flex shrink-0 -space-x-1.5" aria-hidden data-slot="reveal-holders">
               {holders.slice(0, 5).map((m) => (
-                <UserAvatar key={m.id} name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-7 w-7 ring-2 ring-card" textClassName="text-micro" />
+                <UserAvatar key={m.id} name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-6 w-6 ring-2 ring-card" textClassName="text-micro" />
               ))}
             </span>
-            <span className="w-0 min-w-0 flex-1">
-              <span className="block text-control">
-                <span className="font-mono tabular-nums">{holders.length}</span> {holders.length === 1 ? "person can" : "people can"} reveal secrets
-              </span>
-              <span className="block truncate text-label text-muted-foreground">
-                {holders.slice(0, 4).map((m) => personLabel(m.user.full_name, m.user.email)).join(", ")}{holders.length > 4 ? ` and ${holders.length - 4} more` : ""}
-              </span>
-            </span>
-            <Link href="/settings/members?flag=reveal" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
+            <Link href="/settings/members?flag=reveal" className="inline-flex items-center gap-1 text-control font-medium text-primary-hover underline-offset-2 hover:underline">
               Manage in Members<ChevronRight className="h-3 w-3" aria-hidden />
             </Link>
-          </div>
-        )}
-        {holders && holders.length > 2 && (
-          <p className="flex items-start gap-1.5 border-t border-border px-4 py-2.5 text-label text-warn">
-            <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
-            {holders.length} people can read secrets in plaintext. The recommendation for a
-            corporate workspace is two.
-          </p>
+          </SettingsRow>
         )}
       </SettingsCard>
 
-      <SettingsCard icon={ShieldCheck}
+      {/* Counts only, each a way into the Vault: the class itself is set on
+          each secret there, so this card has nothing to edit. */}
+      <SettingsCard icon={Layers}
         title="Classification"
-        description="What each class means, and who can move a credential between them."
+        description="Read-only here; change it on each secret in Vault"
+        footer="Sealed values are never revealed or exported."
       >
-        {CLASSES.map((cls) => {
-          const items = (creds ?? []).filter((c) => (c.sensitivity || "STANDARD").toUpperCase() === cls.id)
-          return (
-            <SettingsRow
-              key={cls.id}
-              label={<span className="inline-flex items-center gap-2">{cls.label}<span className="rounded-full bg-muted px-1.5 font-mono text-micro text-muted-foreground tabular-nums">{creds ? items.length : "…"}</span></span>}
-              description={<>{cls.description} <span className="text-muted-foreground-soft">· {cls.rule}</span></>}
-            >
-              {creds && <CredentialLinks items={items} />}
-            </SettingsRow>
-          )
-        })}
-        <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited. Manager and up can raise · Owner or Admin can lower." border={false}>
-          <span />
-        </SettingsRow>
+        {creds === null ? (
+          <SettingsEmpty>Loading credentials…</SettingsEmpty>
+        ) : (
+          <SettingsCounts
+            items={CLASSES.map((cls) => ({
+              icon: cls.icon,
+              label: cls.label,
+              value: creds.filter((c) => (c.sensitivity || "STANDARD").toUpperCase() === cls.id).length,
+              href: "/credentials",
+            }))}
+          />
+        )}
       </SettingsCard>
 
-      <SettingsCard icon={FolderLock}
-        title="Where credentials live"
-        description="Workspace-wide credentials are visible to every member. A crew-scoped one is visible to that crew's members (and Managers and up) — the crew is the folder."
-      >
+      <SettingsCard icon={FolderLock} title="Where credentials live" description="Read-only">
         {placement === null ? (
           <SettingsEmpty>Loading credentials…</SettingsEmpty>
         ) : creds && creds.length === 0 ? (
           <SettingsEmpty>No credentials you can see in this workspace yet.</SettingsEmpty>
         ) : (
-          <>
-            <SettingsRow label={<span className="inline-flex items-center gap-2">Workspace-wide<span className="rounded-full bg-muted px-1.5 font-mono text-micro text-muted-foreground tabular-nums">{placement.workspaceWide.length}</span></span>} description="Every member sees these.">
-              <CredentialLinks items={placement.workspaceWide} />
-            </SettingsRow>
-            {placement.byCrew.map(([crewId, items]) => (
-              <SettingsRow
-                key={crewId}
-                label={<span className="inline-flex items-center gap-2">{crewNames[crewId]?.name ?? "Crew"}<span className="rounded-full bg-muted px-1.5 font-mono text-micro text-muted-foreground tabular-nums">{items.length}</span></span>}
-                description={crewNames[crewId]
-                  ? <Link href={`/crews?crew=${encodeURIComponent(crewNames[crewId].slug)}`} className="hover:text-foreground hover:underline">Members of this crew see these</Link>
-                  : "Members of this crew see these"}
-              >
-                <CredentialLinks items={items} />
-              </SettingsRow>
-            ))}
-            {placement.unlinked.length > 0 && (
-              <SettingsRow label="Crew-scoped, no crew" description="Visible to Managers and up only, until linked to a crew.">
-                <CredentialLinks items={placement.unlinked} />
-              </SettingsRow>
-            )}
-          </>
+          <SettingsCounts
+            items={[
+              { icon: Building, label: "Workspace-wide", value: placement.workspaceWide, href: "/credentials" },
+              { icon: Users, label: "Per crew", value: placement.perCrew, href: "/credentials" },
+              { icon: AlertTriangle, label: "Crew-scoped, no crew", value: placement.unlinked, href: "/credentials" },
+            ]}
+          />
         )}
       </SettingsCard>
-
-      <p className="text-label text-muted-foreground">
-        Open a credential to change its class or the crews it belongs to.
-      </p>
     </div>
   )
 }
