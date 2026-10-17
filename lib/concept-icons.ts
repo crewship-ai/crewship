@@ -1,7 +1,27 @@
 import {
-  Activity, AtSign, Bell, BookOpen, Brain, CircleDot, ClipboardList, FolderTree, Inbox, Key,
-  LayoutDashboard, LayoutTemplate, ListChecks, MessageSquare, Play, Plug,
-  ScrollText, Settings, ShieldCheck, Store, Users, Zap,
+  Activity,
+  AtSign,
+  Bell,
+  BookOpen,
+  Brain,
+  CalendarDays,
+  CircleDot,
+  ClipboardList,
+  FolderTree,
+  Inbox,
+  Key,
+  LayoutDashboard,
+  LayoutTemplate,
+  ListChecks,
+  MessageSquare,
+  Play,
+  Plug,
+  ScrollText,
+  Settings,
+  ShieldCheck,
+  Store,
+  Users,
+  Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -30,6 +50,8 @@ export const CONCEPT_ICON = {
   /** Missions are multi-step work; matches the mission-created journal icon. */
   missions: ClipboardList,
   routines: ScrollText,
+  /** Calendar (F-01): routine starts and runs by date. */
+  calendar: CalendarDays,
   /**
    * A page: panels laid out on a grid. LayoutTemplate rather than
    * LayoutDashboard, which Dashboard already holds — Pages is where a person

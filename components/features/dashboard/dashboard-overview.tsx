@@ -325,7 +325,7 @@ export function DashboardUpNext({ schedules, now }: { schedules: PipelineSchedul
   return (
     // "Calendar" names where the link will go; until the Calendar page ships
     // it opens the routines calendar tab.
-    <DashCard title="Up next" concept="triggers" link={{ label: "Calendar", href: "/routines?tab=calendar" }}>
+    <DashCard title="Up next" concept="triggers" link={{ label: "Calendar", href: "/calendar" }}>
       {upcoming.length === 0 ? (
         <DashNote action={<Link href="/routines" className={TEXT_LINK}>Add a trigger</Link>}>Nothing scheduled.</DashNote>
       ) : (
