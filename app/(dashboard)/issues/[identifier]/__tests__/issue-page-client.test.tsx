@@ -137,7 +137,7 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
       /change assignee/i,
       /change milestone/i,
       /add label/i,
-      /add link/i,
+      /add relation/i,
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument()
     }
