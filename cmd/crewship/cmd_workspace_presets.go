@@ -27,7 +27,7 @@ var workspaceAccessPresetsCmd = &cobra.Command{Use: "presets", Short: "List immu
 		return err
 	}
 	var catalog struct {
-		Presets []access.CatalogEntry `json:"presets"`
+		Presets []access.CatalogEntry `json:"presets" yaml:"presets"`
 	}
 	if err := cli.ReadJSON(resp, &catalog); err != nil {
 		return err
