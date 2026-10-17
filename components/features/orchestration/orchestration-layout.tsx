@@ -41,7 +41,8 @@ import { parseSavedViews, issueViews } from "@/lib/saved-views"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuePeek } from "@/components/features/issues/issue-peek"
-import { IssuesDisplayOptions, Segmented } from "@/components/features/issues/issues-display-options"
+import { IssuesDisplayOptions } from "@/components/features/issues/issues-display-options"
+import { Segmented } from "@/components/ui/segmented"
 import {
   DEFAULT_ROW_FIELDS,
   PRIORITY_TEXT,
@@ -411,12 +412,13 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   ) : (
     <>
       <Segmented
-        label="View"
+        ariaLabel="View"
+        size="xs"
         value={viewMode}
         onChange={setViewMode}
         options={[
-          { id: "list", label: <><List className="size-3.5" aria-hidden />List</> },
-          { id: "board", label: <><Kanban className="size-3.5" aria-hidden />Board</> },
+          { value: "list", label: "List", icon: List },
+          { value: "board", label: "Board", icon: Kanban },
         ]}
       />
       <IssuesDisplayOptions
