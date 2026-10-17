@@ -33,7 +33,8 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Card | `DashboardCard` | 11px uppercase title, mono hint, `→` action link |
 | Empty state inside a card | `InlineEmpty` (`components/ui/inline-empty`) | ONE line, an icon, an action. Never a 150px centred block |
 | Empty page | `EmptyState` (`components/layout/empty-state`) | says what will appear here and the CLI/UI action that creates it |
-| Status | `StatusPill` (`components/ui/status-pill`) + `formatStatus` (`lib/format-status`) | tones: success / blue / warn / danger / muted / purple. Never a colour alone: dot + word. No local pill maps |
+| Status | `StatusPill` (`components/ui/status-pill`) + `formatStatus` (`lib/format-status`) | the ONLY component that shows a status or a severity. Tones: success / blue / warn / danger / muted / purple (chip tokens ok / info / warn / danger / neutral / violet). Never a colour alone: dot + word, or a glyph via `icon`. A feature's tone word (destructive, bad, high, emerald …) goes through `toStatusTone` (`lib/status-tone`); a raw enum through `statusTone`. No local pill maps: `components/__tests__/status-pill-guard.test.ts` fails on a new `*Pill` / `*StatusBadge` outside `components/ui` |
+| Count, neutral label | `Badge` (`components/ui/badge`) | counts and labels that carry no state; never coloured by status |
 | Crew | `CrewIcon` + name + colour dot | colour may be a palette id OR a hex — use `crewColor` / `crewColorHex` |
 | Agent | `AgentAvatar` with status dot | RUNNING blue with halo, ERROR red, idle green |
 | Model | `getModelLabel` | ids come from `config/models.json`, never typed in a component |

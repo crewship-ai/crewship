@@ -19,7 +19,7 @@ import { AppearStack } from "@/components/ui/detail"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { Skeleton } from "@/components/ui/skeleton"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import type { MCPTemplate } from "@/components/features/mcp/types"
@@ -708,13 +708,13 @@ function LegacyIntegrations() {
 
                   {/* Auth status badge */}
                   {server.auth_status === "missing" && (
-                    <StatusBadge status="FAILED" label="No credential" className="shrink-0 text-[10px]" />
+                    <StatusPill status="FAILED" label="No credential" />
                   )}
                   {server.auth_status === "expired" && (
-                    <StatusBadge status="BLOCKED" label="Expired" className="shrink-0 text-[10px]" />
+                    <StatusPill status="BLOCKED" label="Expired" />
                   )}
                   {server.auth_status === "connected" && (
-                    <StatusBadge status="COMPLETED" label="Connected" className="shrink-0 text-[10px]" />
+                    <StatusPill status="COMPLETED" label="Connected" />
                   )}
                   {server.auth_status === "none" && (
                     <span className="text-[10px] text-muted-foreground/50 shrink-0 uppercase tracking-wide">

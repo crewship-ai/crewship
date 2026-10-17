@@ -49,7 +49,9 @@ import {
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { relTime } from "@/lib/time"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import {
@@ -158,10 +160,14 @@ function CodeLinkRow({ link, edit }: { link: IssueCodeLink; edit?: CodeLinkEdit 
           a test holds it — a longer label would push the pill out of its
           column and into the title. */}
       <span className="w-[92px] shrink-0 pt-px">
-        <Pill tone={badge.tone} className="whitespace-nowrap" data-testid="code-link-state">
-          <Icon className="h-3 w-3 shrink-0" />
-          {badge.label}
-        </Pill>
+        <StatusPill
+          size="md"
+          tone={toStatusTone(badge.tone)}
+          icon={<Icon className="h-3 w-3 shrink-0" />}
+          label={badge.label}
+          className="whitespace-nowrap"
+          data-testid="code-link-state"
+        />
       </span>
 
       <div className="min-w-0 flex-1">

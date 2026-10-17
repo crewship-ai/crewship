@@ -7,6 +7,7 @@ import { Check, ChevronRight, Info, LockOpen, TriangleAlert } from "lucide-react
 import { cn } from "@/lib/utils"
 
 import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { personLabel } from "@/components/ui/user-avatar"
 import { SettingsCard, nativeSelect } from "@/components/features/settings/shared"
 import { CAPABILITY_LABELS, Capability, hasCapability } from "@/lib/capabilities"
@@ -83,7 +84,6 @@ export function membersFindings({ members, caps, invitations, revealEnabled = nu
 }
 
 const TINT: Record<Finding["severity"], string> = { high: "var(--destructive)", medium: "var(--warn)", low: "var(--info)" }
-const TONE = { high: "danger", medium: "warn", low: "muted" } as const
 
 export function MembersAttention({ findings }: { findings: Finding[] }) {
   return (
@@ -100,7 +100,7 @@ export function MembersAttention({ findings }: { findings: Finding[] }) {
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <StatusPill tone={TONE[f.severity]} label={f.severity.charAt(0).toUpperCase() + f.severity.slice(1)} />
+              <StatusPill tone={toStatusTone(f.severity)} label={f.severity.charAt(0).toUpperCase() + f.severity.slice(1)} />
               <p className="min-w-0 text-label font-medium leading-snug text-foreground">{f.title}</p>
             </div>
             <p className="mt-0.5 text-label leading-snug text-muted-foreground">{f.body}</p>

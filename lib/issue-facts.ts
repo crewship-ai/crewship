@@ -12,6 +12,7 @@
 // hairlines, never a row of separate cards. Six facts is what fits before
 // the band stops being glanceable.
 
+import { statusTone, type StatusTone } from "@/lib/status-tone"
 import { formatShortDate, relTime } from "@/lib/time"
 import type {
   IssuePriority,
@@ -166,54 +167,36 @@ function clampPercent(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)))
 }
 
-export type DetailTone = "default" | "success" | "destructive" | "warn" | "blue" | "purple"
-
 /**
- * Issue status in the shared detail palette, so a Backlog pill here is the
- * same colour as a Backlog pill in Inbox, Activity and the board.
+ * Issue status as a StatusPill tone. It reads lib/format-status, the table
+ * every other status pill reads, so a Review pill here is the same colour as
+ * a Review pill in Inbox, Activity and the board.
  */
-export function issueStatusTone(status: MissionStatus | undefined): DetailTone {
-  switch (status) {
-    case "COMPLETED":
-    case "DONE":
-      return "success"
-    case "FAILED":
-    case "CANCELLED":
-    case "DUPLICATE":
-      return "destructive"
-    case "IN_PROGRESS":
-      return "blue"
-    case "REVIEW":
-      return "purple"
-    case "PLANNING":
-    case "TODO":
-      return "warn"
-    default:
-      return "default"
-  }
+export function issueStatusTone(status: MissionStatus | undefined): StatusTone {
+  return statusTone(status)
 }
 
 /**
  * Only urgent and high get an alarm colour. Medium and low are the ordinary
  * case, and a board where every pill is coloured says nothing.
  */
-export function issuePriorityTone(priority: IssuePriority | undefined): DetailTone {
+export function issuePriorityTone(priority: IssuePriority | undefined): StatusTone {
   switch (priority) {
     case "urgent":
-      return "destructive"
+      return "danger"
     case "high":
       return "warn"
     default:
-      return "default"
+      return "muted"
   }
 }
 
-export function projectHealthTone(health: ProjectHealth | undefined): DetailTone {
+export function projectHealthTone(health: ProjectHealth | undefined): StatusTone {
   switch (health) {
     case "at_risk":
       return "warn"
     case "off_track":
-      return "destructive"
+      return "danger"
     default:
       return "success"
   }

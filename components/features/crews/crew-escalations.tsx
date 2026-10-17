@@ -25,7 +25,7 @@ import { useTick } from "@/hooks/use-tick"
 import { EscalationResponseCard, ActionBadge } from "@/components/features/escalations/escalation-response-card"
 import { formatRelativeTime } from "@/lib/time"
 import { z } from "zod"
-import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import type { StatusConfigEntryWithIcon } from "@/lib/status-config"
 import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewEscalationsProps {
@@ -39,8 +39,8 @@ function PendingIcon({ className }: { className?: string }) {
 
 
 const STATUS_CONFIG: Record<Escalation["status"], StatusConfigEntryWithIcon> = {
-  PENDING:  { label: "Pending",  className: STATUS_STYLES.amber,   icon: PendingIcon },
-  RESOLVED: { label: "Resolved", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  PENDING:  { label: "Pending",  tone: "warn",   icon: PendingIcon },
+  RESOLVED: { label: "Resolved", tone: "success", icon: CheckCircle2 },
 }
 
 const TYPE_LABELS: Record<string, { label: string; icon: React.ComponentType<{ className?: string }> }> = {

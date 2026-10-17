@@ -10,6 +10,7 @@ import {
 import type { AgentPersona, PersonaCategory } from "@/lib/entities"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { getModelLabel } from "@/lib/cli-adapters"
 import type { PersonaSource } from "./types"
@@ -216,20 +217,12 @@ function PersonaRow({
         </div>
         <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{persona.blurb}</div>
         <div className="flex gap-1 flex-wrap mt-1.5">
-          <Pill>{getModelLabel(persona.llmModel)}</Pill>
-          <Pill>{persona.toolProfile.toLowerCase()}</Pill>
-          {persona.agentRole === "LEAD" && <Pill>lead</Pill>}
+          <Badge variant="secondary" className="font-mono">{getModelLabel(persona.llmModel)}</Badge>
+          <Badge variant="secondary" className="font-mono">{persona.toolProfile.toLowerCase()}</Badge>
+          {persona.agentRole === "LEAD" && <Badge variant="secondary" className="font-mono">lead</Badge>}
         </div>
       </div>
     </button>
-  )
-}
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-foreground/[0.04] text-muted-foreground">
-      {children}
-    </span>
   )
 }
 

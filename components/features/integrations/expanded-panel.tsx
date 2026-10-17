@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SectionCard } from "@/components/ui/section-card"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import {
   Select,
   SelectContent,
@@ -417,12 +417,7 @@ export function ExpandedPanel({
                 </span>
               )}
               {!discovering && oauthDiscovered && (
-                <StatusBadge status="IN_PROGRESS" label={
-                  <span className="inline-flex items-center gap-1">
-                    <ExternalLink className="h-2.5 w-2.5" />
-                    OAuth detected
-                  </span>
-                } />
+                <StatusPill status="IN_PROGRESS" icon={<ExternalLink className="h-2.5 w-2.5" />} label="OAuth detected" />
               )}
             </div>
             <Input

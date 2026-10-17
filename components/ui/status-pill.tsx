@@ -7,6 +7,11 @@ import { cn } from "@/lib/utils"
  * The one status pill: a dot and a word, in one of six tones. Never a colour
  * alone (README §2). Pass a raw status and it is formatted; pass a label to
  * override the word while keeping the tone rule.
+ *
+ * This is the only component that shows a status or a severity. Counts and
+ * neutral labels use Badge. A feature tone word (destructive, bad, high,
+ * emerald …) becomes a tone through lib/status-tone; a new local *Pill or
+ * *StatusBadge outside components/ui fails components/__tests__/status-pill-guard.
  */
 export const STATUS_PILL_TONE: Record<StatusTone, { pill: string; dot: string }> = {
   // Harbor chips: an opaque tinted fill with a text pair measured per theme
@@ -29,10 +34,12 @@ export interface StatusPillProps extends Omit<React.HTMLAttributes<HTMLSpanEleme
   tone?: StatusTone
   /** Pulse the dot — only for something that is genuinely live. */
   live?: boolean
+  /** A glyph in place of the dot (a spinner, a lock). Sized by the caller, h-3 w-3. */
+  icon?: React.ReactNode
   size?: "sm" | "md"
 }
 
-export function StatusPill({ status, label, tone, live = false, size = "sm", className, ...rest }: StatusPillProps) {
+export function StatusPill({ status, label, tone, live = false, icon, size = "sm", className, ...rest }: StatusPillProps) {
   const meta = formatStatus(status)
   const t = STATUS_PILL_TONE[tone ?? meta.tone]
   return (
@@ -47,7 +54,13 @@ export function StatusPill({ status, label, tone, live = false, size = "sm", cla
       )}
       {...rest}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full opacity-80", t.dot, live && "animate-pulse motion-reduce:animate-none")} aria-hidden />
+      {icon ?? (
+        <span
+          data-slot="status-pill-dot"
+          className={cn("h-1.5 w-1.5 rounded-full opacity-80", t.dot, live && "animate-pulse motion-reduce:animate-none")}
+          aria-hidden
+        />
+      )}
       {label ?? meta.label}
     </span>
   )
