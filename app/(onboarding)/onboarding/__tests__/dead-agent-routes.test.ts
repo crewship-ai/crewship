@@ -229,7 +229,6 @@ const REPAIRED = [
   // chat-client.tsx is what took over its links.
   "app/(dashboard)/chat/chat-client.tsx",
   "components/features/crews/agent-canvas-tabs/overview-tab.tsx",
-  "components/features/approvals/approval-detail.tsx",
   "components/features/journal/runs-view.tsx",
   "components/features/journal/journal-entry-card.tsx",
   "components/features/agents/agent-card.tsx",

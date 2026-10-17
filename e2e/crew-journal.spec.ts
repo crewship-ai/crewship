@@ -21,7 +21,8 @@ import { test, expect } from "./fixtures/auth"
 const routes: { path: string; name: string; landmark: RegExp }[] = [
   { path: "/journal", name: "journal", landmark: /journal|timeline/i },
   { path: "/paymaster", name: "paymaster", landmark: /paymaster|spend|cost/i },
-  { path: "/approvals", name: "approvals", landmark: /approvals?|pending|decide/i },
+  // /approvals is a redirect into the Inbox now; harbor2-legacy-links.spec.ts
+  // covers it (this loop asserts the URL stays on the path it opened).
   // /crows-nest and /eval redirect to /login for the seeded demo
   // user even though CLI lists them as OWNER. Not a regression in
   // this PR — dedicated auth guard test pending. Track as follow-up.
