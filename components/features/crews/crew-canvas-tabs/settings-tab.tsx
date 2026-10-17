@@ -131,9 +131,9 @@ export function SettingsTab({
       </section>
 
       {/* Escalations — what agents of this crew asked a person. Container,
-          network, image, services and security live in the Environment tab. */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Escalations</h2>
+          network, image, services and security live in the Environment tab.
+          The panel carries its own "Escalations" heading; no second one here. */}
+      <section aria-label="Escalations">
         <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
       </section>
 

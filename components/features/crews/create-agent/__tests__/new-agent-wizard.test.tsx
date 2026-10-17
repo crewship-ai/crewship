@@ -66,6 +66,18 @@ describe("New agent wizard", () => {
     expect(primary("Continue")).toBeDisabled()
   })
 
+  it("the footer keeps 'Step x of 4' while Continue is blocked, with the reason beside it", () => {
+    stub()
+    renderWizard()
+    const footer = primary("Continue").closest("div")!
+    expect(within(footer).getByTestId("new-agent-step")).toHaveTextContent("Step 1 of 4")
+    expect(footer).toHaveTextContent(/Name must be at least 2 characters/)
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Fact checker" } })
+    fireEvent.click(primary("Continue"))
+    expect(within(primary("Continue").closest("div")!).getByTestId("new-agent-step")).toHaveTextContent("Step 2 of 4")
+    expect(primary("Continue").closest("div")!).toHaveTextContent(/Choose a provider and model/)
+  })
+
   it("Back keeps what was typed; Model needs a provider before Continue", () => {
     stub()
     renderWizard()

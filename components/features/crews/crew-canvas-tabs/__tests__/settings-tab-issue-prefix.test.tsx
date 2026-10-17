@@ -47,7 +47,8 @@ vi.mock("@/components/features/crews/crew-runtime-config", () => ({
   CrewRuntimeConfig: () => <div data-testid="runtime-config" />,
 }))
 vi.mock("@/components/features/crews/crew-escalations", () => ({
-  CrewEscalations: () => <div data-testid="escalations" />,
+  // Like the real one: the escalations panel brings its own "Escalations" heading.
+  CrewEscalations: () => <div data-testid="escalations"><h2>Escalations</h2></div>,
 }))
 
 const baseCrew = {
@@ -127,5 +128,6 @@ describe("Issue prefix field (#2118)", () => {
   render(<SettingsTab workspaceId="w1" crew={baseCrew} agentsForCrew={[]} patch={vi.fn()} applyAvatarStyle={vi.fn()} onDelete={vi.fn()} />)
   expect(screen.queryByRole("button", { name: "Edit service disk policy" })).not.toBeInTheDocument()
   for (const gone of ["Runtime & security", "Container resources", "Network policy"]) expect(screen.queryByText(gone)).not.toBeInTheDocument()
-  expect(screen.getByRole("heading", { name: "Escalations" })).toBeInTheDocument()
+  // One heading: the panel names itself; Settings adds no second "Escalations".
+  expect(screen.getAllByRole("heading", { name: "Escalations" })).toHaveLength(1)
 })
