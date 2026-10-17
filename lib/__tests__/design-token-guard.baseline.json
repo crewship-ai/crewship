@@ -17,6 +17,7 @@
   "components/features/onboarding/onboarding-proposal-summary.tsx": 1,
   "components/features/issues/issue-card.tsx": 1,
   "components/features/issues/issues-board-view.tsx": 1,
+  "components/features/onboarding/proposal-card.tsx": 1,
   "components/features/routines/routine-calendar.tsx": 1,
   "components/features/routines/routine-comparison.tsx": 1,
   "components/features/routines/routine-decision-form-builder.tsx": 3,

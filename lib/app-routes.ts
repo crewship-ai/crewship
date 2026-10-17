@@ -23,6 +23,7 @@ export const APP_ROUTE_PATTERNS = [
   "/approvals",
   "/audit",
   "/bootstrap",
+  "/calendar",
   "/chat",
   "/chat/[agentSlug]",
   "/conversations",
