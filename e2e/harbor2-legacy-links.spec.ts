@@ -70,7 +70,9 @@ test.describe("/approvals by role", () => {
     const res = await ctx.post("/api/auth/callback/credentials", {
       form: { csrfToken, email, password: process.env.E2E_RBAC_PASSWORD || "rbac-demo-1234", callbackUrl: "/", json: "true" },
     })
-    test.skip(!res.ok(), `cannot log in as ${email} (seed without RBAC baseline users?)`)
+    // A wrong account is a 200 with { error } on the JSON path, not a 4xx.
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    test.skip(!res.ok() || !!body.error, `cannot log in as ${email}: needs the RBAC baseline users (crewship seed --with-users)`)
     await page.context().addCookies((await ctx.storageState()).cookies)
     await ctx.dispose()
   }
