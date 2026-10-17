@@ -212,11 +212,11 @@ test.describe("desktop", () => {
     // The footer's counter (a phone-only copy sits in the footer lead, hidden here).
     await expect(dialog.getByTestId("new-agent-step")).toHaveText("Step 1 of 4")
     await expect(dialog.getByRole("radiogroup", { name: "Start from" })).toBeVisible()
-    await dialog.getByPlaceholder("Filip").fill("H2 wizard probe")
+    await dialog.getByPlaceholder("Filip", { exact: true }).fill("H2 wizard probe")
     await dialog.getByRole("button", { name: "Continue" }).click()
     await expect(dialog.getByTestId("new-agent-step")).toHaveText("Step 2 of 4")
     await dialog.getByRole("button", { name: "Back" }).click()
-    await expect(dialog.getByPlaceholder("Filip")).toHaveValue("H2 wizard probe")
+    await expect(dialog.getByPlaceholder("Filip", { exact: true })).toHaveValue("H2 wizard probe")
     await dialog.getByRole("button", { name: "Step 3: Access" }).click()
     await expect(dialog.getByText("Pays with").first()).toBeVisible()
   })
