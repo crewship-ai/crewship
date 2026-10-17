@@ -318,10 +318,11 @@ func buildDocument(routes []route) map[string]any {
 	_, chatDecisionComponents := chatDecisionSchemaCatalog()
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
+	_, accessPresetComponents := accessPresetSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -709,6 +710,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	restrictedWorkflowRoutes, _ := restrictedWorkflowSchemaCatalog()
 	for key, schema := range restrictedWorkflowRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	presetRoutes, _ := accessPresetSchemaCatalog()
+	for key, schema := range presetRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result
