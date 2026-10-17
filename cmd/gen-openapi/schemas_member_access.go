@@ -15,10 +15,8 @@ func memberAccessPolicySchema() map[string]any {
 	}
 	properties := schema["properties"].(map[string]any)
 	properties["reissue"] = properties["rights"]
-	properties["grant_details"] = map[string]any{"type": "array", "readOnly": true, "items": map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "issuer_id", "created_at", "live"},
-		"properties": map[string]any{"kind": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "issuer_id": map[string]any{"type": "string"}, "issuer_name": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string"}, "live": map[string]any{"type": "boolean"}},
-	}}
+	properties["grant_details"] = map[string]any{"type": "array", "readOnly": true, "items": ref("MemberAccessGrant")}
+	properties["preset_selections"] = map[string]any{"type": "array", "readOnly": true, "items": ref("AccessPresetSelection")}
 	return schema
 }
 
@@ -27,6 +25,7 @@ func memberEffectiveAccessSchema() map[string]any {
 	delete(properties, "rights")
 	delete(properties, "grant_details")
 	delete(properties, "reissue")
+	delete(properties, "preset_selections")
 	properties["account_restricted"] = map[string]any{"type": "boolean"}
 	properties["restriction_scope"] = map[string]any{"type": "string", "enum": []string{"account"}}
 	properties["explanation"] = map[string]any{"type": "string"}
@@ -66,5 +65,10 @@ func memberAccessSchemaComponents() map[string]any {
 		"MemberAccessProjectRight": memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
 		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit"}),
 		"MemberAccessRight":        memberAccessRightSchema(),
+		"MemberAccessGrant":        memberAccessGrantSchema(),
 	}
+}
+
+func memberAccessGrantSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "issuer_id", "created_at", "live"}, "properties": map[string]any{"kind": scalar("string"), "id": scalar("string"), "operation": scalar("string"), "issuer_id": scalar("string"), "issuer_name": scalar("string"), "created_at": scalar("string"), "live": scalar("boolean")}}
 }

@@ -320,7 +320,7 @@ func buildDocument(routes []route) map[string]any {
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
 	_, accessPresetComponents := accessPresetSchemaCatalog()
 	for _, catalog := range []map[string]any{
-		memberAccessSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
+		memberAccessSchemaComponents(), presetSelectionSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
 		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {

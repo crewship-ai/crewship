@@ -534,3 +534,15 @@ The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace 
 The OpenAPI `MemberAccessAgentRight` component names the existing agent-right variant for reuse in administrative policies. It preserves exact operation choices, required IDs and rejection of undeclared fields, without changing grants or runtime authority.
 
 OpenAPI also names `MemberAccessProjectRight`, `MemberAccessRoutineRight` and their complete `MemberAccessRight` union. The schemas preserve existing primitive operation choices, IDs and closed objects exactly; naming them does not add inheritance or alter grant authority.
+
+### Saved selection in administrative policies
+
+Administrative member-policy GET/PUT responses include `preset_selections`, a complete array of informational saved intent. An empty array means no saved preset choice; matching permission bits alone never fabricate a choice. Every item carries the immutable definition reference, saved level/hash/time and optional historical selecting actor. `selected` describes supported saved intent, while `custom` marks unsupported definitions or inconsistent managed bits; neither state grants effective authority. The grant issuer and original creation time remain canonical in `grant_details`.
+
+Only a current trusted workspace administrator can read these choices. Personal `OwnPolicy` responses omit the field. The manual policy PUT accepts the read-only field when round-tripping a GET but ignores its contents: it changes only the explicitly supplied canonical rights, and returns freshly computed selection metadata. Managed-grant changes invalidate the saved choice; unrelated rights and issuer liveness do not rewrite intent. No preset application endpoint or automatic backfill is introduced by this read-only slice.
+
+OpenAPI names the unchanged `MemberAccessGrant` provenance shape for reuse. This retains every original issuer, timestamp and liveness field and changes no policy inputs or effective authority.
+
+### Transactional selection recorder
+
+The internal recorder accepts only a caller-owned transaction, a live trusted administrator, an existing restricted membership with the expected post-replacement incarnation/revision, a supported immutable definition and exact matching canonical managed operations. It records the authenticated selecting actor and server time without changing canonical grant rows, issuers, timestamps or membership revisions. The caller must first perform fresh preview/digest checks, canonical replacement and transactional audit, then record selection last and commit once. Any failure must roll back the whole transaction. The helper alone exposes no apply endpoint and performs no backfill.

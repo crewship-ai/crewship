@@ -530,3 +530,5 @@ crewship workspace member access presets --format json
 ```
 
 Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.
+
+Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
