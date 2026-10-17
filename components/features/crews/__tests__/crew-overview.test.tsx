@@ -78,7 +78,7 @@ describe("CrewOverview", () => {
     renderOverview()
     const works = screen.getByTestId("crew-works-on")
     const links = within(works).getAllByRole("link").map((a) => a.getAttribute("href"))
-    expect(links).toEqual(["/routines?crew=ops", "/issues?crew=ops"])
+    expect(links).toEqual(["/routines?crew=ops", "/issues?crew_id=c1"])
   })
 
   it("the doing card opens a running agent", () => {
