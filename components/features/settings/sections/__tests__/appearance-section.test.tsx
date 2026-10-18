@@ -129,7 +129,12 @@ describe("AppearanceSection", () => {
 
   it("chooses the sidebar mode through the synced store", () => {
     render(<AppearanceSection />)
-    fireEvent.click(screen.getByRole("button", { name: "Pinned open" }))
+    // ODCH-SET-02: the names the rail's own menu and ⌘B use, in its order.
+    expect(["Expanded", "Expand on hover", "Collapsed"].map((n) => screen.getByRole("button", { name: n }))).toHaveLength(3)
+    expect(screen.queryByRole("button", { name: "Pinned open" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Collapsed" }))
+    expect(store.get("crewship_sidebar_mode")).toBe("collapsed")
+    fireEvent.click(screen.getByRole("button", { name: "Expanded" }))
     expect(store.get("crewship_sidebar_mode")).toBe("pinned")
   })
 

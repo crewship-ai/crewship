@@ -36,11 +36,12 @@ const TEXT_SIZE_OPTIONS: { value: TextSize; label: string }[] = [
   { value: "large", label: "Large" },
 ]
 
-// The rail's three modes, in the words the rail's own menu uses.
+// The rail's three modes, named as the rail's own menu and ⌘B name them, in
+// the same order (ODCH-SET-02).
 const SIDEBAR_OPTIONS: { value: SidebarChoice; label: string }[] = [
-  { value: "hover", label: "Rail · expand on hover" },
-  { value: "collapsed", label: "Rail" },
-  { value: "pinned", label: "Pinned open" },
+  { value: "pinned", label: "Expanded" },
+  { value: "hover", label: "Expand on hover" },
+  { value: "collapsed", label: "Collapsed" },
 ]
 
 // What each knob changes, and only that.
