@@ -144,6 +144,45 @@ describe("sign up", () => {
   })
 })
 
+describe("field errors take focus", () => {
+  it("sign up: a mismatch moves focus to Confirm password", async () => {
+    render(<SignupPage />)
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Test Reader" } })
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
+    fireEvent.change(screen.getByLabelText("Password", { exact: true }), { target: { value: "synthetic-passphrase" } })
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "different-passphrase" } })
+    const submit = screen.getByRole("button", { name: "Create account" })
+    submit.focus()
+    await act(async () => { fireEvent.click(submit) })
+    expect(document.activeElement).toBe(screen.getByLabelText("Confirm password"))
+  })
+
+  it("reset: a short password moves focus to New password", async () => {
+    nav.query = "token=synthetic-reset"
+    render(<ResetPasswordPage />)
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "short" } })
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "short" } })
+    const submit = screen.getByRole("button", { name: "Update password" })
+    submit.focus()
+    await act(async () => { fireEvent.click(submit) })
+    expect(document.activeElement).toBe(screen.getByLabelText("New password"))
+  })
+
+  it("first run: a mismatch moves focus to Confirm password", async () => {
+    vi.mocked(serverFetch).mockResolvedValueOnce(Response.json({ needs_bootstrap: true }))
+    render(<BootstrapPage />)
+    await screen.findByRole("heading", { name: "Create the administrator account" })
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Alex Johnson" } })
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "admin@example.test" } })
+    fireEvent.change(screen.getByLabelText("Password", { exact: true }), { target: { value: "long-enough-pw" } })
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "different-pw" } })
+    const submit = screen.getByRole("button", { name: "Continue" })
+    submit.focus()
+    await act(async () => { fireEvent.click(submit) })
+    expect(document.activeElement).toBe(screen.getByLabelText("Confirm password"))
+  })
+})
+
 describe("reset done", () => {
   it("offers Sign in and counts down instead of leaving silently", async () => {
     nav.query = "token=synthetic-reset"
