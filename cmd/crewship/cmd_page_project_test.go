@@ -138,6 +138,7 @@ func TestPageProjectCLIGetHonoursFormat(t *testing.T) {
 }
 
 func TestPageProjectGetSourceOnly(t *testing.T) {
+	guardCLIState(t)
 	for _, revision := range []string{"", "3"} {
 		t.Run("revision="+revision, func(t *testing.T) {
 			stub := pageStub(t)
