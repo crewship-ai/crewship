@@ -592,6 +592,10 @@ routine: its account and grant authority is a separate execution contract.
 CLI-token revocation now also closes an existing CLI WebSocket. Older CLI tickets
 without a source token ID must be replaced through the normal ticket endpoint.
 A short WS ticket lifetime limits admission; it never extends the source expiry.
+Already-issued browser tickets with a session ID use the live persisted session's
+expiry. New browser tickets additionally retain the access JWT's expiry and its
+existing five-second validation grace. Legacy CLI tickets without a source token
+ID cannot establish a connection. This does not change routine run authority.
 Access-token authentication keeps its existing five-second validation grace.
 A non-null malformed CLI-token expiry is invalid and cannot open a stream.
 Offline administrative writes require the exclusive-writer path; this registry
