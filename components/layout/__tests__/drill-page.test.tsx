@@ -190,3 +190,32 @@ describe("DrillPage panel", () => {
     expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
   })
 })
+
+// SET-07 on a tablet (768 to 1279 px, 1024 in the check): the panel floats and
+// starts closed, so the way back cannot live only inside it.
+describe("DrillPage on a tablet (1024 px)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("1279"), media: q, addEventListener: () => {}, removeEventListener: () => {} }))
+  })
+
+  it("keeps the way back on the top bar, with the parent's name, while the panel is closed", () => {
+    renderPage()
+    expect(panel()).toBeNull()
+    const back = screen.getByRole("link", { name: "Back to Settings" })
+    expect(back).toHaveAttribute("href", "/settings")
+    expect(back).toHaveTextContent("Settings")
+  })
+
+  it("shows the path, the head and the content as on a desktop", () => {
+    renderPage({ note: "Managers and up change links" })
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Crew links")
+    expect(document.querySelector("[data-slot=drill-head]")).not.toBeNull()
+    expect(screen.getByText("content")).toBeInTheDocument()
+  })
+
+  it("has the way back once when the panel is opened", () => {
+    renderPage()
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    expect(screen.getAllByRole("link", { name: "Back to Settings" })).toHaveLength(1)
+  })
+})

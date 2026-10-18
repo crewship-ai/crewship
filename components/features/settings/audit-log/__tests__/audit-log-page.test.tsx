@@ -237,7 +237,7 @@ describe("Audit log — range, display, detail and paging", () => {
   it("says what the page is once, in the section head", () => {
     render(<AuditLogPage />)
     expect(screen.getAllByText(/Every state-changing action, immutably recorded/)).toHaveLength(1)
-    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")!
     expect(head).toHaveTextContent("Admins and the owner")
   })
 })

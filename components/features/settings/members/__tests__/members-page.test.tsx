@@ -582,7 +582,7 @@ describe("Members — the person peek", () => {
   it("says what the page is once, in the section head, even while loading", async () => {
     api.mockImplementation(() => new Promise(() => {}))
     renderPage()
-    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")
     expect(head).not.toBeNull()
     expect(within(head!).getByRole("heading", { level: 2, name: "Members" })).toBeInTheDocument()
     expect(screen.getAllByText(/Who is in this workspace/)).toHaveLength(1)
