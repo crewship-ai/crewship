@@ -69,7 +69,7 @@ describe("PAR-069 crews panel rows", () => {
     const row = screen.getByRole("button", { name: "Ops" })
     expect(row.className).toMatch(/min-h-\[30px\]/)
     const tile = row.querySelector("[data-slot=crew-tile]") as HTMLElement
-    expect(tile.style.backgroundColor).toBe("rgb(46, 139, 78)")
+    expect(tile.style.backgroundColor.toLowerCase()).toBe("#2e8b4e")
     expect(tile.style.width).toBe("20px")
   })
   it("agents nest under the open crew with the LEAD mark and group counts are sans tabular", () => {

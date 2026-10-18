@@ -11,7 +11,7 @@ describe("CrewTile", () => {
   it("is a solid tile in the crew colour with a white glyph", () => {
     render(<CrewTile icon="search" color="#0F8C8C" size={48} />)
     const tile = document.querySelector("[data-slot=crew-tile]") as HTMLElement
-    expect(tile.style.backgroundColor).toBe("rgb(15, 140, 140)")
+    expect(tile.style.backgroundColor.toLowerCase()).toBe("#0f8c8c")
     expect(tile.style.width).toBe("48px")
     expect(tile.style.height).toBe("48px")
     expect(tile.querySelector("svg")?.getAttribute("class")).toMatch(/text-white/)
