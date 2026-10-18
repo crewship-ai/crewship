@@ -351,7 +351,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   return (
     <div className="rounded-xl border border-foreground/8 bg-card p-4 space-y-4">
       <div>
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Autonomy level</div>
+        <div className="text-label font-medium text-muted-foreground mb-2">Autonomy level</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {AUTONOMY_LEVELS.map((opt) => (
             <button
@@ -377,7 +377,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       </div>
 
       <div>
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Behavior mode</div>
+        <div className="text-label font-medium text-muted-foreground mb-2">Behavior mode</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {BEHAVIOR_MODES.map((opt) => {
             const disabledByCombination = opt.value === "block" && targetAutonomy === "full"
@@ -425,7 +425,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       <div>
         <label
           htmlFor={`max-ephemeral-${crewId}`}
-          className="block text-xs uppercase tracking-wider text-muted-foreground mb-2"
+          className="block text-label font-medium text-muted-foreground mb-2"
         >
           Ephemeral agent quota
         </label>
@@ -467,7 +467,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
         <div className="space-y-2 pt-2 border-t border-foreground/5">
           <label
             htmlFor={`crew-policy-reason-${crewId}`}
-            className="block text-xs uppercase tracking-wider text-muted-foreground"
+            className="block text-label font-medium text-muted-foreground"
           >
             Reason {policyFieldDirty ? "(required, audit trail)" : "(optional — quota-only change)"}
           </label>

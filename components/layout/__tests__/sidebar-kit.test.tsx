@@ -45,15 +45,15 @@ describe("sidebar-kit", () => {
     expect(btn.className).toContain("border-foreground/[0.08]")
   })
 
-  it("SidebarFilterButton is icon-only inside a 272 px panel so the search keeps its width", () => {
+  it("SidebarFilterButton keeps its \"Filter\" label inside a 272 px panel, with the active count beside it (PAR-155)", () => {
     render(
       <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => undefined }}>
         <SidebarFilterButton activeCount={1} />
       </SecondaryPanelContext.Provider>,
     )
     const btn = screen.getByRole("button", { name: /filter/i })
-    expect(btn.querySelector(".sr-only")?.textContent).toBe("Filter")
-    expect(btn.textContent).toContain("1")
+    expect(btn.querySelector(".sr-only")).toBeNull()
+    expect(btn.textContent).toBe("Filter1")
   })
 
   it("SidebarViewButton renders an accessible view control", () => {

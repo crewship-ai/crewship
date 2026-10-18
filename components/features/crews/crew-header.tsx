@@ -3,10 +3,10 @@
 import { AlertTriangle, Bot, Box, Lock } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 
 import { HeadChip } from "./cr-card"
+import { CrewTile } from "./crew-tile"
 import { isCrewPrivileged } from "./crew-privileged-badge"
 import type { CrewStatus } from "./crews-panel-model"
 import type { AgentSummary, CrewRecord } from "./crew-canvas-tabs/types"
@@ -74,15 +74,15 @@ export function CrewHeader({
         disabled={!onPickIcon}
         title="Change icon and colour"
         aria-label="Change icon and colour"
-        className="shrink-0 rounded-xl outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none"
+        className="shrink-0 rounded-[28%] outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none"
       >
-        <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="lg" />
+        <CrewTile icon={crew.icon} color={crew.color} size={48} />
       </button>
       <div className="min-w-0 flex-1">
         <h1 className="type-title truncate">{crew.name}</h1>
         {crew.description && <p className="mt-1 max-w-prose text-body text-muted-foreground">{crew.description}</p>}
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <StatusPill tone={pill.tone} label={pill.label} live={status.state === "working"} size="md" />
+          <StatusPill className="font-sans" tone={pill.tone} label={pill.label} live={status.state === "working"} size="md" />
           {lead && (
             <HeadChip icon={<AgentAvatar seed={lead.avatar_seed || lead.name} style={lead.avatar_style} avatarUrl={lead.avatar_url} className="size-4 rounded-sm" />}>
               Lead · {lead.name}

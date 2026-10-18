@@ -253,7 +253,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
                   )}
                 </Fact>
                 <Fact label="Refresh token">
-                  <StatusPill
+                  <StatusPill className="font-sans tracking-normal"
                     size="md"
                     status="SEALED"
                     icon={<ShieldOff className="h-3 w-3" />}

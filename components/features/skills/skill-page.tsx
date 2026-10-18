@@ -231,10 +231,10 @@ function OverviewTab({ skill, onTab }: { skill: SkillRow; onTab: (t: SkillTab) =
         <Card title="Last 7 days" icon={Activity}>
           <KV
             rows={[
-              ["Uses", <span key="u" className="font-mono">{usage?.uses_7d ?? 0}</span>],
+              ["Uses", <span key="u" className="tabular-nums">{usage?.uses_7d ?? 0}</span>],
               ["Last used", usage?.last_used_at ? formatRelativeShort(usage.last_used_at) : "Never"],
               ["Agents", String(holders.length)],
-              ["Errors", <span key="e" className={cn("font-mono", usage?.errors_7d ? "text-destructive" : undefined)}>{usage?.errors_7d ?? 0}</span>],
+              ["Errors", <span key="e" className={cn("tabular-nums", usage?.errors_7d ? "text-destructive" : undefined)}>{usage?.errors_7d ?? 0}</span>],
             ]}
           />
         </Card>
@@ -334,7 +334,7 @@ function MdTab({ skill, canEdit, onEdit }: { skill: SkillDetail; canEdit: boolea
             </button>
           ))}
         </div>
-        <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{full.split("\n").length} lines</span>
+        <span className="text-micro tabular-nums text-muted-foreground-soft">{full.split("\n").length} lines</span>
         <span className="flex-1" />
         <Button variant="ghost" size="sm" onClick={copy}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -413,7 +413,7 @@ function RecentUses({ skill, workspaceId, agents }: { skill: SkillRow; workspace
                   {who}
                   {ACTIVITY_WORDS[e.entry_type] ?? e.entry_type}
                 </span>
-                {failed ? <StatusPill tone="danger" label="Error" /> : <span />}
+                {failed ? <StatusPill className="font-sans tracking-normal" tone="danger" label="Error" /> : <span />}
               </li>
             )
           })}
@@ -512,7 +512,7 @@ function UsedByTab({
                 <Users className="size-4 text-muted-foreground" aria-hidden />
               )}
               <h2 className="text-control font-semibold">{label}</h2>
-              <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">
+              <span className="text-micro tabular-nums text-muted-foreground-soft">
                 {on}/{members.length}
               </span>
               <span className="flex-1" />
@@ -620,8 +620,8 @@ function VersionTab({ skill }: { skill: SkillRow }) {
     <Card title="Version" icon={Layers}>
       <KV
         rows={[
-          ["Source", src.url ? <a key="s" href={src.url} target="_blank" rel="noreferrer" className="font-mono text-primary-hover hover:underline">{src.label}</a> : src.label],
-          ["Version", <span key="v" className="font-mono">{skill.version || "—"}</span>],
+          ["Source", src.url ? <a key="s" href={src.url} target="_blank" rel="noreferrer" className="text-primary-hover hover:underline">{src.label}</a> : src.label],
+          ["Version", <span key="v" className="tabular-nums">{skill.version || "—"}</span>],
           ["Updated", skill.updated_at ? formatRelativeShort(skill.updated_at) : "—"],
         ]}
       />
@@ -769,11 +769,11 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
         <SkillSourceMark skill={skill} size={52} />
         <div className="grid min-w-0 gap-1.5">
           <h1 className="text-title font-semibold tracking-tight">{skillName(skill)}</h1>
-          <p className="font-mono text-label text-muted-foreground-soft">{skill.slug}</p>
+          {skillName(skill) !== skill.slug && <p className="font-mono text-label text-muted-foreground-soft">{skill.slug}</p>}
           {skill.description && <p className="text-control text-muted-foreground">{skill.description}</p>}
           <div className="flex flex-wrap items-center gap-1.5" data-slot="skill-chips">
-            {isMadeHere(skill) && skill.version && <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-label font-medium">v{skill.version}</span>}
-            <StatusPill tone={trust.tone} label={trust.label} />
+            {isMadeHere(skill) && skill.version && <span className="rounded-md bg-muted px-2 py-0.5 text-label font-medium tabular-nums">Published v{skill.version}</span>}
+            <StatusPill className="font-sans tracking-normal" tone={trust.tone} label={trust.label} />
             <Chip icon={src.kind === "repo" ? Layers : FileText}>{src.label}</Chip>
             <Chip icon={Layers}>{domainMeta(skill.category).label}</Chip>
             {licence && <Chip icon={Lock}>{licence}</Chip>}

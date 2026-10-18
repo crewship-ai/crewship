@@ -5,7 +5,6 @@ import { CircleDot, Clock, Hand, LayoutGrid, Moon, Play, Plus, SearchX } from "l
 import type { LucideIcon } from "lucide-react"
 
 import { usePagedList } from "@/hooks/use-paged-list"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -13,6 +12,7 @@ import { SidebarRow, SidebarSearch, SidebarSection, SidebarToolbar } from "@/com
 import { cn } from "@/lib/utils"
 
 import { CrSegment, LeadMark, LeadStar } from "./cr-card"
+import { CrewTile } from "./crew-tile"
 import type { ProvisioningState } from "./explorer-groups"
 import {
   CREW_VIEWS,
@@ -169,7 +169,7 @@ export function CrewsPanel({
         selected={selectedAgentId === a.id}
         aria-label={a.name}
         onSelect={opts.onPick ?? (() => onAgentSelect({ slug: a.slug, crewSlug: a.crew_id ? crewSlugById.get(a.crew_id) ?? null : null }))}
-        className={cn(ghost && "opacity-60")}
+        className={cn("min-h-[30px]", ghost && "opacity-60")}
       >
         <span className="relative shrink-0">
           <AgentAvatar
@@ -184,7 +184,7 @@ export function CrewsPanel({
         {lead ? (
           <LeadMark />
         ) : temp ? (
-          <StatusPill tone={temp.tone === "warn" ? "warn" : "muted"} label={temp.label} icon={<Clock className="h-3 w-3" aria-hidden />} />
+          <StatusPill className="font-sans" tone={temp.tone === "warn" ? "warn" : "muted"} label={temp.label} icon={<Clock className="h-3 w-3" aria-hidden />} />
         ) : a.status === "RUNNING" ? (
           <span aria-label="Working" className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
         ) : null}
@@ -208,11 +208,12 @@ export function CrewsPanel({
           aria-label={crew.name}
           aria-expanded={open}
           onSelect={() => onCrewSelect(crew.slug)}
+          className="min-h-[30px]"
         >
-          <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" className="size-5 rounded-md [&>svg]:size-3" />
+          <CrewTile icon={crew.icon} color={crew.color} size={20} />
           <span className="min-w-0 flex-1 truncate font-medium">{crew.name}</span>
           {status.needs > 0 ? (
-            <StatusPill tone="warn" label={String(status.needs)} aria-label={`${status.needs} need you`} />
+            <StatusPill className="font-sans" tone="warn" label={String(status.needs)} aria-label={`${status.needs} need you`} />
           ) : status.state === "working" ? (
             <span aria-label="Working" className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
           ) : null}
@@ -246,7 +247,7 @@ export function CrewsPanel({
                   <SidebarSection label="Crews" count={foundCrews.total ?? foundCrews.items.length}>
                     {foundCrews.items.map((c) => (
                       <SidebarRow key={c.id} as="div" aria-label={c.name} onSelect={() => onCrewSelect(c.slug)}>
-                        <CrewIcon icon={c.icon || "briefcase"} color={c.color} size="sm" className="size-5 rounded-md [&>svg]:size-3" />
+                        <CrewTile icon={c.icon} color={c.color} size={20} />
                         <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
                       </SidebarRow>
                     ))}
@@ -275,11 +276,12 @@ export function CrewsPanel({
                     selected={state.view === v.id}
                     data-testid={`crews-view-${v.id}`}
                     aria-keyshortcuts={String(i + 1)}
+                    className="min-h-[30px]"
                     onSelect={() => setState({ ...state, view: v.id })}
                   >
                     <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="min-w-0 flex-1 truncate">{v.label}</span>
-                    <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{model.counts[v.id]}</span>
+                    <span className="text-micro tabular-nums text-muted-foreground-soft">{model.counts[v.id]}</span>
                   </SidebarRow>
                 )
               })}
@@ -324,7 +326,7 @@ export function CrewsPanel({
                       <div className="flex items-center gap-1.5 px-3.5 pb-0.5 pt-2 text-micro text-muted-foreground-soft">
                         {s.key === "needs" ? <Hand className="size-3" aria-hidden /> : s.key === "working" ? <Play className="size-3" aria-hidden /> : <CircleDot className="size-3" aria-hidden />}
                         <span>{s.label}</span>
-                        <span className="font-mono tabular-nums">{s.rows.length}</span>
+                        <span className="tabular-nums">{s.rows.length}</span>
                       </div>
                     )}
                     {s.rows.map(crewRow)}

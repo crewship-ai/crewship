@@ -4,6 +4,7 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 
 export interface PanelSpace<T extends string> {
   key: T
@@ -47,13 +48,13 @@ export function PanelSpaces<T extends string>({
             data-drill-close
             onClick={() => onChange(s.key)}
             className={cn(
-              "kit-tap row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-control",
+              "kit-tap row-interactive row-hover min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1 text-left text-control",
               on && "row-selected font-medium",
             )}
           >
-            <Icon className={cn("h-3.5 w-3.5 shrink-0", on ? "text-foreground" : "text-muted-foreground")} aria-hidden />
+            <SidebarRowTile icon={Icon} active={on} />
             <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            {s.count != null && <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">{s.count}</span>}
+            {s.count != null && <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{s.count}</span>}
             <kbd aria-hidden className="shrink-0 rounded border border-border px-1 font-mono text-micro text-muted-foreground-soft">{i + 1}</kbd>
           </button>
         )

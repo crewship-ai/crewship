@@ -955,7 +955,7 @@ export function CreateSurfaceSection({
       {title != null && (
         <div className="flex items-center gap-1.5">
           {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/75">{title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground/75">{title}</h3>
           {/* A hint that truncates to "— a template fills the persona, model and t…"
               is worse than no hint. The section title survives; this does not. */}
           {hint != null && (
@@ -1022,7 +1022,7 @@ export function CreateSurfaceField({
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <label
         htmlFor={htmlFor}
-        className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+        className="flex items-center gap-1 text-[12px] font-semibold text-muted-foreground"
       >
         {label}
         {required && (

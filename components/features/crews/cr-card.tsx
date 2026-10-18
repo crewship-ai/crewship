@@ -45,7 +45,7 @@ export function CrCard({
       <header className="flex min-h-12 items-center gap-2.5 px-4 pb-2 pt-3.5">
         <ConceptIcon concept={concept} icon={icon} accent="blue" variant="chip" className="h-7 w-7 rounded-md" />
         <h2 className="min-w-0 truncate text-body font-semibold text-foreground">{title}</h2>
-        {count != null && <span className="font-mono text-label tabular-nums text-muted-foreground">{count}</span>}
+        {count != null && <span className="text-label tabular-nums text-muted-foreground">{count}</span>}
         <span className="flex-1" />
         {link && <CardLink {...link} />}
         {action}
@@ -181,7 +181,7 @@ export function CrSegment<T extends string>({ value, options, onChange, label, c
 /** The LEAD mark beside an agent's name. */
 export function LeadMark({ className }: { className?: string }) {
   return (
-    <span className={cn("inline-flex items-center rounded-sm bg-chip-violet-bg px-1 font-mono text-micro font-semibold tracking-wide text-chip-violet-fg", className)}>
+    <span className={cn("inline-flex items-center rounded-sm bg-chip-violet-bg px-1 font-sans text-micro font-bold tracking-wide text-chip-violet-fg", className)}>
       LEAD
     </span>
   )

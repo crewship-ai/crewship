@@ -267,7 +267,7 @@ export function BarMenuSection({ label, count, tone, overflow, children }: BarMe
   return (
     <div data-testid={`bar-menu-section-${label.toLowerCase().replace(/\s+/g, "-")}`}>
       <div className="flex items-center gap-2 border-b border-foreground/[0.04] bg-surface-subtle/60 px-3 py-1">
-        <span className={cn("type-meta font-semibold", tone === "warn" ? "text-warn" : "text-muted-foreground")}>
+        <span className={cn("type-meta font-semibold", tone === "warn" ? "text-warn" : "text-foreground/40")}>
           {label}
         </span>
         {count != null && (

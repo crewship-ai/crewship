@@ -156,7 +156,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
   const mine = (ws: WorkspaceData) => isOwnPersonal(ws, data?.user.id)
   const own = workspaces.filter(mine)
   const shared = workspaces.filter((ws) => !mine(ws))
-  const sectionLabel = "text-micro uppercase tracking-wider text-muted-foreground font-medium"
+  const sectionLabel = "text-micro text-muted-foreground font-semibold"
   return (
     <>
       {/* The personal account first, the way the person is "themselves"

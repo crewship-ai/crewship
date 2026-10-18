@@ -424,7 +424,7 @@ export function PageSaveBar({
               <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--save-bar-fg)] opacity-70 motion-safe:animate-ping" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--save-bar-fg)]" />
             </span>
-            <span><span className="font-mono tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
+            <span><span className="tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
           </span>
           <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-micro sm:inline">⌘S</kbd>
           <Button type="button" variant="ghost" size="sm"

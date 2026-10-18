@@ -799,7 +799,7 @@ WORK STYLE: …`}
               <p className="min-w-0 flex-1 text-[10.5px] text-muted-foreground flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/15 text-success border border-success/25">
+                    <span className="text-micro font-semibold px-1.5 py-0.5 rounded bg-success/15 text-success border border-success/25">
                       Pre-filled
                     </span>
                     <span>
@@ -809,7 +809,7 @@ WORK STYLE: …`}
                   </>
                 ) : draft.editedPersonaPrompt !== null && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn/15 text-warn border border-warn/25">
+                    <span className="text-micro font-semibold px-1.5 py-0.5 rounded bg-warn/15 text-warn border border-warn/25">
                       Edited
                     </span>
                     <span>
