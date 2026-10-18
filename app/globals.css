@@ -1272,6 +1272,10 @@ body {
     position: fixed; top: 48px; right: 0; bottom: 0; left: 56px; z-index: 39;
     background: color-mix(in srgb, var(--foreground) 6%, transparent);
   }
+  /* v67 phone detail (core.js:331): one bar with the way back first and the
+     item's name; the area's name gives way while a page puts a back control
+     in the bar (SubBar `leading`, marked data-phone-back). */
+  header:has([data-phone-back]) [data-slot="area-crumb"] { display: none; }
   .secondary-panel-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; background: var(--background); }
   .secondary-panel-toolbar {
     display: flex;
@@ -2148,7 +2152,3 @@ body {
   }
 }
 
-/* v67 phone detail (core.js:331): one bar with the way back first and the
-   item's name; the area's name gives way while a page puts a back control in
-   the bar (SubBar `leading`, marked data-phone-back). */
-header:has([data-phone-back]) [data-slot="area-crumb"] { display: none; }
