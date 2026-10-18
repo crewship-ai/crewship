@@ -226,11 +226,17 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(forbidden()).toEqual([])
   })
 
-  it.each(["/issues", "/issues/manage/other", "/issues/manage-all"])("does not widen adjacent management path %s", async pathname => {
+  // Harbor 2: a known path outside the access says so (G03); a path the app
+  // has no page for is the not-found state. Neither mounts the screen.
+  it.each([
+    ["/issues", /isn’t part of your access$/],
+    ["/issues/manage/other", "Not found"],
+    ["/issues/manage-all", /isn’t part of your access$/],
+  ] as const)("does not widen adjacent management path %s", async (pathname, copy) => {
     workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: ["account_security"] }]
     nav.pathname = pathname
     mount()
-    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect((await screen.findAllByText(copy)).length).toBeGreaterThan(0)
     expect(screen.queryByTestId("page")).toBeNull()
     expect(forbidden()).toEqual([])
   })
