@@ -22,8 +22,8 @@ export function ConnectionBadge({ status }: { status: string }) {
       status === "connected"
         ? "bg-success/10 text-success dark:bg-success/30 dark:text-success"
         : status === "connecting"
-          ? "bg-warn/10 text-warn dark:bg-warn/30 dark:text-warn"
-          : "bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive"
+          ? "bg-chip-warn-bg text-chip-warn-fg"
+          : "bg-chip-danger-bg text-chip-danger-fg"
     )}>
       {status === "connected" ? (
         <Wifi className="h-3 w-3" />
