@@ -2,10 +2,11 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, KeyRound } from "lucide-react"
+import { ArrowLeft, KeyRound, Link2Off } from "lucide-react"
 import { AUTH_BUTTON, AuthCard, AuthLink, AuthPasswordInput, AuthReceipt, AuthScreen } from "@/components/branding/auth-card"
 import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
+import { PageEmpty } from "@/components/layout/page-state"
 import { Spinner } from "@/components/ui/spinner"
 import { serverFetch } from "@/lib/server-base"
 
@@ -89,6 +90,25 @@ function ResetForm() {
   useEffect(() => {
     if (done && secondsLeft <= 0) router.push("/login")
   }, [done, secondsLeft, router])
+
+  if (!token) {
+    return (
+      <AuthScreen panel="reset">
+        <AuthCard
+          icon={KeyRound}
+          title="Choose a new password"
+          links={<AuthLink href="/forgot-password">Request a new link</AuthLink>}
+        >
+          <PageEmpty
+            icon={Link2Off}
+            title="This reset link is incomplete"
+            description="Open the link from the email again, or ask for a new one."
+            className="p-0"
+          />
+        </AuthCard>
+      </AuthScreen>
+    )
+  }
 
   const passwordError = fieldError?.field === "password" ? fieldError.message : null
   const confirmError = fieldError?.field === "confirm" ? fieldError.message : null

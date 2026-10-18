@@ -24,6 +24,21 @@ export default function SignupPage() {
   // operator (an env var); the visitor gets the way in that exists.
   const [closed, setClosed] = useState(false)
   const router = useRouter()
+  // setup-status already says whether sign-up is on; don't draw a form the
+  // server will refuse. A failed probe leaves the form — the 403 path above
+  // still catches it.
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve(serverFetch("/api/v1/system/setup-status"))
+      .then((r) => (r?.ok ? r.json() : null))
+      .then((d: { allow_signup?: boolean } | null) => {
+        if (!cancelled && d?.allow_signup === false) setClosed(true)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
  const [invitationToken,setInvitationToken]=useState("")
  useEffect(()=>{setInvitationToken(captureInvitationProof())},[])
  const joinPath = invitationToken ? "/join" : ""

@@ -73,6 +73,8 @@ it.each([
   expect(router.push).not.toHaveBeenCalled()
 })
 it.each(["network", "malformed body"])("recovers after %s and permits a deliberate retry", async (failure) => {
+  // The page asks setup-status first; sign-up is on.
+  vi.mocked(serverFetch).mockResolvedValueOnce(Response.json({ needs_bootstrap: false, allow_signup: true }))
   if (failure === "network") vi.mocked(serverFetch).mockRejectedValueOnce(new Error("offline"))
   else vi.mocked(serverFetch).mockResolvedValueOnce(new Response("bad response", { status: 503 }))
   vi.mocked(serverFetch).mockResolvedValueOnce(Response.json({ ok: true }, { status: 202 }))
