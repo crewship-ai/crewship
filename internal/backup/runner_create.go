@@ -474,7 +474,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	var dump *DBDump
 	switch opts.Scope {
 	case ScopeWorkspace:
-		dump, err = DumpWorkspace(ctx, db, target.ID)
+		dump, err = dumpWorkspaceWithCategories(ctx, db, target.ID, filter)
 	case ScopeCrew:
 		if len(target.CrewTargets) > 0 {
 			dump, err = DumpCrew(ctx, db, target.CrewTargets[0].ID)

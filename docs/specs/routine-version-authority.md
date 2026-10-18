@@ -89,3 +89,19 @@ workspaces by main-schema ID and slug. Unsupported generated or hidden admission
 fields and unknown receipt columns are refused; unrelated generated columns retain
 UNKNOWN0 compatibility. Manifest versions only strengthen refusal, never source
 authentication. No receipt import, admission creation or execution is enabled.
+
+Zero-head receipt storage has complete scoped backup inventory, category and
+owning-routine filters before any capture cutover is registered. Selected
+receipt/source metadata supports native SQL TEXT and INTEGER proof fields and
+NULL or valid UTF-8 TEXT optional bindings. Unsupported native bindings or
+invalid UTF-8 cause the selected export to fail as a whole, without changing
+source rows or successfully publishing a bundle. Excluding routines excludes
+both pipelines and receipts. Genuine old storage absence is preserved; partial
+or unknown modern table inventories are refused. This structural transport check
+does not certify full DDL authenticity, imported provenance or runtime
+permission.
+
+Storage-shape tests manually seed receipt rows to exercise export support. Such
+rows are not genuine legacy capture evidence. Native core capture and persisted
+acknowledgements require a separate append-only cutover and genuine integration
+qualification.

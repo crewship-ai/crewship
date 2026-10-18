@@ -219,6 +219,7 @@ var BackupTables = []string{
 	"pipelines",
 	"access_preset_selections", // informational choice; after membership and typed resource parents
 	"pipeline_versions",
+	"pipeline_legacy_head_receipts",
 	"pipeline_drafts",
 	"pipeline_schedules",
 	"pipeline_webhooks",
@@ -464,7 +465,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "pipeline_versions":
+	case "pipeline_versions", "pipeline_legacy_head_receipts":
 		// Human/autonomous historical versions have no execution origin. Scope
 		// through the owning routine, never the optional admission fence.
 		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
@@ -552,6 +553,10 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 // but we issue the explicit PRAGMA afterwards to be safe against
 // driver changes.
 func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump, error) {
+	return dumpWorkspaceWithCategories(ctx, db, workspaceID, nil)
+}
+
+func dumpWorkspaceWithCategories(ctx context.Context, db *sql.DB, workspaceID string, filter categoryFilter) (*DBDump, error) {
 	// sql.LevelSerializable maps to BEGIN IMMEDIATE on modernc.org/sqlite,
 	// which is what we want: the writer lock is grabbed on the first
 	// statement so a concurrent writer cannot slip rows between our
@@ -564,6 +569,15 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		return nil, fmt.Errorf("backup: begin dump tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if filter.table("pipelines") != filter.table("pipeline_legacy_head_receipts") {
+		return nil, ErrLegacyHeadReceiptExportUnsupported
+	}
+	if filter.table("pipeline_legacy_head_receipts") {
+		if err := checkLegacyHeadReceiptExportIn(ctx, tx, workspaceID); err != nil {
+			return nil, err
+		}
+	}
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
