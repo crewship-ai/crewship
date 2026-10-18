@@ -177,7 +177,7 @@ function OverviewCard({ icon: Icon, title, right, testId, children }: { icon: Lu
   return (
     <section className="overflow-hidden rounded-card border border-border bg-card" data-testid={testId} aria-label={title}>
       <header className="flex items-center gap-2.5 px-4.5 pb-2 pt-3.5">
-        <span className="icon-tile grid h-7 w-7 place-items-center rounded-md"><Icon className="h-4 w-4" aria-hidden /></span>
+        <span className="icon-tile grid size-[28px] place-items-center rounded-md"><Icon className="h-4 w-4" aria-hidden /></span>
         <h2 className="text-control font-semibold tracking-normal">{title}</h2>
         <span className="flex-1" />
         {right}

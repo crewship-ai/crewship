@@ -438,7 +438,8 @@ test.describe("v67 parity", () => {
       await page.keyboard.press("Escape")
       await page.getByTestId("activity-trigger").click()
       const pop = page.getByTestId("activity-popover")
-      expect(Math.round((await pop.boundingBox())!.width)).toBe(480)
+      // Measured after the open animation; its first frame is ~479 px.
+      await expect.poll(async () => Math.round((await pop.boundingBox())!.width)).toBe(480)
       await expect(page.getByRole("link", { name: /Open Activity/ })).toBeVisible()
     })
   })
