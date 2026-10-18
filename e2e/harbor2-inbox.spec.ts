@@ -410,7 +410,16 @@ for (const vp of [{ n: "1440", width: 1440, height: 900 }, { n: "1024", width: 1
       await seed(page)
       await serveFeed(page, { inbox: Object.values(ASK) })
       let sent: { value?: string } | null = null
-      await page.route(/\/api\/v1\/escalations\/esc_e2e_c\/supply/, async (route) => { sent = route.request().postDataJSON(); await route.fulfill({ json: { credential: null } }) })
+      // The answer is held until the field has been checked: on success the
+      // dock gives way to the "Approved" record, so the field is only there
+      // while the request is in flight. It must already be empty then.
+      let release: () => void = () => {}
+      const answered = new Promise<void>((r) => { release = r })
+      await page.route(/\/api\/v1\/escalations\/esc_e2e_c\/supply/, async (route) => {
+        sent = route.request().postDataJSON()
+        await answered
+        await route.fulfill({ json: { credential: null } })
+      })
       await page.goto("/inbox?item=ib_e2e_c")
       const field = page.getByLabel("Value")
       await expect(field).toHaveAttribute("type", "password")
@@ -418,6 +427,9 @@ for (const vp of [{ n: "1440", width: 1440, height: 900 }, { n: "1024", width: 1
       await page.getByRole("button", { name: "Supply credential" }).click()
       await expect.poll(() => sent?.value).toBe("secret_e2e_value")
       await expect(field).toHaveValue("")
+      await expect(page.locator("body")).not.toContainText("secret_e2e_value")
+      release()
+      await expect(page.getByRole("main", { name: "Inbox detail" }).getByRole("status").getByRole("heading", { name: "Approved" })).toBeVisible()
       await expect(page.locator("body")).not.toContainText("secret_e2e_value")
     })
 
