@@ -24,6 +24,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Runtime, authority and budgets
 
+- [Routine version authority identity](routine-version-authority.md): immutable content/authority storage with preserved history and integer pins; no publication activation.
+
 - [Publication grant provenance](routine-publication-grant-bindings.md): host-only exact selected-grant and issuer membership bindings; no publication or execution activation.
 
 - [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
