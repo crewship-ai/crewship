@@ -323,8 +323,24 @@ describe("the frame owns no viewport height of its own", () => {
     const { container } = renderStatus("ready")
     const frame = container.querySelector('[data-slot="public-page-frame"]')!
     expect(frame.className).toContain("max-w-[1200px]")
-    expect(frame.className).toContain("px-4")
-    expect(frame.className).toContain("md:px-6")
+    // In px, not the spacing scale: --spacing is 0.23rem, so px-4 / md:px-6
+    // render about 13.7 / 20.5 px, short of the v67 .wrap gutter (16 / 24 px).
+    expect(frame.className).toContain("px-[16px]")
+    expect(frame.className).toContain("md:px-[24px]")
+    expect(frame.className).not.toMatch(/(^|\s)(md:)?px-\d/)
+  })
+
+  it("lets the password card take the whole phone screen (no gutter around it below 768 px)", () => {
+    // AuthCard is "a frame on a desk; the whole screen on a phone", as on
+    // /login. Inside the frame's gutter its refusal band and pinned footer
+    // stopped short of both edges at 390 px.
+    const { container } = renderStatus("password")
+    const frame = container.querySelector('[data-slot="public-page-frame"]')!
+    expect(frame.className).toContain("max-md:p-0")
+    for (const status of ["loading", "unavailable", "ready"] as const) {
+      const other = renderStatus(status).container.querySelector('[data-slot="public-page-frame"]')!
+      expect(other.className, status).not.toContain("max-md:p-0")
+    }
   })
 })
 

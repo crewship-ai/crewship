@@ -202,8 +202,10 @@ for (const w of PUBLIC_WIDTHS) {
 
   test(`P02 /p/<token> password at ${w.width}: auth card, server text verbatim, token not in URL`, async ({ page }) => {
     await page.setViewportSize({ width: w.width, height: w.height })
+    // The refusal exactly as internal/api/pages_public.go replyPublicPasswordRefused
+    // writes it: 401, the sentence as a plain string under "error".
     await page.route("**/api/v1/public/pages/*/unlock", (route) =>
-      route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: { message: "that link and password do not match" } }) }),
+      route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "that link and password do not match", password_required: true }) }),
     )
     await page.route("**/api/v1/public/pages/*", (route) =>
       route.fulfill({ status: 401, contentType: "application/json", body: "{}" }),
@@ -214,7 +216,11 @@ for (const w of PUBLIC_WIDTHS) {
     await expect(page.locator("[data-slot=auth-lockup]")).toHaveCount(0)
     await page.getByLabel("Password").fill("not-the-password")
     await page.getByRole("button", { name: "Open" }).click()
-    await expect(page.getByRole("alert")).toHaveText("that link and password do not match")
+    // Next.js mounts an empty <div role="alert" id="__next-route-announcer__">
+    // for client-side route announcements, so a bare getByRole("alert")
+    // resolves to two elements. Exclude only the announcer: the page must
+    // still carry exactly one alert, and it must read the server's sentence.
+    await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveText("that link and password do not match")
     if (w.width < 768) {
       expect(Math.round(((await c.boundingBox())!).width)).toBe(w.width)
     } else {
@@ -246,8 +252,12 @@ for (const w of PUBLIC_WIDTHS) {
     await expect(page.locator("[data-slot=public-page-meta]")).toContainText("Shared read-only · rendered")
     await expect(page.locator("[data-slot=public-page-footer]")).toContainText("This link stops working")
     expect(await page.locator("[data-slot=public-page-frame] button, [data-slot=public-page-frame] a").count()).toBe(0)
+    // The gutter is the frame's inline padding: the frame itself spans the
+    // viewport below 1200 px, so measure where its content starts.
     const frame = (await page.locator("[data-slot=public-page-frame]").boundingBox())!
-    expect(Math.round(frame.x)).toBe(w.width >= 768 ? 24 : 16)
+    const head = (await page.locator("[data-slot=public-page-header]").boundingBox())!
+    expect(Math.round(frame.x)).toBe(0)
+    expect(Math.round(head.x - frame.x)).toBe(w.width >= 768 ? 24 : 16)
     await noSidewaysScroll(page)
   })
 

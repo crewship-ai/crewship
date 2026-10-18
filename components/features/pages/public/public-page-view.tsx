@@ -64,11 +64,17 @@ export function PublicPageView({
 }: PublicPageViewProps) {
   // No page-level height of its own: the caller's frame (the public bar plus
   // this) decides how tall the page is, so the bar and the content never
-  // fight over the viewport. 16 px gutter on a phone, 24 px from tablet.
+  // fight over the viewport. 16 px gutter on a phone, 24 px from tablet, in
+  // px: the spacing scale (--spacing 0.23rem) would render 13.7 / 20.5 px.
+  // The password state is AuthCard, which owns the whole phone screen (as on
+  // /login), so it gets no gutter below 768 px.
   return (
     <main
       data-slot="public-page-frame"
-      className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-5 px-4 py-6 md:px-6 md:py-8"
+      className={cn(
+        "mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-5 px-[16px] py-6 md:px-[24px] md:py-8",
+        status === "password" && "max-md:p-0",
+      )}
     >
       <PublicPageBody
         status={status}
