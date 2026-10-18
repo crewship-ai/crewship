@@ -2367,6 +2367,39 @@ selector in this release. Statuses: 200 document; 400 unsupported selector;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
 
+## List saved document checkpoints
+
+`GET /api/v1/pages/{slug}/document/checkpoints`
+
+Authentication: a current human credential with current Page and document read
+access; scoped CLI credentials need `pages:read`. Agent run credentials are
+refused. Request: the Page slug or immutable `@PageID` and current workspace;
+no request body. Response: `checkpoints`, an array of at most 1000 entries with
+`id`, `rev`, `schema`, `actor` and `created_at`. This does not create a checkpoint.
+Statuses: 200 list; 400 invalid selector; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page or document;
+409 incompatible state; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoints <page-slug>`.
+
+## Read one saved document checkpoint
+
+`GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}`
+
+Authentication: the same current human read access, checked again on each read.
+A historical checkpoint never restores earlier permissions. Request: a Page
+selector and checkpoint ID of 1–128 ASCII letters, digits, underscores or hyphens;
+no request body. Response: exactly `page_id`, `id`, `rev`, `schema` and the
+retained document `content`. No editing epoch, binary snapshot or write
+capability is returned. Unsupported schemas return 409 without content.
+Statuses: 200 checkpoint; 400 invalid identity; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page, document or checkpoint;
+409 incompatible schema; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoint <page-slug> <checkpoint-id>`.
+
 ## Initialize a native document
 
 `POST /api/v1/pages/{slug}/document/initialize`
