@@ -11,7 +11,7 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarToolbar } from "@/components/layout/sidebar-kit"
 import { SidebarRowTile } from "@/components/layout/row-tile"
 import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
-import { SecondaryPanel, useCloseSecondaryPanelSheet, useIsTabletPanel } from "@/components/layout/secondary-panel"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
@@ -101,11 +101,10 @@ export function DrillPage<S extends string = string>({
   React.useState(() => migrateDrillCollapse(title, id))
   const closeSheet = useCloseSecondaryPanelSheet()
   const hasPanel = nav != null || facets != null || spaces != null
-  const tablet = useIsTabletPanel() && !isMobile
-  // On a desktop with a panel the way back is the panel's first row; on a
-  // phone the panel is a sheet and on a tablet it floats, closed until the top
-  // bar's panel button opens it, so there the page keeps it on the sub-bar.
-  const backOnSubBar = isMobile || tablet || !hasPanel
+  // With a panel the way back is the panel's first row (v67 pk-back), on a
+  // desk and on a tablet, where a drill page's panel is a docked list. On a
+  // phone the panel is a sheet, so the page keeps it on the sub-bar.
+  const backOnSubBar = isMobile || !hasPanel
 
   return (
     // One Save for the nested page, as in Settings (components/ui/page-save-bar).
@@ -130,7 +129,7 @@ export function DrillPage<S extends string = string>({
       />
       <div className="flex min-h-0 flex-1">
         {hasPanel && (
-          <SecondaryPanel id={id} label={`${title} navigation`}>
+          <SecondaryPanel kind="list" id={id} label={`${title} navigation`}>
             {/* v67 pk-back: the way back is the panel's first row, above the
                 toolbar. On a phone the sheet has the arrow on the sub-bar. */}
             {!backOnSubBar && (

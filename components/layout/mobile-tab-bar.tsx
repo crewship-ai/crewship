@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Menu } from "lucide-react"
+import { LayoutGrid } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { visiblePhoneTabs } from "@/lib/nav-sections"
@@ -69,7 +69,7 @@ export function MobileTabBar() {
         onClick={() => setMobileNavOpen(true)}
         className="flex flex-1 flex-col items-center justify-center gap-0.5 text-micro text-muted-foreground transition-colors"
       >
-        <Menu className="h-5 w-5" />
+        <LayoutGrid className="h-5 w-5" />
         <span>More</span>
       </button>
     </nav>

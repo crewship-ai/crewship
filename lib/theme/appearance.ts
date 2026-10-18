@@ -69,7 +69,9 @@ export const LEGACY_TEXT_SIZE: TextSize = "default"
 export const THEME_STORAGE_KEY = "theme"
 export const DEFAULT_THEME: ThemeChoice = "system"
 export const LEGACY_THEME: ThemeChoice = "dark"
-export const DEFAULT_SIDEBAR: SidebarChoice = "hover"
+// Pinned open: a new person sees the names of every place (owner decision
+// 2026-10-18, v67). A tablet still shows the rail (components/ui/sidebar.tsx).
+export const DEFAULT_SIDEBAR: SidebarChoice = "pinned"
 export const DEFAULT_MOTION: MotionChoice = "system"
 
 /** localStorage keys; per browser, like the theme and the accent. */

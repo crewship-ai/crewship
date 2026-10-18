@@ -31,6 +31,7 @@ import { NotificationSoundEvents } from "@/components/layout/notification-sound-
 import { AppearanceSync } from "@/components/layout/appearance-sync"
 import { WorkspaceAccentStyle } from "@/components/layout/workspace-accent"
 import { SidebarPreference } from "@/components/layout/sidebar-preference"
+import { useAppStore } from "@/lib/store"
 
 export default function DashboardLayout({
   children,
@@ -52,6 +53,7 @@ export default function DashboardLayout({
   const trustedWorkspaceId = useTrustedWorkspaceId()
   useAccessModeWatcher()
   const isMobile = useIsMobile()
+  const setPanelSlot = useAppStore((s) => s.setPanelSlot)
   const pathname = usePathname()
   const independentPage = pathname === "/settings" || (pathname.startsWith("/admin") && session?.user.is_instance_admin === true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -134,6 +136,12 @@ export default function DashboardLayout({
           <SidebarPreference />
           <AppSidebar />
           <SidebarInset>
+            {/* v67: the page's panel column starts at the top of the card with
+                its own 48 px toolbar; the top bar spans the content column
+                only. SecondaryPanel renders into the slot when docked. */}
+            <div className="flex min-h-0 flex-1">
+            <div ref={setPanelSlot} data-slot="panel-slot" className="flex shrink-0 empty:hidden" />
+            <div data-slot="content-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
             <AppToolbar />
             {/* One banner at a time (app-banners.tsx): each asks the queue
                 for the slot, highest priority first. */}
@@ -152,6 +160,8 @@ export default function DashboardLayout({
                   : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} pathname={pathname} />
                 : children}
               </WorkspaceAvailabilityBoundary>
+            </div>
+            </div>
             </div>
             {/* A flex sibling, not a fixed bar: it takes real space, so the
                 scroll container above it needs no compensating padding and

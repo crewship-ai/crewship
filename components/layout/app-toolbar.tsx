@@ -148,7 +148,7 @@ export function AppToolbar() {
     }
 
     return (
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1.5 min-w-0" data-slot="area-crumb">
         {area ? (
           <>
             <span className="area-tile" aria-hidden><area.icon /></span>
@@ -205,7 +205,9 @@ export function AppToolbar() {
         {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3).
             Tablet: it floats over the content and this button toggles it
             (v67 panelBtn, COM-05). */}
-        {(isMobile || tabletPanel) && secondaryPanel && (
+        {/* A tablet's list panel (Inbox, Settings, Admin) is docked, so it has
+            no button (v67 panelBtn is for filter panels only). */}
+        {(isMobile || (tabletPanel && secondaryPanel?.kind !== "list")) && secondaryPanel && (
           <Button
             variant="ghost"
             size="icon-sm"

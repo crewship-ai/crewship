@@ -113,6 +113,7 @@ describe("the user menu (PAR-141)", () => {
     expect(m).toHaveAttribute("data-align", "start")
   })
   it("opens to the right of the rail when the sidebar is a rail", () => {
+    localStorage.setItem("crewship_sidebar_mode", "hover")
     open()
     expect(screen.getByRole("menu")).toHaveAttribute("data-side", "right")
   })

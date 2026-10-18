@@ -84,7 +84,7 @@ describe("Admin navigation panel", () => {
     expect(await screen.findByRole("region", { name: "Admin Runtime" })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get("tab")).toBe("providers")
     // The list moved to the top bar's sheet; Back returns to it and drops ?tab=.
-    expect(useAppStore.getState().secondaryPanel).toEqual({ id: "admin", label: "Admin navigation" })
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "admin", label: "Admin navigation" })
     fireEvent.click(screen.getByRole("button", { name: "Back to Admin" }))
     await waitFor(() => expect(panel()).toHaveAttribute("data-phone", "inline"))
     expect(new URLSearchParams(window.location.search).has("tab")).toBe(false)

@@ -246,7 +246,12 @@ export function SubBar<T extends string = string>({
       <div className={cn("shrink-0", className)}>
         {createPortal(
           <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" role="group" aria-label={ariaLabel}>
-            {leading && <div className="flex shrink-0 items-center">{leading}</div>}
+            {/* v67 phone detail: the way back first, then what is open — the
+                area's name in the top bar gives way (globals.css :has rule). */}
+            {leading && <div className="flex shrink-0 items-center" data-phone-back>{leading}</div>}
+            {leading && (
+              <span className="min-w-0 truncate text-default font-semibold text-foreground">{section ?? title}</span>
+            )}
             <div className="flex-1" />
             <ActionsSlot>{actions}</ActionsSlot>
           </div>,
@@ -425,14 +430,19 @@ export function SubBarPrimary({ icon: Icon, className, children, asChild, ...pro
       asChild={asChild}
       variant="default"
       size="sm"
-      className={cn("gap-1.5 px-3", (Icon || phoneIcon) && "max-md:min-w-8 max-md:px-2 coarse:max-md:min-w-[44px]", className)}
+      // Tablet (v67 index.html:275): an action with an icon is an icon square
+      // below 1280 too, so the path, actions and bells fit one 48 px row.
+      className={cn("gap-1.5 px-3", Icon && "max-xl:min-w-8 max-xl:px-2 coarse:max-xl:min-w-[44px]", phoneIcon && "max-md:min-w-8 max-md:px-2 coarse:max-md:min-w-[44px]", className)}
+      title={Icon && typeof children === "string" ? children : undefined}
       {...props}
     >
       {Icon && <Icon className="h-3 w-3" />}
       {phoneIcon && <Plus className="h-3 w-3 md:hidden" aria-hidden />}
       {asChild ? (
         <Slot.Slottable>{children}</Slot.Slottable>
-      ) : Icon || phoneIcon ? (
+      ) : Icon ? (
+        <span className="max-xl:sr-only">{children}</span>
+      ) : phoneIcon ? (
         <span className="max-md:sr-only">{children}</span>
       ) : (
         children
@@ -450,11 +460,12 @@ export function SubBarSecondary({ icon: Icon, className, children, asChild, ...p
       asChild={asChild}
       variant="ghost"
       size="sm"
-      className={cn("gap-1.5", Icon ? "max-md:min-w-8 max-md:px-2" : "max-md:hidden", className)}
+      className={cn("gap-1.5", Icon ? "max-xl:min-w-8 max-xl:px-2" : "max-md:hidden", className)}
+      title={Icon && typeof children === "string" ? children : undefined}
       {...props}
     >
       {Icon && <Icon className="h-3 w-3" />}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : Icon ? <span className="max-md:sr-only">{children}</span> : children}
+      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : Icon ? <span className="max-xl:sr-only">{children}</span> : children}
     </Button>
   )
 }
