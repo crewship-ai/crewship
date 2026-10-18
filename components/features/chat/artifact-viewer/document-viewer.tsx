@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useLayoutEffect, useRef } from "react"
 import { ArrowLeft, Maximize2, Minimize2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { DocumentViewerProps, ViewerTarget } from "./types"
@@ -19,8 +19,28 @@ function sameTarget(a: ViewerTarget, b: ViewerTarget) {
 export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, layout, expanded, onClose, onExpandedChange, openerRef }: DocumentViewerProps<Content>) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const identity = target ? JSON.stringify([scopeKey, target.workspaceId, target.pageId, target.type, target.mode]) : null
-  useEffect(() => {
-    if (identity) closeButton.current?.focus()
+  const previousIdentity = useRef(identity)
+  const restoreFrame = useRef<number | null>(null)
+  const closeRequest = useRef<{identity: string | null; opener: HTMLElement | null; ref: DocumentViewerProps<Content>["openerRef"]} | null>(null)
+  useLayoutEffect(() => {
+    const previous = previousIdentity.current
+    previousIdentity.current = identity
+    if (identity) {
+      closeRequest.current = null
+      closeButton.current?.focus()
+    } else if (previous && closeRequest.current?.identity === previous) {
+      const request = closeRequest.current
+      closeRequest.current = null
+      // Restore only after the host actually closed, and cancel if it reopens.
+      restoreFrame.current = requestAnimationFrame(() => {
+        restoreFrame.current = null
+        if (request.opener?.isConnected && request.ref?.current === request.opener) request.opener.focus()
+      })
+    }
+    return () => {
+      if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current)
+      restoreFrame.current = null
+    }
   }, [identity])
 
   if (!target) return null
@@ -28,12 +48,8 @@ export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, la
     read.scopeKey === scopeKey && validTarget(read.target) && sameTarget(target, read.target) &&
     typeof read.title === "string" && read.title.trim() ? read : undefined
   function close() {
-    const opener = openerRef?.current
+    closeRequest.current = {identity, opener: openerRef?.current ?? null, ref: openerRef}
     onClose()
-    // Let the controlled host reveal the chat before returning focus to its card.
-    requestAnimationFrame(() => {
-      if (opener?.isConnected && openerRef?.current === opener) opener.focus()
-    })
   }
   const mobile = layout === "mobile"
   const CloseIcon = mobile ? ArrowLeft : X
