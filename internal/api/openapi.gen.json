@@ -15941,6 +15941,11 @@
             "type": "string"
           }
         },
+        "required": [
+          "passed",
+          "status",
+          "tested_at"
+        ],
         "type": "object"
       },
       "RoutineWebhookReceipt": {

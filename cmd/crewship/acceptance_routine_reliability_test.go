@@ -511,6 +511,7 @@ func TestAcceptance_RoutineFolders(t *testing.T) {
 	if got := folders(); len(got) != 0 {
 		t.Fatalf("after delete: %+v", got)
 	}
+	listed = nil // json.Unmarshal into a reused slice keeps fields the new JSON omits
 	if err := json.Unmarshal([]byte(run("list")), &listed); err != nil || len(listed) != 2 || listed[0].FolderID != "" {
 		t.Fatalf("routines must survive the folder: %v %+v", err, listed)
 	}
