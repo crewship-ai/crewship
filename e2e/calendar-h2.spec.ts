@@ -136,6 +136,12 @@ test.describe("desktop", () => {
   })
 
   test("CAL-07 click on an empty slot opens Schedule a start prefilled", async ({ page }) => {
+    // A slot in the past opens with the next whole hour instead
+    // (calendar-page.tsx), so this week's last 14:00 is only a future slot
+    // before 14:00 on a Sunday. Pin the page's clock to 06:00 today.
+    const morning = new Date()
+    morning.setHours(6, 0, 0, 0)
+    await page.clock.setFixedTime(morning)
     await seed(page, PINNED)
     await fixtures(page)
     await page.goto("/calendar?view=week")

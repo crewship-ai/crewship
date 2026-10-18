@@ -58,7 +58,7 @@ async function sessionFor(browser: Browser, who: Who) {
       const page = await ctx.newPage()
       await page.goto("/login")
       await page.getByLabel(/email/i).fill(ROLES[who].email)
-      await page.getByLabel(/password/i).fill(PASSWORD)
+      await page.getByLabel("Password", { exact: true }).fill(PASSWORD)
       await page.getByRole("button", { name: /sign in|log in/i }).click()
       await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20_000 })
       const state = await ctx.storageState()

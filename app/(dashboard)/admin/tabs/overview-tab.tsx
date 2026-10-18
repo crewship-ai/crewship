@@ -367,17 +367,17 @@ export const OverviewTab = React.memo(function OverviewTab({
           {/* ── Platform: what is running, and what it is running on. */}
           <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" compactHeader>
             <Row icon={Cpu} label="Engine" description={health?.log_level?.level ? `Log level ${health.log_level.level}${health.log_level.expires_at ? " (temporary)" : ""}` : undefined}>
-              {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
+              {health ? <><StatusDot status="COMPLETED" className="mr-1.5" />Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
             </Row>
             <Row icon={Database} label="Database" description="SQLite">
-              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} />
+              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} className="mr-1.5" />
               {checks[0].state === "bad" && health?.db?.error ? `Unreachable (${health.db.error})` : checks[0].detail}
             </Row>
             <Row icon={Container} label="Container runtime" description={runtimeInfo?.socket}>
-              <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} /> {runtimeLabel}
+              <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} className="mr-1.5" />{runtimeLabel}
             </Row>
             <Row icon={Plug} label="Host daemon" description="How agents reach the host">
-              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
+              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} className="mr-1.5" />{daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
             </Row>
             <Row icon={HardDrive} label="Disk" description={health?.disk?.path}>
               {/* The data volume is the one that fills in practice. A missing
@@ -387,9 +387,9 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : health.disk.error ? (
                 <span className="text-label text-muted-foreground">Unavailable — {health.disk.error}</span>
               ) : (
-                <span className="flex flex-wrap items-center gap-x-2 text-label text-muted-foreground">
+                <span className="text-label text-muted-foreground" title={`${formatBytes(health.disk.free_bytes ?? 0)} free of ${formatBytes(health.disk.total_bytes ?? 0)}`}>
                   <span className="tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
-                  <span>{formatBytes(health.disk.free_bytes ?? 0)} free of {formatBytes(health.disk.total_bytes ?? 0)}</span>
+                  {` · ${formatBytes(health.disk.free_bytes ?? 0)} free`}
                 </span>
               )}
             </Row>
@@ -403,25 +403,25 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : journal === null ? (
                 "Not checked"
               ) : journalOK === false || journal.error ? (
-                <span className="text-destructive"><StatusDot status="FAILED" /> {journal.error ?? "Verification failed"}</span>
+                <span className="text-destructive"><StatusDot status="FAILED" className="mr-1.5" />{journal.error ?? "Verification failed"}</span>
               ) : (
-                <><StatusDot status="COMPLETED" /> {(journalEntries ?? 0).toLocaleString()} entries verified</>
+                <><StatusDot status="COMPLETED" className="mr-1.5" />{(journalEntries ?? 0).toLocaleString()} verified</>
               )}
             </Row>
             <Row icon={KeyRound} label="Encryption key" description={health?.encryption_key_source === "generated" ? undefined : keySourceNote(health?.encryption_key_source)}>
-              <StatusDot status={health?.encryption_key_source === "generated" ? "BLOCKED" : health?.encryption_key_source ? "COMPLETED" : "PENDING"} />
+              <StatusDot status={health?.encryption_key_source === "generated" ? "BLOCKED" : health?.encryption_key_source ? "COMPLETED" : "PENDING"} className="mr-1.5" />
               <span className={cn("whitespace-nowrap", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
               {/* A weakness, not a detail: it stays on the page, not in a hover hint. */}
-              {health?.encryption_key_source === "generated" && <span className="basis-full text-micro text-warn">{keySourceNote("generated")}</span>}
+              {health?.encryption_key_source === "generated" && <span className="block whitespace-normal text-micro text-warn">{keySourceNote("generated")}</span>}
             </Row>
             <Row icon={Archive} label="Backups" description={noBackup ? "Nothing to restore from yet" : undefined}>
-              {posture === null ? "Checking…" : noBackup ? <><StatusDot status="BLOCKED" /><span className="text-warn">None recorded</span></> : <><StatusDot status="COMPLETED" /> Recorded</>}
+              {posture === null ? "Checking…" : noBackup ? <><StatusDot status="BLOCKED" className="mr-1.5" /><span className="text-warn">None recorded</span></> : <><StatusDot status="COMPLETED" className="mr-1.5" />Recorded</>}
             </Row>
             <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : "Judges every credential read"}>
-              {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
+              {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" className="mr-1.5" />On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" className="mr-1.5" />Off</>}
             </Row>
             <Row icon={Radio} label="Telemetry" description="crewship telemetry on|off">
-              <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
+              <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} className="mr-1.5" />
               {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
             </Row>
           </SettingsCard>
@@ -438,11 +438,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 <Row icon={Bot} label="Agents per crew"><span className="tabular-nums">{license.max_agents_per_crew > 0 ? `up to ${license.max_agents_per_crew}` : "Unlimited"}</span></Row>
                 <Row icon={Sparkles} label="Features">
                   {license.features?.length ? (
-                    <span className="flex flex-wrap gap-1">
-                      {license.features.map((f) => (
-                        <span key={f} className="rounded border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">{f}</span>
-                      ))}
-                    </span>
+                    <span className="font-mono text-micro text-muted-foreground" title={license.features.join(", ")}>{license.features.join(", ")}</span>
                   ) : (
                     <span className="text-label text-muted-foreground">All open-source features</span>
                   )}
@@ -495,7 +491,9 @@ function Row({ icon: Icon, label, description, children }: { icon: LucideIcon; l
         <Icon className="size-3.5 shrink-0" aria-hidden />
         <span className="min-w-0 truncate">{label}</span>
       </span>
-      <span className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-label text-foreground">{children}</span>
+      {/* One line, like v67: the dot stays beside its text and a long value
+          ends in an ellipsis instead of wrapping the row taller. */}
+      <span data-slot="admin-row-value" className="min-w-0 flex-1 truncate text-label text-foreground [&>*]:align-middle">{children}</span>
     </div>
   )
 }

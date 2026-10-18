@@ -441,7 +441,8 @@ test.describe("v67 parity", () => {
       await page.keyboard.press("Escape")
       await page.getByTestId("activity-trigger").click()
       const pop = page.getByTestId("activity-popover")
-      expect(Math.round((await pop.boundingBox())!.width)).toBe(480)
+      // Measured after the open animation; its first frame is ~479 px.
+      await expect.poll(async () => Math.round((await pop.boundingBox())!.width)).toBe(480)
       await expect(page.getByRole("link", { name: /Open Activity/ })).toBeVisible()
     })
   })
@@ -513,7 +514,10 @@ for (const vp of [{ n: "1440", width: 1440, height: 900 }, { n: "1024", width: 1
       await field.fill("secret_e2e_value")
       await page.getByRole("button", { name: "Supply credential" }).click()
       await expect.poll(() => sent?.value).toBe("secret_e2e_value")
-      await expect(field).toHaveValue("")
+      // The item is done: the receipt replaces the form, so the field is gone
+      // with its value, and the receipt names what happened.
+      await expect(page.getByRole("main", { name: "Inbox detail" }).getByRole("heading", { name: "Credential supplied" })).toBeVisible()
+      await expect(field).toHaveCount(0)
       await expect(page.locator("body")).not.toContainText("secret_e2e_value")
     })
 

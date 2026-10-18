@@ -98,8 +98,8 @@ describe("PAR-022 / 023 Overview typography", () => {
     expect(title.className).toContain("font-semibold")
     expect(title.className).not.toContain("tracking-tight")
     const tile = section.querySelector(".icon-tile")!
-    expect(tile.className).toContain("h-7")
-    expect(tile.className).toContain("w-7")
+    // 28 px in px: the Harbor spacing scale draws h-7 at 24 px.
+    expect(tile.className.split(" ")).toContain("size-[28px]")
   })
 
   it("keeps the empty list note in sentence case at 12.5 px sans (PAR-021)", () => {
