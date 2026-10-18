@@ -180,7 +180,7 @@ describe("Admin overview — health checks", () => {
       runs: [{ ts: "2026-09-28T00:00:00Z", value: 3 }, { ts: "2026-09-29T00:00:00Z", value: 4 }],
     })
     expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/up 1h 2m/)).toBeInTheDocument()
-    expect(within(screen.getByRole("region", { name: "Runs this week" })).getByText(/runs in the last 7 days/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Runs this week" })).getByText("Runs")).toBeInTheDocument()
   })
 })
 
@@ -244,5 +244,36 @@ describe("Admin overview — integrity", () => {
   it("still says so when nothing is detected at all", () => {
     renderTab({ runtimeAvailable: false, runtimeInfo: null })
     expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/not detected/i)).toBeInTheDocument()
+  })
+})
+
+// PAR-094 / PAR-095: v67's cards have a one-line header (tile and title) and
+// compact rows, label with its icon and the value beside it, no dividers.
+describe("Admin overview — card headers and rows as v67", () => {
+  const cards = ["Runs this week", "Platform", "Integrity", "License"]
+
+  it.each(cards)("%s has a one-line header with no subtitle", (name) => {
+    renderTab({ runs: [{ ts: "2026-09-28T00:00:00Z", value: 3 }], daemon: null })
+    const region = screen.getByRole("region", { name })
+    const head = region.querySelector("[data-slot=settings-card-header]") as HTMLElement
+    expect(head).not.toBeNull()
+    expect(head.textContent?.trim()).toBe(name)
+  })
+
+  it.each(["Platform", "Integrity", "License"])("%s lists compact rows without dividers", (name) => {
+    renderTab()
+    const rows = screen.getByRole("region", { name }).querySelectorAll("[data-slot=admin-row]")
+    expect(rows.length).toBeGreaterThan(2)
+    for (const r of rows) {
+      expect(r.className).not.toMatch(/border-b|divide-y/)
+      expect(r.className).toContain("flex-row")
+      expect(r.className).not.toMatch(/min-h-\[?(5|6)\d/)
+    }
+  })
+
+  it("keeps what a row used to explain on the row as a hint", () => {
+    renderTab({ runtimeInfo: { runtime: "docker", version: "29.3.0", socket: "/var/run/docker.sock" } })
+    const row = within(screen.getByRole("region", { name: "Platform" })).getByText("Container runtime").closest("[data-slot=admin-row]")!
+    expect(row).toHaveAttribute("title", "/var/run/docker.sock")
   })
 })
