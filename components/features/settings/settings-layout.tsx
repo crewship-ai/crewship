@@ -441,7 +441,7 @@ function SettingsPage() {
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           {/* pb-24: room under the last card for the floating Save bar. */}
-          <div className="max-w-3xl mx-auto p-4 pb-24 md:p-6 md:pb-24">
+          <div className="max-w-[820px] mx-auto p-4 pb-24 md:p-6 md:pb-24">
             {/* Section content */}
             <AnimatePresence mode="wait">
               <motion.div

@@ -149,10 +149,12 @@ function SettingsCardHeader({
   danger?: boolean
 }) {
   return (
-    // The 50 px header of the card anatomy at the Small text size (a 14.857px
-    // root; it scales with Standard and Large): a floor, so a header with a
-    // description line may grow, around the 32 px tile (--control-md).
-    <div data-slot="settings-card-header" className="flex min-h-[3.3654rem] items-center gap-3 border-b border-border px-4 py-2">
+    // The v67 card header (`.scard header`: 14 px padding around a 32 px tile,
+    // a 13 px semibold title over a 12 px subtitle, 68 px with both) at the
+    // Small text size (a 14.857px root; it scales with Standard and Large).
+    // The height is the padding around the content, not a floor: a header with
+    // no subtitle is the 60 px v67 draws, and a long description may grow.
+    <div data-slot="settings-card-header" className="flex items-center gap-3 border-b border-border px-4 py-4">
       {Icon && (
         <span
           className="icon-tile inline-flex size-[var(--control-md)] shrink-0 items-center justify-center rounded-lg"
@@ -163,7 +165,7 @@ function SettingsCardHeader({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <h3 id={titleId} className={cn("text-sm font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
+        <h3 id={titleId} className={cn("text-control font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
           {title}
         </h3>
         {description && (
@@ -406,12 +408,12 @@ export function SettingsSummary({ children, className, slot = "settings-summary"
 
 const SUMMARY_DOT = { success: "bg-success", warn: "bg-warn", danger: "bg-destructive", info: "bg-primary" } as const
 
-/** One statement in a SettingsSummary; `n` is set in the mono figure face. */
+/** One statement in a SettingsSummary; `n` is a tabular sans figure. */
 export function SummaryItem({ n, children, tone }: { n?: ReactNode; children?: ReactNode; tone?: keyof typeof SUMMARY_DOT }) {
   return (
     <span className="inline-flex items-center">
       {tone && <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", SUMMARY_DOT[tone])} aria-hidden />}
-      {n != null && <span className="font-mono tabular-nums text-foreground">{n}</span>}
+      {n != null && <span className="tabular-nums text-foreground">{n}</span>}
       {n != null && children != null && "\u00a0"}
       {children}
     </span>
@@ -466,7 +468,7 @@ export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canS
     // Green like the page's own save bar (--save-bar-*), which this stands in for.
     <div role="region" aria-label="Unsaved changes" data-slot="settings-save-bar"
       className="save-bar-glow sticky bottom-4 z-10 mx-auto flex w-fit items-center gap-3 rounded-xl border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] py-1.5 pl-4 pr-1.5 text-xs font-medium text-[var(--save-bar-fg)]">
-      <span><span className="font-mono tabular-nums">{count}</span> unsaved change{count === 1 ? "" : "s"}</span>
+      <span><span className="tabular-nums">{count}</span> unsaved change{count === 1 ? "" : "s"}</span>
       <button type="button" onClick={onDiscard} disabled={saving}
         className="h-7 rounded-md px-2.5 opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:opacity-100 disabled:opacity-50">Discard</button>
       <button type="button" disabled={saving || !canSave}
@@ -480,4 +482,19 @@ export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canS
 export function firstSentence(text: string): string {
   const m = /^(.+?[.!?])(\s|$)/.exec(text.trim())
   return m ? m[1] : text.trim()
+}
+
+/**
+ * v67 dates: day, short month, and the year ("12 Oct 2026"), or with
+ * `year: "if-not-current"` only when it is not this year ("3 Mar"). Always English
+ * month names in the day-first order the wireframe uses, whatever the browser
+ * locale (a locale that writes "Oct 12" or "12. 10." is how two pages ended up
+ * with two formats).
+ */
+export function formatSettingsDate(iso: string | Date, opts: { year?: boolean | "if-not-current" } = {}): string {
+  const d = iso instanceof Date ? iso : new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  const month = d.toLocaleDateString("en-US", { month: "short" })
+  const withYear = opts.year === "if-not-current" ? d.getFullYear() !== new Date().getFullYear() : opts.year !== false
+  return `${d.getDate()} ${month}${withYear ? ` ${d.getFullYear()}` : ""}`
 }

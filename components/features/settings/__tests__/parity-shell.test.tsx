@@ -86,9 +86,10 @@ describe("PAR-088 card header", () => {
     render(<SettingsCard title="Account" description="Your identity on this instance" icon={Building}><p>row</p></SettingsCard>)
     const header = screen.getByRole("region", { name: "Account" }).querySelector("[data-slot=settings-card-header]")!
     const cls = header.className.split(" ")
-    expect(cls).toContain("min-h-[4.5767rem]")
+    // 14 px padding (py-4 is 0.92rem, 13.7 px at Small) around the content:
+    // 32 px tile / 20 px title + 16 px subtitle, so 68 px with a subtitle.
     expect(cls).toContain("py-4")
-    expect(cls).not.toContain("min-h-[3.3654rem]")
+    expect(cls.some((c) => c.startsWith("min-h-"))).toBe(false)
     expect(screen.getByRole("heading", { name: "Account" }).className).toContain("text-control")
     expect(screen.getByText("Your identity on this instance").className).toContain("text-label")
   })

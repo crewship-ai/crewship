@@ -57,16 +57,40 @@ test.describe("desktop", () => {
     })
   }
 
-  test("T06 card anatomy: 32 px fields, 10 px card radius, 50 px card header", async ({ page }) => {
+  test("T06 card anatomy: 32 px fields, 10 px card radius, 60 px card header", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings?tab=general")
     const identity = page.getByRole("region", { name: "Identity" })
     await expect(identity).toBeVisible()
     await expect(identity).toHaveCSS("border-top-left-radius", "10px")
-    expect(await height(page, "[data-slot=settings-card-header]")).toBeGreaterThanOrEqual(49)
-    expect(await height(page, "[data-slot=settings-card-header]")).toBeLessThanOrEqual(52)
+    // v67 `.scard header`: 14 px padding around the 32 px tile (60 px with no
+    // subtitle, 68 px with one — PAR-088, measured in the next test).
+    expect(await height(page, "[data-slot=settings-card-header]")).toBeGreaterThanOrEqual(58)
+    expect(await height(page, "[data-slot=settings-card-header]")).toBeLessThanOrEqual(62)
     expect(Math.round((await identity.getByLabel("Workspace name").boundingBox())!.height)).toBe(32)
   })
+
+  // v67 parity (PAR-086, 087, 088): the content column, the section list rows
+  // and the card header with a subtitle, measured at the three widths.
+  for (const width of [1440, 1024]) {
+    test(`PAR-086/087/088 shell at ${width}: 820 px column, 34 px list rows, 68 px card header`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await seed(page, PINNED)
+      await page.goto("/settings?tab=profile")
+      const head = page.locator("[data-slot=settings-page-head]")
+      await expect(head).toBeVisible()
+      const column = await head.evaluate((el) => (el.closest("div.mx-auto") as HTMLElement).getBoundingClientRect().width)
+      // 820 px, or the room there is (the panel takes 272 px of a 1024 px page).
+      expect(Math.round(column)).toBeLessThanOrEqual(820)
+      if (width === 1440) expect(Math.round(column)).toBe(820)
+      const row = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance" })
+      expect(Math.round((await row.boundingBox())!.height)).toBe(34)
+      const account = page.getByRole("region", { name: "Account" }).locator("[data-slot=settings-card-header]")
+      const h = Math.round((await account.boundingBox())!.height)
+      expect(h).toBeGreaterThanOrEqual(66)
+      expect(h).toBeLessThanOrEqual(70)
+    })
+  }
 
   test("T06 save bar appears on name edit, Discard restores", async ({ page }) => {
     await seed(page, PINNED)
