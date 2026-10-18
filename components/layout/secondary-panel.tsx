@@ -13,6 +13,26 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
  *  takes the 48 px toolbar shape and appends the panel's collapse button. */
 export const SecondaryPanelContext = React.createContext<{ toggle: React.ReactNode; claim: () => () => void } | null>(null)
 
+/** Tablet width (Harbor 2 breakpoints, #3358): between the phone and 1280. */
+const TABLET_QUERY = "(min-width: 768px) and (max-width: 1279px)"
+
+/**
+ * True at tablet width. There the SecondaryPanel starts closed and floats
+ * over the content, opened from the top bar's panel button (COM-05).
+ */
+export function useIsTabletPanel(): boolean {
+  const [on, setOn] = React.useState(false)
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const mql = window.matchMedia(TABLET_QUERY)
+    const update = () => setOn(mql.matches)
+    update()
+    mql.addEventListener?.("change", update)
+    return () => mql.removeEventListener?.("change", update)
+  }, [])
+  return on
+}
+
 /**
  * SecondaryPanel — the one second column every section uses (Harbor 2, #3350
  * M3). 272 px wide, 44 px when collapsed; a 48 px toolbar at the height of the
@@ -24,6 +44,10 @@ export const SecondaryPanelContext = React.createContext<{ toggle: React.ReactNo
  * - On a phone the same content opens as a bottom sheet from the top bar's
  *   panel button (AppToolbar reads the registration below); there is one phone
  *   pattern instead of four.
+ * - On a tablet (768–1279) the panel starts closed and opens from the same
+ *   top-bar button, floating over the content (v67 `panelBtn`); its close
+ *   button, Escape or a click outside closes it. The desktop collapse
+ *   preference does not apply there.
  *
  * Content is composed from components/layout/sidebar-kit.
  */
@@ -54,6 +78,7 @@ export function SecondaryPanel({
   children?: React.ReactNode
 }) {
   const isMobile = useIsMobile()
+  const tablet = useIsTabletPanel() && !isMobile
   // Whether the content brought its own kit toolbar (which then carries the
   // collapse button); otherwise the panel draws a toolbar for it.
   const [claimed, setClaimed] = React.useState(0)
@@ -114,6 +139,66 @@ export function SecondaryPanel({
           {footer && <div className="secondary-panel-footer">{footer}</div>}
         </SheetContent>
       </Sheet>
+    )
+  }
+
+  if (tablet) {
+    if (!sheetOpen) return null
+    const close = () => setSheetOpen(false)
+    const closeButton = (
+      <button
+        type="button"
+        onClick={close}
+        aria-label={`Close ${label}`}
+        title="Close panel"
+        className="secondary-panel-toggle"
+      >
+        <PanelLeftClose aria-hidden />
+      </button>
+    )
+    return (
+      <>
+        {/* A click outside closes it; not a control of its own (Escape and
+            the close button are the keyboard ways). */}
+        <div aria-hidden data-testid="secondary-panel-scrim" className="secondary-panel-scrim" onClick={close} />
+        <aside
+          data-slot="secondary-panel"
+          data-panel-id={id}
+          data-collapsed="false"
+          data-float="true"
+          aria-label={label}
+          className={cn("secondary-panel secondary-panel-float", className)}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return
+            e.stopPropagation()
+            close()
+          }}
+        >
+          <SecondaryPanelContext.Provider value={{ toggle: closeButton, claim }}>
+            {toolbar ? (
+              <>
+                <div className="secondary-panel-toolbar">
+                  {toolbar}
+                  <span className="ml-auto" />
+                  {closeButton}
+                </div>
+                <div className="secondary-panel-body">{children}</div>
+              </>
+            ) : (
+              <>
+                {claimed === 0 && (
+                  <div className="secondary-panel-toolbar">
+                    <span className="ml-auto" />
+                    {closeButton}
+                  </div>
+                )}
+                <div className="secondary-panel-content">{children}</div>
+              </>
+            )}
+            {footer && <div className="secondary-panel-footer">{footer}</div>}
+          </SecondaryPanelContext.Provider>
+        </aside>
+      </>
     )
   }
 

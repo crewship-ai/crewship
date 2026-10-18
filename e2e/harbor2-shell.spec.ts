@@ -134,3 +134,51 @@ test.describe("first paint of a brand-new device", () => {
     await expect(html).toHaveClass(/(^|\s)dark(\s|$)/)
   })
 })
+
+// COM-05 (#3481): at tablet width the secondary panel starts closed, opens
+// from the top bar and floats over the content without moving it.
+test.describe("tablet secondary panel", () => {
+  test.use({ viewport: { width: 1024, height: 800 } })
+
+  test("starts closed, opens floating from the top bar, closes with Escape", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/issues")
+    const button = page.getByTestId("secondary-panel-button")
+    await expect(button).toBeVisible()
+    await expect(page.locator("[data-slot=secondary-panel]")).toHaveCount(0)
+    const content = page.locator("[data-slot=sidebar-inset]")
+    const before = await content.boundingBox()
+    await button.click()
+    const panel = page.locator("[data-slot=secondary-panel][data-float=true]")
+    await expect(panel).toBeVisible()
+    expect(Math.round((await panel.boundingBox())!.width)).toBe(272)
+    expect(await panel.evaluate((el) => getComputedStyle(el).position)).toBe("fixed")
+    // The content keeps its place under the floating panel.
+    expect((await content.boundingBox())!.x).toBe(before!.x)
+    await panel.getByRole("button", { name: /^Close / }).press("Escape")
+    await expect(panel).toHaveCount(0)
+  })
+})
+
+// COM-06 (#3481): a phone page whose title repeats the area and whose actions
+// are hidden there leaves no empty 36 px row under the top bar.
+test.describe("phone page header", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+  test("the Dashboard draws no empty sub-bar row", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/")
+    await expect(page.locator("header").first()).toBeVisible()
+    const rows = page.locator("[data-slot=sub-bar-row]")
+    const count = await rows.count()
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i)
+      if (!(await row.isVisible())) continue
+      // A visible row holds something visible.
+      const shown = await row.evaluate((el) =>
+        Array.from(el.querySelectorAll("*")).some((c) => (c as HTMLElement).offsetWidth > 0 && (c as HTMLElement).offsetHeight > 0),
+      )
+      expect(shown).toBe(true)
+    }
+  })
+})

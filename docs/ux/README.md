@@ -46,6 +46,12 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
 | Filters in a secondary panel | `useSidebarFacets` + `SidebarFacetBlock` + `SidebarInlineFacet` (`components/layout/sidebar-facets`) | the Filter button opens the facets INSIDE the panel under its toolbar (never a floating popover); each facet folds, names its choice and clears alone; at most 6 values, the rest behind "All N…" (searchable); counts over the whole space. While the block is closed, active facets show as `SidebarActiveChip`s named "Facet: Value". `SidebarFilterPopover` is only for surfaces without a panel |
 | Two to five views of one thing | `Segmented` (`components/ui/segmented`) | one radio group (arrows, Home / End, one tab stop); `count` after a label, `title` for the reason a segment is disabled. No local segmented copies |
+| Pick one of many in a dialog | `Combobox` (`components/ui/combobox`) | a button naming the choice and a searchable list (labels, descriptions, keywords); `modal` inside a CreateSurface. No native `<select>` or local picker in dialogs |
+| Note beside a field or choice | `Note` (`components/ui/note`) | quiet grey for information, `tone="warn"` tinted; a banner is for a page's state, a note explains what is next to it |
+| Option that needs a sentence | `ChoiceTile` (`components/ui/choice-tile`) | `aria-pressed` tile with glyph, title, one line; short equal options use `Segmented` |
+| What a decision loses or keeps | `ConsequenceList` (`components/ui/confirm-dialog`) | lost / warn / kept lines, the tone said in words for screen readers; `ConfirmDialog` draws it, other surfaces asking the same question use it directly |
+| Page actions from below the layout | `SubBarActions` (`components/layout/sub-bar`) | a page under its layout's SubBar puts its actions in the bar through this, never a portal target handed down |
+| Chart series by crew or agent | `--series-1..8` (`bg-series-N`, `text-series-N`) | 1–5 equal `--chart-1..5`; every slot ≥ 3:1 on every surface in both schemes, ΔE ≥ 10 apart; assign from slot 1, never reorder |
 | Saving typed-in values | `PageSaveProvider` + `PageSaveBar` (`components/ui/page-save-bar`); cards register through `useDirtyForm` + `SaveFooter`, `SettingsSaveBar` or `usePageSave` | see "Saving" below |
 
 ### Saving

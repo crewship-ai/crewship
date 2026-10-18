@@ -10,7 +10,9 @@ import { cn } from "@/lib/utils"
  * steps joined by short rules, finished steps green with a check, the current
  * one raised in the accent. A step before the current one — or any step when
  * `freeNavigation` is set — can be clicked to go back to it. On a phone the
- * labels give way to "2 / 5".
+ * labels give way to "2 / 5". Past the last step (`current = steps.length`,
+ * the wizard's "all set" screen) every step reads done and the phone counter
+ * says "5 / 5 · Done".
  */
 export function WizardSteps({
   steps,
@@ -20,15 +22,16 @@ export function WizardSteps({
   className,
 }: {
   steps: string[]
-  /** 0-based index of the step on screen. */
+  /** 0-based index of the step on screen; `steps.length` once finished. */
   current: number
   onStepChange?: (index: number) => void
   /** Allow jumping forward too (every step is independently valid). */
   freeNavigation?: boolean
   className?: string
 }) {
+  const complete = current >= steps.length
   return (
-    <nav aria-label="Steps" className={cn("wizard-steps", className)}>
+    <nav aria-label="Steps" data-complete={complete || undefined} className={cn("wizard-steps", className)}>
       <ol>
         {steps.map((label, i) => {
           const state = i < current ? "done" : i === current ? "current" : "todo"
@@ -55,7 +58,9 @@ export function WizardSteps({
           )
         })}
       </ol>
-      <span className="wizard-steps-count" aria-hidden>{current + 1} / {steps.length}</span>
+      <span className="wizard-steps-count" aria-hidden>
+        {complete ? `${steps.length} / ${steps.length} · Done` : `${current + 1} / ${steps.length}`}
+      </span>
     </nav>
   )
 }
