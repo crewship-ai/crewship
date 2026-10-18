@@ -171,3 +171,111 @@ func TestInitializeFinalAuthorityAndAssetGuardRollBack(t *testing.T) {
 		t.Fatalf("unknown stored schema accepted: %v", err)
 	}
 }
+
+func TestInitializeTxKeepsCallerPageCommitAndRollback(t *testing.T) {
+	db, deck := initStoreFixture(t)
+	ctx := t.Context()
+	store := New(db.DB, Options{})
+	for _, commit := range []bool{false, true} {
+		page := "tx_rollback"
+		if commit {
+			page = "tx_commit"
+		}
+		t.Run(page, func(t *testing.T) {
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err = tx.ExecContext(ctx, "UPDATE slides_writer_fence SET seq=seq+1 WHERE id=1"); err != nil {
+				t.Fatal(err)
+			}
+			// The caller creates the Page in the same transaction as the populated deck.
+			if _, err = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,'ws-a',?,'Atomic','slides-owner','{}')`, page, page); err != nil {
+				t.Fatal(err)
+			}
+			candidate := deck
+			candidate.DeckID = page
+			receipt, err := store.InitializeTx(ctx, tx, Key{"ws-a", page}, initRequest(candidate, "caller-create"), "user:slides-owner")
+			if err != nil || receipt.Revision != 1 {
+				t.Fatalf("candidate receipt %#v %v", receipt, err)
+			}
+			var inside int
+			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM slides_receipts WHERE page_id=?", page).Scan(&inside); err != nil || inside != 1 {
+				t.Fatalf("receipt not in caller transaction: %d %v", inside, err)
+			}
+			if commit {
+				err = tx.Commit()
+			} else {
+				err = tx.Rollback()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if commit {
+				want = 1
+			}
+			for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts"} {
+				countRows(t, db, table, page, want)
+			}
+			ids := 0
+			if commit {
+				ids = len(ObjectIDs(candidate))
+			}
+			countRows(t, db, "slides_object_ids", page, ids)
+			var pages int
+			if err = db.QueryRowContext(ctx, "SELECT count(*) FROM pages WHERE id=?", page).Scan(&pages); err != nil || pages != want {
+				t.Fatalf("Page count%d want%d %v", pages, want, err)
+			}
+		})
+	}
+	path := db.Path()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := database.Open("file:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	saved, err := New(reopened.DB, Options{}).Read(ctx, Key{"ws-a", "tx_commit"}, 0, initAuthority)
+	expected := deck
+	expected.DeckID = "tx_commit"
+	hash, _ := DeckHash(expected)
+	if err != nil || saved.ContentHash != hash || saved.Deck.DeckID != "tx_commit" {
+		t.Fatalf("reopened state %#v %v", saved, err)
+	}
+	retry, err := New(reopened.DB, Options{}).Initialize(ctx, Key{"ws-a", "tx_commit"}, initRequest(expected, "caller-create"), initAuthority)
+	if err != nil || !retry.Duplicate || retry.Revision != 1 || retry.ContentHash != hash {
+		t.Fatalf("reopened retry %#v %v", retry, err)
+	}
+}
+
+func TestInitializeTxRejectsIncompleteCallerAuthority(t *testing.T) {
+	db, deck := initStoreFixture(t)
+	store := New(db.DB, Options{})
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	key := Key{"ws-a", deck.DeckID}
+	for _, test := range []struct {
+		name  string
+		tx    *sql.Tx
+		key   Key
+		actor string
+	}{
+		{"missing transaction", nil, key, "actor"},
+		{"missing actor", tx, key, ""},
+		{"missing workspace", tx, Key{PageID: key.PageID}, "actor"},
+		{"missing Page", tx, Key{WorkspaceID: key.WorkspaceID}, "actor"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := store.InitializeTx(t.Context(), test.tx, test.key, initRequest(deck, "invalid-caller"), test.actor); err == nil {
+				t.Fatal("incomplete caller authority accepted")
+			}
+		})
+	}
+}
