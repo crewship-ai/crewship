@@ -29,7 +29,10 @@ Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
 {"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team and review feedback."}]}
 ```
 
-The result identifies the saved document and its link. If confirmation is lost,
+The result identifies the saved document and its link. Opening its chat card
+resolves that saved identity in your current workspace and opens the native
+editor. An unavailable document never falls back to another page or the catalog.
+If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
 owner. A one-shot admission grants no later access. If the original human request
