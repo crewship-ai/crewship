@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
+
 ### Fixed
 
 - ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.

@@ -885,11 +885,20 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// don't auto-issue an admin token here because the bootstrap
 	// flow is unauthenticated up to this point; the user hasn't
 	// agreed to any 7-day expiry contract yet.
-	_, err = tx.ExecContext(r.Context(),
+	tokenResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?)",
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "bootstrap: insert cli_token", err)
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, userID, tokenID, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: token audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: acknowledge token", err)
 		return
 	}
 
