@@ -69,7 +69,17 @@ for (const width of [1280, 390]) {
     await page.goto("/routines")
     await expect(page.getByRole("heading", { name: "Private routines" })).toBeVisible()
     await page.getByRole("button", { name: "User menu" }).click()
-    await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
+    if (width < 768) {
+      // Harbor 2 G12: below 768 px the user menu is the kit MenuSheet, a
+      // bottom-sheet dialog whose rows are buttons and links, not menuitems.
+      const sheet = page.getByRole("dialog", { name: "User menu" })
+      await expect(sheet).toBeVisible()
+      await expect(page.getByRole("menu")).toHaveCount(0)
+      await sheet.getByRole("button", { name: "Connect CLI…" }).click()
+      await expect(sheet).toBeHidden()
+    } else {
+      await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
+    }
     const dialog = page.getByRole("dialog", { name: "Connect the CLI" })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR --server=${new URL(page.url()).origin}`)
