@@ -51,14 +51,14 @@ describe("SubBar in the top bar", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Members" }).className).not.toMatch(/sr-only/)
   })
 
-  it("stays in place on a phone and where no slot exists", () => {
+  it("stays in place where no slot exists, and on a phone puts its actions in the top bar (v67: one header row)", () => {
     render(<SubBar title="Issues" actions={<SubBarPrimary>New issue</SubBarPrimary>} />)
     expect(screen.getByRole("heading", { level: 1, name: "Issues" })).toBeVisible()
     cleanup()
     const slot = withSlot()
     mobile = true
     render(<SubBar title="Issues" actions={<SubBarPrimary>New issue</SubBarPrimary>} />)
-    expect(slot).not.toContainElement(screen.getByRole("button", { name: "New issue" }))
+    expect(slot).toContainElement(screen.getByRole("button", { name: "New issue" }))
   })
 
   it("on a phone does not repeat the area named in the top bar, but keeps the actions", () => {
@@ -88,24 +88,22 @@ describe("SubBar in the top bar", () => {
 
   // COM-06 (#3481): Dashboard passes its window control as an action hidden
   // below md; the row then held nothing visible and drew an empty 36 px strip.
-  it("on a phone collapses the row when every action is hidden there, and keeps them mounted", () => {
-    withSlot("Dashboard")
+  it("on a phone draws no row of its own for the actions, and keeps hidden ones mounted in the top bar", () => {
+    const slot = withSlot("Dashboard")
     mobile = true
     const { container } = render(
       <SubBar title="Dashboard" actions={<button type="button" style={{ display: "none" }}>Last 7 days</button>} />,
     )
-    const row = container.querySelector("[data-slot=sub-bar-row]")
-    expect(row).not.toBeNull()
-    expect(row).toHaveAttribute("data-empty")
-    expect(row?.className).toMatch(/data-\[empty\]:hidden/)
+    expect(container.querySelector("[data-slot=sub-bar-row]")).toBeNull()
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard", hidden: true })).toBeInTheDocument()
     // A display:none button has no accessible name to query by; its text is
     // still in the document, so it stays mounted.
+    expect(slot).toContainElement(screen.getByText("Last 7 days"))
     expect(screen.getByText("Last 7 days").closest("[data-slot=sub-bar-actions]")).not.toBeNull()
   })
 
-  it("on a phone keeps the row while one action is visible", () => {
-    withSlot("Dashboard")
+  it("on a phone keeps the visible action in the top bar, with no row of its own", () => {
+    const slot = withSlot("Dashboard")
     mobile = true
     const { container } = render(
       <SubBar
@@ -113,8 +111,8 @@ describe("SubBar in the top bar", () => {
         actions={<><button type="button" style={{ display: "none" }}>Window</button><SubBarPrimary>Customize</SubBarPrimary></>}
       />,
     )
-    expect(container.querySelector("[data-slot=sub-bar-row]")).not.toHaveAttribute("data-empty")
-    expect(screen.getByRole("button", { name: "Customize" })).toBeVisible()
+    expect(container.querySelector("[data-slot=sub-bar-row]")).toBeNull()
+    expect(slot).toContainElement(screen.getByRole("button", { name: "Customize" }))
   })
 
   // COM-12 (#3481): a page deeper in the tree than its layout's SubBar (the
@@ -136,16 +134,16 @@ describe("SubBar in the top bar", () => {
     expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
   })
 
-  it("SubBarActions works on a phone, in the page's own row", () => {
-    withSlot("Routines")
+  it("SubBarActions works on a phone, in the top bar", () => {
+    const slot = withSlot("Routines")
     mobile = true
-    const { container } = render(
+    render(
       <>
         <SubBar title="Weekly scan" />
         <SubBarActions><button type="button">Run now</button></SubBarActions>
       </>,
     )
-    const actions = container.querySelector("[data-slot=sub-bar-actions]")
+    const actions = slot.querySelector("[data-slot=sub-bar-actions]")
     expect(actions).toContainElement(screen.getByRole("button", { name: "Run now" }))
   })
 
