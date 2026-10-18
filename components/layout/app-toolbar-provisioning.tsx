@@ -21,6 +21,67 @@ import { apiFetch } from "@/lib/api-fetch"
 // driving Build now / Retry / Restart agents from the global toolbar,
 // plus its row, checklist, status dot, and feature-chip helpers.
 
+/**
+ * The crews whose image wants a person: build pending, building, failed,
+ * built but agents still on the old image (waiting for an explicit Restart),
+ * or a just-finished build whose summary is still lingering. Acknowledged and
+ * clean crews are left out so the list always matches the count.
+ */
+export function provisioningNeedingAttention(provisioning: ReturnType<typeof useProvisioningStatus>) {
+  return provisioning.detail.filter((d) => {
+    if (d.acknowledged) return false
+    if (d.status === "needs_provision" || d.status === "running" || d.status === "failed") return true
+    if (d.status === "completed" && (d.agentsPendingRestart ?? 0) > 0) return true
+    if (d.recent) return true
+    return false
+  })
+}
+
+/** "2 need rebuild", "1 build failed", "Building 1…" — what the builds want. */
+export function provisioningSummary(provisioning: ReturnType<typeof useProvisioningStatus>): string {
+  if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
+  if (provisioning.building > 0) return `Building ${provisioning.building}…`
+  if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
+  if (provisioning.pendingRestart > 0) return `${provisioning.pendingRestart} need${provisioning.pendingRestart > 1 ? "" : "s"} restart`
+  if (provisioning.recentlyCompleted > 0) return `Built ${provisioning.recentlyCompleted}`
+  return ""
+}
+
+/** The container-builds list with its Build / Retry / Restart actions. */
+export function ProvisioningPanel({
+  provisioning,
+  workspaceId,
+  onNavigate,
+}: {
+  provisioning: ReturnType<typeof useProvisioningStatus>
+  workspaceId: string | null
+  onNavigate: () => void
+}) {
+  const unhealthy = provisioningNeedingAttention(provisioning)
+  return (
+    <>
+      <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
+        <Package className="h-3.5 w-3.5 text-muted-foreground" />
+        Container builds
+      </div>
+      <ul className="divide-y max-h-[480px] overflow-y-auto">
+        {unhealthy.map((d) => (
+          <ProvisioningRow
+            key={d.id}
+            crew={d}
+            workspaceId={workspaceId}
+            onNavigate={onNavigate}
+            onAcknowledge={() => provisioning.acknowledge(d.id)}
+          />
+        ))}
+      </ul>
+      <div className="px-3 py-2 border-t bg-muted/30 text-[10px] text-muted-foreground">
+        Build button kicks off provisioning here — no need to open the crew.
+      </div>
+    </>
+  )
+}
+
 function ProvisioningBadge({
   provisioning,
   workspaceId,
@@ -63,19 +124,6 @@ function ProvisioningBadge({
       : onlyRecent
         ? Check
         : Package
-  // Show every crew that needs the user's attention: build pending, building,
-  // failed, build complete but agents still on the old image (waiting for
-  // explicit Restart), or a just-finished build whose recent summary is still
-  // lingering. Acknowledged + idle / clean-completed crews are filtered out so
-  // the popover always reflects the badge count.
-  const unhealthy = provisioning.detail.filter((d) => {
-    if (d.acknowledged) return false
-    if (d.status === "needs_provision" || d.status === "running" || d.status === "failed") return true
-    if (d.status === "completed" && (d.agentsPendingRestart ?? 0) > 0) return true
-    if (d.recent) return true
-    return false
-  })
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -89,24 +137,7 @@ function ProvisioningBadge({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-[min(420px,calc(100vw-2rem))] p-0 overflow-hidden">
-        <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
-          <Package className="h-3.5 w-3.5 text-muted-foreground" />
-          Container builds
-        </div>
-        <ul className="divide-y max-h-[480px] overflow-y-auto">
-          {unhealthy.map((d) => (
-            <ProvisioningRow
-              key={d.id}
-              crew={d}
-              workspaceId={workspaceId}
-              onNavigate={() => setOpen(false)}
-              onAcknowledge={() => provisioning.acknowledge(d.id)}
-            />
-          ))}
-        </ul>
-        <div className="px-3 py-2 border-t bg-muted/30 text-[10px] text-muted-foreground">
-          Build button kicks off provisioning here — no need to open the crew.
-        </div>
+        <ProvisioningPanel provisioning={provisioning} workspaceId={workspaceId} onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   )

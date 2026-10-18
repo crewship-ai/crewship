@@ -23,14 +23,12 @@ const h = vi.hoisted(() => ({
   agentItems: [] as unknown[],
   refresh: vi.fn(),
   role: "OWNER" as string | null,
-  crews: [] as unknown[],
-  agents: [] as unknown[],
 }))
 
-// The fleet line under the header reads the dashboard's crew and agent lists.
-vi.mock("@/hooks/use-dashboard-data", () => ({
-  useCrewSummaries: () => ({ data: h.crews }),
-  useAgentSummaries: () => ({ data: h.agents }),
+// The status summary has its own tests (layout/__tests__/par-system-status);
+// here only its place in the panel is asserted.
+vi.mock("@/components/layout/activity-system-status", () => ({
+  ActivitySystemStatus: () => <div data-testid="activity-system-status-stub" />,
 }))
 
 // importOriginal on use-active-routine-runs drags in use-realtime →
@@ -131,8 +129,6 @@ const reset = () => {
   h.runs = []
   h.agentItems = []
   h.role = "OWNER"
-  h.crews = []
-  h.agents = []
 }
 
 describe("<ActivityBell> badge", () => {
@@ -240,12 +236,10 @@ describe("<ActivityBell> v67 panel", () => {
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull()
   })
 
-  it("says how many crews and agents are online, working and idle", () => {
-    h.crews = [{ id: "c1" }, { id: "c2" }]
-    h.agents = [{ id: "a1", status: "RUNNING" }, { id: "a2", status: "IDLE" }, { id: "a3", status: "IDLE" }, { id: "a4", status: "STOPPED" }]
+  it("carries the connection, fleet and build status under the header (PAR-001)", () => {
     render(<ActivityBell />)
     openDropdown()
-    expect(screen.getByTestId("activity-fleet")).toHaveTextContent("2 crews · 3 agents online · 1 working · 2 idle")
+    expect(screen.getByTestId("activity-system-status-stub")).toBeInTheDocument()
   })
 
   it("closes the day in the footer: completed today and what it cost, then Open Activity", () => {

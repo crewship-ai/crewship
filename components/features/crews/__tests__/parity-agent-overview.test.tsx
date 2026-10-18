@@ -28,7 +28,7 @@ const runs = [{ id: "r1", status: "RUNNING", trigger_type: "SCHEDULE", started_a
 
 function renderOverview(extra: Record<string, unknown> = {}) {
   const props = { workspaceId: "ws", agent, inbox: { count: 0 }, runs: [] as unknown[], chats: [] as unknown[], error: null, onRetry: vi.fn(), onWork: vi.fn(), revision: 0, onStop: vi.fn(), cost30d: 6.4, ...extra }
-  render(<AgentOverview {...(props as never)} />)
+  render(<AgentOverview {...(props as unknown as React.ComponentProps<typeof AgentOverview>)} />)
   return props
 }
 

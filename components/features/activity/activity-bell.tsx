@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
+import { ActivitySystemStatus } from "@/components/layout/activity-system-status"
 import Link from "next/link"
 import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
-import { Activity, AlertTriangle, Bot, Hand, Play, Users } from "lucide-react"
+import { Activity, AlertTriangle, Bot, Hand, Play } from "lucide-react"
 import {
   BarMenu,
   BarMenuBody,
@@ -21,7 +22,6 @@ import { MAX_LIVE_ROWS } from "@/components/features/routines/live-run-row"
 import { formatElapsedSince } from "@/components/features/routines/routine-cost-format"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useActiveRuns, type ActiveRunItem } from "@/hooks/use-active-runs"
-import { useAgentSummaries, useCrewSummaries } from "@/hooks/use-dashboard-data"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { useTick } from "@/hooks/use-tick"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -161,15 +161,6 @@ export function completedToday(runs: PipelineRun[], now: Date = new Date()): { c
   }
 }
 
-/** Pure: the fleet line — crews, agents that are up, how many work, how many wait. */
-export function fleetSummary(crewCount: number, agents: { status: string }[]): string {
-  const online = agents.filter((a) => a.status !== "STOPPED" && a.status !== "OFFLINE")
-  const working = online.filter((a) => a.status === "RUNNING").length
-  const idle = online.filter((a) => a.status === "IDLE").length
-  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-  return [n(crewCount, "crew", "crews"), `${n(online.length, "agent", "agents")} online`, `${working} working`, `${idle} idle`].join(" · ")
-}
-
 // Body is a separate component, mounted only while the panel is open, so the
 // 1 s elapsed tick and the two list fetches do not run behind a closed
 // popover. That also makes the chip choice per-opening.
@@ -193,8 +184,6 @@ function ActivityPanelBody({
   onOpenItem: (href: string) => void
 }) {
   useTick(1000) // re-render each second so elapsed times tick
-  const crewsQ = useCrewSummaries(workspaceId)
-  const agentsQ = useAgentSummaries(workspaceId)
 
   const waiting = liveRuns.filter((r) => isAwaitingApproval(r.status))
   const running = liveRuns.filter((r) => !isAwaitingApproval(r.status))
@@ -204,10 +193,6 @@ function ActivityPanelBody({
   const [picked, setPicked] = useState<ActivityChip | null>(null)
   const chip = picked ?? defaultActivityChip(liveTotal)
   const today = completedToday(recentRuns)
-
-  const crewCount = crewsQ.data?.length ?? 0
-  const agents = agentsQ.data ?? []
-  const showFleet = crewCount > 0 || agents.length > 0
 
   const groups: { id: ActivityChip; label: string; tone?: "warn"; rows: React.ReactNode[]; hidden: number; hiddenLabel: string }[] = []
   const cap = <T,>(rows: T[]) => rows.slice(0, MAX_GROUP_ROWS)
@@ -246,12 +231,9 @@ function ActivityPanelBody({
         meta={liveTotal > 0 ? `${liveTotal} live` : "nothing live"}
       />
 
-      {showFleet && (
-        <div data-testid="activity-fleet" className="flex items-center gap-1.5 border-b border-foreground/[0.06] px-3 py-1.5 type-meta text-muted-foreground">
-          <Users className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="tabular-nums">{fleetSummary(crewCount, agents)}</span>
-        </div>
-      )}
+      {/* The connection, the fleet and the container builds (v67 "Now"
+          summary): the top bar no longer carries them. */}
+      <ActivitySystemStatus onNavigate={onNavigate} />
 
       {total > 0 && (
         <BarMenuChips<ActivityChip>
