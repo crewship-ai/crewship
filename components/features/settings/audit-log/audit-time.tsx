@@ -188,7 +188,7 @@ export function AuditCalendar({
       </div>
       <div className="grid grid-cols-7 gap-0.5">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <span key={i} className="pb-0.5 text-center font-mono text-micro text-muted-foreground-soft" aria-hidden>{d}</span>
+          <span key={i} className="pb-0.5 text-center text-micro text-muted-foreground-soft" aria-hidden>{d}</span>
         ))}
         {cells.map((day, i) => {
           if (!day) return <span key={`b${i}`} />
@@ -209,7 +209,7 @@ export function AuditCalendar({
               aria-label={`${formatDay(day)}: ${count} event${count === 1 ? "" : "s"}`}
               title={`${formatDay(day)} · ${count} event${count === 1 ? "" : "s"}`}
               className={cn(
-                "relative grid h-7 place-items-center font-mono text-micro tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+                "relative grid h-7 place-items-center text-micro tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
                 inRange ? "bg-primary/[0.13] text-foreground" : "rounded-md",
                 inRange && !prevIn && "rounded-l-md",
                 inRange && !nextIn && "rounded-r-md",

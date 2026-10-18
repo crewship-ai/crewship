@@ -329,7 +329,7 @@ function FlowStrip({ reduce }: { reduce: boolean }) {
           <li key={s.id} className="flex items-center gap-1.5">
             <button type="button" onClick={() => go(s.id)}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2.5 text-xs hover:border-primary/40 hover:text-foreground">
-              <span className="font-mono text-micro text-primary-hover">{i + 1}</span>{s.label}
+              <span className="text-micro tabular-nums text-primary-hover">{i + 1}</span>{s.label}
             </button>
             {i < LIFECYCLE_STEPS.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground-soft" aria-hidden />}
           </li>
@@ -420,7 +420,7 @@ function MapStack(p: SlotProps) {
 function StepCell({ n, label, sub, className }: { n: number; label: string; sub: string; className?: string }) {
   return (
     <div role="rowheader" className={cn("flex items-start gap-3 px-4 py-3", className)}>
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 font-mono text-micro text-primary-hover">{n}</span>
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 text-micro tabular-nums text-primary-hover">{n}</span>
       <span className="min-w-0">
         <span className="block text-control font-medium">{label}</span>
         <span className="block text-label text-muted-foreground">{sub}</span>
