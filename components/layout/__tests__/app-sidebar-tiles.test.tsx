@@ -49,7 +49,13 @@ describe("the sidebar's rows", () => {
 })
 
 describe("one grid, one motion", () => {
-  beforeEach(() => { cleanup(); vi.mocked(localStorage.setItem).mockClear() })
+  // These pin the rail's own behaviour, so the device starts on the rail
+  // (a new device starts pinned since 2026-10-18; shell-v67.test.tsx).
+  beforeEach(() => {
+    cleanup()
+    vi.mocked(localStorage.setItem).mockClear()
+    vi.mocked(localStorage.getItem).mockImplementation((k: string) => (k === "crewship_sidebar_mode" ? "hover" : null))
+  })
   // vitest.setup mocks localStorage: read what the rail WROTE for the mode.
   const mode = () => vi.mocked(localStorage.setItem).mock.calls.filter(([k]) => k === "crewship_sidebar_mode").at(-1)?.[1]
 
