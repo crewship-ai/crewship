@@ -12,7 +12,7 @@ provider, application, real CLI binary or browser and are not live acceptance.
 
 | Step | Document adapter | Acceptance scope |
 | --- | --- | --- |
-| agentCreate | Actual CLI agent run, durable result/read, ADMIN 404 and OWNER read | T-AG-01 / T-ACL-02 subchecks |
+| agentCreate | Explicit production composer intent, actual CLI durable result/read, ADMIN 404 and OWNER read | T-AG-01 / T-ACL-02 subchecks |
 | openChatPanel | Playwright clicks saved result in the existing chat; waits for editor | T-AG-01 subcheck |
 | iterateMessage | Incomplete | Existing-document agent iteration needs its own adapter |
 | humanEditVersions | Browser save/reload and CLI revision advancement; incomplete | T-DOC-01 subchecks; T-DOC-03 history/compare/restore absent |
@@ -35,7 +35,7 @@ not launch a provider or browser. A future fixture must drive actual agent
 execution and actual CLI subprocesses; a test-only operation returning success
 cannot close missing production behavior.
 
-`manual-sonnet-5.5` invokes the configured real agent and may spend provider
+`manual-sonnet-5.5` submits through the real composer creation control and invokes the configured agent and may spend provider
 credits. Use only an authorized dedicated test instance with that agent already
 configured for Sonnet 5.5. The model designation is operator input, not verified
 provider provenance. Inspect durable run/provider records independently before
@@ -98,6 +98,11 @@ JSON file is mode 0600. Raw command output, cookies and document content are
 not reported. A failed assertion intentionally reports a generic operation
 failure to avoid leaking private provider responses. Setup failure is failure,
 not acceptance. Keep private input and evidence files out of commits/issues.
+
+The runner selects Create document in the production composer, verifies its sent
+WebSocket frame carries explicit creation intent, and uses real CLI subprocesses
+to read the saved result and completed run. An ordinary English CLI prompt does
+not carry this consent and is not used as a creation path.
 
 The runner creates a document and appends a message to the supplied chat, then
 replaces that document's text. It closes only its own browser contexts. It does

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readPrivateJson } from '../helpers/private-artifacts.mjs'
+import { submitDocumentCreation } from './creation-consent.mjs'
 const execute=promisify(execFile)
 
 // Shell-free subprocess; never print command output or credentials into reports.
@@ -54,12 +55,21 @@ export async function documentAdapter(config,browser) {
       // The MEMBER is the requester and document owner. Precreate this private chat.
       const previous=JSON.parse(await cli(config,'MEMBER',['doc','chat-results',config.chatId]))
       assert.ok(!previous.results.some(r=>r.title===config.title),'use a fresh unique title')
-      await cli(config,'MEMBER',['run',config.agent,'--chat',config.chatId,
-        `Create one populated private Document titled ${JSON.stringify(config.title)} containing exactly this text: ${JSON.stringify(config.initialText)}. Use the supported document creation tool. Do not create any other resource.`])
-      const saved=JSON.parse(await cli(config,'MEMBER',['doc','chat-results',config.chatId]))
-      const matches=saved.results.filter(r=>r.title===config.title)
-      assert.equal(matches.length,1)
-      result=matches[0]
+      const creationPage=await contexts.MEMBER.newPage()
+      await submitDocumentCreation(creationPage,config)
+      const deadline=Date.now()+180_000
+      while(Date.now()<deadline) {
+        const saved=JSON.parse(await cli(config,'MEMBER',['doc','chat-results',config.chatId]))
+        const matches=saved.results.filter(r=>r.title===config.title)
+        assert.ok(matches.length<=1,'creation must not duplicate the requested title')
+        if(matches.length===1) {
+          const run=JSON.parse(await cli(config,'MEMBER',['run','get',matches[0].run_id,'--format','json']))
+          assert.ok(!['failed','cancelled','interrupted'].includes(run.status),'creation run did not complete successfully')
+          if(run.status==='completed') {result=matches[0];break}
+        }
+        await new Promise(resolve=>setTimeout(resolve,1000))
+      }
+      assert.ok(result,'explicit UI creation must produce a durable result and completed run')
       assert.equal(result.type,'document')
       assert.equal(result.on_behalf_of_user_id,config.identities.MEMBER.userId)
       assert.ok(result.page_id && result.page_slug && result.run_id)
@@ -72,7 +82,7 @@ export async function documentAdapter(config,browser) {
       assert.equal(admin.status(),404)
       const owner=await read('OWNER')
       assert.equal(owner.page_id,result.page_id)
-      return {status:'passed',checks:['T-AG-01: CLI agent run created one durable Document','T-ACL-02: MEMBER requester, ADMIN 404, OWNER read'],source:{pageId:result.page_id,runId:result.run_id,chatId:config.chatId}}
+      return {status:'passed',checks:['T-AG-01: explicit composer intent created one durable Document; actual CLI verified result and completed run','T-ACL-02: MEMBER requester, ADMIN 404, OWNER read'],source:{pageId:result.page_id,runId:result.run_id,chatId:config.chatId}}
     },
     async openChatPanel() {
       const page=await contexts.MEMBER.newPage()

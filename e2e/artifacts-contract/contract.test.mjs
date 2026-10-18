@@ -127,3 +127,16 @@ test('setup validation fails before browser/provider and retains all seven rows'
     if(output) await rm(output,{recursive:true,force:true})
   }
 })
+
+test('English creation needs explicit composer metadata bound to the exact sent chat',async()=>{
+  const {creationConsent}=await import('./creation-consent.mjs')
+  const prompt='Create a Document in English'
+  const body={session_id:'chat-1',content:prompt,metadata:{document_creation_intent:{submission_id:'ui-consent-1',drafting:true}}}
+  const frame=value=>JSON.stringify({type:'send_message',channel:'session:chat-1',payload:JSON.stringify(value)})
+  assert.deepEqual(creationConsent(frame(body),'chat-1',prompt),{submission_id:'ui-consent-1',drafting:true})
+  for(const bad of [{...body,metadata:{}},{...body,session_id:'chat-2'},{...body,content:'different intent'},
+    {...body,metadata:{document_creation_intent:{submission_id:'ui-consent-1',drafting:false}}},
+    {...body,metadata:{document_creation_intent:{submission_id:'',drafting:true}}}]) assert.equal(creationConsent(frame(bad),'chat-1',prompt),null)
+  assert.equal(creationConsent(frame(body),'chat-2',prompt),null)
+  assert.equal(creationConsent('not json','chat-1',prompt),null)
+})
