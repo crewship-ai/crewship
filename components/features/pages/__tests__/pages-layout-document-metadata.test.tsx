@@ -19,7 +19,8 @@ vi.mock("@/hooks/use-workspace",async(importOriginal)=>({
 vi.mock("@/hooks/use-mobile",()=>({useIsMobile:()=>false}))
 vi.mock("next/navigation",()=>({useRouter:()=>({push:vi.fn(),replace:vi.fn(),prefetch:vi.fn()}),usePathname:()=>"/pages/notes",useSearchParams:()=>new URLSearchParams(),useParams:()=>({})}))
 vi.mock("../page-application",()=>({PageApplicationView:({fallback}:{fallback:React.ReactNode})=>{htmlHost();return <>{fallback}</>}}))
-afterEach(()=>{cleanup();requests.mockReset();htmlHost.mockReset()})
+const ownedFixtures=new Set<()=>void>()
+afterEach(()=>{cleanup();for(const dispose of [...ownedFixtures])dispose();requests.mockReset();htmlHost.mockReset()})
 
 async function dirtyDocument() {
   window.history.replaceState(null,"","/pages/notes")
@@ -37,14 +38,20 @@ async function dirtyDocument() {
     return Response.json({})
   })
   const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})
-  render(<QueryClientProvider client={client}><PagesLayout workspaceId="ws" slug="notes" /></QueryClientProvider>)
+  const dispose=()=>{if(!ownedFixtures.delete(dispose))return;client.clear();saved.destroy()}
+  ownedFixtures.add(dispose)
+  // The scenarios begin with a confirmed open Document. Keep initial metadata
+  // under the real human's key and finish the immediate mocked reads/effects
+  // before testing dirty state; initial entry animation is a separate concern.
+  client.setQueryData(pagesKeys.detail("ws","notes","pages-test-human"),page)
+  await act(async()=>{render(<QueryClientProvider client={client}><PagesLayout workspaceId="ws" slug="notes" /></QueryClientProvider>)})
   const node=await screen.findByLabelText("Document editor")
   const editor=(node as HTMLElement&{editor:Editor}).editor
   await waitFor(()=>expect(editor.isEditable).toBe(true))
   act(()=>{editor.commands.insertContent("Unsaved local text ")})
   await screen.findByRole("button",{name:"Download unsaved draft"},{timeout:3000})
   expect(node).toHaveTextContent("Unsaved local text")
-  return {node,editor,client,saved,refetch:async(status:number)=>{
+  return {node,editor,client,saved,dispose,refetch:async(status:number)=>{
     metadataStatus=status
     await act(async()=>{await client.refetchQueries({queryKey:pagesKeys.detail("ws","notes"),exact:false})})
   }}
@@ -65,7 +72,7 @@ it("retains the real dirty Document session through a metadata-only 503",async()
     await waitFor(()=>expect(screen.queryByText("Page details are temporarily unavailable. Your document remains open.")).toBeNull())
     expect(screen.getByLabelText("Document editor")).toBe(view.node)
     expect(view.node).toHaveTextContent("Unsaved local text")
-  } finally {cleanup();view.client.clear();view.saved.destroy()}
+  } finally {cleanup();view.dispose()}
 })
 
 it.each([401,403,404])("hides the native session on denied metadata revalidation (%s)",async(status)=>{
@@ -77,5 +84,5 @@ it.each([401,403,404])("hides the native session on denied metadata revalidation
     expect(screen.queryByText(/Saved private document/)).toBeNull()
     expect(screen.queryByText(/Unsaved local text/)).toBeNull()
     expect(htmlHost).not.toHaveBeenCalled()
-  } finally {cleanup();view.client.clear();view.saved.destroy()}
+  } finally {cleanup();view.dispose()}
 })

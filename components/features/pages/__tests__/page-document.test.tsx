@@ -94,3 +94,23 @@ it("retains the local draft when availability is disabled after hydration",async
  expect(request.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
  saved.destroy()
 })
+
+
+it.each([
+  {name:"schema2 heading",schema:2,node:{type:"heading",attrs:{id:"last-heading",level:2},content:[{type:"text",text:"Saved final heading"}]}},
+  {name:"schema3 code block",schema:3,node:{type:"codeBlock",attrs:{id:"last-code"},content:[{type:"text",text:"saved code"}]}}
+])("does not manufacture a trailing block or write when opening $name",async fixture=>{
+  const {documentSchema}=await import("@/lib/documents/schema")
+  const saved=documentSchema.create({type:"doc",content:[fixture.node]},fixture.schema)
+  try {
+    request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:fixture.schema,rev:1,epoch:"initial-epoch",can_write:true,snapshot:documentSchema.snapshot(saved)}}))
+    await act(async()=>{render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)})
+    const node=await screen.findByLabelText("Document editor")
+    const editor=(node as HTMLElement&{editor:Editor}).editor
+    await waitFor(()=>expect(editor.isEditable).toBe(true))
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1700))})
+    expect(request.mock.calls.filter(([,init])=>init?.method==="POST")).toHaveLength(0)
+    expect(editor.getJSON().content).toHaveLength(1)
+    expect(node.querySelector("p")).toBeNull()
+  } finally {cleanup();saved.destroy()}
+})
