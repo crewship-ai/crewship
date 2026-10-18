@@ -123,30 +123,37 @@ admission. Changes in an unrelated workspace do not revoke valid local shares.
 The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
-### Ordered preset foundations (not enabled)
+### Ordered resource presets
 
 The immutable v1 catalog defines routine View (`view,results`), Run
 (`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
 View (`list,read`), Contribute (`list,read,contribute`) and Manage
 (`list,read,contribute,manage`). Publication and `delete_issues` remain separate.
-These are future explicit bundles: this foundation exposes no preset application
-route, CLI command or selector and changes no existing grants or access mode.
+These bundles are available through administrative preview and confirmed apply
+API/CLI operations and the Settings selector. Application is always explicit;
+the catalog does not change existing grants or access mode.
 
 An empty-on-upgrade `access_preset_selections` table preserves deliberately saved
 choice provenance separately from canonical `access_grants`. Matching independent
 grants remain Custom. Managed grant edits invalidate a saved label; orthogonal
 rights, unrelated revisions and issuer liveness changes preserve saved intent.
 Inactive grants stay inactive. Versioned definitions are immutable, with no
-backfill or automatic reissue. Applying and previewing these bundles, including
-regular-results disclosure and retained destructive consequences, require the
-subsequent API/CLI/UI work tracked by #3271.
+backfill or automatic reissue. Preview describes regular-results disclosure and
+retained destructive consequences before confirmed application; the API/CLI
+and Settings contracts are specified below.
 
 An internal transaction-scoped planner now computes explicit before/after
 operations, retained issuer/timestamp provenance, deliberate reissue intent and
 independent Results, execution, destructive and file-role consequences. Its
 confirmation digest binds the current member incarnation/revision, caller and
 issuer authority, resource state and immutable definition in one snapshot.
-The selected resource is validated live; FK-valid historical grants for unrelated unavailable resources remain in the canonical before/after plan without regaining resource authority. The planner performs no writes and the digest supplies no authority. Administrative preview API/CLI and the confirmed apply API expose these contracts; application recomputes the same snapshot inside its writer transaction. The administrative apply CLI submits the same confirmed selection once; the selector remains follow-up work.
+The selected resource is validated live; FK-valid historical grants for unrelated
+unavailable resources remain in the canonical before/after plan without regaining
+resource authority. The planner performs no writes and the digest supplies no
+authority. Administrative preview API/CLI and the confirmed apply API expose
+these contracts; application recomputes the same snapshot inside its writer
+transaction. The administrative apply CLI and Settings selector submit the same
+reviewed, confirmed selection without silently refreshing or retrying a write.
 An empty starting grant collection serializes as `before: []`, including in the
 canonical confirmation fingerprint; preview collections remain JSON arrays.
 
@@ -527,7 +534,7 @@ Preset selection workspace, membership, resource and selector foreign keys have 
 
 ### Administrative preset catalog
 
-The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Application is not enabled by the catalog slice.
+The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Applying a selection is a separate explicit operation described under Explicit preset application.
 
 The OpenAPI `MemberAccessAgentRight` component names the existing agent-right variant for reuse in administrative policies. It preserves exact operation choices, required IDs and rejection of undeclared fields, without changing grants or runtime authority.
 
