@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -15,6 +16,7 @@ var (
 	ErrConflict  = errors.New("document revision conflict")
 	ErrFence     = errors.New("document writer fenced")
 	ErrQuota     = errors.New("document quota exceeded")
+	ErrRateLimit = fmt.Errorf("%w: temporary operation rate limit", ErrQuota)
 	ErrSchema    = errors.New("unsupported document schema")
 	ErrDuplicate = errors.New("idempotency key payload mismatch")
 )
@@ -30,6 +32,7 @@ type Authorize func(context.Context, *sql.Tx) (string, error)
 type Options struct {
 	MaxDocumentBytes, MaxLogBytes, MaxHistoryBytes, MaxCommits, MaxDocuments int
 	LeaseDuration                                                            time.Duration
+	ReceiptWindow                                                            time.Duration
 }
 type Store struct {
 	db   *sql.DB
@@ -39,22 +42,28 @@ type Lease struct {
 	Owner, Writer string
 	Epoch         int64
 	ExpiresAt     time.Time
+	Generation    int64
 }
 type Update struct {
 	Rev     int64
 	Payload []byte
 }
 type State struct {
-	Schema                      int
-	HeadRev, Epoch, SnapshotRev int64
-	Snapshot                    []byte
-	Projection                  json.RawMessage
-	Updates                     []Update
+	Schema                                  int
+	HeadRev, Epoch, SnapshotRev, Generation int64
+	Snapshot                                []byte
+	Projection                              json.RawMessage
+	Updates                                 []Update
 }
+
+// MutationGuard enforces application-specific immutable request bounds inside the writer transaction.
+type MutationGuard func(context.Context, *sql.Tx, string, State) error
 type Commit struct {
+	Guard                     MutationGuard
 	Lease                     Lease
 	ID, Fingerprint           string
 	IfRev                     int64
+	IfGeneration              *int64
 	Schema                    int
 	Update, CandidateSnapshot []byte
 	Projection                json.RawMessage
@@ -87,6 +96,9 @@ func New(db *sql.DB, o Options) *Store {
 	}
 	if o.MaxCommits <= 0 {
 		o.MaxCommits = 10000
+	}
+	if o.ReceiptWindow <= 0 {
+		o.ReceiptWindow = 10 * time.Minute
 	}
 	if o.MaxDocuments <= 0 {
 		o.MaxDocuments = 128
@@ -123,7 +135,7 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	return t.Commit()
 }
 func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection)
+	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
 	}

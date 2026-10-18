@@ -77,6 +77,17 @@ func safeDocumentRestoreRow(table string, row map[string]any) (map[string]any, e
 	for key, value := range row {
 		copy[key] = value
 	}
+	if generation, ok := row["generation"].(float64); ok {
+		if generation < 0 || generation >= float64(math.MaxInt64) || math.Trunc(generation) != generation {
+			return nil, fmt.Errorf("backup: invalid document generation")
+		}
+		copy["generation"] = int64(generation) + 1
+	} else if generation, ok := row["generation"].(int64); ok {
+		if generation < 0 || generation == math.MaxInt64 {
+			return nil, fmt.Errorf("backup: invalid document generation")
+		}
+		copy["generation"] = generation + 1
+	}
 	copy["writer"], copy["owner"], copy["lease_until"], copy["epoch"] = "", "", int64(0), epoch+1
 	return copy, nil
 }

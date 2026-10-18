@@ -246,11 +246,15 @@ func TestDocumentsFixtureMatchesFreshMigrationAndReopens(t *testing.T) {
 	}
 }
 
-func TestDocumentsFixtureIsolatesRowsAndReceipts(t *testing.T) {
+func TestDocumentsFixtureIsolatesRowsReceiptsAndWriters(t *testing.T) {
 	a, dbA, pathA := fixture(t, Options{})
 	b, dbB, pathB := fixture(t, Options{})
 	if pathA == pathB {
 		t.Fatal("fixtures share a database path")
+	}
+	leaseA, leaseB := acquire(t, a), acquire(t, b)
+	if leaseA.Writer == leaseB.Writer {
+		t.Fatal("fixture copied a live writer identity")
 	}
 	if _, err := dbA.Exec(`UPDATE users SET email='copy-a@example.test' WHERE id='document-owner'`); err != nil {
 		t.Fatal(err)
@@ -259,19 +263,15 @@ func TestDocumentsFixtureIsolatesRowsAndReceipts(t *testing.T) {
 	if err := dbB.QueryRow(`SELECT email FROM users WHERE id='document-owner'`).Scan(&email); err != nil || email != "document-owner@example.test" {
 		t.Fatalf("user rows not isolated: %q %v", email, err)
 	}
-	target := Key{"workspace-a", "page-c"}
-	if _, err := a.InitRequest(ctx, target, "fixture-copy-initialization", "fixture-copy-payload", 1, []byte("copy-a"), projection, allow); err != nil {
+	if _, err := a.Commit(ctx, key, commit(leaseA, "fixture-copy-mutation", 0), allow); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Read(ctx, target, allow); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("initialization leaked to another fixture: %v", err)
-	}
 	state, err := b.Read(ctx, key, allow)
-	if err != nil || state.HeadRev != 0 || string(state.Snapshot) != "baseline" {
-		t.Fatalf("document initialization changed another fixture: %+v %v", state, err)
+	if err != nil || state.Generation != 0 || state.HeadRev != 0 || string(state.Snapshot) != "baseline" {
+		t.Fatalf("document mutation leaked: %+v %v", state, err)
 	}
 	var n int
-	if err := dbB.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE id='fixture-copy-initialization'`).Scan(&n); err != nil || n != 0 {
+	if err := dbB.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE id='fixture-copy-mutation'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("receipt leaked: %d %v", n, err)
 	}
 }

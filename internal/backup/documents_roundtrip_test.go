@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -24,7 +25,7 @@ func seedBackupDocument(t *testing.T, db *sql.DB, ws, page, owner string) {
 		args []any
 	}{
 		{`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,?,?,'{}')`, []any{page, ws, page, page, owner}},
-		{`INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,epoch,snapshot,snapshot_rev,projection,writer,owner,lease_until) VALUES(?,?,1,2,41,?,1,?,'source-engine','source-owner',4102444800000)`, []any{ws, page, documentSnapshot, documentProjection}},
+		{`INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,epoch,snapshot,snapshot_rev,projection,writer,owner,lease_until,generation) VALUES(?,?,1,2,41,?,1,?,'source-engine','source-owner',4102444800000,7)`, []any{ws, page, documentSnapshot, documentProjection}},
 		{`INSERT INTO document_updates(workspace_id,page_id,rev,payload) VALUES(?,?,2,?)`, []any{ws, page, documentUpdate}},
 		{`INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind,created_at) VALUES(?,?,'original-request','request-digest','original-fingerprint',2,41,'user:historical-actor','human','2026-10-15T16:00:00.000Z')`, []any{ws, page}},
 		{`INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor,created_at) VALUES(?,?,'original-checkpoint',2,1,?,?,'user:historical-actor','2026-10-15T16:00:00.000Z')`, []any{ws, page, documentSnapshot, documentProjection}},
@@ -40,7 +41,7 @@ func assertBackupDocument(t *testing.T, db *sql.DB, expected int) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM documents`).Scan(&count); err != nil || count != expected {
 		t.Fatalf("documents=%d want %d: %v", count, expected, err)
 	}
-	rows, err := db.Query(`SELECT d.workspace_id,d.page_id,d.epoch,d.writer,d.owner,d.lease_until,d.snapshot,d.projection,u.payload,c.snapshot,c.projection,r.digest,r.epoch,r.actor,r.kind,r.rev,c.rev,r.fingerprint,c.actor,r.created_at,c.created_at FROM documents d JOIN document_updates u ON u.workspace_id=d.workspace_id AND u.page_id=d.page_id JOIN document_checkpoints c ON c.workspace_id=d.workspace_id AND c.page_id=d.page_id JOIN document_receipts r ON r.workspace_id=d.workspace_id AND r.page_id=d.page_id`)
+	rows, err := db.Query(`SELECT d.workspace_id,d.page_id,d.epoch,d.generation,d.writer,d.owner,d.lease_until,d.snapshot,d.projection,u.payload,c.snapshot,c.projection,r.digest,r.epoch,r.actor,r.kind,r.rev,c.rev,r.fingerprint,c.actor,r.created_at,c.created_at FROM documents d JOIN document_updates u ON u.workspace_id=d.workspace_id AND u.page_id=d.page_id JOIN document_checkpoints c ON c.workspace_id=d.workspace_id AND c.page_id=d.page_id JOIN document_receipts r ON r.workspace_id=d.workspace_id AND r.page_id=d.page_id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,14 +49,14 @@ func assertBackupDocument(t *testing.T, db *sql.DB, expected int) {
 	seen := 0
 	var restoredKeys []documents.Key
 	for rows.Next() {
-		var epoch, lease, receiptEpoch, rev, checkpointRev int64
+		var epoch, generation, lease, receiptEpoch, rev, checkpointRev int64
 		var workspace, page, writer, owner, digest, actor, kind, fingerprint, checkpointActor, receiptCreated, checkpointCreated string
 		var snapshot, projection, update, checkpoint, checkpointProjection []byte
-		if err := rows.Scan(&workspace, &page, &epoch, &writer, &owner, &lease, &snapshot, &projection, &update, &checkpoint, &checkpointProjection, &digest, &receiptEpoch, &actor, &kind, &rev, &checkpointRev, &fingerprint, &checkpointActor, &receiptCreated, &checkpointCreated); err != nil {
+		if err := rows.Scan(&workspace, &page, &epoch, &generation, &writer, &owner, &lease, &snapshot, &projection, &update, &checkpoint, &checkpointProjection, &digest, &receiptEpoch, &actor, &kind, &rev, &checkpointRev, &fingerprint, &checkpointActor, &receiptCreated, &checkpointCreated); err != nil {
 			t.Fatal(err)
 		}
-		if epoch != 42 || writer != "" || owner != "" || lease != 0 {
-			t.Fatalf("restored live lease/epoch: %d %q %q %d", epoch, writer, owner, lease)
+		if epoch != 42 || generation != 8 || writer != "" || owner != "" || lease != 0 {
+			t.Fatalf("restored lease: epoch=%d generation=%d writer=%q owner=%q until=%d", epoch, generation, writer, owner, lease)
 		}
 		if !bytes.Equal(snapshot, documentSnapshot) || !bytes.Equal(checkpoint, documentSnapshot) || !bytes.Equal(update, documentUpdate) || !bytes.Equal(projection, documentProjection) || !bytes.Equal(checkpointProjection, documentProjection) {
 			t.Fatal("document binary bytes changed")
@@ -77,8 +78,11 @@ func assertBackupDocument(t *testing.T, db *sql.DB, expected int) {
 	authorize := func(context.Context, *sql.Tx) (string, error) { return "user:historical-actor", nil }
 	for _, key := range restoredKeys {
 		state, err := store.Read(t.Context(), key, authorize)
-		if err != nil || state.HeadRev != 2 || state.SnapshotRev != 1 || len(state.Updates) != 1 {
+		if err != nil || state.HeadRev != 2 || state.SnapshotRev != 1 || state.Generation != 8 || len(state.Updates) != 1 {
 			t.Fatalf("restored durable replay %#v: %v", state, err)
+		}
+		if _, err := store.Renew(t.Context(), key, documents.Lease{Writer: "source-engine", Owner: "source-owner", Epoch: 41}, authorize); !errors.Is(err, documents.ErrFence) {
+			t.Fatalf("source lease revived after restore: %v", err)
 		}
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM document_writer_fence WHERE id=1`).Scan(&count); err != nil || count != 1 {
@@ -140,12 +144,12 @@ func TestDocumentBackupWorkspaceRoundtrip(t *testing.T) {
 	if err := backup.RestoreDump(t.Context(), source, dump); err != nil {
 		t.Fatal(err)
 	}
-	var epoch int
+	var epoch, generation int
 	var writer string
-	if err := source.QueryRow(`SELECT epoch,writer FROM documents WHERE workspace_id=?`, ws).Scan(&epoch, &writer); err != nil || epoch != 42 || writer != "" {
-		t.Fatalf("existing writer not fenced: %d %q %v", epoch, writer, err)
+	if err := source.QueryRow(`SELECT epoch,generation,writer FROM documents WHERE workspace_id=?`, ws).Scan(&epoch, &generation, &writer); err != nil || epoch != 42 || generation != 8 || writer != "" {
+		t.Fatalf("existing writer not fenced: epoch=%d generation=%d writer=%q err=%v", epoch, generation, writer, err)
 	}
-	if err := source.QueryRow(`SELECT epoch,writer FROM documents WHERE workspace_id='foreign-documents'`).Scan(&epoch, &writer); err != nil || epoch != 41 || writer != "source-engine" {
+	if err := source.QueryRow(`SELECT epoch,generation,writer FROM documents WHERE workspace_id='foreign-documents'`).Scan(&epoch, &generation, &writer); err != nil || epoch != 41 || generation != 7 || writer != "source-engine" {
 		t.Fatal("restore changed foreign writer")
 	}
 }
@@ -179,13 +183,42 @@ func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
 	if err := backup.RestoreDump(t.Context(), source, dump); err == nil {
 		t.Fatal("corrupt binary accepted")
 	}
-	var epoch, lease int64
+	var epoch, generation, lease int64
 	var writer, owner string
-	if err := source.QueryRow(`SELECT epoch,writer,owner,lease_until FROM documents WHERE workspace_id=?`, workspace).Scan(&epoch, &writer, &owner, &lease); err != nil {
+	if err := source.QueryRow(`SELECT epoch,generation,writer,owner,lease_until FROM documents WHERE workspace_id=?`, workspace).Scan(&epoch, &generation, &writer, &owner, &lease); err != nil {
 		t.Fatal(err)
 	}
-	if epoch != 41 || writer != "source-engine" || owner != "source-owner" || lease != 4102444800000 {
+	if epoch != 41 || generation != 7 || writer != "source-engine" || owner != "source-owner" || lease != 4102444800000 {
 		t.Fatal("failed restore changed live authority")
+	}
+}
+func TestDocumentReceiptEvidenceBeyondTenThousandSurvivesEncryptedRestore(t *testing.T) {
+	source := openMigratedDB(t)
+	ws := seedWorkspace(t, source)
+	seedBackupDocument(t, source, ws, "document-page", "u_admin")
+	if _, err := source.Exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
+ INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind,created_at)
+ SELECT ?, 'document-page','historical-'||i,'digest','fingerprint',2,41,'user:historical-actor','human','2000-01-01T00:00:00.000Z' FROM n`, ws); err != nil {
+		t.Fatal(err)
+	}
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "receipt-evidence-passphrase", Actor: actor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := openMigratedDB(t)
+	if _, err = backup.RestoreBackup(t.Context(), target, backup.RestoreOptions{Path: bundle.Path, Passphrase: "receipt-evidence-passphrase", Actor: actor}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err = target.QueryRow(`SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id='document-page'`, ws).Scan(&count); err != nil || count != 10001 {
+		t.Fatalf("receipt evidence truncated: %d %v", count, err)
+	}
+	store := documents.New(target, documents.Options{})
+	allow := func(context.Context, *sql.Tx) (string, error) { return "user:historical-actor", nil }
+	r, found, err := store.LookupReceipt(t.Context(), documents.Key{WorkspaceID: ws, PageID: "document-page"}, "original-request", "original-fingerprint", allow)
+	if err != nil || !found || r.Rev != 2 || r.Epoch != 41 {
+		t.Fatalf("original durable retry evidence lost: %+v %v %v", r, found, err)
 	}
 }
 

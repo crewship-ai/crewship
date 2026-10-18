@@ -6,7 +6,9 @@ require a human-owned Page without existing panels or application source.
 
 The initial storage foundation supports initialization and reading of schema 1
 state. It adds no public endpoint, editor, background service or enabled runtime.
-Lease, edit and checkpoint operations are delivered separately.
+The storage API also supports writer leases, atomic edits, receipt lookup,
+pinned checkpoints and explicit restoration. Public endpoint wiring is
+delivered separately.
 
 Callers provide an authorization function. Every operation runs that function
 inside a transaction after acquiring the document writer fence. Initialization
@@ -20,6 +22,35 @@ incomplete document as valid. The caller remains responsible for interpreting
 and validating the document's CRDT payload; this storage foundation does not
 claim that arbitrary binary data is a valid document.
 
+An edit requires the current lease owner, writer identity, epoch and expiry,
+plus a matching revision and any supplied generation or block-hash conditions.
+Current authorization runs inside the fenced transaction before receipt lookup.
+An identical retry returns its original receipt; a changed actor, payload or
+precondition conflicts. The request digest excludes lease credentials so a
+confirmed edit can be retried after boot fencing with a new lease. Requests
+without a generation condition preserve their original digest representation.
+
+A checkpoint pins the snapshot and projection at the confirmed revision.
+Restoration creates a new head revision, advances its epoch and generation,
+and clears the writer lease. It replaces the replay log while retaining pinned
+checkpoints and retry receipts. Checkpoint and restore retries bind the original
+generation when supplied; changing that condition conflicts, while requests
+without it retain their previous digest representation. Authorization still
+runs before retry lookup, including after a writer lease has rotated.
+
+Logical storage statistics distinguish the current snapshot, replay updates,
+pinned checkpoint bytes and receipt counts. They do not measure SQLite file or
+WAL allocation. History limits reject new operations without deleting confirmed
+checkpoints or receipts.
+
+Document capacity is scoped to each workspace, with a default of 128 documents.
+New commits, checkpoints and restores share a per-document admission window:
+by default, 10,000 receipts within ten minutes of server time. A full window
+returns `ErrRateLimit`, which also matches `ErrQuota`. Current authorization and
+exact retry lookup run first, so an authorized confirmed retry still succeeds
+when the window is full. Expiring a window never removes receipts; historical
+retry evidence remains available after restart and encrypted backup restoration.
+
 The database migration prevents attaching documents to existing panels or
 application drafts, and prevents removing a document's human owner. Additional
 content types must install reciprocal exclusion checks when their storage is
@@ -30,7 +61,7 @@ Workspace backups include document state, updates, receipts and checkpoints in
 dependency order. Binary content uses an explicit base64 representation to
 preserve bytes through serialized bundles. Workspace forks remap document and
 history anchors together. Workspace restoration and physical instance recovery
-clear restored writer credentials and advance epochs so a source writer cannot
+clear restored writer credentials and advance epochs and generations so a source writer cannot
 resume with its old authority. The process-local writer fence is excluded from
 workspace bundles.
 
@@ -39,3 +70,7 @@ They cover current authorization, exact retries, conflicting inputs, workspace
 scope, persistent reopening, type exclusivity and incomplete replay rejection.
 Backup tests exercise encrypted workspace bundles, forks, physical instance
 recovery and rollback after corrupt binary input.
+Mutation tests cover concurrent revision checks, lease renewal and release,
+boot fencing, immutable transaction guards, exact retries and revoked authority.
+Checkpoint and restore tests also cover generation-bound retries, scoped reads,
+pinned history, and transaction rollback that preserves the original writer.
