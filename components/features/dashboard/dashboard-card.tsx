@@ -26,7 +26,7 @@ export function DashboardCard({ title, icon: Icon, hint, action, className, chil
       {...rest}
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        {/* Harbor eyebrow: mono, wide-tracked, in the brand ink. When title and
+        {/* Harbor eyebrow: sentence-case sans in the brand ink. When title and
             hint do not fit on one line the hint moves under the title,
             rather than squeezing the title onto two. */}
         <div className="eyebrow inline-flex min-w-0 items-center gap-1.5">
@@ -34,7 +34,7 @@ export function DashboardCard({ title, icon: Icon, hint, action, className, chil
           <span>{title}</span>
         </div>
         {(hint || action) && (
-          <div data-slot="dashboard-card-hint" className="flex min-w-0 items-center gap-2 text-[11px] font-mono text-muted-foreground">
+          <div data-slot="dashboard-card-hint" className="flex min-w-0 items-center gap-2 text-micro tabular-nums text-muted-foreground">
             {hint}
             {action}
           </div>

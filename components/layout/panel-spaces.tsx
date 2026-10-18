@@ -32,7 +32,7 @@ export function PanelSpaces<T extends string>({
 }: PanelSpacesConfig<T> & { className?: string }) {
   useSpaceKeys(items.map((s) => s.key), onChange)
   return (
-    <div role="tablist" aria-label={label} aria-orientation="vertical" data-slot="panel-spaces" className={cn("flex flex-col gap-px px-1.5 pt-2", className)}>
+    <div role="tablist" aria-label={label} aria-orientation="vertical" data-slot="panel-spaces" className={cn("mx-2 mt-2 flex flex-col gap-px rounded-lg border border-border bg-card p-1", className)}>
       {items.map((s, i) => {
         const on = s.key === value
         const Icon = s.icon
@@ -55,7 +55,6 @@ export function PanelSpaces<T extends string>({
             <SidebarRowTile icon={Icon} active={on} />
             <span className="min-w-0 flex-1 truncate">{s.label}</span>
             {s.count != null && <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{s.count}</span>}
-            <kbd aria-hidden className="shrink-0 rounded border border-border px-1 font-mono text-micro text-muted-foreground-soft">{i + 1}</kbd>
           </button>
         )
       })}

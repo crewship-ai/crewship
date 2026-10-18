@@ -548,7 +548,7 @@ export function InboxV2() {
   const topActions = displayed && !confirmation ? (
     <span className="flex items-center gap-0.5" data-testid="inbox-item-nav">
       {position >= 0 && (
-        <span className="mr-1 hidden whitespace-nowrap font-mono text-label tabular-nums text-muted-foreground sm:inline" aria-label={`Item ${position + 1} of ${visible.length}`}>
+        <span className="mr-1 hidden whitespace-nowrap text-label tabular-nums text-muted-foreground sm:inline" aria-label={`Item ${position + 1} of ${visible.length}`}>
           {position + 1} / {visible.length}
         </span>
       )}

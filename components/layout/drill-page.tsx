@@ -183,7 +183,7 @@ function DrillHead({ icon: Icon, title, description, note }: { icon: LucideIcon;
   )
 }
 
-/** The bordered "← <parent>" control; the arrow alone when `compact`. */
+/** The plain "← <parent>" row (v67); the arrow alone when `compact`. */
 function DrillBack({ parent, compact = false }: { parent: { href: string; label: string; icon?: LucideIcon }; compact?: boolean }) {
   const BackIcon = parent.icon
   return (
@@ -192,7 +192,7 @@ function DrillBack({ parent, compact = false }: { parent: { href: string; label:
       data-slot="drill-back"
       aria-label={`Back to ${parent.label}`}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background text-xs font-medium text-foreground/85 shadow-xs transition-colors hover:bg-accent hover:text-foreground",
+        "inline-flex h-7 items-center gap-1.5 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
         compact ? "w-7 justify-center" : "pl-1.5 pr-2.5",
       )}
     >
