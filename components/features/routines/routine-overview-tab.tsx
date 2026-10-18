@@ -179,7 +179,7 @@ export function RoutineOverviewTab({
                       title={b.label}
                       aria-label={`Run ${b.id.slice(0, 8)} · ${b.label}`}
                       onClick={() => onOpenRun(b.id)}
-                      className={cn("min-w-1.5 flex-1 rounded-sm transition-opacity hover:opacity-80", BAR[b.tone], b.tone === "mut" ? "h-1/3" : "h-full")}
+                      className={cn("min-w-1.5 max-w-6 flex-1 rounded-sm transition-opacity hover:opacity-80", BAR[b.tone], b.tone === "mut" ? "h-1/3" : "h-full")}
                     />
                   ))}
                 </div>
