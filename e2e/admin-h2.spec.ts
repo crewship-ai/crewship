@@ -141,7 +141,9 @@ test.describe("Admin console", () => {
     await seed(page, PINNED)
     await page.route("**/api/v1/admin/instance/retention", async (route) => {
       if (route.request().method() !== "PUT") return route.fallback()
-      await route.fulfill({ json: { applied: false, dry_run: true, preview_id: "p0", changes: [] } })
+      // The server's shape (internal/api/admin_instance_retention.go): per
+      // workspace, and no workspace has anything to change.
+      await route.fulfill({ json: { dry_run: true, preview_id: "p0", workspaces: [] } })
     })
     await page.goto("/admin?tab=retention")
     const row = page.locator("[data-slot=retention-table] [data-key]").first()
