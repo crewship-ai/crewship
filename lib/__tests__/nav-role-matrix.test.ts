@@ -13,7 +13,7 @@ import type { RestrictedSurface } from "../restricted-surfaces"
 const HAS_CALENDAR = navSections.some((s) => s.items.some((i) => i.href === "/calendar"))
 const WORK_AND_BUILD = [
   "Dashboard", "Inbox", "Chat", "Activity",
-  "Issues", "Routines", "Pages", ...(HAS_CALENDAR ? ["Calendar"] : []),
+  "Issues", "Routines", "Artifacts", ...(HAS_CALENDAR ? ["Calendar"] : []),
   "Crews", "Skills", "Vault", "Integrations",
 ]
 const titles = (items: { title: string }[]) => items.map((i) => i.title)
@@ -46,7 +46,7 @@ describe("role x navigation rows (full session)", () => {
 
   it("keeps the order of the design: Work is Issues, Routines, Pages (then Calendar)", () => {
     const t = titles(visibleNavItems({ role: "MEMBER", instanceAdmin: false, surfaces: null }))
-    expect(t.slice(4, HAS_CALENDAR ? 8 : 7)).toEqual(["Issues", "Routines", "Pages", ...(HAS_CALENDAR ? ["Calendar"] : [])])
+    expect(t.slice(4, HAS_CALENDAR ? 8 : 7)).toEqual(["Issues", "Routines", "Artifacts", ...(HAS_CALENDAR ? ["Calendar"] : [])])
   })
 })
 
@@ -54,7 +54,7 @@ describe("Guest (restricted session) x navigation rows", () => {
   const cases: [string, RestrictedSurface[], string[]][] = [
     ["chat only", ["chat", "account_security"], ["Chat", "Settings"]],
     ["chat and issues", ["chat", "issues", "account_security"], ["Chat", "Issues", "Settings"]],
-    ["issues, routines and pages", ["issues", "routines", "pages", "account_security"], ["Issues", "Routines", "Pages", "Settings"]],
+    ["issues, routines and pages", ["issues", "routines", "pages", "account_security"], ["Issues", "Routines", "Artifacts", "Settings"]],
     ["account security only", ["account_security"], ["Settings"]],
     ["nothing granted", [], []],
   ]

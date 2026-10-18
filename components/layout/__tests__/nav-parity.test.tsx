@@ -132,3 +132,9 @@ describe("the navigation is defined once", () => {
     expect(new Set(hrefs).size, `duplicate rows: ${hrefs.join(", ")}`).toBe(hrefs.length)
   })
 })
+
+
+it("names the shared destination Artifacts while preserving existing Page links",()=>{
+  expect(flatten().find(item=>item.href==="/pages")?.title).toBe("Artifacts")
+  expect(flatten().filter(item=>item.href==="/pages")).toHaveLength(1)
+})
