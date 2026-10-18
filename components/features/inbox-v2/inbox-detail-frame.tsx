@@ -266,6 +266,7 @@ export function outcomeLabel(action: string | null | undefined): string {
   const labels: Record<string, string> = {
     approved: "Approved",
     approve: "Approved",
+    supplied: "Credential supplied",
     denied: "Denied",
     deny: "Denied",
     rejected: "Rejected",

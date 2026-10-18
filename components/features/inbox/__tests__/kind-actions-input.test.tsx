@@ -97,7 +97,7 @@ describe("Credential request (I03)", () => {
     fireEvent.change(field, { target: { value: "secret_abc" } })
     fireEvent.click(send)
     await waitFor(() => expect(escalationSupplyCredential).toHaveBeenCalledWith("esc-1", "secret_abc", "ws"))
-    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("approved"))
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("supplied"))
     expect((screen.getByLabelText("Value") as HTMLInputElement).value).toBe("")
   })
 
