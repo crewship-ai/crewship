@@ -26,6 +26,7 @@ import { CrewTeam, hireState } from "./crew-team"
 import { CrewTools } from "./crew-tools"
 import { CrewEnvironment } from "./crew-environment"
 import { CrewSettings } from "./crew-settings"
+import { CrewDeleteDialog } from "./crew-delete-dialog"
 import { HireDialog, RehireDialog } from "./crew-hire-dialog"
 import { useCrewSpend } from "./crew-spend"
 import { MemoryWorkspace } from "./memory-workspace"
@@ -418,20 +419,13 @@ export function CrewCanvas({
         confirmLabel={avatarConfirm?.reset ? "Reset avatars" : "Apply style"}
         onConfirm={() => applyAvatarStyle(avatarConfirm?.reset ?? false)}
       />
-      <ConfirmDialog
+      <CrewDeleteDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete crew ${crew.name}?`}
-        description="This deletes the crew and its agents. Background cleanup removes runtimes whose ownership is verified; older runtimes may need manual cleanup. Removing a runtime stops its processes and discards files stored only in its container writable layer."
-        consequences={[
-          { tone: "lost", text: `${agents.length === 1 ? "1 agent is" : `${agents.length} agents are`} deleted along with the crew` },
-          { tone: "lost", text: "Declared sidecar containers and their data volumes are also deleted" },
-          { tone: "lost", text: "Crew issues are deleted" },
-          { tone: "kept", text: "Background runtime cleanup preserves mounted volumes, host data and shared images" },
-        ]}
-        confirmLabel="Delete crew"
-        destructive
-        typeToConfirm={crew.slug}
+        workspaceId={workspaceId}
+        crew={crew}
+        agents={agents}
+        containers={containers}
         onConfirm={handleDelete}
       />
     </PageSaveProvider>
