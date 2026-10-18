@@ -500,7 +500,7 @@ function RoutinesList({
               const Icon = v.icon
               const n = viewCount(v.id)
               return (
-                <SidebarRow key={v.id} as="div" selected={view === v.id} onSelect={() => onViewChange(v.id)}>
+                <SidebarRow key={v.id} as="div" selected={view === v.id} aria-current={view === v.id ? "page" : undefined} onSelect={() => onViewChange(v.id)}>
                   <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate" title={`${v.label} · ${i + 1}`}>{v.label}</span>
                   {n != null && n > 0 && <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{n}</span>}

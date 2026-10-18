@@ -144,7 +144,8 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest =
             icon={Webhook}
             title="No webhooks yet"
             description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
-            action={
+          >
+            <div className="mt-4">
               <Button
                 size="sm"
                 variant="default"
@@ -154,8 +155,8 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest =
                 <Plus className="h-3.5 w-3.5" />
                 Add webhook
               </Button>
-            }
-          />
+            </div>
+          </EmptyState>
         </Card>
       ) : (
         <Card
