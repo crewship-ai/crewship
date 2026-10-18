@@ -253,7 +253,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await save.click()
     await expect.poll(() => patch?.name).toBe("Renamed certificate")
     await expect(page.getByRole("heading", { name: "Renamed certificate", exact: true })).toBeVisible()
-    await expect(page.getByText("production", { exact: true })).toBeVisible()
+    // The saved tag, in the secret's header — the Settings field shows the
+    // draft too, so the header is what proves the save came back.
+    const head = page.locator("header").filter({ has: page.getByRole("heading", { name: "Renamed certificate", exact: true }) })
+    await expect(head.getByText("production", { exact: true })).toBeVisible()
     expect(patch).not.toHaveProperty("value")
     // The old dialog re-sent the tier (3) so a metadata save could not reset
     // it; the save bar sends only what changed, so the tier is never touched.
