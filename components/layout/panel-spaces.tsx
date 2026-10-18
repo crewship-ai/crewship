@@ -53,7 +53,7 @@ export function PanelSpaces<T extends string>({
           >
             <Icon className={cn("h-3.5 w-3.5 shrink-0", on ? "text-foreground" : "text-muted-foreground")} aria-hidden />
             <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            {s.count != null && <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">{s.count}</span>}
+            {s.count != null && <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{s.count}</span>}
             <kbd aria-hidden className="shrink-0 rounded border border-border px-1 font-mono text-micro text-muted-foreground-soft">{i + 1}</kbd>
           </button>
         )

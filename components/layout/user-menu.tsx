@@ -303,7 +303,7 @@ function ActiveSessionsCount() {
     return () => { live = false }
   }, [])
   if (count === null) return null
-  return <span className="font-mono text-micro text-muted-foreground">{count} active</span>
+  return <span className="text-micro tabular-nums text-muted-foreground">{count} active</span>
 }
 
 /** The foot of the menu (v67 `pu-ver`): which build this is — the first thing
