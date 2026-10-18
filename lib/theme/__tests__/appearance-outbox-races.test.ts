@@ -97,4 +97,61 @@ describe("appearance outbox: review regressions", () => {
     await outbox.kick()
     expect(sent).toEqual(["appearance", "appearance.style"])
   })
+
+  // Independent review of candidate5 (2026-10-18): on unload both keys left
+  // at once, so the style could land although `appearance` was refused.
+  it("keepalive does not write style before appearance has been accepted", async () => {
+    const sent: string[] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const outbox = createAppearanceOutbox({
+      storage: storage(),
+      send: async (key) => { sent.push(key); if (key === "appearance") { await held; return { ok: false, status: 400 } } return { ok: true, status: 204 } },
+      schedule: () => () => {}, onStatus: () => {},
+    })
+    outbox.enqueue("appearance", "theme and accent")
+    outbox.enqueue("appearance.style", "style")
+    outbox.flushKeepalive()
+    expect(sent).toEqual(["appearance"])
+    release()
+    await outbox.flush()
+    expect(sent).toEqual(["appearance"])
+    expect(outbox.pending("appearance.style")).toBe(true)
+    expect(outbox.status()).toBe("failed")
+  })
+
+  it("keepalive sends style after appearance is accepted, both with keepalive", async () => {
+    const sent: [string, boolean][] = []
+    const outbox = createAppearanceOutbox({
+      storage: storage(),
+      send: async (key, _body, keepalive) => { sent.push([key, keepalive]); return { ok: true, status: 204 } },
+      schedule: () => () => {}, onStatus: () => {},
+    })
+    outbox.enqueue("appearance", "a")
+    outbox.enqueue("appearance.style", "s")
+    outbox.flushKeepalive()
+    expect(sent).toEqual([["appearance", true]])
+    await outbox.flush()
+    expect(sent).toEqual([["appearance", true], ["appearance.style", true]])
+    expect(outbox.status()).toBe("synced")
+  })
+
+  it("keepalive during a run repeats only the head on the wire, never what follows it", async () => {
+    const sent: [string, boolean][] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const outbox = createAppearanceOutbox({
+      storage: storage(),
+      send: async (key, _body, keepalive) => { sent.push([key, keepalive]); if (key === "appearance" && !keepalive) { await held; return { ok: false, status: 400 } } return { ok: key !== "appearance", status: key === "appearance" ? 400 : 204 } },
+      schedule: () => () => {}, onStatus: () => {},
+    })
+    outbox.enqueue("appearance", "a")
+    outbox.enqueue("appearance.style", "s")
+    const run = outbox.flush()
+    outbox.flushKeepalive()
+    expect(sent).toEqual([["appearance", false], ["appearance", true]])
+    release()
+    await run
+    expect(sent.map(([k]) => k)).not.toContain("appearance.style")
+  })
 })
