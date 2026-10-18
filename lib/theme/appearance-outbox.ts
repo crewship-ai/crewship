@@ -21,7 +21,10 @@
  *   request is on the wire goes out in the same run.
  * - `pause()` (sync switched off) cancels a scheduled retry and stops the run
  *   after the request already on the wire; nothing is sent until `resume()`.
- * - On unload whatever is left goes out with `keepalive` (not while paused).
+ * - On unload the queue runs with `keepalive`, in the same order: the next
+ *   entry goes only after the previous one was accepted. If the page dies
+ *   first, the rest is replayed from localStorage on the next load. Not
+ *   while paused.
  */
 
 export const OUTBOX_STORAGE_KEY = "crewship-appearance-outbox"
@@ -103,7 +106,7 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
     }, RETRY_DELAYS_MS[attempt++]) || null
   }
 
-  async function run(): Promise<void> {
+  async function run(keepalive: boolean): Promise<void> {
     // Always the head of the (sorted) queue, re-read after every request.
     for (;;) {
       if (paused) break
@@ -112,7 +115,7 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
       if (!e || e.failed) break
       let res: { ok: boolean; status: number }
       try {
-        res = await deps.send(e.key, e.body, false)
+        res = await deps.send(e.key, e.body, keepalive)
       } catch {
         res = { ok: false, status: 0 }
       }
@@ -141,7 +144,7 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
 
   function flush(): Promise<void> {
     if (paused) return Promise.resolve()
-    if (!running) running = run().finally(() => (running = null))
+    if (!running) running = run(false).finally(() => (running = null))
     return running
   }
 
@@ -168,11 +171,14 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
     },
     flushKeepalive(): void {
       if (paused) return
-      // Same order rule as a run: stop at the first refused entry.
-      for (const e of entries) {
-        if (e.failed) break
-        void deps.send(e.key, e.body, true).catch(() => undefined)
+      if (running) {
+        // The head is on the wire without keepalive and may die with the
+        // page: repeat only the head. What follows waits for its answer.
+        const e = entries[0]
+        if (e && !e.failed) void deps.send(e.key, e.body, true).catch(() => undefined)
+        return
       }
+      running = run(true).finally(() => (running = null))
     },
     /** Sync switched off: no request leaves until `resume()`. */
     pause(): void {
