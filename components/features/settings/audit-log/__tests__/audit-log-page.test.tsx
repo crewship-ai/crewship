@@ -188,6 +188,18 @@ describe("Audit log — range, display, detail and paging", () => {
     await waitFor(() => expect(document.querySelector("[data-slot=audit-calendar]")).not.toBeNull())
   })
 
+  it("draws the range with the kit Segmented, not a local copy", async () => {
+    render(<AuditLogPage />)
+    const bar = document.querySelector<HTMLElement>("[data-slot=audit-range]")!
+    const seg = bar.querySelector<HTMLElement>("[data-slot=segmented]")!
+    expect(seg).not.toBeNull()
+    expect(seg).toHaveAttribute("aria-label", "Time range")
+    // Arrow keys move and select along the presets (the kit's radio group).
+    const checked = within(seg).getByRole("radio", { name: "Last 7 days" })
+    fireEvent.keyDown(checked, { key: "End" })
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("all"))
+  })
+
   it("keeps Group repeated events and Mark access changes above the table, not in the panel", async () => {
     render(<AuditLogPage />)
     const strip = document.querySelector<HTMLElement>("[data-slot=audit-display]")!
@@ -237,7 +249,7 @@ describe("Audit log — range, display, detail and paging", () => {
   it("says what the page is once, in the section head", () => {
     render(<AuditLogPage />)
     expect(screen.getAllByText(/Every state-changing action, immutably recorded/)).toHaveLength(1)
-    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")!
     expect(head).toHaveTextContent("Admins and the owner")
   })
 })

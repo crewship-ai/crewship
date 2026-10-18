@@ -74,7 +74,8 @@ describe("ActivityPeek · work", () => {
     const p = props(work())
     render(<ActivityPeek {...p} />)
     const peek = await screen.findByTestId("activity-peek-work")
-    expect(peek.querySelector("[data-slot=status-pill]")).toHaveTextContent("Running")
+    // The status is the routine run peek's own pill, above the Activity sections.
+    expect(screen.getByTestId("run-peek").querySelector("[data-slot=status-pill]")).toHaveTextContent("Running")
     // How it connects: the webhook → the run → the agent → the issue it created.
     const how = within(peek).getByRole("heading", { name: "How it connects" }).parentElement!
     const steps = within(how).getAllByRole("listitem").map((li) => li.textContent)
@@ -98,6 +99,24 @@ describe("ActivityPeek · work", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stop run" }))
     await waitFor(() => expect(mock.fetch).toHaveBeenCalledWith("/api/v1/workspaces/ws/pipelines/runs/run_418/cancel", { method: "POST" }))
     expect(p.onChanged).toHaveBeenCalled()
+  })
+
+  // RT-07: a routine run in Activity opens the routine run peek: version and
+  // cost included, Open run goes to the page; Activity's own sections stay.
+  it("a routine run opens the routine run peek with version and cost", async () => {
+    mock.records.mockReturnValue({
+      records: records.map((r) => (r.id === "run_418" ? { ...r, pipeline_version: 4, cost_usd: 0.31 } : r)),
+    })
+    const p = props(work())
+    render(<ActivityPeek {...p} />)
+    const peek = await screen.findByTestId("run-peek")
+    expect(within(peek).getByText("Version").nextElementSibling).toHaveTextContent("v4")
+    expect(within(peek).getByText("Cost").nextElementSibling).toHaveTextContent("$0.31")
+    // Activity's own sections and actions live inside the same peek.
+    expect(within(peek).getByRole("heading", { name: "How it connects" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Stop" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
+    expect(p.onOpenFull).toHaveBeenCalledWith(expect.objectContaining({ id: "run_418" }))
   })
 
   it("hides Stop from a member, whom the server would refuse", async () => {

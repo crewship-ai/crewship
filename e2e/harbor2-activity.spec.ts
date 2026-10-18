@@ -61,14 +61,19 @@ test.describe("desktop", () => {
     await expect(page).not.toHaveURL(/run=/)
   })
 
-  // RT-07 (#3492): an Activity row of a routine run opens the run peek in place.
-  test("RT-07 a routine-run row opens the run peek with Open run", async ({ page }) => {
+  // RT-07 (#3492): an Activity row of a routine run opens the routine run peek
+  // (the one from Routines: version and cost), Activity's sections inside it.
+  test("RT-07 a routine-run row opens the routine run peek with version, cost and Open run", async ({ page }) => {
     await seed(page)
     await page.goto("/activity")
     await expect(page.getByTestId("activity-summary")).toBeVisible()
     const rows = page.getByRole("table", { name: "Activity" }).locator("[data-row-id^=run_], [data-row-id^=run-]")
     test.skip((await rows.count()) === 0, "needs a recorded routine run")
     await rows.first().click()
+    const peek = page.getByTestId("run-peek")
+    await expect(peek).toBeVisible()
+    await expect(peek.getByText("Version")).toBeVisible()
+    await expect(peek.getByText("Cost")).toBeVisible()
     await expect(page.getByTestId("activity-peek-work")).toBeVisible()
     await expect(page.getByRole("button", { name: "Open run" })).toBeVisible()
     await expect(page).toHaveURL(/\/activity\?.*run=/)
@@ -117,10 +122,34 @@ test.describe("tablet", () => {
     await expect(page.getByTestId("activity-summary")).toBeVisible()
     expect(await visibleColumns(page)).toEqual(["Work", "Agent", "Took"])
   })
+
+  test("RT-07 1024 the routine run peek fits the viewport", async ({ page }) => {
+    await seed(page)
+    await page.goto("/activity")
+    await expect(page.getByTestId("activity-summary")).toBeVisible()
+    const rows = page.getByRole("table", { name: "Activity" }).locator("[data-row-id^=run_], [data-row-id^=run-]")
+    test.skip((await rows.count()) === 0, "needs a recorded routine run")
+    await rows.first().click()
+    await expect(page.getByTestId("run-peek")).toBeVisible()
+    const b = (await page.locator("[data-slot=peek]").boundingBox())!
+    expect(b.x + b.width).toBeLessThanOrEqual(1024)
+  })
 })
 
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+  test("RT-07 390 the routine run peek is full screen with Open run", async ({ page }) => {
+    await seed(page)
+    await page.goto("/activity")
+    const rows = page.getByRole("table", { name: "Activity" }).locator("[data-row-id^=run_], [data-row-id^=run-]")
+    test.skip((await rows.count()) === 0, "needs a recorded routine run")
+    await rows.first().click()
+    await expect(page.getByTestId("run-peek")).toBeVisible()
+    const b = (await page.locator("[data-slot=peek]").boundingBox())!
+    expect(b.width).toBeLessThanOrEqual(390)
+    await expect(page.getByRole("button", { name: "Open run" })).toBeVisible()
+  })
 
   test("390 chips + list, Peek full screen", async ({ page }) => {
     await seed(page)

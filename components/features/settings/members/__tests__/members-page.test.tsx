@@ -460,6 +460,24 @@ describe("Members — drafts stay where they were made", () => {
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
     expect(writes()).toHaveLength(0)
   })
+
+  it("shows the unread-capabilities failure as the kit PageBanner (alert, bad tone) with Retry (COM-03)", async () => {
+    const normal = api.getMockImplementation()!
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!init?.method && url.includes("/members/capabilities")) return { ok: false, status: 500, json: async () => ({}), text: async () => "" }
+      return normal(url, init)
+    })
+    renderPage("/settings/members")
+    const banner = await screen.findByRole("alert")
+    expect(banner).toHaveAttribute("data-tone", "bad")
+    expect(banner).toHaveClass("page-banner", "page-banner-bad")
+    expect(banner).toHaveAttribute("data-slot", "members-caps-error")
+    expect(banner).toHaveTextContent(/Could not read what people may do/)
+    expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+    const before = api.mock.calls.filter(([url]) => String(url).includes("/members/capabilities")).length
+    fireEvent.click(within(banner).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(api.mock.calls.filter(([url]) => String(url).includes("/members/capabilities")).length).toBeGreaterThan(before))
+  })
 })
 
 // Harbor 2: the Invited view offers Reissue (a new link, shown once, valid 7
@@ -582,7 +600,7 @@ describe("Members — the person peek", () => {
   it("says what the page is once, in the section head, even while loading", async () => {
     api.mockImplementation(() => new Promise(() => {}))
     renderPage()
-    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")
     expect(head).not.toBeNull()
     expect(within(head!).getByRole("heading", { level: 2, name: "Members" })).toBeInTheDocument()
     expect(screen.getAllByText(/Who is in this workspace/)).toHaveLength(1)

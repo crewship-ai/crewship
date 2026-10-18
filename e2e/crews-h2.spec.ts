@@ -26,6 +26,21 @@ async function firstAgentOf(page: Page, crew: string): Promise<string> {
   return (await row.getAttribute("data-agent-row"))!
 }
 
+/** CRW-03: Tools and access → Add skill opens the shared Give to picker for the agent. */
+async function openGiveSkills(page: Page) {
+  const crew = await firstCrew(page)
+  const agent = await firstAgentOf(page, crew)
+  await page.goto(`/crews?agent=${agent}&tab=tools`)
+  await page.getByRole("button", { name: "Add skill" }).first().click()
+  const dialog = page.getByRole("dialog", { name: /Give skills to/ })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-slot="give-to-picker"]')).toBeVisible()
+  await expect(dialog.getByRole("textbox", { name: "Search skills" })).toBeVisible()
+  await expect(dialog.getByText(/\d+ added · \d+ removed/)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Apply" })).toBeDisabled()
+  return dialog
+}
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1440, height: 1000 } })
   test.beforeEach(async ({ page }) => seed(page))
@@ -135,6 +150,15 @@ test.describe("desktop", () => {
       await page.goto(`/crews?agent=${agent}&tab=${legacy}`)
       await expect(page.getByRole("tab", { name: "Tools and access" })).toHaveAttribute("aria-selected", "true")
     }
+  })
+
+  test("CRW-03 Add skill opens the shared Give to picker; Apply stays disabled until a change", async ({ page }) => {
+    const dialog = await openGiveSkills(page)
+    const first = dialog.getByRole("checkbox").first()
+    await first.click()
+    await expect(dialog.getByRole("button", { name: "Apply" })).toBeEnabled()
+    await first.click()
+    await expect(dialog.getByRole("button", { name: "Apply" })).toBeDisabled()
   })
 
   test("K15 Terminal button opens dock; Files tab lists /crew for a crew and /crew/agents/<slug> for an agent", async ({ page }) => {
@@ -330,6 +354,17 @@ test.describe("desktop", () => {
   })
 })
 
+test.describe("tablet", () => {
+  test.use({ viewport: { width: 1024, height: 768 } })
+  test.beforeEach(async ({ page }) => seed(page))
+
+  test("CRW-03 tablet 1024: Add skill opens the shared Give to picker as a centred 480 dialog", async ({ page }) => {
+    const dialog = await openGiveSkills(page)
+    const w = await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)
+    expect(w).toBeLessThanOrEqual(480)
+  })
+})
+
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   test.beforeEach(async ({ page }) => seed(page))
@@ -360,5 +395,12 @@ test.describe("phone", () => {
     const dialog = page.getByRole("dialog", { name: /New crew/ })
     await expect(dialog).toBeVisible()
     expect(await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(390)
+  })
+
+  test("CRW-03 phone 390: Add skill opens the shared Give to picker as a full-width bottom sheet with 44 px rows", async ({ page }) => {
+    const dialog = await openGiveSkills(page)
+    expect(await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(390)
+    const row = dialog.locator("label").filter({ has: page.getByRole("checkbox") }).first()
+    if (await row.count()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   })
 })

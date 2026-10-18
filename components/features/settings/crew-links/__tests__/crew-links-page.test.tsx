@@ -283,7 +283,7 @@ describe("Crew links — the link dialog and the panel's spaces", () => {
 describe("Crew links — one section head", () => {
   it("says what the page is once, in the section head, with who may change it", async () => {
     render(<CrewLinksPage />)
-    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")!
     expect(within(head).getByRole("heading", { level: 2, name: "Crew links" })).toBeInTheDocument()
     expect(head).toHaveTextContent("Who hands work to whom, and whose shared files they see.")
     expect(head).toHaveTextContent("Managers and up change links")

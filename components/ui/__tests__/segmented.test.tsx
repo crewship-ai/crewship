@@ -89,3 +89,18 @@ describe("Segmented", () => {
     expect(screen.getByRole("radiogroup")).toHaveClass("ml-auto")
   })
 })
+
+// SET-07 kit request 5 / SET-06: heights come from the control tokens, not the
+// spacing scale (h-7 is about 24 px, the Small control is 28 px).
+describe("Segmented heights", () => {
+  it("uses the control tokens, so a segment follows the density setting", () => {
+    const { rerender } = render(<Segmented ariaLabel="V" value="a" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onChange={() => {}} />)
+    const sm = screen.getByRole("radio", { name: "A" })
+    expect(sm.className).toContain("h-[var(--control-sm)]")
+    expect(sm.className).not.toMatch(/(^|\s)h-7(\s|$)/)
+    rerender(<Segmented ariaLabel="V" value="a" size="xs" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onChange={() => {}} />)
+    const xs = screen.getByRole("radio", { name: "A" })
+    expect(xs.className).toContain("h-[var(--control-xs)]")
+    expect(xs.className).not.toMatch(/(^|\s)h-6(\s|$)/)
+  })
+})

@@ -8,6 +8,7 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) }))
 
 import { useAppStore } from "@/lib/store"
+import { Link2 } from "lucide-react"
 import { SecondaryPanel } from "../secondary-panel"
 import { SidebarToolbar } from "../sidebar-kit"
 
@@ -154,5 +155,39 @@ describe("SecondaryPanel", () => {
     expect(screen.getByText("Rows")).toBeVisible()
     expect(screen.getByRole("region", { name: "Inbox list" })).toHaveAttribute("data-phone", "inline")
     expect(useAppStore.getState().secondaryPanel).toBeNull()
+  })
+})
+
+// SET-07 kit request 4: the panel takes spaces (keys 1 to 9).
+describe("SecondaryPanel spaces", () => {
+  const items = [{ key: "a", label: "Alpha", icon: Link2 }, { key: "b", label: "Beta", icon: Link2, count: 3 }, { key: "c", label: "Gamma", icon: Link2 }] as const
+
+  it("lists them as a tablist under the toolbar with the key printed and announced", () => {
+    render(<SecondaryPanel id="x" label="X views" toolbar={<input aria-label="Search" />} spaces={{ items, value: "a", onChange: () => {} }}><p>Rows</p></SecondaryPanel>)
+    const list = screen.getByRole("tablist", { name: "Spaces" })
+    expect(screen.getByLabelText("Search").compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const tabs = screen.getAllByRole("tab")
+    expect(tabs.map((t) => t.getAttribute("aria-keyshortcuts"))).toEqual(["1", "2", "3"])
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true")
+    expect(tabs[1]).toHaveTextContent("3")
+  })
+
+  it("switches on 1 to 9, but not while typing, with a modifier, or with a dialog open", () => {
+    const onChange = vi.fn()
+    render(<SecondaryPanel id="x" label="X views" toolbar={<input aria-label="Search" />} spaces={{ items, value: "a", onChange }}><p>Rows</p></SecondaryPanel>)
+    fireEvent.keyDown(window, { key: "3" })
+    expect(onChange).toHaveBeenLastCalledWith("c")
+    onChange.mockClear()
+    fireEvent.keyDown(screen.getByLabelText("Search"), { key: "2" })
+    fireEvent.keyDown(window, { key: "2", ctrlKey: true })
+    fireEvent.keyDown(window, { key: "9" })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("is in the phone sheet too, as 44 px rows (390 px)", () => {
+    mobile = true
+    render(<SecondaryPanel id="x" label="X views" spaces={{ items, value: "a", onChange: () => {} }}><p>Rows</p></SecondaryPanel>)
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    expect(screen.getAllByRole("tab")[1].className).toMatch(/kit-tap/)
   })
 })

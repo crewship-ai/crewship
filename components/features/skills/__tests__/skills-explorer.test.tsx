@@ -44,15 +44,18 @@ describe("SkillsExplorer", () => {
     renderExplorer()
     const expected = ["Library", "On agents", "Not on any agent", "Needs attention", "Proposed by agents", "Archived"]
     expected.forEach((label, i) => {
-      const hint = screen.getByText(label)
+      // The hint belongs to the row you press, not to the text inside it.
+      const hint = screen.getByRole("button", { name: new RegExp(`^${label}`) })
+      expect(hint).toHaveAttribute("data-testid", expect.stringMatching(/^skills-view-/))
       expect(hint).toHaveAttribute("title", `${label} · press ${i + 1}`)
       expect(hint).toHaveAttribute("aria-keyshortcuts", String(i + 1))
     })
     cleanup()
     // Without Proposed the keys close up, as the keyboard handler does.
     renderExplorer({}, false)
-    expect(screen.getByText("Archived")).toHaveAttribute("title", "Archived · press 5")
-    expect(screen.getByText("Archived")).toHaveAttribute("aria-keyshortcuts", "5")
+    const archived = screen.getByRole("button", { name: /^Archived/ })
+    expect(archived).toHaveAttribute("title", "Archived · press 5")
+    expect(archived).toHaveAttribute("aria-keyshortcuts", "5")
   })
 
   it("orders the panel: active filters, then Views, then the facets", () => {

@@ -252,9 +252,27 @@ test.describe("desktop", () => {
       ["/settings/audit", "Every state-changing action, immutably recorded"],
     ] as const) {
       await page.goto(path)
-      await expect(page.locator("[data-slot=settings-page-head]")).toContainText(sentence)
+      await expect(page.locator("[data-slot=drill-head]")).toContainText(sentence)
       await expect(page.getByText(sentence)).toHaveCount(1)
     }
+  })
+
+  test("SET-07 kit DrillPage: the top bar is the path; the panel has Back above the toolbar, then facets, then spaces", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/crew-links")
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/Settings\s*\/?\s*Crew links/)
+    const panel = page.locator("[data-slot=secondary-panel]")
+    const back = panel.locator("[data-slot=drill-back-row]")
+    await expect(back).toBeVisible()
+    const y = async (loc: ReturnType<Page["locator"]>) => (await loc.first().boundingBox())!.y
+    const backY = await y(back)
+    const searchY = await y(panel.getByRole("searchbox").or(panel.getByPlaceholder(/search/i)))
+    const spacesY = await y(panel.locator("[data-slot=panel-spaces]"))
+    expect(backY).toBeLessThan(searchY)
+    expect(searchY).toBeLessThan(spacesY)
+    // The back row leads to the parent.
+    await back.getByRole("link", { name: "Back to Settings" }).click()
+    await expect(page).toHaveURL(/\/settings(\?|$)/)
   })
 
   const MOVED: [string, RegExp][] = [
@@ -302,7 +320,7 @@ test.describe("phone", () => {
   test("SET-01/02/03 drill pages at 390: no horizontal overflow; the member Peek is a bottom sheet", async ({ page }) => {
     for (const path of ["/settings/members", "/settings/crew-links", "/settings/audit"]) {
       await page.goto(path)
-      await expect(page.locator("[data-slot=settings-page-head]")).toBeVisible()
+      await expect(page.locator("[data-slot=drill-head]")).toBeVisible()
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow, path).toBeLessThanOrEqual(0)
     }
@@ -315,9 +333,48 @@ test.describe("phone", () => {
     expect(Math.round((await peek.boundingBox())!.width)).toBe(390)
   })
 
+  test("SET-07 a drill page at 390: the arrow Back is on the top bar and goes to Settings", async ({ page }) => {
+    await page.goto("/settings/members")
+    const back = page.getByRole("link", { name: "Back to Settings" })
+    await expect(back).toBeVisible()
+    const box = (await back.boundingBox())!
+    expect(box.height).toBeGreaterThanOrEqual(28)
+    // The panel is a sheet on a phone: no panel column, no back row inside the page.
+    await expect(page.locator("aside[data-slot=secondary-panel]")).toHaveCount(0)
+    await back.click()
+    await expect(page).toHaveURL(/\/settings(\?|$)/)
+  })
+
+  test("kit: a small Button is a 44 px target on a touch device (the control tokens), SET-06 keeps 28 px for a fine pointer", async ({ page }) => {
+    await page.goto("/settings/members")
+    const exportCsv = page.getByRole("button", { name: "Export CSV" })
+    await expect(exportCsv).toBeVisible()
+    expect(Math.round((await exportCsv.boundingBox())!.height)).toBeGreaterThanOrEqual(44)
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--control-sm").trim())).toBe("44px")
+  })
+
   test("rows wrap their control under the label instead of overflowing", async ({ page }) => {
     await page.goto("/settings?tab=general")
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(0)
+  })
+})
+
+test.describe("tablet", () => {
+  test.use({ viewport: { width: 1024, height: 768 } })
+
+  test("SET-07 a drill page at 1024: Back with the parent's name on the top bar, the path, the head, no horizontal overflow", async ({ page }) => {
+    for (const path of ["/settings/members", "/settings/crew-links", "/settings/audit"]) {
+      await page.goto(path)
+      const back = page.getByRole("link", { name: "Back to Settings" })
+      await expect(back).toBeVisible()
+      await expect(back).toContainText("Settings")
+      await expect(page.locator("[data-slot=drill-head]")).toBeVisible()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow, path).toBeLessThanOrEqual(0)
+    }
+    await page.goto("/settings/members")
+    await page.getByRole("link", { name: "Back to Settings" }).click()
+    await expect(page).toHaveURL(/\/settings(\?|$)/)
   })
 })

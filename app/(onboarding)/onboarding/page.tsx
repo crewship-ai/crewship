@@ -49,10 +49,11 @@ import type { CrewTemplateSlug, HandoffMode } from "@/components/features/onboar
 import { OnboardingSetupChat } from "@/components/features/onboarding/onboarding-setup-chat"
 import { OnboardingCreatedPanel } from "@/components/features/onboarding/onboarding-created-panel"
 import { OnboardingProposalSummary } from "@/components/features/onboarding/onboarding-proposal-summary"
-import { PairingBlock } from "@/components/features/onboarding/pairing-block"
+import { PairingBlock, type PairStatus } from "@/components/layout/cli-pairing"
+import { ChoiceTile } from "@/components/ui/choice-tile"
+import { Note } from "@/components/ui/note"
 import { TemplatePicker } from "@/components/features/onboarding/template-picker"
 import {
-  ChoiceTile,
   SetupBanner,
   SetupCard,
   SetupCardBody,
@@ -60,7 +61,6 @@ import {
   SetupCardHeader,
   SetupCardSkeleton,
   SetupFrame,
-  SetupNote,
   ShortcutHint,
 } from "@/components/features/onboarding/setup-card"
 import {
@@ -255,7 +255,7 @@ export default function OnboardingPage() {
   // "Or add it now"; browser mode ignores this and always shows it.
   // (showCredential is gone: the credential block is no longer collapsible.
   // Hiding it was what took the model picker away in CLI mode.)
-  const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
+  const [pairStatus, setPairStatus] = useState<PairStatus>("idle")
   // Whether the workspace holds a model token for the agents yet — a
   // different credential from the CLI token pairing mints. See the poll below.
   const [tokenDelivered, setTokenDelivered] = useState(false)
@@ -1100,7 +1100,7 @@ export default function OnboardingPage() {
             {/* What the person needs BEFORE step 2, said once and calmly —
                 a note, not a warning box, so the first screen of the product
                 does not look like something already went wrong. */}
-            <SetupNote>
+            <Note>
               <div className="font-medium text-foreground">Before you start</div>
               <ul className="mt-1.5 space-y-2">
                 <li className="flex items-start gap-2">
@@ -1123,7 +1123,7 @@ export default function OnboardingPage() {
                   </span>
                 </li>
               </ul>
-            </SetupNote>
+            </Note>
           </SetupCardBody>
         )}
 
@@ -1178,23 +1178,49 @@ export default function OnboardingPage() {
             </CreateSurfaceField>
 
             {mode === "cli" && (
-              <PairingBlock
-                status={pairStatus}
-                command={pairCommand}
-                remainingSec={pairRemainingSec}
-                tokenDelivered={tokenDelivered}
-                copied={pairCopied}
-                onCopy={copyPairCmd}
-                onNewCode={() => {
-                  // startPairing flips to "starting" synchronously before its
-                  // await, so this does not bridge through "idle" — that would
-                  // briefly open the auto-start race window.
-                  setPairCode(null)
-                  setPairExpiresAt(null)
-                  void startPairing()
-                }}
-                onRetry={() => void startPairing()}
-              />
+              <div className="space-y-2" data-testid="onboarding-pairing">
+                <p className="text-label leading-relaxed text-muted-foreground">
+                  Don&apos;t have the Crewship CLI yet? Download it from{" "}
+                  <a
+                    href="https://github.com/crewship-ai/crewship/releases"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    GitHub releases
+                  </a>
+                  , then run this on the machine where it lives:
+                </p>
+                <PairingBlock
+                  status={pairStatus}
+                  command={pairCommand}
+                  remainingSec={pairRemainingSec}
+                  copied={pairCopied}
+                  onCopy={copyPairCmd}
+                  paired={
+                    tokenDelivered ? (
+                      <>
+                        <strong className="font-semibold text-foreground">CLI paired and model token received.</strong>{" "}
+                        Nothing to paste.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="font-semibold text-foreground">CLI paired.</strong> Your terminal is signed in;
+                        the agents still need their own model token.
+                      </>
+                    )
+                  }
+                  onNewCode={() => {
+                    // startPairing flips to "starting" synchronously before its
+                    // await, so this does not bridge through "idle" — that would
+                    // briefly open the auto-start race window.
+                    setPairCode(null)
+                    setPairExpiresAt(null)
+                    void startPairing()
+                  }}
+                  onRetry={() => void startPairing()}
+                />
+              </div>
             )}
 
             {/* ADAPTER + MODEL + TOKEN. Always rendered, in both modes: the
@@ -1209,11 +1235,11 @@ export default function OnboardingPage() {
                 }}
               />
               {CLI_ADAPTERS[adapter]?.status !== "production" && (
-                <SetupNote tone="warn" role="alert">
+                <Note tone="warn" role="alert">
                   {CLI_ADAPTERS[adapter]?.label} is still experimental and its CLI is not guaranteed to be present in the
                   onboarding image. Choose Claude Code to finish setup; you can add experimental adapters from the
                   dashboard afterwards.
-                </SetupNote>
+                </Note>
               )}
             </CreateSurfaceField>
 
@@ -1297,7 +1323,7 @@ export default function OnboardingPage() {
                 )
               })()}
               {(savedCredentialSelected || tokenDelivered) && (
-                <SetupNote icon={Check}>
+                <Note icon={Check}>
                   <span className="font-medium text-foreground">
                     {savedCredentialSelected
                       ? "Your saved Anthropic credential will be reused."
@@ -1306,25 +1332,25 @@ export default function OnboardingPage() {
                   {savedCredentialSelected
                     ? "The secret stays encrypted and is not sent back to this page."
                     : "Change it only if you want the agents on a different credential."}
-                </SetupNote>
+                </Note>
               )}
               {/* Says what the pasted value IS before Continue asks the
                   provider — the one mistake this field exists to catch. */}
               {tokenHint && (
-                <SetupNote
+                <Note
                   tone={tokenHint.tone === "warn" ? "warn" : "info"}
                   icon={tokenHint.tone === "ok" ? Check : undefined}
                   role={tokenHint.tone === "warn" ? "alert" : "status"}
                   data-testid="onboarding-token-hint"
                 >
                   {tokenHint.text}
-                </SetupNote>
+                </Note>
               )}
               {isLocalModel(model) ? (
-                <SetupNote>
+                <Note>
                   Local model selected — no API key needed. Leave this empty unless you also want cloud models later.
                   Requires <code className="font-mono text-foreground">CREWSHIP_LOCAL_MODEL_BASE_URL</code> on the server.
-                </SetupNote>
+                </Note>
               ) : (
                 <>
                   {ADAPTER_TOKEN_CMD[adapter] && (
@@ -1343,7 +1369,7 @@ export default function OnboardingPage() {
             </div>
 
             {mode === "cli" && ADAPTER_CLI_INSTALL[adapter] && (
-              <SetupNote icon={Sparkles}>
+              <Note icon={Sparkles}>
                 New to {adapterCfg?.label}?{" "}
                 <a
                   href={ADAPTER_CLI_INSTALL[adapter].url}
@@ -1355,7 +1381,7 @@ export default function OnboardingPage() {
                   <ExternalLink className="size-3" aria-hidden />
                 </a>
                 {" — "}then come back and paste the snippet above.
-              </SetupNote>
+              </Note>
             )}
 
             {/* TELEMETRY CONSENT — explicit choice, pre-ticked to the build's
@@ -1445,13 +1471,13 @@ export default function OnboardingPage() {
                 ))}
                 {preparedProposal && <OnboardingProposalSummary proposal={preparedProposal} created={false} />}
                 {createdCrews.length === 0 && existingCrewCount > 0 && (
-                  <SetupNote icon={Check} role="status" data-testid="onboarding-resumed-crews">
+                  <Note icon={Check} role="status" data-testid="onboarding-resumed-crews">
                     <span className="font-medium text-foreground">
                       {existingCrewCount === 1 ? "A crew was already built" : `${existingCrewCount} crews were already built`}
                     </span>{" "}
                     before this page was reloaded — it is listed below. You can launch with it now, or ask the Guide for
                     another. Do not create the same crew twice.
-                  </SetupNote>
+                  </Note>
                 )}
                 <OnboardingCreatedPanel workspaceId={onboardingWorkspaceId} onCrewsFound={setExistingCrewCount} />
                 {/* Escape hatch (PRD §4.3). Hidden once a crew exists —
@@ -1482,7 +1508,7 @@ export default function OnboardingPage() {
               </SetupBanner>
             )}
             {chatNeedsCredential && !chatUnavailable && (
-              <SetupNote
+              <Note
                 tone="warn"
                 data-testid="onboarding-guide-needs-token"
               >
@@ -1492,7 +1518,7 @@ export default function OnboardingPage() {
                     Back to step 2
                   </Button>
                 </span>
-              </SetupNote>
+              </Note>
             )}
             <TemplatePicker
               value={crewSlug}

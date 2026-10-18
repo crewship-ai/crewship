@@ -5,7 +5,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-export interface SettingsSpace<T extends string> {
+export interface PanelSpace<T extends string> {
   key: T
   label: string
   icon: LucideIcon
@@ -14,33 +14,25 @@ export interface SettingsSpace<T extends string> {
 }
 
 /**
- * The spaces of a Settings drill page's panel (Harbor 2 PNL-02, v67
- * `spacesKit`): two to nine places that each show a different page body —
+ * The spaces of a side panel (Harbor 2 PNL-02, v67 `spacesKit`): two to nine places that each show a different page body —
  * Crew links' By crew / All links / Matrix — listed under the way back,
  * each on its number key. 1–9 switch while focus is not in a field and no
  * dialog is open; the key is announced (`aria-keyshortcuts`) and printed.
  *
- * Settings-side until the kit's SecondaryPanel takes spaces (kit request in
- * the area PR); the markup is the kit row's (`row-interactive`, `row-hover`,
- * `row-selected`) so the move is a rename.
+ * SecondaryPanel takes them as `spaces`; DrillPage as `spaces` too (SET-07).
+ * The markup is the kit row's (`row-interactive`, `row-hover`, `row-selected`).
  */
-export function SettingsSpaces<T extends string>({
-  spaces,
+export function PanelSpaces<T extends string>({
+  items,
   value,
   onChange,
   label = "Spaces",
   className,
-}: {
-  spaces: readonly SettingsSpace<T>[]
-  value: T
-  onChange: (key: T) => void
-  label?: string
-  className?: string
-}) {
-  useSpaceKeys(spaces.map((s) => s.key), onChange)
+}: PanelSpacesConfig<T> & { className?: string }) {
+  useSpaceKeys(items.map((s) => s.key), onChange)
   return (
-    <div role="tablist" aria-label={label} aria-orientation="vertical" data-slot="settings-spaces" className={cn("flex flex-col gap-px px-1.5 pt-2", className)}>
-      {spaces.map((s, i) => {
+    <div role="tablist" aria-label={label} aria-orientation="vertical" data-slot="panel-spaces" className={cn("flex flex-col gap-px px-1.5 pt-2", className)}>
+      {items.map((s, i) => {
         const on = s.key === value
         const Icon = s.icon
         return (
@@ -90,4 +82,13 @@ export function useSpaceKeys<T extends string>(keys: readonly T[], onChange: (ke
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
+}
+
+/** What a panel is given to list its spaces. */
+export interface PanelSpacesConfig<T extends string = string> {
+  items: readonly PanelSpace<T>[]
+  value: T
+  onChange: (key: T) => void
+  /** The tablist's name; "Spaces" by default. */
+  label?: string
 }

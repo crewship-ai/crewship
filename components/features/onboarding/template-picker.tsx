@@ -5,7 +5,7 @@ import { KeyRound, Plus } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
-import { ChoiceTile } from "./setup-card"
+import { ChoiceTile } from "@/components/ui/choice-tile"
 import { TEAM_TEMPLATE_SLUGS, TEMPLATES, TEMPLATE_MODEL_LABEL, type CrewTemplateSlug } from "./crew-templates"
 
 /**

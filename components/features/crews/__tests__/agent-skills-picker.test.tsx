@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-li
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }))
 
-import { AgentSkillsPicker, agentSkillDiff } from "../agent-skills-picker"
+import { AgentSkillsPicker } from "../agent-skills-picker"
 import type { AgentSkillRow } from "../agent-canvas-tabs/types"
 
 // A-TOOLS "Add skill" (K09) opens the Give to picker turned around: one agent,
@@ -40,14 +40,6 @@ const props = { open: true, agentId: "a1", agentName: "Scout", workspaceId: "ws1
 function calls(spy: ReturnType<typeof stub>, method: string) {
   return spy.mock.calls.filter(([u, i]) => String(u).includes("/agents/a1/skills") && (i?.method ?? "GET") === method)
 }
-
-describe("agentSkillDiff", () => {
-  it("adds what is newly checked and removes held skills that were unchecked", () => {
-    const held = new Map([["s1", "as1"], ["s2", "as2"]])
-    expect(agentSkillDiff(held, new Set(["s2", "s3"]))).toEqual({ add: ["s3"], remove: [{ skillId: "s1", assignmentId: "as1" }] })
-    expect(agentSkillDiff(held, new Set(["s1", "s2"]))).toEqual({ add: [], remove: [] })
-  })
-})
 
 describe("Give skills to an agent (A-TOOLS, K09)", () => {
   beforeEach(() => cleanup())

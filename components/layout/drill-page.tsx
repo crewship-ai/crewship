@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarToolbar } from "@/components/layout/sidebar-kit"
-import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
+import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
+import { SecondaryPanel, useCloseSecondaryPanelSheet, useIsTabletPanel } from "@/components/layout/secondary-panel"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
@@ -25,22 +26,33 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
  * The side panel is the shared SecondaryPanel (Harbor 2, #3350 M3): 272 px,
  * collapse remembered per user as `panel.<panelId>.collapsed`, and on a phone
  * the same content in a bottom sheet opened from the top bar's panel button.
- * Inside it (PNL-02) the "← <parent>" row comes first, then the page's
- * DrillNavSections of DrillNavItems; the page's `toolbar` (search, Filter)
- * becomes the panel toolbar with the collapse button. On a phone, and on a
+ * Inside it (PNL-02, v67 `pk-back`) the "← <parent>" row comes first, above
+ * the page's `toolbar` (search, Filter; the collapse button is added), then
+ * the `facets` slot (an inline facet block), then the `spaces` (keys 1-9),
+ * then the page's DrillNavSections of DrillNavItems. On a phone, and on a
  * page without a panel, the way back stays at the start of the sub-bar, and
  * `mobileNav` (usually the page's view tabs) stays on the page.
+ *
+ * The page owns its head (SET-07, PRD SHL-05): the top bar is the path
+ * ("Settings / Members"; on a phone just the page, after the arrow back) and
+ * the section head - icon tile, title, one sentence, `note` on the right - is
+ * drawn here, once, before the page's data arrives. `head={false}` leaves it
+ * out for a page that shows only a no-access state.
  *
  * Used by Settings › Crew links, Members, Audit log and Lifecycle hooks, and
  * Admin › People & workspaces, Security and Backups.
  */
-export function DrillPage({
+export function DrillPage<S extends string = string>({
   parent,
   title,
   icon: Icon,
   description,
+  note,
+  head = true,
   panelId,
   toolbar,
+  facets,
+  spaces,
   nav,
   mobileNav,
   actions,
@@ -51,13 +63,23 @@ export function DrillPage({
   parent: { href: string; label: string; icon?: LucideIcon }
   title: string
   icon: LucideIcon
+  /** The head's one sentence about what the page is for. */
   description?: string
+  /** Right of the head: who may change what is here. */
+  note?: React.ReactNode
+  /** Draw the section head (default). False: a page with only a no-access state. */
+  head?: boolean
   /** SecondaryPanel id, `drill-<route segment>` ("drill-crew-links"); it keys
    *  the remembered collapse. Defaults to one derived from `title`. */
   panelId?: string
   /** The panel's toolbar — SidebarSearch, a SidebarFilterPopover. The
    *  collapse button is added here. */
   toolbar?: React.ReactNode
+  /** Directly under the toolbar, above the spaces and sections: the inline
+   *  facet block (SidebarFacetBlock). Not inside the sections nav. */
+  facets?: React.ReactNode
+  /** The panel's spaces (By crew / All links / Matrix), on keys 1-9. */
+  spaces?: PanelSpacesConfig<S>
   /** The side panel's sections — DrillNavSection / DrillNavItem. Leave it
    *  out for a page whose content is its own map (Lifecycle hooks): no panel. */
   nav?: React.ReactNode
@@ -77,19 +99,23 @@ export function DrillPage({
   // this initializer): the collapse set under the old key carries over once.
   React.useState(() => migrateDrillCollapse(title, id))
   const closeSheet = useCloseSecondaryPanelSheet()
-  const hasPanel = nav != null
+  const hasPanel = nav != null || facets != null || spaces != null
+  const tablet = useIsTabletPanel() && !isMobile
   // On a desktop with a panel the way back is the panel's first row; on a
-  // phone the panel is a sheet, so the page keeps it on the sub-bar.
-  const backOnSubBar = isMobile || !hasPanel
+  // phone the panel is a sheet and on a tablet it floats, closed until the top
+  // bar's panel button opens it, so there the page keeps it on the sub-bar.
+  const backOnSubBar = isMobile || tablet || !hasPanel
 
   return (
     // One Save for the nested page, as in Settings (components/ui/page-save-bar).
     <PageSaveProvider>
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
+      {/* The path: "Settings / Members". On a phone the top bar already names
+          the area and the arrow is the way back, so the page is just its title. */}
       <SubBar
         icon={Icon}
-        title={title}
-        description={description}
+        title={isMobile ? title : parent.label}
+        section={isMobile ? undefined : title}
         ariaLabel={`${parent.label} / ${title}`}
         actions={actions}
         leading={
@@ -104,21 +130,26 @@ export function DrillPage({
       <div className="flex min-h-0 flex-1">
         {hasPanel && (
           <SecondaryPanel id={id} label={`${title} navigation`}>
+            {/* v67 pk-back: the way back is the panel's first row, above the
+                toolbar. On a phone the sheet has the arrow on the sub-bar. */}
+            {!backOnSubBar && (
+              <div className="px-2 pt-2" data-slot="drill-back-row">
+                <DrillBack parent={parent} />
+              </div>
+            )}
             {toolbar && <SidebarToolbar>{toolbar}</SidebarToolbar>}
-            {/* A pick inside the phone sheet closes it: the result is what the
-                person wants to see next. On a desktop this does nothing. */}
-            <nav
-              className="min-h-0 flex-1 overflow-y-auto pb-4"
-              aria-label={`${title} sections`}
-              onClick={(e) => { if ((e.target as HTMLElement).closest("[data-drill-close]")) closeSheet() }}
-            >
-              {!backOnSubBar && (
-                <div className="px-2 pt-2" data-slot="drill-back-row">
-                  <DrillBack parent={parent} />
-                </div>
-              )}
-              {nav}
-            </nav>
+            <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+              {facets}
+              {spaces && <PanelSpaces<S> {...spaces} />}
+              {/* A pick inside the phone sheet closes it: the result is what the
+                  person wants to see next. On a desktop this does nothing. */}
+              <nav
+                aria-label={`${title} sections`}
+                onClick={(e) => { if ((e.target as HTMLElement).closest("[data-drill-close]")) closeSheet() }}
+              >
+                {nav}
+              </nav>
+            </div>
           </SecondaryPanel>
         )}
         <div className="relative min-h-0 min-w-0 flex-1">
@@ -126,6 +157,7 @@ export function DrillPage({
             {isMobile && mobileNav && (
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
             )}
+            {head && <DrillHead icon={Icon} title={title} description={description} note={note} />}
             {children}
           </main>
           <PageSaveBar />
@@ -133,6 +165,20 @@ export function DrillPage({
       </div>
     </div>
     </PageSaveProvider>
+  )
+}
+
+/** The section head: tile, title, one sentence, and who may change things. */
+function DrillHead({ icon: Icon, title, description, note }: { icon: LucideIcon; title: string; description?: string; note?: React.ReactNode }) {
+  return (
+    <div data-slot="drill-head" className="flex flex-wrap items-center gap-3.5 px-4 pt-4 md:px-6 md:pt-6">
+      <span className="page-tile page-tile-40" aria-hidden><Icon /></span>
+      <div className="min-w-0 flex-[1_1_14rem]">
+        <h2 className="text-title font-semibold leading-tight tracking-tight text-foreground">{title}</h2>
+        {description && <p className="mt-0.5 text-body text-muted-foreground">{description}</p>}
+      </div>
+      {note != null && <span className="shrink-0 text-label text-muted-foreground" data-slot="drill-head-note">{note}</span>}
+    </div>
   )
 }
 

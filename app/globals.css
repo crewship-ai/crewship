@@ -37,6 +37,18 @@
   --control-sm: 1.8846rem;
   --control-md: 2.1538rem;
 }
+/* A finger-sized target on a touch device: every control that reads the
+ * tokens (Button xs/sm/default and their icon sizes, inputs, selects,
+ * Segmented) is 44px tall under `pointer: coarse`. In px, not rem, so the
+ * reader's text size cannot take it under the target; a fine pointer keeps
+ * the rem values above. */
+@media (pointer: coarse) {
+  :root {
+    --control-xs: 44px;
+    --control-sm: 44px;
+    --control-md: 44px;
+  }
+}
 :root { --mobile-tab-bar-h: 0px; }
 @media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(3.5rem + env(safe-area-inset-bottom)); } }
 

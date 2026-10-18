@@ -117,15 +117,59 @@ for (const who of Object.keys(ROLES) as Who[]) {
         await ctx.close()
       })
 
-      test("the user row in More opens the same user menu", async ({ browser }) => {
+      test("the user row in More opens the user menu as a bottom sheet", async ({ browser }) => {
         const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), ...phone })
         const page = await ctx.newPage()
         await page.goto("/issues")
         await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click()
-        await page.getByRole("dialog").getByRole("button", { name: "User menu" }).click()
+        await page.getByRole("dialog", { name: "Navigation" }).getByRole("button", { name: "User menu" }).click()
+        // A sheet (dialog) docked to the bottom edge, not a popover menu.
+        const sheet = page.getByRole("dialog", { name: "User menu" })
+        await expect(sheet).toBeVisible()
+        await expect(page.getByRole("menu")).toHaveCount(0)
+        const box = (await sheet.boundingBox())!
+        expect(Math.round(box.x)).toBe(0)
+        expect(Math.round(box.width)).toBe(390)
+        expect(Math.round(box.y + box.height)).toBe(844)
+        await expect(sheet.getByRole("link", { name: /^appearance$/i })).toBeVisible()
+        await expect(sheet.getByRole("button", { name: /^log out$/i })).toBeVisible()
+        // Every row is a comfortable target.
+        for (const h of await sheet.locator("[data-menu-row]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) {
+          expect(h).toBeGreaterThanOrEqual(44)
+        }
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+        expect(overflow).toBeLessThanOrEqual(0)
+        // Picking a row closes it.
+        await sheet.getByRole("link", { name: /^appearance$/i }).click()
+        await expect(page.getByRole("dialog", { name: "User menu" })).toHaveCount(0)
+        await ctx.close()
+      })
+    })
+
+    // Tablet (768 to 1279 px): the rail is narrow, and the user menu is still
+    // the popover - the sheet is for phones only. Role x rows matrix.
+    test.describe("tablet 1024", () => {
+      test("the user menu is a popover with the role's rows", async ({ browser }) => {
+        const ctx = await browser.newContext({ storageState: await sessionFor(browser, who), viewport: { width: 1024, height: 768 } })
+        const page = await ctx.newPage()
+        await page.goto("/issues")
+        await page.getByRole("button", { name: "User menu" }).click()
         const menu = page.getByRole("menu")
-        await expect(menu.getByRole("menuitem", { name: /^log out$/i })).toBeVisible()
-        await expect(menu.getByRole("menuitem", { name: /^appearance$/i })).toBeVisible()
+        await expect(menu).toBeVisible()
+        await expect(page.getByRole("dialog", { name: "User menu" })).toHaveCount(0)
+        // A popover: narrower than the viewport, not docked to the bottom edge.
+        const box = (await menu.boundingBox())!
+        expect(box.width).toBeLessThan(400)
+        expect(box.y + box.height).toBeLessThan(768)
+        const rows = (await menu.getByRole("menuitem").allTextContents()).map((t) => t.replace(/\d+ active$/, "").trim())
+        expect(rows).toEqual(expect.arrayContaining(["Profile & account", "Appearance", "Sessions & CLI tokens", "Help & resources", "Log out"]))
+        // Both demo roles are trusted sessions: the full set, in the v67 order.
+        const order = ["Profile & account", "Appearance", "Notification sounds", "Notification preferences", "Sessions & CLI tokens", "Connect CLI…", "Help & resources", "Log out"]
+        const seen = order.map((n) => rows.findIndex((r) => r.includes(n)))
+        expect(seen.every((i) => i >= 0)).toBe(true)
+        expect([...seen].sort((a, b) => a - b)).toEqual(seen)
+        await expect(menu.getByRole("radiogroup", { name: "Theme" })).toBeVisible()
+        await expect(menu.getByText(/^(Owner|Admin|Manager|Member|Viewer)$/)).toBeVisible()
         await ctx.close()
       })
     })

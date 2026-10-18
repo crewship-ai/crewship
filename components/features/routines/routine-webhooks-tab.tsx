@@ -140,23 +140,17 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest =
       {ours.length === 0 && !formOpen ? (
         <Card title="Webhooks">
           <EmptyState
-            size="inline"
+            size="compact"
             icon={Webhook}
             title="No webhooks yet"
             description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
-          >
-            <div className="mt-4">
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => setFormOpen(true)}
-                className="h-9 gap-1.5 px-4 text-sm"
-              >
+            action={
+              <Button size="sm" variant="default" onClick={() => setFormOpen(true)} className="gap-1.5 px-4">
                 <Plus className="h-3.5 w-3.5" />
                 Add webhook
               </Button>
-            </div>
-          </EmptyState>
+            }
+          />
         </Card>
       ) : (
         <Card

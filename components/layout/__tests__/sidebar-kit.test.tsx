@@ -95,6 +95,19 @@ describe("sidebar-kit", () => {
     expect(onSelect).toHaveBeenCalled()
   })
 
+  it("SidebarRow puts title and aria-keyshortcuts on the interactive row itself, not on a label inside it (COM-15)", () => {
+    render(
+      <SidebarRow onSelect={() => {}} title="Library · press 1" aria-keyshortcuts="1" data-testid="row">
+        <span>Library</span>
+      </SidebarRow>,
+    )
+    const row = screen.getByRole("button", { name: /library/i })
+    expect(row).toBe(screen.getByTestId("row"))
+    expect(row).toHaveAttribute("aria-keyshortcuts", "1")
+    expect(row).toHaveAttribute("title", "Library · press 1")
+    expect(screen.getByText("Library")).not.toHaveAttribute("aria-keyshortcuts")
+  })
+
   it("SidebarCollapseButton toggles and reflects collapsed state in its label", () => {
     const onToggle = vi.fn()
     const { rerender } = render(<SidebarCollapseButton collapsed={false} onToggle={onToggle} />)

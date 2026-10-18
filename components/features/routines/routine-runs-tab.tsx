@@ -194,7 +194,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
     return (
       <Card title="Run history">
         <EmptyState
-          size="inline"
+          size="compact"
           icon={Play}
           title="No runs yet"
           description="Trigger one with the Run button above, or invoke via agent / CLI / schedule. Each invocation appears here with the step-level waterfall."
