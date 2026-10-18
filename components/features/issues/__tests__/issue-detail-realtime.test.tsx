@@ -143,6 +143,20 @@ describe("IssueDetailSurface — an agent's write reaches the open tab", () => {
     )
   })
 
+  // Seen as a flake in full runs: the debounced refresh was dropped when the
+  // surface re-rendered with new callbacks inside the 100 ms window (the
+  // cleanup effect keyed on scheduleRefresh cleared the pending timer).
+  it("a re-render inside the debounce window does not drop the refresh", async () => {
+    const { server } = liveFetch()
+    const view = render(<IssueDetailSurface workspaceId="ws1" identifier="ENG-1" onNotFound={() => {}} />)
+    await waitFor(() => expect(screen.getByText("As the reader left it")).toBeInTheDocument())
+    server.title = "Arrived after a re-render"
+    emit("issue.updated", { id: "id-ENG-1", identifier: "ENG-1" })
+    // A parent re-render with a fresh callback, before the debounce fires.
+    view.rerender(<IssueDetailSurface workspaceId="ws1" identifier="ENG-1" onNotFound={() => {}} />)
+    await waitFor(() => expect(screen.getByText("Arrived after a re-render")).toBeInTheDocument())
+  })
+
   it("repaints when mission.updated names this issue", async () => {
     const { server } = liveFetch()
     await openIssue()

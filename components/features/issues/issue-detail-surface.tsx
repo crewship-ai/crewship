@@ -384,18 +384,25 @@ export function IssueDetailSurface({
   // our own writes refetch directly, which is why clicking in the UI always
   // looked fine and only somebody else's change went missing.
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The timer calls whatever the fetchers are when it fires. A re-render in
+  // the 100 ms window (new callbacks, the crew resolving) must not cancel a
+  // refresh already owed; only unmounting does.
+  const refreshNow = React.useRef<() => void>(() => {})
+  refreshNow.current = () => {
+    void fetchIssue()
+    void fetchSubResources()
+  }
   const scheduleRefresh = React.useCallback(() => {
     if (realtimeTimer.current) return
     realtimeTimer.current = setTimeout(() => {
       realtimeTimer.current = null
-      void fetchIssue()
-      void fetchSubResources()
+      refreshNow.current()
     }, 100)
-  }, [fetchIssue, fetchSubResources])
+  }, [])
   React.useEffect(() => () => {
     if (realtimeTimer.current) clearTimeout(realtimeTimer.current)
     realtimeTimer.current = null
-  }, [scheduleRefresh])
+  }, [])
 
   const onIssueEvent = React.useCallback(
     (event: RealtimeEvent) => {
