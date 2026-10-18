@@ -280,6 +280,12 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if bytes.Contains(out, []byte(created.Slug)) != (role == "OWNER") {
 			t.Fatalf("%s catalog audience: %s", role, out)
 		}
+		if role == "ADMIN" || role == "OWNER" {
+			out, err := invoke("page", "access", "--subject", "user:"+owner)
+			if err != nil || bytes.Contains(out, []byte(created.Slug)) != (role == "OWNER") {
+				t.Fatalf("%s actual CLI subject access audience: %v %s", role, err, out)
+			}
+		}
 		if role == "OWNER" {
 			out, err := invoke("page", "access", created.Slug)
 			if err != nil || bytes.Contains(out, []byte("admin@private.example")) {

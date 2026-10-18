@@ -64,6 +64,12 @@ func TestPrivateChatDocumentAudience(t *testing.T) {
 	if denied.Code != 404 {
 		t.Errorf("ADMIN access report=%d want404", denied.Code)
 	}
+	for _, subject := range []string{author, "private-OWNER"} {
+		r := pagesSubjectAccessCall(t, h, workspace, "private-ADMIN", "ADMIN", "subject=user:"+subject)
+		if r.Code != 200 || strings.Contains(r.Body.String(), "created-doc") || strings.Contains(r.Body.String(), "Created report") {
+			t.Errorf("ADMIN subject access disclosed private artifact: %d %s", r.Code, r.Body.String())
+		}
+	}
 	// An unavailable audit must not disclose another person's private document.
 	execOrFatal(t, h.db, `CREATE TRIGGER reject_private_access_audit BEFORE INSERT ON audit_logs WHEN NEW.action='artifact.private_owner_accessed' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	r := pagesGetStatus(t, h, workspace, "private-OWNER", "OWNER", "created-doc")

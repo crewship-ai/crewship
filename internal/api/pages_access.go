@@ -295,8 +295,22 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rows []pageAccessPageWire
+	var privateCaller *pageViewer
 	for _, id := range order {
 		rec := pagesByID[id]
+		if rec.PrivateAudience {
+			if privateCaller == nil {
+				liveRole, err := h.liveContentHumanRole(r.Context(), wsID, user.ID)
+				if err != nil {
+					replyInternalError(w, h.logger, "authorize private access report", err)
+					return
+				}
+				privateCaller = &pageViewer{UserID: user.ID, Role: liveRole}
+			}
+			if !privatePageViewer(rec, privateCaller) {
+				continue
+			}
+		}
 		ownerCrewSlug := ""
 		if rec.OwnerCrewID != "" {
 			ownerCrewSlug = crewSlugs[rec.OwnerCrewID]
