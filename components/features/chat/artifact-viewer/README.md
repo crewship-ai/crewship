@@ -27,10 +27,12 @@ union may expand. Files and other types are unsupported in this cut.
 
 The shell exposes controlled close/expand callbacks, a mobile Back to chat
 action, initial close-control focus, and Escape/close focus restoration to a
-still-connected opener. It does not trap focus or declare a modal: the host
+still-connected opener only after the controlled target becomes null. Reopening
+cancels pending restoration; an ignored close callback never moves focus. It does not trap focus or declare a modal: the host
 owns desktop split/mobile placement. Escape already consumed by a nested
-control does not close the viewer. A parent closing the shell independently
-must handle its own focus restoration.
+control does not close the viewer. Keep the shell mounted with `target: null` to observe that closed transition.
+A parent unmounting or closing the shell independently must handle its own
+focus restoration.
 
 Keep the live transcript, composer, pending attachments and editor mounted at
 their existing identities when opening, expanding or closing the viewer. The
