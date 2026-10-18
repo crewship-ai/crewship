@@ -52,7 +52,7 @@ export function useIsTabletPanel(): boolean {
  *
  * Content is composed from components/layout/sidebar-kit.
  */
-export function SecondaryPanel({
+export function SecondaryPanel<S extends string = string>({
   id,
   label,
   toolbar,
@@ -78,11 +78,11 @@ export function SecondaryPanel({
   phoneInline?: boolean
   /** Two to nine places that each show a different page body, listed first in
    *  the body (under the toolbar) and switched on keys 1-9 (PNL-02). */
-  spaces?: PanelSpacesConfig
+  spaces?: PanelSpacesConfig<S>
   className?: string
   children?: React.ReactNode
 }) {
-  const spacesNode = spaces ? <PanelSpaces {...spaces} /> : null
+  const spacesNode = spaces ? <PanelSpaces<S> {...spaces} /> : null
   const isMobile = useIsMobile()
   const tablet = useIsTabletPanel() && !isMobile
   // Whether the content brought its own kit toolbar (which then carries the

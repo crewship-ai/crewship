@@ -42,7 +42,7 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
  * Used by Settings › Crew links, Members, Audit log and Lifecycle hooks, and
  * Admin › People & workspaces, Security and Backups.
  */
-export function DrillPage({
+export function DrillPage<S extends string = string>({
   parent,
   title,
   icon: Icon,
@@ -79,7 +79,7 @@ export function DrillPage({
    *  facet block (SidebarFacetBlock). Not inside the sections nav. */
   facets?: React.ReactNode
   /** The panel's spaces (By crew / All links / Matrix), on keys 1-9. */
-  spaces?: PanelSpacesConfig
+  spaces?: PanelSpacesConfig<S>
   /** The side panel's sections — DrillNavSection / DrillNavItem. Leave it
    *  out for a page whose content is its own map (Lifecycle hooks): no panel. */
   nav?: React.ReactNode
@@ -140,7 +140,7 @@ export function DrillPage({
             {toolbar && <SidebarToolbar>{toolbar}</SidebarToolbar>}
             <div className="min-h-0 flex-1 overflow-y-auto pb-4">
               {facets}
-              {spaces && <PanelSpaces {...spaces} />}
+              {spaces && <PanelSpaces<S> {...spaces} />}
               {/* A pick inside the phone sheet closes it: the result is what the
                   person wants to see next. On a desktop this does nothing. */}
               <nav

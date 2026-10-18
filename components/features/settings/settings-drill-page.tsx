@@ -14,7 +14,7 @@ import type { PanelSpacesConfig } from "@/components/layout/panel-spaces"
  * facets and spaces (#3487 SET-07, PRD SHL-05). `note` is who may change what
  * is here, on the right of the head.
  */
-export function SettingsDrillPage({
+export function SettingsDrillPage<S extends string = string>({
   title,
   icon,
   description,
@@ -38,7 +38,7 @@ export function SettingsDrillPage({
   panelId: string
   toolbar?: React.ReactNode
   facets?: React.ReactNode
-  spaces?: PanelSpacesConfig
+  spaces?: PanelSpacesConfig<S>
   nav?: React.ReactNode
   mobileNav?: React.ReactNode
   actions?: React.ReactNode
