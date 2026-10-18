@@ -345,6 +345,14 @@ test.describe("phone", () => {
     await expect(page).toHaveURL(/\/settings(\?|$)/)
   })
 
+  test("kit: a small Button is a 44 px target on a touch device (the control tokens), SET-06 keeps 28 px for a fine pointer", async ({ page }) => {
+    await page.goto("/settings/members")
+    const exportCsv = page.getByRole("button", { name: "Export CSV" })
+    await expect(exportCsv).toBeVisible()
+    expect(Math.round((await exportCsv.boundingBox())!.height)).toBeGreaterThanOrEqual(44)
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--control-sm").trim())).toBe("44px")
+  })
+
   test("rows wrap their control under the label instead of overflowing", async ({ page }) => {
     await page.goto("/settings?tab=general")
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
