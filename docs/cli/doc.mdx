@@ -100,6 +100,22 @@ schema 2; initialization does not silently upgrade an existing document.
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
 an operation whose confirmation was lost.
 
+## `crewship doc checkpoints <page-slug>`
+
+`crewship doc checkpoints <page-slug>` lists at most the latest 1,000 retained
+checkpoint pins, ordered by revision and identity. Checkpoints are explicit saved
+pins, not every editor keystroke. Older pins remain retained and can be read by ID.
+
+## `crewship doc checkpoint <page-slug> <checkpoint-id>`
+
+Read that exact confirmed
+body with its Page ID, checkpoint ID, revision and schema. Both commands accept
+`@<page-id>` and the standard JSON, YAML and NDJSON output formats.
+
+These commands use current human read access, including the private audience;
+an old run or checkpoint ID grants no access. Reads never restore content or
+change a draft. The public response omits binary snapshots and writer fences.
+
 ## `crewship doc read <page-slug>`
 
 For a saved Document identity, `crewship doc read @<page-id>` keeps the original

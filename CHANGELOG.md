@@ -28,6 +28,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
 - Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
+- Read retained Document checkpoint lists and exact saved bodies through the API and `doc checkpoints` / `doc checkpoint`, without restoring or changing the current draft.
 
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
