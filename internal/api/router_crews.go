@@ -601,6 +601,16 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-bindings",
 		authed(wsCtx(http.HandlerFunc(bindings.ResolveForAgent))))
 
+	// Vault folders (#3479). Registered before the /{credentialId} wildcard
+	// routes' neighbours; the path is its own prefix so there is no clash.
+	// Read is open to every workspace member (names are not secret, counts
+	// follow credential visibility); the handlers repeat the role gates.
+	credFolders := NewCredentialFolderHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credential-folders", authed(wsCtx(http.HandlerFunc(credFolders.List))))
+	r.authedMut("POST", "/api/v1/credential-folders", roleInline, credFolders.Create)
+	r.authedMut("PATCH", "/api/v1/credential-folders/{folderId}", roleInline, credFolders.Update)
+	r.authedMut("DELETE", "/api/v1/credential-folders/{folderId}", roleManage, credFolders.Delete)
+
 	// Credential custom fields (PRD-CREDENTIALS-V2-2026 §2.2). The multi-part
 	// half of a credential: AWS wants access key id + secret + region, a
 	// service account wants a blob + a filename, and one `encrypted_value`

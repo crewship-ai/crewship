@@ -134,6 +134,9 @@ const (
 	msgRevealReasonTooShort = "A reason of at least 20 characters is required, and it is recorded in the audit log."
 	msgRevealReasonGeneric  = "That reason is too generic to be useful in an audit. Say what you need the value for."
 	msgCredentialNotFound   = "Credential not found"
+	msgRevealFolderAdmins   = "This secret's folder limits reveal to owners and admins."
+	msgRevealFolderNobody   = "This secret's folder is sealed: nothing in it can be revealed. " +
+		"Rotate the secret instead — the new value is shown once at creation."
 )
 
 // CredentialRevealHandler owns the reveal surface: the reveal itself, the
@@ -211,6 +214,9 @@ type revealTarget struct {
 	credType    string
 	sensitivity string
 	encValue    string
+	// folderReveal is the Vault folder's reveal policy (folderRevealInherit
+	// when unfiled). It can only tighten the gate, never loosen it.
+	folderReveal string
 }
 
 // Reveal discloses a credential's plaintext value.
@@ -315,6 +321,19 @@ func (h *CredentialRevealHandler) Reveal(w http.ResponseWriter, r *http.Request)
 	if target.sensitivity == SensitivitySealed {
 		h.denyReveal(w, callerID, role, credID, "sealed", msgRevealSealed)
 		return
+	}
+
+	// 6b. Folder policy — a Vault folder may limit reveal to owners and admins,
+	// or seal everything in it. Tightening only: every layer above still ran.
+	switch target.folderReveal {
+	case folderRevealNobody:
+		h.denyReveal(w, callerID, role, credID, "folder_sealed", msgRevealFolderNobody)
+		return
+	case folderRevealAdmins:
+		if !canRole(role, "manage") {
+			h.denyReveal(w, callerID, role, credID, "folder_admins_only", msgRevealFolderAdmins)
+			return
+		}
 	}
 
 	// 7. L3.3 — a reason that will still mean something in six months.
@@ -522,10 +541,12 @@ func revealEnabledForWorkspace(ctx context.Context, db *sql.DB, workspaceID stri
 func loadRevealTarget(ctx context.Context, db *sql.DB, workspaceID, credID string) (*revealTarget, error) {
 	var t revealTarget
 	err := db.QueryRowContext(ctx, `
-		SELECT id, name, type, sensitivity, encrypted_value
-		FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-	`, credID, workspaceID).Scan(&t.id, &t.name, &t.credType, &t.sensitivity, &t.encValue)
+		SELECT c.id, c.name, c.type, c.sensitivity, c.encrypted_value,
+			COALESCE((SELECT `+folderEffectiveRevealSQL+` FROM credential_folders f
+				LEFT JOIN credential_folders p ON p.id = f.parent_id WHERE f.id = c.folder_id), 'inherit')
+		FROM credentials c
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
+	`, credID, workspaceID).Scan(&t.id, &t.name, &t.credType, &t.sensitivity, &t.encValue, &t.folderReveal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

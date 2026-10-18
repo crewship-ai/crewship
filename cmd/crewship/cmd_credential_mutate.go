@@ -440,6 +440,13 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
+		if ref, _ := flags.GetString("folder"); ref != "" {
+			id, err := resolveCredentialFolderID(client, ref)
+			if err != nil {
+				return err
+			}
+			body["folder_id"] = id
+		}
 
 		// #1083: crew scoping parity. --crews accepts slugs or IDs; resolve
 		// each to an ID (what the API's credential_crews junction expects).
@@ -617,6 +624,18 @@ var credUpdateCmd = &cobra.Command{
 					return fmt.Errorf("stdin value cannot be empty")
 				}
 				body["value"] = v
+			}
+		}
+		if flags.Changed("folder") {
+			ref, _ := flags.GetString("folder")
+			if ref == "" {
+				body["folder_id"] = nil
+			} else {
+				id, err := resolveCredentialFolderID(client, ref)
+				if err != nil {
+					return err
+				}
+				body["folder_id"] = id
 			}
 		}
 		if flags.Changed("security-level") {
