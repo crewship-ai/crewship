@@ -1382,7 +1382,72 @@ jobs:
           path: out/
           retention-days: 1
 
+      - name: Set up Node 24 for Document engine verification
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Verify the pinned Document engine
+        timeout-minutes: 3
+        run: |
+          pnpm --dir tools/docs-service install --frozen-lockfile
+          pnpm --dir tools/docs-service test
+
   # ── Frontend tests: four complete partitions, one global coverage gate ──
+      - name: Verify the Document service image and lifecycle
+        id: docs-image
+        timeout-minutes: 8
+        env:
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --depth=1 origin "$REVIEWED_SHA"
+          context_tree="$(git rev-parse HEAD:tools/docs-service)"
+          reviewed_tree="$(git rev-parse "$REVIEWED_SHA:tools/docs-service")"
+          test "$context_tree" = "$reviewed_tree"
+          git diff --exit-code -- tools/docs-service
+          image="crewship-docs-ci:${REVIEWED_SHA}"
+          docker build --tag "$image" tools/docs-service
+          DOCS_IMAGE="$image" node tools/docs-service/image-smoke.mjs
+          artifact="$RUNNER_TEMP/docs-service-image"
+          mkdir -p "$artifact"
+          image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          # Save by immutable ID so loading the artifact cannot replace tags.
+          docker save --output "$artifact/image.tar" "$image_id"
+          SOURCE_SHA="$REVIEWED_SHA" CONTEXT_TREE="$context_tree" IMAGE_ID="$image_id" \
+            ARTIFACT_DIR="$artifact" TESTED_CHECKOUT_SHA="$(git rev-parse HEAD)" python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          directory = Path(os.environ['ARTIFACT_DIR'])
+          digest = hashlib.sha256()
+          with (directory / 'image.tar').open('rb') as archive:
+              for chunk in iter(lambda: archive.read(1024 * 1024), b''):
+                  digest.update(chunk)
+          receipt = {
+              'source_sha': os.environ['SOURCE_SHA'],
+              'tested_checkout_sha': os.environ['TESTED_CHECKOUT_SHA'],
+              'context_tree': os.environ['CONTEXT_TREE'],
+              'image_id': os.environ['IMAGE_ID'],
+              'archive_sha256': digest.hexdigest(),
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+          }
+          (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          echo "source_sha=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Retain the qualified Document image without publication
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: docs-service-image-${{ steps.docs-image.outputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/docs-service-image/image.tar
+            ${{ runner.temp }}/docs-service-image/receipt.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   frontend-test-types:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.code == 'true'
