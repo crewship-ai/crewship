@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
+
 - Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
 
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.

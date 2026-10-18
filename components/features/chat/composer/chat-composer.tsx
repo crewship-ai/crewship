@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { FilePlus2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 import {
   PromptInput,
@@ -33,6 +35,8 @@ interface ChatComposerProps {
   agentId: string
   sessionId: string
   agentName?: string
+  /** Confirmed support in this private chat with no selected Page. */
+  documentCreationEnabled?: boolean
   /** "desktop" wraps the input in AttachmentZone + mention autocomplete +
    *  attachment button; "mobile" renders the bare input, matching the two
    *  historical branches of ChatPanel. */
@@ -119,6 +123,7 @@ export function ChatComposer({
   agentId,
   sessionId,
   agentName,
+  documentCreationEnabled = false,
   variant,
   isStreaming,
   connectionStatus,
@@ -142,6 +147,17 @@ export function ChatComposer({
   // them in this browser. Anonymous/embedded composers keep text in memory.
   const draftKey = userId ? JSON.stringify(["user", userId, sessionId]) : null
   const inputScope = draftKey ?? JSON.stringify(["anonymous", sessionId])
+  const creationScope = JSON.stringify([userId, agentId, sessionId])
+  const canCreateDocument = documentCreationEnabled && Boolean(userId)
+  const [creationSelection, setCreationSelection] = useState<string | null>(null)
+  const createDocument = canCreateDocument && creationSelection === creationScope
+  const creationPacket = useRef<{ scope: string; content: string; submissionId: string } | null>(null)
+  // Consent is ephemeral and belongs to one identity and conversation. It is
+  // neither a persisted composer draft nor a preference for future messages.
+  useEffect(() => {
+    setCreationSelection(null)
+    creationPacket.current = null
+  }, [creationScope, canCreateDocument])
   const restoreInput = () => {
     const saved = draftKey ? useComposerStore.getState().drafts[draftKey] : undefined
     return saved?.trim() ? saved : initialInput ?? ""
@@ -249,12 +265,24 @@ export function ChatComposer({
   const handleTypedSubmit = useCallback(
     async (message: SubmittedMessage) => {
       sentRef.current = false
-      await handleSubmit(message)
+      let outgoing = message
+      if (createDocument) {
+        const content = composeMessageWithAttachments(message.text, sessionAttachments)
+        if (creationPacket.current?.scope !== creationScope || creationPacket.current.content !== content) {
+          creationPacket.current = { scope: creationScope, content, submissionId: crypto.randomUUID() }
+        }
+        outgoing = { ...message, metadata: { ...message.metadata, document_creation_intent: {
+          submission_id: creationPacket.current.submissionId, drafting: true,
+        } } }
+      }
+      await handleSubmit(outgoing)
       if (!sentRef.current) return
+      setCreationSelection(null)
+      creationPacket.current = null
       setInput("")
       if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, draftKey, setInput],
+    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -349,6 +377,25 @@ export function ChatComposer({
     sendableAttachments(sessionAttachments).length > 0 ||
     hasPendingUploads(sessionAttachments)
   const submitDisabled = !isStreaming && (!hasContent || !canSend)
+  const creationControl = canCreateDocument ? (
+    <Button
+      type="button"
+      variant={createDocument ? "secondary" : "ghost"}
+      size="sm"
+      aria-label="Create document"
+      aria-pressed={createDocument}
+      title="Create document / Vytvořit dokument"
+      disabled={isStreaming || !canSend}
+      className="coarse:min-h-12"
+      onClick={() => {
+        setCreationSelection(createDocument ? null : creationScope)
+        creationPacket.current = null
+      }}
+    >
+      <FilePlus2 className="size-4" aria-hidden="true" />
+      Create document
+    </Button>
+  ) : null
 
   if (variant === "mobile") {
     // The mobile branch used to be a bare input: no attachments at all, so a
@@ -380,6 +427,7 @@ export function ChatComposer({
               <div className="flex items-center gap-1">
                 <CameraButton agentId={agentId} sessionId={sessionId} />
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
+                {creationControl}
               </div>
               <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
             </PromptInputFooter>
@@ -412,6 +460,7 @@ export function ChatComposer({
           <PromptInputFooter className="justify-between p-2 gap-2">
             <div className="flex items-center gap-1">
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
+              {creationControl}
             </div>
             <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
           </PromptInputFooter>

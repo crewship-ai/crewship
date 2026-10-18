@@ -121,18 +121,32 @@ create another write. Revoked credentials cannot replay saved requests.
 
 ## Requesting a document in chat
 
-With Document support and the workspace creation policy enabled, use a direct
-private-chat request such as `vytvoř dokument o plánu uvedení produktu` without
-selecting an existing Page. The run creates a new populated document for you
-and returns its saved link. Quoted or ambiguous text does not grant creation
-permission.
+With Document support and the workspace creation policy enabled, open a private
+agent chat without selecting an existing Page. Select **Create document** in the
+composer, then describe what you want and send the message. For example, write
+“Please draft a garden plan. Include three sections!” or “Napiš mi plán zahrady.”
+The request can use Czech or English, punctuation, and multiple lines.
 
-You remain the document's owner. This request does not grant the run permission
-to edit another Page. A direct creation request also allows the original live
-run to save guarded drafts of the new document while completing that request.
-The permission does not carry over to a later run. For an uncertain tool
-confirmation, retry the original input and mutation ID; sending a new chat
-message is a separate request.
+The selection applies to one sent message. It authorizes creating a new private
+document and saving drafts of that document during the original live run.
+Sending successfully clears the selection; changing users or conversations also
+clears it. A failed local send preserves the selection for retry. The control
+is unavailable while Document support is unconfirmed or an existing Page is
+selected. The server rechecks the original human and private-chat permissions.
+
+The composer carries `document_creation_intent` metadata with a `submission_id`
+and `drafting: true`; it leaves the message text unchanged. The older
+`document_creation` metadata shape remains supported for existing clients.
+Sending both shapes is rejected. Text returned by a model does not grant consent.
+
+The narrow command `vytvoř dokument o plánu uvedení produktu` remains a fallback.
+Its topic must be a single line containing letters, digits, spaces or hyphens;
+quoted, negated or ambiguous text does not grant creation permission. Use the
+composer control for other wording.
+
+The run creates a populated document and returns its saved link. Reopening a
+result does not grant a later run permission to edit it. Repeating an uncertain
+operation must reuse the original request, rather than issuing a new chat task.
 
 ## `crewship doc chat-results <chat-id>`
 
