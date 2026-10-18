@@ -494,6 +494,8 @@ for (const vp of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, {
       const box = await tile.boundingBox()
       expect(Math.round(box!.width)).toBe(48)
       if (vp.width >= 1024) {
+        // COM-05: on a tablet the panel starts closed; its button opens it.
+        if (vp.width < 1280) await page.getByTestId("secondary-panel-button").click()
         const row = page.locator(`[data-crew-row="${crew}"] [role=button], [data-crew-row="${crew}"] > div`).first()
         expect(Math.round((await row.boundingBox())!.height)).toBeGreaterThanOrEqual(30)
         const small = await page.locator(`[data-crew-row="${crew}"] [data-slot=crew-tile]`).boundingBox()
