@@ -227,15 +227,24 @@ Invalid inputs and forbidden explicit projects retain their existing errors.
 A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
 `Retry-After` seconds; it discloses no audience or workspace counts.
 
-The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
-per entry (256 valid List projects plus all-projects), and 32768 audiences
-globally. Existing audiences remain usable at capacity; a refused new audience
-does not allocate an empty account or charge either budget. Capacity overflow is the
-same transient 429; active entries are never evicted to grant a fresh burst.
+The lazy limiter retains at most 4096 user/workspace entries and 32768 audience
+buckets globally. Each workspace may retain at most 256 entries and 2048 audience
+buckets; each entry still supports 257 audiences (256 valid List projects plus
+all-projects). These are process memory quotas, not product tiers or tenant
+capacity guarantees. One workspace cannot consume the entire global allowance,
+but multiple workspaces can fill it: a new entry or audience is then refused
+with the same transient 429. Existing audiences remain usable subject to their
+unchanged rate budgets. Capacity refusal allocates no empty account and spends
+neither budget; active entries are never evicted or reset to grant a fresh burst.
+
 Idle entries expire after at least five minutes and the configured full-refill
-interval. Rate settings are exposed in Rate Limiters; process restart resets
-these in-memory budgets and replicas enforce their own budgets. Rate limiting
-does not truncate counts or bound the cost of one large authorized search.
+interval. Ordered idle lists retain exactly one node per entry and audience;
+cleanup visits only the expired prefix, not all active maps on every full
+request. Audience maps shrink after expiry halves their high-water mark, bounding
+retained backing storage without copying a full active map on capacity denial.
+Rate settings are exposed in Rate Limiters; process restart resets these
+in-memory budgets and replicas enforce their own budgets. Rate limiting does not
+truncate counts or bound the cost of one large authorized search.
 
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
