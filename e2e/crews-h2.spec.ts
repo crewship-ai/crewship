@@ -173,7 +173,10 @@ test.describe("desktop", () => {
     await dialog.getByRole("button", { name: "Continue" }).click()
     await dialog.locator("button[aria-pressed]").first().click()
     await dialog.getByRole("button", { name: "Continue" }).click()
-    await dialog.getByRole("radio", { name: /Anthropic/ }).first().click().catch(() => undefined)
+    // A provider choice shows only when the template asks for one; a click
+    // on a missing radio would wait out the whole test timeout.
+    const provider = dialog.getByRole("radio", { name: /Anthropic/ })
+    if (await provider.count()) await provider.first().click()
     await dialog.getByRole("button", { name: /Create crew/ }).click()
     await expect(page).toHaveURL(new RegExp(`crew=${slug}`))
     await page.getByRole("tab", { name: /Team/ }).click()
