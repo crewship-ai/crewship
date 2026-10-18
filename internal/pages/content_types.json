@@ -1,0 +1,146 @@
+[
+  {
+    "type_id": "panels",
+    "schema_version": 1,
+    "viewer": "panel-grid",
+    "editor": "page-spec",
+    "storage_adapter": "page-panels-v1",
+    "projection_adapter": "panel-data-v1",
+    "anchor_kinds": [
+      "tab",
+      "panel"
+    ],
+    "export_formats": [
+      "page-bundle"
+    ],
+    "execution_profile": "declarative-panels",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "application",
+    "schema_version": 1,
+    "viewer": "page-application",
+    "editor": "page-project",
+    "storage_adapter": "page-project-v1",
+    "projection_adapter": "page-publication-v1",
+    "anchor_kinds": [],
+    "export_formats": [],
+    "execution_profile": "react-vite-typescript/v1",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "html",
+    "schema_version": 1,
+    "viewer": "static-artifact",
+    "editor": "static-artifact",
+    "storage_adapter": "page-artifact-revisions-v1",
+    "projection_adapter": "static-html-v1",
+    "anchor_kinds": [
+      "document",
+      "viewport-point"
+    ],
+    "export_formats": [
+      "html.txt"
+    ],
+    "execution_profile": "static-html-v1",
+    "authoring_skill": "crewship-artifacts"
+  },
+  {
+    "type_id": "board",
+    "schema_version": 1,
+    "viewer": "page-board",
+    "editor": "page-board",
+    "storage_adapter": "page-boards-v1",
+    "projection_adapter": "excalidraw-scene-v1",
+    "anchor_kinds": [
+      "board",
+      "board-element"
+    ],
+    "export_formats": [
+      "board-draft.json"
+    ],
+    "execution_profile": "declarative-board",
+    "authoring_skill": "crewship-artifacts"
+  },
+  {
+    "type_id": "doc",
+    "schema_version": 1,
+    "viewer": "page-document",
+    "editor": "page-document",
+    "storage_adapter": "documents-yjs-v1",
+    "projection_adapter": "prosemirror-v1",
+    "anchor_kinds": [
+      "block",
+      "text-range"
+    ],
+    "export_formats": [
+      "markdown"
+    ],
+    "execution_profile": "managed-docs-v1",
+    "authoring_skill": "crewship-documents"
+  },
+  {
+    "type_id": "doc",
+    "schema_version": 2,
+    "viewer": "page-document",
+    "editor": "page-document",
+    "storage_adapter": "documents-yjs-v2",
+    "projection_adapter": "prosemirror-v2",
+    "anchor_kinds": [
+      "block",
+      "text-range"
+    ],
+    "export_formats": [
+      "markdown"
+    ],
+    "execution_profile": "managed-docs-v1",
+    "authoring_skill": "crewship-documents"
+  },
+  {
+    "type_id": "doc",
+    "schema_version": 3,
+    "viewer": "page-document",
+    "editor": "page-document",
+    "storage_adapter": "documents-yjs-v3",
+    "projection_adapter": "prosemirror-v3",
+    "anchor_kinds": [
+      "block",
+      "text-range"
+    ],
+    "export_formats": [
+      "markdown"
+    ],
+    "execution_profile": "managed-docs-v1",
+    "authoring_skill": "crewship-documents"
+  },
+  {
+    "type_id": "slides",
+    "schema_version": 1,
+    "viewer": "page-slides",
+    "editor": "page-slides",
+    "storage_adapter": "slides-canonical-v1",
+    "projection_adapter": "native-react-v1",
+    "anchor_kinds": [
+      "slide",
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "none",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "slides",
+    "schema_version": 2,
+    "viewer": "page-slides",
+    "editor": "page-slides",
+    "storage_adapter": "slides-canonical-v2",
+    "projection_adapter": "native-react-v2",
+    "anchor_kinds": [
+      "slide",
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "none",
+    "authoring_skill": ""
+  }
+]
