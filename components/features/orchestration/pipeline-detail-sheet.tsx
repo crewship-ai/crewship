@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { GitBranch, History, FileJson, RotateCcw, Download } from "lucide-react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { apiFetch } from "@/lib/api-fetch"
+import { askConfirm } from "@/components/ui/confirm-host"
 
 // PipelineDetailSheet is the right-side drawer that opens when a
 // PipelineRunNode is clicked in the Orchestration → Graph view.
@@ -115,7 +116,13 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
   const handleRollback = async (version: number) => {
     const scope = scopeRef.current
     if (!scope || pendingAction !== null) return
-    if (!confirm(`Rollback to version ${version}? History is preserved; the next save will be version ${(versions[0]?.version ?? 0) + 1}.`)) return
+    const ok = await askConfirm({
+      title: `Rollback to version ${version}?`,
+      description: `History is preserved; the next save will be version ${(versions[0]?.version ?? 0) + 1}.`,
+      confirmLabel: "Roll back",
+      cancelLabel: "Cancel",
+    })
+    if (!ok || scopeRef.current !== scope || scope.controller.signal.aborted) return
     const active = () => scopeRef.current === scope && !scope.controller.signal.aborted
     setPendingAction("rollback")
     setError(null)

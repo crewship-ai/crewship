@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -72,7 +73,7 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
     setSubmitting(true); setError(""); setRun(null)
     try {
       if (!request.current) {
-        if (action.confirm && !window.confirm(`${action.confirm.title}\n\n${action.confirm.body}`)) return
+        if (action.confirm && !await askConfirm({ title: action.confirm.title, description: action.confirm.body, confirmLabel: "Run action", cancelLabel: "Cancel" })) return
         const inputs: Record<string, string | number | boolean> = {}
         for (const field of action.inputs) {
           const value = values[field.name] ?? ""

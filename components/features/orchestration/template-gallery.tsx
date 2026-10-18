@@ -19,6 +19,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { WorkflowTemplate, TemplateDefinition } from "@/lib/types/template"
 
@@ -280,7 +281,7 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                     aria-label={`Delete template ${tmpl.name}`}
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
-                      if (!window.confirm(`Delete template "${tmpl.name}"?`)) return
+                      if (!await askConfirm({ title: `Delete template "${tmpl.name}"?`, confirmLabel: "Delete", cancelLabel: "Cancel", destructive: true })) return
                       const current = scope.current
                       if (!current || current.workspaceId !== workspaceId) return
                       try {

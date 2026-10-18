@@ -7,6 +7,7 @@ import { ArrowLeft, Bell, BellOff, MessageSquare, Plus, Send, Settings2, UserMin
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -280,7 +281,7 @@ function ConversationMembers({ workspaceId, userId, conversation, participants, 
         <ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-7 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{person.name || "Workspace member"}</span>
         <span className="text-[10px] text-muted-foreground">{person.role}</span>
-        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-[44px] text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { if (window.confirm(`Remove ${person.name} from this conversation?`)) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
+        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-[44px] text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { void askConfirm({ title: `Remove ${person.name} from this conversation?`, confirmLabel: "Remove", cancelLabel: "Cancel", destructive: true }).then((ok) => { if (ok) void change(person.user_id) }) }}><UserMinus className="size-3.5" /></Button>}
       </li>)}
     </ul>
     {canManage && <>
