@@ -46,7 +46,7 @@ async function bootstrapChecks(page, bootstrap) {
     // A returned constructor is not proof that worker code ran. Require an
     // actual message/error outcome; silence at the deadline is a failure.
     const workerProbe = `async function observeWorker() {
-      const proof = {constructor:'not-attempted', errorName:null, errorEvent:false, message:null, timedOut:false, cspDirective:null};
+      const proof = {constructor:'not-attempted', errorName:null, errorEvent:false, errorMessage:null, errorFilename:null, message:null, timedOut:false, cspDirective:null};
       const violation = event => { if (event.effectiveDirective === 'worker-src') proof.cspDirective = event.effectiveDirective; };
       document.addEventListener('securitypolicyviolation', violation);
       let worker, url, timer;
@@ -55,7 +55,7 @@ async function bootstrapChecks(page, bootstrap) {
           url = URL.createObjectURL(new Blob(['postMessage("spike.worker.executed")'], {type:'text/javascript'}));
           worker = new Worker(url); proof.constructor = 'returned';
           worker.onmessage = event => { proof.message = event.data; resolve(); };
-          worker.onerror = event => { event.preventDefault(); proof.errorEvent = true; resolve(); };
+          worker.onerror = event => { event.preventDefault(); proof.errorEvent = true; proof.errorMessage = event.message ?? null; proof.errorFilename = event.filename ?? null; resolve(); };
           timer = setTimeout(() => { proof.timedOut = true; resolve(); }, 1000);
         } catch (error) { proof.constructor = 'threw'; proof.errorName = error.name; resolve(); }
       });
@@ -207,11 +207,11 @@ for (const name of ['firefox', 'webkit']) {
   const result = { browser: name, executable: options.get(`--${name}-executable`) ?? playwright[name].executablePath(), checks: [], status: 'not-run' };
   report.browsers.push(result);
   let browser, page;
+  const requests = [];
   try {
     browser = await playwright[name].launch({ headless: true, ...(options.has(`--${name}-executable`) ? { executablePath: options.get(`--${name}-executable`) } : {}) });
     result.browserVersion = browser.version();
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] }, serviceWorkers: 'block' });
-    const requests = [];
     await context.route('**/*', route => { requests.push(route.request().url()); return route.abort(); });
     page = await context.newPage(); page.setDefaultTimeout(5000);
     result.userAgent = await page.evaluate(() => navigator.userAgent);
@@ -219,10 +219,10 @@ for (const name of ['firefox', 'webkit']) {
     result.checks.push(...await bootstrapChecks(page, sources['internal/pagebuild/bootstrap.js']));
     const workerControl = await sameOriginWorkerControl(context, await page.evaluate(() => window.spikeWorkerProbe));
     result.observations = { sameOriginWorkerControl: workerControl };
+    result.checks.push(...await channelChecks(page));
     assert.equal(workerControl.message, 'spike.worker.executed', 'same-origin worker positive control must execute');
     assert.equal(workerControl.timedOut, false, 'worker control timeout is not acceptance');
     assert.equal(workerControl.errorEvent, false, 'worker control errors cannot qualify this environment');
-    result.checks.push(...await channelChecks(page));
     assert.equal(requests.length, 0, 'fixture attempted a network request');
     result.status = 'pass';
   } catch (error) {
@@ -230,6 +230,7 @@ for (const name of ['firefox', 'webkit']) {
     result.error = String(error.message).split('\nCall log:')[0];
     failed = true;
   } finally {
+    result.blockedRequests = requests;
     if (page) {
       result.observations = { ...await page.evaluate(() => window.spikeObservations ?? {}).catch(() => ({})), ...result.observations };
       result.checks = [...new Set([...await page.evaluate(() => window.spikeChecks ?? []).catch(() => []), ...result.checks])];

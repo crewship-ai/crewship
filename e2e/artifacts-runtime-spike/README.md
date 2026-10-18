@@ -43,7 +43,11 @@ it. An additional opaque blob-allowed observation reports engine behavior; an
 explicit engine rejection there is not a sandbox bypass or a required worker
 capability. Completed named checks survive later control failures.
 Individual DOM/storage/worker observations are retained even when an assertion
-fails. The original remote failure from run `39171348217` remains evidence of
+fails, including worker error details and every intercepted/aborted request URL.
+Channel checks run before positive-control qualification, so a failed worker
+control cannot hide independently executed channel results. All ten named
+checks alone do not override a failed required positive control.
+The original remote failure from run `39171348217` remains evidence of
 the initial aggregate assertion; it is not retroactively relabelled PASS.
 
 These local primitives do **not** establish cross-site browser process
