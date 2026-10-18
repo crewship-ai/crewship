@@ -75,7 +75,7 @@ export function ReviewPreview({
             · actions are not executed here
           </p>
         </div>
-        <Button variant="outline" className="min-h-11" onClick={onReturn}>
+        <Button variant="outline" className="min-h-11 coarse:min-h-[44px]" onClick={onReturn}>
           Back to review
         </Button>
       </div>
@@ -90,7 +90,7 @@ export function ReviewPreview({
 
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          className="min-h-11"
+          className="min-h-11 coarse:min-h-[44px]"
           // Not disabled by `query.isError`, because that wedges the one
           // control that can clear the state — and `retry: false` means a
           // single network blip is enough to set it.
@@ -120,7 +120,7 @@ export function ReviewPreview({
             stop message, and a preview that can only be stopped from inside
             itself cannot be stopped at all. Unmounting the frame is the stop. */}
         {live && (
-          <Button variant="outline" className="min-h-11" onClick={() => setStopped(true)}>
+          <Button variant="outline" className="min-h-11 coarse:min-h-[44px]" onClick={() => setStopped(true)}>
             Stop preview
           </Button>
         )}

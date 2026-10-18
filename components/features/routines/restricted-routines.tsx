@@ -109,7 +109,7 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
       <div role="radiogroup" aria-label="Routine" className="flex flex-col divide-y divide-hairline overflow-hidden rounded-card border border-hairline bg-card">
         {catalog.map(item => {
           const on = item.slug === selected
-          return <button key={item.slug} type="button" role="radio" aria-checked={on} disabled={active || !!request.current} onClick={() => { setSelected(item.slug); setValues({}); setRun(null); setError("") }} className={cn("flex min-h-11 items-center gap-3 px-4 py-2 text-left text-sm transition-colors disabled:opacity-60", on ? "bg-primary/10" : "hover:bg-foreground/[0.03]")}>
+          return <button key={item.slug} type="button" role="radio" aria-checked={on} disabled={active || !!request.current} onClick={() => { setSelected(item.slug); setValues({}); setRun(null); setError("") }} className={cn("flex min-h-11 coarse:min-h-[44px] items-center gap-3 px-4 py-2 text-left text-sm transition-colors disabled:opacity-60", on ? "bg-primary/10" : "hover:bg-foreground/[0.03]")}>
             <Workflow className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
             <span className="text-xs text-muted-foreground">{item.inputs.length ? `${item.inputs.length} ${item.inputs.length === 1 ? "input" : "inputs"}` : "no inputs"}</span>

@@ -24,6 +24,30 @@ const CORE_HREFS = [
   "/crews", "/skills", "/credentials", "/integrations",
 ]
 
+// A sheet slides in; its box is only the docked one once the animation is over.
+// Wait until nothing animates on it, its transform is gone and the box has been
+// identical across two frames - measuring earlier reads a mid-slide rect.
+async function settled(el: import("@playwright/test").Locator) {
+  await el.evaluate(
+    (node) =>
+      new Promise<void>((resolve) => {
+        let last = ""
+        let same = 0
+        const tick = () => {
+          const r = node.getBoundingClientRect()
+          const now = [r.x, r.y, r.width, r.height].join(",")
+          const idle = node.getAnimations({ subtree: true }).length === 0
+          const t = getComputedStyle(node).transform
+          same = idle && (t === "none" || t === "matrix(1, 0, 0, 1, 0, 0)") && now === last ? same + 1 : 0
+          last = now
+          if (same >= 3) resolve()
+          else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+}
+
 type Who = keyof typeof ROLES
 const states = new Map<Who, ReturnType<BrowserContext["storageState"]>>()
 
@@ -127,6 +151,7 @@ for (const who of Object.keys(ROLES) as Who[]) {
         const sheet = page.getByRole("dialog", { name: "User menu" })
         await expect(sheet).toBeVisible()
         await expect(page.getByRole("menu")).toHaveCount(0)
+        await settled(sheet)
         const box = (await sheet.boundingBox())!
         expect(Math.round(box.x)).toBe(0)
         expect(Math.round(box.width)).toBe(390)
@@ -134,9 +159,12 @@ for (const who of Object.keys(ROLES) as Who[]) {
         await expect(sheet.getByRole("link", { name: /^appearance$/i })).toBeVisible()
         await expect(sheet.getByRole("button", { name: /^log out$/i })).toBeVisible()
         // Every row is a comfortable target.
-        for (const h of await sheet.locator("[data-menu-row]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) {
-          expect(h).toBeGreaterThanOrEqual(44)
-        }
+        // (Notification sounds is a switch row: it was 37.6 px from min-h-11.)
+        const rows = await sheet.locator("[data-menu-row]").evaluateAll((els) =>
+          els.map((e) => ({ name: (e.textContent ?? "").trim(), h: e.getBoundingClientRect().height })),
+        )
+        expect(rows.map((r) => r.name)).toContain("Notification sounds")
+        for (const r of rows) expect(r.h, r.name).toBeGreaterThanOrEqual(44)
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
         expect(overflow).toBeLessThanOrEqual(0)
         // Picking a row closes it.
@@ -161,7 +189,8 @@ for (const who of Object.keys(ROLES) as Who[]) {
         const box = (await menu.boundingBox())!
         expect(box.width).toBeLessThan(400)
         expect(box.y + box.height).toBeLessThan(768)
-        const rows = (await menu.getByRole("menuitem").allTextContents()).map((t) => t.replace(/\d+ active$/, "").trim())
+        // "Notification sounds" is a switch row: menuitemcheckbox, not menuitem.
+        const rows = (await menu.locator('[role="menuitem"], [role="menuitemcheckbox"]').allTextContents()).map((t) => t.replace(/\d+ active$/, "").trim())
         expect(rows).toEqual(expect.arrayContaining(["Profile & account", "Appearance", "Sessions & CLI tokens", "Help & resources", "Log out"]))
         // Both demo roles are trusted sessions: the full set, in the v67 order.
         const order = ["Profile & account", "Appearance", "Notification sounds", "Notification preferences", "Sessions & CLI tokens", "Connect CLI…", "Help & resources", "Log out"]

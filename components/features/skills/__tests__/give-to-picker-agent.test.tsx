@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
-import { GiveToPicker, heldSkillsDiff } from "@/components/features/skills/give-to-picker"
+import { GiveToPicker, heldSkillsDiff, type HeldSkillChange } from "@/components/features/skills/give-to-picker"
 
 // Direction "agent-to-skills" (CRW-03, #3481): one agent, the workspace's skills.
 const library = [
@@ -20,7 +20,7 @@ describe("heldSkillsDiff", () => {
 
 describe("GiveToPicker direction agent-to-skills", () => {
   it("searches, sends only the diff and reports once", async () => {
-    const write = vi.fn(async () => undefined)
+    const write = vi.fn(async (_change: HeldSkillChange) => undefined)
     const onClose = vi.fn()
     const onApplied = vi.fn()
     render(<GiveToPicker {...base} write={write} onApplied={onApplied} onClose={onClose} />)
@@ -69,6 +69,7 @@ describe("GiveToPicker direction agent-to-skills", () => {
     expect(dialog.className).toContain("max-sm:bottom-0")
     const row = screen.getByRole("checkbox", { name: "PDF reports" }).closest("label")!
     expect(row.className).toContain("min-h-11")
+    expect(row.className).toContain("coarse:min-h-[44px]")
     expect(dialog.className).toContain("sm:max-w-[480px]")
   })
 })

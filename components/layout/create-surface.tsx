@@ -675,7 +675,7 @@ export function CreateSurfaceHeader({
             size="icon-xs"
             onClick={onBack}
             aria-label="Back"
-            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:w-[44px]"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -736,7 +736,7 @@ export function CreateSurfaceHeader({
             size="icon-xs"
             onClick={() => guard(onClose)}
             aria-label="Close"
-            className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+            className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:w-[44px]"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -1071,7 +1071,7 @@ export function CreateSurfaceChoice<T extends string>({
             onClick={() => onChange(o.value)}
             className={cn(
               "h-8 rounded-md border px-2.5 text-xs font-medium transition-colors",
-              "coarse:h-[44px] max-sm:flex-1 coarse:px-3 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1",
+              "coarse:h-[44px] max-sm:flex-1 coarse:px-3 group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1",
               active
                 ? "border-primary/40 bg-primary/15 text-primary-hover"
                 : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
@@ -1154,7 +1154,7 @@ export function CreateSurfaceDisclosure({
         // generous. `--spacing: 0.23rem` is why: py-3 is 11px a side, not 12,
         // and it is added to a 19px line rather than to 44. Callers cannot
         // patch it either; this component takes no className.
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px] max-sm:py-3 group-data-[mobile=true]/surface:min-h-12 group-data-[mobile=true]/surface:py-3"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px] max-sm:py-3 group-data-[mobile=true]/surface:min-h-[44px] group-data-[mobile=true]/surface:py-3"
       >
         {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
         <span className="shrink-0 text-[13px] font-medium text-foreground">{label}</span>
@@ -1277,7 +1277,7 @@ export function CreateSurfacePill({
         // reach it either (40.5) — h-12 is the touch-target class in this
         // repo, and this is the control New issue and New project are made of.
         "coarse:px-3 coarse:text-sm group-data-[mobile=true]/surface:px-3",
-        "coarse:h-[44px] group-data-[mobile=true]/surface:h-12",
+        "coarse:h-[44px] group-data-[mobile=true]/surface:h-[44px]",
         !readOnly && "hover:bg-foreground/[0.08]",
         readOnly && "cursor-default",
         set ? "text-foreground/85" : "text-muted-foreground",
@@ -1572,7 +1572,7 @@ export function CreateSurfacePicker({
               onChange={(e) => search.onChange(e.target.value)}
               placeholder={search.placeholder ?? "Search…"}
               aria-label={search.placeholder ?? "Search"}
-              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary coarse:h-[44px] coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm"
+              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary coarse:h-[44px] coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:text-sm"
             />
           </div>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground-soft">
@@ -1983,7 +1983,7 @@ export function CreateSurfaceFooter({
           size="sm"
           onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
           disabled={busy}
-          className="h-8 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
+          className="h-8 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
         >
           {cancelLabel}
         </Button>
@@ -1995,7 +1995,7 @@ export function CreateSurfaceFooter({
         size="sm"
         onClick={onPrimary}
         disabled={primaryDisabled || busy}
-        className="h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-[2] coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
+        className="h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-[2] coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
       >
         {busy ? <Spinner className="h-3 w-3" /> : PrimaryIcon ? <PrimaryIcon className="h-3 w-3" /> : null}
         {primaryLabel}
@@ -2017,7 +2017,7 @@ export function CreateSurfaceSecondaryAction({
       variant="outline"
       size="sm"
       className={cn(
-        "h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
+        "h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
         className,
       )}
       {...props}

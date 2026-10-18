@@ -14,6 +14,7 @@ const env = vi.hoisted(() => ({
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => env.mobile }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => env.mode }))
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => false,
   useAuth: () => ({ session: { user: { id: "u1", name: "Demo User", email: "demo@crewship.ai" } }, signOut: vi.fn().mockResolvedValue(undefined) }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
@@ -98,7 +99,7 @@ describe("the user menu on a phone (< 768 px)", () => {
   it("makes every row a 44 px target", () => {
     openMenu("toolbar")
     for (const row of screen.getByRole("dialog", { name: /user menu/i }).querySelectorAll<HTMLElement>("[data-menu-row]")) {
-      expect(row.className).toMatch(/min-h-11/)
+      expect(row.className).toMatch(/min-h-\[44px\]/)
     }
   })
 

@@ -7,7 +7,7 @@ import {
   LogOut, MonitorSmartphone, Palette, Sparkles, SquareTerminal, User, Volume2,
 } from "lucide-react"
 
-import { useAuth } from "@/hooks/use-auth"
+import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { apiFetch } from "@/lib/api-fetch"
@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Badge } from "@/components/ui/badge"
 import { MenuSheet, MenuSheetItem, MenuSheetSeparator, MenuSheetSub } from "@/components/ui/menu-sheet"
-import { buildLabel } from "./sidebar-version"
+import { buildLabel, editionName } from "@/lib/build-info"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
 
@@ -306,11 +306,14 @@ function ActiveSessionsCount() {
   return <span className="font-mono text-micro text-muted-foreground">{count} active</span>
 }
 
-/** The foot of the menu (v67 `pu-ver`): which build this is — the first thing
- *  a bug report needs — and, when a newer release exists, a link to it. Same
- *  read and label as the rail's SidebarVersion. */
+/** The foot of the menu (v67 `pu-ver`): "Community Edition · dev · a41d725" —
+ *  which Crewship this is, the first thing a bug report needs — and, when a
+ *  newer release exists, a link to it. The sidebar no longer carries this; an
+ *  instance admin can follow the build to the Admin overview. */
 function BuildFooter() {
+  const instanceAdmin = useIsInstanceAdmin()
   const [build, setBuild] = useState<{ label: string; update: string | null } | null>(null)
+  const [edition, setEdition] = useState<string | undefined>()
   useEffect(() => {
     let live = true
     apiFetch("/api/v1/system/version")
@@ -319,12 +322,27 @@ function BuildFooter() {
         if (live && b?.current) setBuild({ label: buildLabel(b), update: b.newer ? (b.url ?? RELEASES_URL) : null })
       })
       .catch(() => {})
+    apiFetch("/api/v1/system/license")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((l) => { if (live && l?.edition) setEdition(l.edition) })
+      .catch(() => {})
     return () => { live = false }
   }, [])
   if (!build) return null
+  const text = (
+    <>
+      {edition && <><span data-testid="user-menu-edition">{editionName(edition)}</span> · </>}
+      <span data-testid="user-menu-build">{build.label}</span>
+    </>
+  )
+  const cls = "min-w-0 truncate font-mono text-micro text-muted-foreground-soft"
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2" data-testid="user-menu-footer">
-      <span className="min-w-0 truncate font-mono text-micro text-muted-foreground-soft" data-testid="user-menu-build">{build.label}</span>
+      {instanceAdmin ? (
+        <Link href="/admin?tab=overview" className={cn(cls, "hover:text-foreground hover:underline")}>{text}</Link>
+      ) : (
+        <span className={cls}>{text}</span>
+      )}
       {build.update && (
         <a href={build.update} target="_blank" rel="noopener noreferrer" className="shrink-0 text-micro font-medium text-primary hover:underline">
           Update available
