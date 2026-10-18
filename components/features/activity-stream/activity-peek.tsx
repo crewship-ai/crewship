@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Peek } from "@/components/ui/peek"
 import { StatusPill } from "@/components/ui/status-pill"
+import { RoutineRunPeek } from "@/components/features/routines/routine-run-peek"
 import { routineViewHref } from "@/components/features/routines/routine-navigation"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import {
@@ -237,28 +238,8 @@ function WorkPeek({
 
   const firstIssue = (c.issues ?? []).find((i) => i.identifier)
 
-  return (
+  const actionButtons = (
     <>
-      <Peek
-        open={open}
-        onOpenChange={(o) => !o && onClose()}
-        title={item.title}
-        subtitle={item.runs ? `${item.runs.length} runs, grouped` : isRoutineRun ? "Routine run" : c.kind === "assignment" ? "Agent work" : "Work"}
-        onPrev={onPrev}
-        onNext={onNext}
-        onOpenFull={item.runs ? undefined : () => onOpenFull(item)}
-        footer={
-          <div className="flex flex-wrap items-center gap-2">
-            {item.runs ? (
-              <Button size="sm" onClick={() => onShowRoutine(item.routineSlug!, true)}>
-                All runs, one by one
-              </Button>
-            ) : (
-              <Button size="sm" onClick={() => onOpenFull(item)}>
-                <ExternalLink className="size-3.5" aria-hidden />
-                {isRoutineRun ? "Open run" : "Open work"}
-              </Button>
-            )}
             {firstIssue && (
               <Button size="sm" variant="outline" asChild>
                 <Link href={`/issues/${encodeURIComponent(firstIssue.identifier!)}`}>Open issue</Link>
@@ -277,18 +258,36 @@ function WorkPeek({
                 Run again
               </Button>
             )}
-          </div>
-        }
-      >
-        <div className="grid gap-4" data-testid="activity-peek-work">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill tone={WORK_STATUS_TONE[item.status]} label={WORK_STATUS_LABEL[item.status]} live={item.status === "running"} />
-            <span className="text-label text-muted-foreground">
-              {whenLabel(item.ts, now)} · {item.origin}
-            </span>
-          </div>
-          <p className="text-body text-foreground/80">{workflowSentence(c, rname)}</p>
-
+    </>
+  )
+  const confirms = (
+    <>
+      <ConfirmDialog
+        open={confirm === "stop"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={`Stop ${item.title}?`}
+        description="The run halts before its next step."
+        consequences={[
+          { tone: "kept", text: "Steps that already finished keep their results." },
+          { tone: "lost", text: "Steps that have not started will not run." },
+        ]}
+        confirmLabel="Stop run"
+        destructive
+        onConfirm={stop}
+      />
+      <ConfirmDialog
+        open={confirm === "again"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={`Run ${item.title} again?`}
+        description="A new run starts with the same input as this one."
+        consequences={[{ tone: "kept", text: "This run and its results stay as they are." }]}
+        confirmLabel="Run again"
+        onConfirm={again}
+      />
+    </>
+  )
+  const sections = (
+    <>
           {item.status === "waiting" && (
             <div className="flex items-start gap-2 rounded-lg bg-chip-warn-bg px-3 py-2.5 text-body text-chip-warn-fg">
               <Hand className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -387,30 +386,99 @@ function WorkPeek({
               )}
             </Section>
           )}
+    </>
+  )
+
+  // RT-07: one routine run is the routine run peek (version, cost, J / K over
+  // the routine's runs); Activity's connections, history and actions ride in it.
+  const record = isRoutineRun && !item.runs ? records.find((r) => r.id === item.id) : undefined
+  if (record) {
+    return (
+      <>
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          open={open}
+          runs={records}
+          runId={item.id}
+          subtitle="Routine run"
+          routineName={() => rname}
+          onChange={onPickRun}
+          onClose={onClose}
+          onOpen={() => onOpenFull(item)}
+          onPrev={onPrev}
+          onNext={onNext}
+          footerExtra={
+            <>
+              {firstIssue && (
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/issues/${encodeURIComponent(firstIssue.identifier!)}`}>Open issue</Link>
+                </Button>
+              )}
+              <span className="flex-1" />
+              {canStop && (
+                <Button size="sm" variant="ghost" onClick={() => setConfirm("stop")}>
+                  <Square className="size-3.5" aria-hidden />
+                  Stop
+                </Button>
+              )}
+              {canAgain && (
+                <Button size="sm" variant="ghost" onClick={() => setConfirm("again")}>
+                  <RotateCcw className="size-3.5" aria-hidden />
+                  Run again
+                </Button>
+              )}
+            </>
+          }
+          extra={
+            <div className="grid gap-4" data-testid="activity-peek-work">
+              {sections}
+            </div>
+          }
+        />
+        {confirms}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <Peek
+        open={open}
+        onOpenChange={(o) => !o && onClose()}
+        title={item.title}
+        subtitle={item.runs ? `${item.runs.length} runs, grouped` : isRoutineRun ? "Routine run" : c.kind === "assignment" ? "Agent work" : "Work"}
+        onPrev={onPrev}
+        onNext={onNext}
+        onOpenFull={item.runs ? undefined : () => onOpenFull(item)}
+        footer={
+          <div className="flex flex-wrap items-center gap-2">
+            {item.runs ? (
+              <Button size="sm" onClick={() => onShowRoutine(item.routineSlug!, true)}>
+                All runs, one by one
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => onOpenFull(item)}>
+                <ExternalLink className="size-3.5" aria-hidden />
+                {isRoutineRun ? "Open run" : "Open work"}
+              </Button>
+            )}
+            {actionButtons}
+          </div>
+        }
+      >
+        <div className="grid gap-4" data-testid="activity-peek-work">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone={WORK_STATUS_TONE[item.status]} label={WORK_STATUS_LABEL[item.status]} live={item.status === "running"} />
+            <span className="text-label text-muted-foreground">
+              {whenLabel(item.ts, now)} · {item.origin}
+            </span>
+          </div>
+          <p className="text-body text-foreground/80">{workflowSentence(c, rname)}</p>
+
+          {sections}
         </div>
       </Peek>
-      <ConfirmDialog
-        open={confirm === "stop"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title={`Stop ${item.title}?`}
-        description="The run halts before its next step."
-        consequences={[
-          { tone: "kept", text: "Steps that already finished keep their results." },
-          { tone: "lost", text: "Steps that have not started will not run." },
-        ]}
-        confirmLabel="Stop run"
-        destructive
-        onConfirm={stop}
-      />
-      <ConfirmDialog
-        open={confirm === "again"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title={`Run ${item.title} again?`}
-        description="A new run starts with the same input as this one."
-        consequences={[{ tone: "kept", text: "This run and its results stay as they are." }]}
-        confirmLabel="Run again"
-        onConfirm={again}
-      />
+      {confirms}
     </>
   )
 }

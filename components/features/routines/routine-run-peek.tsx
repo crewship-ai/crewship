@@ -102,7 +102,23 @@ export function RoutineRunPeek({
   onClose,
   onOpen,
   routineName,
+  open = true,
+  onPrev,
+  onNext,
+  subtitle,
+  extra,
+  footerExtra,
 }: {
+  /** Closed while the host animates the item out. */
+  open?: boolean
+  /** Replace J / K over `runs` (the host walks its own list). */
+  onPrev?: () => void
+  onNext?: () => void
+  subtitle?: React.ReactNode
+  /** More sections under the facts (Activity's connections and history). */
+  extra?: React.ReactNode
+  /** More footer actions beside Open run. */
+  footerExtra?: React.ReactNode
   workspaceId: string
   runs: PeekRun[]
   runId: string
@@ -122,17 +138,20 @@ export function RoutineRunPeek({
   const older = i < runs.length - 1 ? runs[i + 1] : null
   return (
     <Peek
-      open
-      onOpenChange={(open) => !open && onClose()}
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
       title={`Run ${run.id.slice(0, 8)}`}
-      subtitle={run.started_at ? formatRoutineTime(run.started_at) : undefined}
-      onPrev={newer ? () => onChange(newer.id) : undefined}
-      onNext={older ? () => onChange(older.id) : undefined}
+      subtitle={subtitle ?? (run.started_at ? formatRoutineTime(run.started_at) : undefined)}
+      onPrev={onPrev ?? (newer ? () => onChange(newer.id) : undefined)}
+      onNext={onNext ?? (older ? () => onChange(older.id) : undefined)}
       onOpenFull={() => onOpen(run.id)}
       footer={
-        <Button type="button" size="sm" onClick={() => onOpen(run.id)}>
-          Open run
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={() => onOpen(run.id)}>
+            Open run
+          </Button>
+          {footerExtra}
+        </div>
       }
     >
       <div className="flex flex-col gap-4 p-4" data-testid="run-peek">
@@ -160,6 +179,7 @@ export function RoutineRunPeek({
             </>
           )}
         </dl>
+        {extra}
         <p className="text-xs text-muted-foreground-soft">J and K move between runs; Enter opens the run.</p>
       </div>
     </Peek>

@@ -74,7 +74,8 @@ describe("ActivityPeek · work", () => {
     const p = props(work())
     render(<ActivityPeek {...p} />)
     const peek = await screen.findByTestId("activity-peek-work")
-    expect(peek.querySelector("[data-slot=status-pill]")).toHaveTextContent("Running")
+    // The status is the routine run peek's own pill, above the Activity sections.
+    expect(screen.getByTestId("run-peek").querySelector("[data-slot=status-pill]")).toHaveTextContent("Running")
     // How it connects: the webhook → the run → the agent → the issue it created.
     const how = within(peek).getByRole("heading", { name: "How it connects" }).parentElement!
     const steps = within(how).getAllByRole("listitem").map((li) => li.textContent)
