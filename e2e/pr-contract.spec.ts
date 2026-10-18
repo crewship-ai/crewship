@@ -195,11 +195,15 @@ test("PR browser contract subset", async ({ page }) => {
     expect(after.state).toBe("resolved")
     expect(after.resolved_action).toBe("answer")
 
-    // The receipt on the issue's event log, read the way a person reads it:
-    // the issue's History tab shows the inbox_acted row.
+    // The receipt on the issue's event log, read the way a person reads it.
+    // Harbor 2 (issues I-FULL) folded the old History tab into the Timeline
+    // card, whose Show segment All · Comments · Activity · Runs narrows it;
+    // Activity is the event log alone, so the inbox_acted row must be there.
     await page.goto(`/issues/${encodeURIComponent(identifier)}`)
     await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 })
-    await page.getByRole("button", { name: /^history$/i }).click()
+    const activityOnly = page.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "Activity", exact: true })
+    await activityOnly.click()
+    await expect(activityOnly).toHaveAttribute("aria-checked", "true")
     await expect(page.getByText(/inbox acted/)).toBeVisible()
     // And as the CLI reads it (`crewship issue events`): the same row, the
     // same seq the receipt named.
