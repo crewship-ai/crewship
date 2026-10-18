@@ -10,8 +10,12 @@ vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
 const row = { page_id: "saved-doc", type: "document", page_slug: "old-address", title: "Finished plan", revision: 0, created_at: "2026-10-17T00:00:00Z", agent_id: "agent", agent_name: "Ada", run_id: "expired-run", on_behalf_of_user_id: "human" }
 let status = 200
 const clients: QueryClient[] = []
-beforeEach(() => { status = 200; vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(status === 200 ? { results: [row] } : { error: "Unavailable" }), { status })) })
-afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks() })
+beforeEach(() => {
+  // Preserve defaultPrevented evidence without letting happy-dom navigate HTTP.
+  vi.spyOn(window, "open").mockImplementation(() => null)
+  status = 200; vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(status === 200 ? { results: [row] } : { error: "Unavailable" }), { status }))
+})
+afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); vi.restoreAllMocks() })
 function mount(enabled = true, onOpenDocument?: (target: ViewerTarget, opener: HTMLAnchorElement) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   clients.push(client)
