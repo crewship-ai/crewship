@@ -62,3 +62,39 @@ test('CLI transport invokes a binary directly and pins identity and target',asyn
     await assert.rejects(()=>cli({...c,binary:join(root,'absent')},'MEMBER',[]))
   } finally {await rm(root,{recursive:true,force:true})}
 })
+
+test('invalid adapter status is a failure rather than skip evidence',async()=>{
+  const result=await runContract(config(),{agentCreate:async()=>({status:'skipped'})})
+  assert.equal(result.status,'failed')
+  assert.equal(result.steps[0].status,'failed')
+})
+
+test('fixture CLI writes private incomplete report without browser or provider',async()=>{
+  const {mkdtemp,writeFile,readFile,stat,rm}=await import('node:fs/promises')
+  const {tmpdir}=await import('node:os')
+  const {join,resolve}=await import('node:path')
+  const {execFile}=await import('node:child_process')
+  const {promisify}=await import('node:util')
+  const root=await mkdtemp(join(tmpdir(),'artifact-contract-entry-'))
+  let output
+  try {
+    const input=join(root,'config.json')
+    await writeFile(input,JSON.stringify(config()),{mode:0o600})
+    let failure
+    try {await promisify(execFile)(process.execPath,[resolve('e2e/artifacts-contract/run.mjs'),input])}
+    catch(error){failure=error}
+    assert.equal(failure?.code,2,'incomplete is not a zero exit pass')
+    output=failure.stdout.match(/Artifacts: (.+)/)?.[1]
+    assert.ok(output)
+    const report=JSON.parse(await readFile(join(output,'report.json'),'utf8'))
+    assert.equal(report.steps.length,7)
+    assert.ok(report.steps.every(s=>s.status==='incomplete'))
+    assert.match(report.steps[0].reason,/no provider or agent was invoked/)
+    assert.equal(report.liveAcceptance,false)
+    assert.equal((await stat(output)).mode & 0o777,0o700)
+    assert.equal((await stat(join(output,'report.json'))).mode & 0o777,0o600)
+  } finally {
+    await rm(root,{recursive:true,force:true})
+    if(output) await rm(output,{recursive:true,force:true})
+  }
+})
