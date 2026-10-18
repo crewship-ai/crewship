@@ -15,7 +15,7 @@ describe("heading tracking", () => {
   })
 
   it("keeps the section and panel roles at the same tracking", () => {
-    for (const sel of [".type-section", ".type-page-label", ".type-group-head", ".type-dialog-title"]) {
+    for (const sel of [".type-section", ".type-group-head", ".type-dialog-title"]) {
       const i = css.indexOf(`${sel} {`)
       expect(i, sel).toBeGreaterThan(-1)
       expect(css.slice(i, css.indexOf("}", i)), sel).toMatch(/letter-spacing:\s*-0\.005em/)

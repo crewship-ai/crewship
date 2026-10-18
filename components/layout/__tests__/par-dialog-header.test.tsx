@@ -60,10 +60,9 @@ describe("dialog header (PAR-151)", () => {
     expect(screen.getByRole("button", { name: "Pick crew" }).parentElement).not.toHaveClass("sr-only")
   })
 
-  it("blurs the page behind the scrim", () => {
-    dialog()
-    expect(document.querySelector('[data-slot="dialog-overlay"]')?.className).toContain("backdrop-blur")
-  })
+  // v67 blurs the page behind the scrim (1.5 px). Not done: Pages'
+  // page-editor.test.tsx asserts "No blur, ever" on the shared overlay. See
+  // the report: needs that line relaxed by the Pages owner.
 
   it("prints the footer keys as key chips", () => {
     dialog()
