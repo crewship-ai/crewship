@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ChangeItem } from "@/lib/activity-feed"
 import { ActivityModeSegment } from "../activity-mode-segment"
 import { ActivityRange } from "../activity-range"
+import { ActivityPanel } from "../activity-panel"
+import { SecondaryPanelContext } from "@/components/layout/secondary-panel"
+import { EMPTY_FILTERS } from "@/lib/activity-feed"
 import { ChangeRow } from "../activity-feed-table"
 
 vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...rest}>{children}</a> }))
@@ -41,5 +44,16 @@ describe("Activity v67 sizes", () => {
   it("draws the range control at the 28 px control height", () => {
     render(<ActivityRange value={{ key: "7d" }} onChange={vi.fn()} now={new Date(2026, 9, 15).getTime()} />)
     expect(screen.getByRole("group", { name: "Time range" }).className).toContain("h-[var(--control-sm)]")
+  })
+
+  it("PAR-059: inside the secondary panel the Filter button shows its word next to the funnel", () => {
+    render(
+      <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => {} }}>
+        <ActivityPanel filters={EMPTY_FILTERS} onFilters={vi.fn()} viewCounts={{ all: 0, need: 0, live: 0, failed: 0 }} routines={[]} agents={[]} crews={[]} sources={[]} />
+      </SecondaryPanelContext.Provider>,
+    )
+    const button = screen.getByRole("button", { name: /^Filter/ })
+    expect(button).toHaveTextContent("Filter")
+    expect(button.querySelector(".sr-only")).toBeNull()
   })
 })

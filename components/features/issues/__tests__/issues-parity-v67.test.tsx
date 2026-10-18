@@ -8,6 +8,7 @@ import { IssuesBoardView } from "../issues-board-view"
 import { IssuesViewToggle } from "../issues-view-toggle"
 import { IssuesPanel, type IssuesPanelProps } from "@/components/features/orchestration/issues-panel"
 import { NO_FILTERS } from "@/hooks/use-issue-filters"
+import { SecondaryPanelContext } from "@/components/layout/secondary-panel"
 import type { Mission, Project } from "@/lib/types/mission"
 
 const issue = (i: number): Mission =>
@@ -49,5 +50,20 @@ describe("Issues v67 details", () => {
     // A coarse pointer keeps the 44 px target.
     for (const radio of within(group).getAllByRole("radio")) expect(radio.className).toContain("coarse:h-[44px]")
     expect(within(group).getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("PAR-040: inside the secondary panel the Filter button shows its word next to the funnel", () => {
+    const props: IssuesPanelProps = {
+      issues: [], quickCounts: { mine: 0, all: 0 }, projects: [], savedViews: [], crews: [], search: "", onSearchChange: vi.fn(),
+      filters: NO_FILTERS, onFilters: vi.fn(), onClearFilters: vi.fn(), selection: null, onSelect: vi.fn(), onNewProject: vi.fn(),
+    }
+    render(
+      <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => {} }}>
+        <IssuesPanel {...props} />
+      </SecondaryPanelContext.Provider>,
+    )
+    const button = screen.getByRole("button", { name: "Filter issues" })
+    expect(button).toHaveTextContent("Filter")
+    expect(button.querySelector(".sr-only")).toBeNull()
   })
 })
