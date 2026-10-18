@@ -79,3 +79,13 @@ nonzero or malformed markers, and non-NULL admission references before acquiring
 a write connection or invoking callbacks. Existing UNKNOWN0 transport remains
 permitted. This input check creates no storage or runtime permission; bundle and
 target-history validation require a separate boundary before storage activation.
+
+### Closed run-admission target and bundle boundary
+
+Restore checks reserved metadata and protected target history before service
+planning, remapping or callbacks, and repeats validation in the write transaction.
+The early check includes the actual FilesOnly destination and resolves replacement
+workspaces by main-schema ID and slug. Unsupported generated or hidden admission
+fields and unknown receipt columns are refused; unrelated generated columns retain
+UNKNOWN0 compatibility. Manifest versions only strengthen refusal, never source
+authentication. No receipt import, admission creation or execution is enabled.
