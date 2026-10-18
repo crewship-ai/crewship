@@ -2,9 +2,10 @@
 
 import * as React from "react"
 import { motion, useReducedMotion } from "motion/react"
-import { ArrowRight, Download, Eye, Grid3x3, Link2, List, Plus, ShieldCheck, Users, X } from "lucide-react"
+import { ArrowRight, Circle, Download, Eye, Grid3x3, Link2, List, Plus, Repeat, ShieldCheck, Terminal, Upload, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
@@ -40,7 +41,7 @@ import {
 } from "./crew-links-model"
 import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
-import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { SettingsKpiStrip, SettingsSummary, SummaryItem, nativeSelect, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageEmpty, PageError } from "@/components/layout/page-state"
@@ -112,6 +113,8 @@ export function CrewLinksPage() {
   // The one direction open in the link dialog (v67 `cldir`), from any view.
   const [editing, setEditing] = React.useState<{ from: Crew; to: Crew } | null>(null)
   const edit = (from: Crew, to: Crew) => setEditing({ from, to })
+  // v67's "New link": pick the two crews, then the direction opens as for any other.
+  const [newLink, setNewLink] = React.useState(false)
 
   const dirs = React.useMemo(() => directionsOf(connections), [connections])
   const dups = React.useMemo(() => duplicateNames(crews), [crews])
@@ -183,7 +186,7 @@ export function CrewLinksPage() {
 
   const nav = (
     <>
-      <DrillNavSection label="Links" count={crews.length}>
+      <DrillNavSection collapsible={false} label="Links" count={crews.length}>
         {LINK_FACETS.map((f, i) => {
           const n = facetCount(f.key)
           return (
@@ -193,10 +196,10 @@ export function CrewLinksPage() {
           )
         })}
       </DrillNavSection>
-      <DrillNavSection label="Linked crews" count={withLinks.length}>
+      <DrillNavSection collapsible={false} label="Linked crews" count={withLinks.length}>
         {withLinks.length ? withLinks.map(crewItem) : <p className="px-2 py-1 text-xs text-muted-foreground">No linked crew matches.</p>}
       </DrillNavSection>
-      <DrillNavSection label="Crews without links" count={alone.length}>
+      <DrillNavSection collapsible={false} label="Crews without links" count={alone.length}>
         {alone.length ? alone.map((c, i) => crewItem(c, i + withLinks.length)) : <p className="px-2 py-1 text-xs text-muted-foreground">None.</p>}
       </DrillNavSection>
     </>
@@ -235,6 +238,19 @@ export function CrewLinksPage() {
       icon={Link2}
       description="Who hands work to whom, and whose shared files they see."
       note="Managers and up change links"
+      actions={
+        <>
+          <Button variant="ghost" size="icon-sm" aria-label="Command line" title="crewship crew connect <A> <B> · crewship crew connections"
+            onClick={() => toast.info("crewship crew connect <A> <B> · crewship crew connections")}>
+            <Terminal className="h-3.5 w-3.5" />
+          </Button>
+          {canManage && (
+            <Button size="sm" onClick={() => setNewLink(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />New link
+            </Button>
+          )}
+        </>
+      }
       toolbar={toolbar}
       facets={facetBlock}
       spaces={spaces}
@@ -268,15 +284,20 @@ export function CrewLinksPage() {
               <button type="button" onClick={() => setFilters(DEFAULT_CREW_LINK_FILTERS)} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear all</button>
             </div>
           )}
-          {/* The summary answers the audit question before any crew is opened. */}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground" data-slot="crew-links-summary">
-            <Stat n={stats.links} one="link" many="links" />
-            <Stat n={stats.directions} one="direction" many="directions" />
-            {!filesUnknown && <Stat n={stats.delivering} one="direction can deliver files" many="directions can deliver files" />}
-            <Stat n={stats.alone} one="crew works alone" many="crews work alone" />
-            {shown.length !== crews.length && <span><span className="font-mono tabular-nums text-foreground">{shown.length}</span> of {crews.length} crews shown</span>}
-            {!canManage && <span className="ml-auto">Read-only — Managers and up change links.</span>}
-          </div>
+          {/* The summary answers the audit question before any crew is opened
+              (v67: four figures as tiles). */}
+          <SettingsKpiStrip slot="crew-links-summary" items={[
+            { icon: Link2, label: "Links", value: stats.links },
+            { icon: Repeat, label: "Directions", value: stats.directions },
+            ...(!filesUnknown ? [{ icon: Upload, label: "Can deliver files", value: stats.delivering }] : []),
+            { icon: Circle, label: "Work alone", value: stats.alone },
+          ]} />
+          {(shown.length !== crews.length || !canManage) && (
+            <SettingsSummary slot="crew-links-note">
+              {shown.length !== crews.length && <SummaryItem n={shown.length}>of {crews.length} crews shown</SummaryItem>}
+              {!canManage && <span className="ml-auto">Read-only — Managers and up change links.</span>}
+            </SettingsSummary>
+          )}
           {loadError && (
             <PageError
               className="max-w-none px-0 py-0"
@@ -317,6 +338,7 @@ export function CrewLinksPage() {
         destructive
         onConfirm={links.confirmUnlink}
       />
+      <NewLinkDialog open={newLink} crews={sorted} dups={dups} onClose={() => setNewLink(false)} onContinue={(from, to) => { setNewLink(false); setEditing({ from, to }) }} />
       <DirectionDialog pair={editing} dirs={dirs} links={links} onClose={() => setEditing(null)} />
     </SettingsDrillPage>
   )
@@ -325,10 +347,6 @@ export function CrewLinksPage() {
 // ── Pieces ────────────────────────────────────────────────────────────────
 
 type Links = ReturnType<typeof useCrewLinks>
-
-function Stat({ n, one, many }: { n: number; one: string; many: string }) {
-  return <span><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
-}
 
 function CrewLabel({ crew, dup }: { crew: Crew; dup: boolean }) {
   return (
@@ -364,7 +382,7 @@ const FILE_TONE: Record<FileAccess, string> = {
 function FilesChip({ files }: { files: FileAccess | null }) {
   // Unknown on servers that do not report file access; the page says so once.
   if (files === null) return null
-  return <span className={cn("inline-flex h-[22px] items-center gap-1 rounded-full px-2 font-mono text-micro font-semibold", FILE_TONE[files])}>{FILE_ICON[files]}{FILE_LABELS[files]}</span>
+  return <span className={cn("inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-micro font-semibold", FILE_TONE[files])}>{FILE_ICON[files]}{FILE_LABELS[files]}</span>
 }
 
 /** None / View / Deliver for one direction; a chip when it cannot be edited. */
@@ -402,7 +420,7 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins, agentsByCrew, o
     <section className="min-w-0 overflow-hidden rounded-card border border-border bg-card" aria-label={title}>
       <header className="flex items-center gap-2 border-b border-border/60 bg-surface-subtle px-4 py-2.5">
         <h3 className="text-sm font-semibold">{title}</h3>
-        <span className="font-mono text-micro text-muted-foreground">{list.length}</span>
+        <span className="text-micro tabular-nums text-muted-foreground">{list.length}</span>
         <span className="ml-auto text-xs text-muted-foreground">{hint}</span>
       </header>
       {list.length === 0 && (
@@ -443,7 +461,7 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins, agentsByCrew, o
     <div className="space-y-4">
       <CrewProfile crew={crew} agents={agentsOf(crew)} />
       <LinkMap crew={crew} ins={ins} outs={outs} dirs={dirs} agentsByCrew={agentsByCrew} onSelect={onSelect} compact={compact} />
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="space-y-4">
         {block("Hands work to", "and what it may do with their files", "out", outs)}
         {block("Receives work from", "and what they may do with its files", "in", ins)}
       </div>
@@ -564,7 +582,7 @@ function AllLinks({ crews, shown, dirs, dups, isMobile, onEdit }: { crews: Crew[
     <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="All links">
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
         <h3 className="text-sm font-semibold">Directions</h3>
-        <span className="ml-auto font-mono text-micro text-muted-foreground">{rows.length}</span>
+        <span className="ml-auto text-micro tabular-nums text-muted-foreground">{rows.length}</span>
       </div>
       {rows.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{filtered ? "No link involves the crews these filters show." : "No crew can hand work to another yet."}</p>}
       {rows.length > 0 && (isMobile ? (
@@ -655,13 +673,49 @@ function Matrix({ crews, dirs, dups, onEdit }: { crews: Crew[]; dirs: Map<string
   )
 }
 
+/** v67 `.cl-leg`: the three colours as small squares, then what a link never grants. */
 function Legend() {
+  const swatch = (tone: string) => <i data-swatch aria-hidden className={cn("inline-block size-[0.8077rem] rounded-sm", tone)} />
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5"><span className="inline-flex h-[22px] items-center gap-1 rounded-full bg-chip-info-bg px-2 font-mono text-micro font-semibold text-chip-info-fg"><ArrowRight className="h-3 w-3" />Work</span>may hand work</span>
-      <span className="inline-flex items-center gap-1.5"><FilesChip files="read" />reads their shared files</span>
-      <span className="inline-flex items-center gap-1.5"><FilesChip files="read_write" />reads and delivers into their incoming folder</span>
-      <span className="ml-auto inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" />Links never grant shell, credentials or private agent homes.</span>
+    <div data-slot="crew-links-legend" className="flex flex-wrap items-center gap-x-4 gap-y-2 text-label text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">{swatch("bg-chip-info-bg")}Work — may hand work</span>
+      <span className="inline-flex items-center gap-1.5">{swatch("bg-chip-ok-bg")}View — reads their shared files</span>
+      <span className="inline-flex items-center gap-1.5">{swatch("bg-chip-warn-bg")}View + deliver — reads and delivers into their incoming folder</span>
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground-soft"><ShieldCheck className="h-3.5 w-3.5" aria-hidden />Links never grant shell, credentials or private agent homes.</span>
     </div>
+  )
+}
+
+/**
+ * v67's "New link": which crew hands work to which. Continue opens that
+ * direction in the direction dialog, where the work switch and the shared-file
+ * level are set; nothing is written here.
+ */
+function NewLinkDialog({ open, crews, dups, onClose, onContinue }: { open: boolean; crews: Crew[]; dups: Set<string>; onClose: () => void; onContinue: (from: Crew, to: Crew) => void }) {
+  const [from, setFrom] = React.useState("")
+  const [to, setTo] = React.useState("")
+  React.useEffect(() => { if (open) { setFrom(""); setTo("") } }, [open])
+  const a = crews.find((c) => c.id === from)
+  const b = crews.find((c) => c.id === to)
+  const name = (c: Crew) => (dups.has(c.name) ? `${c.name} (${c.slug})` : c.name)
+  const field = (label: string, value: string, set: (v: string) => void, skip: string) => (
+    <label className="flex flex-col gap-1.5 text-control">
+      <span className="font-medium">{label}</span>
+      <select aria-label={label} value={value} onChange={(e) => set(e.target.value)} className={cn(nativeSelect, "w-full")}>
+        <option value="">Choose a crew…</option>
+        {crews.filter((c) => c.id !== skip).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}
+      </select>
+    </label>
+  )
+  return (
+    <CreateSurface open={open} onOpenChange={(o) => { if (!o) onClose() }} size="sm" ariaLabel="New link" onSubmit={a && b ? () => onContinue(a, b) : undefined}>
+      <CreateSurfaceHeader icon={Link2} title="New link" onClose={onClose} />
+      <CreateSurfaceBody className="flex flex-col gap-3">
+        {field("From crew", from, setFrom, to)}
+        {field("To crew", to, setTo, from)}
+        <p className="text-label text-muted-foreground">From hands work to To. The other direction is set separately.</p>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter onCancel={onClose} primaryLabel="Continue" primaryDisabled={!a || !b} onPrimary={() => { if (a && b) onContinue(a, b) }} />
+    </CreateSurface>
   )
 }

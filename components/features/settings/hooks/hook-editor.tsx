@@ -141,7 +141,7 @@ export function HookEditor({
             <div className="mt-3 space-y-3">
               {HOOK_GROUPS.map((g) => (
                 <div key={g.id}>
-                  <div className="mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{g.label}</div>
+                  <div className="mb-1.5 text-micro font-semibold text-muted-foreground-soft">{g.label}</div>
                   <div role="radiogroup" aria-label={g.label} className="grid gap-1.5 sm:grid-cols-2">
                     {HOOK_EVENTS.filter((e) => e.group === g.id).map((e) => {
                       const checked = d.event === e.id

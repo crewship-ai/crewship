@@ -310,7 +310,7 @@ export function MembersPage() {
   const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const nav = (
     <>
-      <DrillNavSection label="People" count={members.length}>
+      <DrillNavSection collapsible={false} label="People" count={members.length}>
         <DrillNavItem index={0} selected={!filters.status && !filters.role && !filters.area && !filters.flag} onSelect={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, q: filters.q })}
           icon={ico(Users)} label="Everyone" meta={members.length} />
         {isManager && (
@@ -319,7 +319,7 @@ export function MembersPage() {
             icon={ico(Mail)} label="Invited" meta={invitationsQuery.isLoading ? "…" : invitations.length} />
         )}
       </DrillNavSection>
-      <DrillNavSection label="Role">
+      <DrillNavSection collapsible={false} label="Role">
         {ROLES.map((r, i) => {
           const n = countWith({ role: r })
           return (
@@ -329,7 +329,7 @@ export function MembersPage() {
         })}
       </DrillNavSection>
       {capsReadable && (
-        <DrillNavSection label="Can do">
+        <DrillNavSection collapsible={false} label="Can do">
           {[...AREAS.map((a) => ({ key: a.key as string, label: a.label, sub: a.caps.map((c) => c.short.toLowerCase()).join(" · "), icon: ico(AREA_ICON[a.key], "text-primary-hover") })),
             { key: "chat", label: "Chat only", sub: undefined, icon: ico(MessageSquare) }].map((a, i) => {
             const n = countWith({ area: a.key })
@@ -341,7 +341,7 @@ export function MembersPage() {
         </DrillNavSection>
       )}
       {capsReadable && (
-        <DrillNavSection label="Needs a look">
+        <DrillNavSection collapsible={false} label="Needs a look">
           {MEMBER_FLAGS.map((f, i) => {
             const n = countWith({ flag: f.key })
             return (

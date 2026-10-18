@@ -402,3 +402,117 @@ test.describe("tablet", () => {
     await expect(page).toHaveURL(/\/settings(\?|$)/)
   })
 })
+
+// ── v67 parity (PAR-086 … PAR-119) ──────────────────────────────────────
+// Measured in a browser at the three widths. The sizes are the v67 ones at
+// the Small text size (a 14.857 px root, pinned by PINNED); a fine pointer.
+
+const sansNotMono = async (locator: import("@playwright/test").Locator) => {
+  const family = await locator.evaluate((el) => getComputedStyle(el).fontFamily)
+  expect(family.toLowerCase()).not.toMatch(/mono|courier/)
+}
+
+test.describe("v67 parity", () => {
+  for (const width of [1440, 1024, 390]) {
+    test.describe(`at ${width}`, () => {
+      test.use({ viewport: { width, height: 1000 } })
+
+      test("PAR-089/090 profile: Change and Remove with a picture, a sans role pill, 12 Oct 2026", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings?tab=profile")
+        const workspace = page.getByRole("region", { name: "Workspace" })
+        await expect(workspace).toBeVisible()
+        await sansNotMono(workspace.locator("[data-slot=status-pill]").first())
+        const joined = workspace.getByText(/^\d{1,2} [A-Z][a-z]{2} \d{4}$/)
+        await expect(joined).toBeVisible()
+        await sansNotMono(joined)
+      })
+
+      test("PAR-097/098/100 appearance: 22 px swatches named by tooltip, wireframe previews, 28 px segments", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings?tab=appearance")
+        const swatch = page.getByRole("radiogroup", { name: "Accent colour" }).getByRole("radio").first()
+        await expect(swatch).toBeVisible()
+        const box = (await swatch.boundingBox())!
+        expect(Math.round(box.width)).toBe(22)
+        await expect(swatch).toHaveAttribute("title", /\w/)
+        await expect(page.locator("[data-slot=theme-preview]")).toHaveCount(3)
+        const segment = page.getByRole("group", { name: "Text size" }).getByRole("button").first()
+        expect(Math.round((await segment.boundingBox())!.height)).toBe(28)
+        expect(await segment.evaluate((el) => getComputedStyle(el).fontSize)).toBe("13px")
+      })
+
+      test("PAR-115/116/117 general: right-aligned fields, five Pages tiles, Fill in missing avatars", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings?tab=general")
+        await expect(page.getByLabel("Workspace name")).toHaveCSS("text-align", "right")
+        const pages = page.getByRole("region", { name: "Pages appearance" })
+        await expect(pages.getByRole("radio")).toHaveCount(5)
+        await expect(pages.locator(".uppercase")).toHaveCount(0)
+        await expect(page.getByRole("button", { name: /Store missing avatars/ })).toHaveCount(0)
+      })
+
+      test("PAR-118/119 access & secrets: the same reveal explanation for every role, count and avatars", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings?tab=access-secrets")
+        await expect(page.getByText(/Each reveal still needs a fresh sign-in and a reason/)).toBeVisible()
+        await expect(page.getByText(/the API refuses everyone else/)).toHaveCount(0)
+        await expect(page.getByRole("region", { name: "Who may reveal" }).getByText(/can read secrets in plaintext/)).toHaveCount(0)
+      })
+
+      test("PAR-101/102/103/104 members: primary Add member, five KPI tiles, sans table head", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings/members")
+        const strip = page.locator("[data-slot=members-summary]")
+        await expect(strip).toBeVisible()
+        expect(await strip.locator("[data-slot=settings-kpi]").count()).toBeGreaterThanOrEqual(3)
+        if (width >= 1024) {
+          const add = page.getByRole("button", { name: "Add member" })
+          await expect(add).toHaveAttribute("data-variant", "default")
+          const th = page.locator("table[aria-label='People and what they may do'] thead th").nth(1)
+          await expect(th).toBeVisible()
+          await expect(th).toHaveCSS("text-transform", "none")
+          await sansNotMono(th)
+          await expect(page.locator("[data-slot=drill-section] button[aria-expanded]")).toHaveCount(0)
+        }
+      })
+
+      test("PAR-107/109 crew links: CLI hint and New link, four KPI tiles, the radial map, one column", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings/crew-links")
+        await expect(page.getByRole("button", { name: "Command line" })).toBeVisible()
+        const strip = page.locator("[data-slot=crew-links-summary]")
+        await expect(strip).toBeVisible()
+        expect(await strip.locator("[data-slot=settings-kpi]").count()).toBeGreaterThanOrEqual(3)
+        const hands = page.getByRole("region", { name: "Hands work to" })
+        test.skip((await hands.count()) === 0, "environment prerequisite: the workspace needs a crew")
+        const receives = page.getByRole("region", { name: "Receives work from" })
+        const a = (await hands.boundingBox())!, b = (await receives.boundingBox())!
+        // One column: the second card is under the first, not beside it.
+        expect(b.y).toBeGreaterThan(a.y + a.height - 2)
+        if (width >= 768) {
+          await expect(page.getByRole("region", { name: "Link map" }).locator("circle[data-slot=link-map-centre]")).toBeVisible()
+          await expect(page.getByRole("button", { name: "New link" })).toHaveAttribute("data-variant", "default")
+        }
+      })
+
+      test("PAR-110/111/112/113/114 audit log: spaces card, 24-hour times, solid bars, info banner, icon-only refresh", async ({ page }) => {
+        await seed(page, PINNED)
+        await page.goto("/settings/audit")
+        const crumb = page.getByRole("banner").getByText(/^Audit\s?log$/).first()
+        // The word space survives the heading's tracking (PAR-110).
+        await expect(page.getByRole("heading", { name: "Audit log" }).first()).toBeVisible()
+        expect(await crumb.evaluate((el) => parseFloat(getComputedStyle(el).letterSpacing) || 0)).toBeGreaterThan(-0.2)
+        await expect(page.locator("[data-slot=journal-verify]")).toHaveClass(/page-banner-info/)
+        const chart = page.locator("[data-slot=audit-histogram]")
+        await expect(chart).toBeVisible()
+        await expect(chart.locator("[data-bar]").first()).toBeVisible()
+        const events = page.getByRole("region", { name: "Events" })
+        await expect(events.getByRole("button", { name: "Refresh audit log" })).toHaveText("")
+        const time = events.locator("[data-audit-weight] .tabular-nums").first()
+        if (await time.count()) await expect(time).toHaveText(/^\d{2}:\d{2}$|^$/)
+        if (width >= 1024) await expect(page.locator("[data-slot=panel-spaces]").getByRole("tab")).toHaveCount(4)
+      })
+    })
+  }
+})

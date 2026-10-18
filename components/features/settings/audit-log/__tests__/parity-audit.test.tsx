@@ -46,14 +46,16 @@ describe("PAR-111 trail switcher", () => {
     await renderPage()
     const spaces = document.querySelector<HTMLElement>("[data-slot=panel-spaces]")!
     expect(within(spaces).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, "").trim())).toEqual(["Workspace", "Crews", "Credentials", "Keeper"])
-    expect(screen.queryByText("Settings, people, crews, credentials")).toBeNull()
-    expect(screen.queryByText("Every gatekeeper decision, append-only")).toBeNull()
+    const panel = document.querySelector<HTMLElement>("[data-slot=secondary-panel]")!
+    expect(within(panel).queryByText("Settings, people, crews, credentials")).toBeNull()
+    expect(within(panel).queryByText("Every gatekeeper decision, append-only")).toBeNull()
   })
 
   it("groups the rest in plain sentence-case headings", async () => {
     await renderPage()
     const sections = Array.from(document.querySelectorAll("[data-slot=drill-section]"))
-    expect(sections.map((s) => s.firstElementChild!.textContent!.replace(/[\d]+( active)?$/, "").trim())).toEqual(["Category", "People", "Run result"])
+    // (People joins them once the workspace lists someone.)
+    expect(sections.map((s) => s.firstElementChild!.textContent!.replace(/[\d]+( active)?$/, "").trim())).toEqual(["Category", "Run result"])
     for (const s of sections) expect(s.querySelector("button[aria-expanded]")).toBeNull()
   })
 
@@ -68,7 +70,8 @@ describe("PAR-112 times and histogram", () => {
   it("writes times on the 24-hour clock", async () => {
     await renderPage()
     const row = document.querySelector<HTMLElement>("[data-audit-weight]")!
-    expect(within(row).getByText("09:16")).toBeInTheDocument()
+    // (A second copy sits in the phone layout, hidden from sm up.)
+    expect(within(row).getAllByText("09:16").length).toBeGreaterThan(0)
     expect(row.textContent).not.toMatch(/\b(AM|PM)\b/i)
   })
 

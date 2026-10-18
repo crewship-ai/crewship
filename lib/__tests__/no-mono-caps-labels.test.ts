@@ -44,14 +44,6 @@ const BASELINE: Record<string, number> = {
   "components/features/logs/logs-toolbar.tsx": 1,
   "components/features/paymaster/time-range-picker.tsx": 1,
   "components/features/paymaster/top-spenders-table.tsx": 1,
-  "components/features/settings/audit-log/audit-time.tsx": 2,
-  "components/features/settings/crew-links/crew-profile.tsx": 2,
-  "components/features/settings/hooks/hook-editor.tsx": 1,
-  "components/features/settings/hooks/hooks-page.tsx": 1,
-  "components/features/settings/members/member-detail.tsx": 1,
-  "components/features/settings/members/members-page.tsx": 1,
-  "components/features/settings/members/people-table.tsx": 3,
-  "components/features/settings/sections/crew-audit-section.tsx": 1,
 }
 
 const STRING_LITERAL = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g

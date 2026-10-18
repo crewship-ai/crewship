@@ -379,19 +379,20 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
     <AuditAvatars.Provider value={avatars}>
     <SettingsCard icon={ScrollText}
       title={title}
-      description={description}
+      // v67: the line that says what is shown sits on the right of the head,
+      // beside an icon-only refresh and Export CSV, not under the title.
       actions={
         <>
+          {description && <span className="hidden text-label text-muted-foreground sm:inline">{description}</span>}
           <Button
-            variant="outline"
-            size="sm"
-            className="px-2.5 text-xs"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => fetchLogs({ silent: true })}
             disabled={loading || refreshing}
             aria-label="Refresh audit log"
+            title="Refresh"
           >
-            <RefreshCw className={cn("h-3 w-3 mr-1.5", refreshing && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           </Button>
           <Button
             variant="outline"
@@ -505,10 +506,10 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
               {/* A day is the unit people actually search in ("what happened
                   on the 27th"), and it is free to compute — the server
                   already returns newest-first. */}
-              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground backdrop-blur">
+              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground backdrop-blur">
                 {dayHeading(bucket.day)}
-                <span className="ml-2 font-mono text-micro font-normal normal-case tracking-normal text-muted-foreground-soft">
-                  {bucket.logs.length}
+                <span className="ml-1.5 font-normal tabular-nums text-muted-foreground-soft">
+                  · {bucket.logs.length}
                 </span>
               </h3>
               {(groupRepeats ? foldRuns(bucket.logs) : bucket.logs.map((log) => ({ key: log.id, logs: [log] }))).map((group) =>
@@ -532,7 +533,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
           {/* Pagination */}
           {total > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-t border-border/40">
-              <span className="text-micro text-muted-foreground font-mono tabular-nums">
+              <span className="text-micro text-muted-foreground tabular-nums">
                 {rangeStart}–{rangeEnd} of {total.toLocaleString()} events
               </span>
               <div className="flex items-center gap-1.5">
@@ -782,5 +783,6 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
 function formatTimeOfDay(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "--:--"
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  // The wireframe's 24-hour clock ("09:16"); the app has no per-workspace time format.
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
 }

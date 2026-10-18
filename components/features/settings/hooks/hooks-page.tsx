@@ -51,7 +51,7 @@ const KIND: Record<string, { label: string; tag: string; icon: React.ElementType
 const TONE_DOT = { ok: "bg-success", warn: "bg-warn", bad: "bg-destructive", none: "bg-muted-foreground/40" } as const
 const TONE_TEXT = { ok: "text-success", warn: "text-warn", bad: "text-destructive", none: "text-muted-foreground" } as const
 /** `.eyebrow` without its colour, so a heading can be amber or red. */
-const EYEBROW = "font-mono text-[11px] font-medium uppercase leading-4 tracking-[0.08em]"
+const EYEBROW = "text-micro font-semibold leading-4"
 
 const STATES: { key: HookFilters["state"]; label: string }[] = [
   { key: "", label: "All" },
@@ -273,7 +273,7 @@ export function HooksPage() {
 }
 
 function Stat({ n, one, many, className }: { n: number; one: string; many: string; className?: string }) {
-  return <span className={className}><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
+  return <span className={className}><span className="tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
 }
 
 function Toolbar({ filters, setFilters, view, setView, hasHooks }: {
