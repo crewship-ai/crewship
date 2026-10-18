@@ -2,7 +2,7 @@ import { useRef, useState } from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { DocumentViewer, type DocumentViewerProps } from "./document-viewer"
-afterEach(cleanup)
+afterEach(()=>{cleanup();vi.restoreAllMocks()})
 const target={workspaceId:"w1",pageId:"page1",type:"document",mode:"latest"} as const
 function props(): DocumentViewerProps<string> {
   return {target,scopeKey:"human/w1/chat1/g1",read:{status:"ready",scopeKey:"human/w1/chat1/g1",target,title:"Private saved title",content:"Authorized document body"},renderBody:vi.fn(value=><p>{value.content}</p>),layout:"side",expanded:false,onClose:vi.fn(),onExpandedChange:vi.fn()}
@@ -52,7 +52,8 @@ it("focuses close on opening and returns focus to the connected opener on Escape
   const opener=document.createElement("button");document.body.append(opener)
   try {
     const p={...props(),openerRef:{current:opener}}
-    render(<DocumentViewer {...p}/>)
+    const view=render(<DocumentViewer {...p}/>)
+    view.rerender(<DocumentViewer {...p} onClose={()=>{p.onClose();view.rerender(<DocumentViewer {...p} target={null}/>)}}/>)
     const close=screen.getByRole("button",{name:"Close document preview"})
     expect(close).toHaveFocus()
     fireEvent.keyDown(close,{key:"Escape"})
@@ -86,4 +87,33 @@ it("returns focus after the controlled mobile host reveals its previously hidden
   const opener=screen.getByRole("button",{name:"Saved Document card"})
   await waitFor(()=>expect(opener).toHaveFocus())
   expect(screen.queryByRole("region",{name:"Document preview"})).toBeNull()
+})
+
+it("does not restore focus when the controlled host leaves the target active",()=>{
+  const frame=vi.spyOn(globalThis,"requestAnimationFrame")
+  const p=props();render(<DocumentViewer {...p}/>)
+  const close=screen.getByRole("button",{name:"Close document preview"})
+  fireEvent.click(close)
+  expect(p.onClose).toHaveBeenCalledOnce()
+  expect(frame).not.toHaveBeenCalled()
+  expect(close).toHaveFocus()
+})
+it("cancels a pending close restoration when the host immediately reopens",()=>{
+  const frames=new Map<number,FrameRequestCallback>()
+  let next=0
+  vi.spyOn(globalThis,"requestAnimationFrame").mockImplementation(callback=>{frames.set(++next,callback);return next})
+  const cancel=vi.spyOn(globalThis,"cancelAnimationFrame").mockImplementation(id=>{frames.delete(id)})
+  const opener=document.createElement("button");document.body.append(opener)
+  try {
+    const p={...props(),openerRef:{current:opener}}
+    const view=render(<DocumentViewer {...p}/>)
+    fireEvent.click(screen.getByRole("button",{name:"Close document preview"}))
+    view.rerender(<DocumentViewer {...p} target={null}/>)
+    expect(frames.size).toBe(1)
+    view.rerender(<DocumentViewer {...p}/>)
+    expect(cancel).toHaveBeenCalled()
+    expect(frames.size).toBe(0)
+    expect(screen.getByRole("button",{name:"Close document preview"})).toHaveFocus()
+    expect(opener).not.toHaveFocus()
+  } finally {opener.remove()}
 })
