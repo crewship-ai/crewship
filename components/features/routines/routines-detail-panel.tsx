@@ -512,8 +512,8 @@ export function RoutinesDetailPanel({
   }
 
   // A schedule the circuit breaker turned off. Turning it back on is the
-  // schedule's own PATCH (Owner/Admin); the failure count resets only after
-  // the next successful run.
+  // schedule's own PATCH (Owner/Admin); updateSchedule zeroes the failure
+  // count and the reason straight away.
   const breaker = schedules.find(
     (s) => (s.target_pipeline_id === routine?.id || s.target_pipeline_slug === slug) && !s.enabled && s.disabled_reason === "circuit_breaker",
   )
@@ -522,7 +522,7 @@ export function RoutinesDetailPanel({
     setBusyGov("enable")
     try {
       await updateSchedule(breaker.id, { cron_expr: breaker.cron_expr, enabled: true })
-      toast.success("Schedule is on again", { description: "The failure count resets after the next successful run." })
+      toast.success("Schedule is on again", { description: "The failure count is back to zero." })
       onChanged()
     } catch (e) {
       toast.error("Could not turn the schedule back on", { description: e instanceof Error ? e.message : String(e) })
@@ -796,7 +796,7 @@ export function RoutinesDetailPanel({
                     <p className="text-sm font-medium">Turned off after {breaker.consecutive_failures} failures in a row</p>
                     <p className="text-xs text-muted-foreground">
                       The schedule “{breaker.name}” is paused; webhooks and manual runs still work.
-                      {permissions.manage ? " Turn it back on once the cause is fixed; the failure count resets after the next successful run." : " An Owner or Admin can turn it back on."}
+                      {permissions.manage ? " Turn it back on once the cause is fixed; the failure count is back to zero as soon as you do." : " An Owner or Admin can turn it back on."}
                     </p>
                   </section>
                 )}
