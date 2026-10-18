@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Refuse unsupported run-admission payloads in raw dump restore before opening the write transaction or invoking callbacks.
+
 - Add byte-preserving canonical validation for routine run-admission envelopes and their outer identity tuple. This storage prerequisite does not create admissions or enable execution.
 
 - Document a review proposal for crew and credential sharing with explicit human audiences; no access behavior changes.
