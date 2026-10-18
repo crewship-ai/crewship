@@ -18,7 +18,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 function clipboard() {
   const writeText = vi.fn().mockResolvedValue(undefined)
-  Object.assign(navigator, { clipboard: { writeText } })
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
   return writeText
 }
 

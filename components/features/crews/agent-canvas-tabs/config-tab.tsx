@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 
 import { ConfigReadOnly, ConfigRow, ConfigSwitch } from "../canvas/config-field"
 import { AskFormsBuilder } from "../ask-forms-builder"
+import { AgentHooksCard } from "../agent-hooks-card"
 import type { AgentRecord } from "./types"
 
 // =============================================================================
@@ -196,6 +197,14 @@ export function ConfigTab({ agent, patch, learning }: ConfigTabProps) {
               onSave={(v) => patch({ schedule_enabled: v })}
             />
           </DetailCard>
+        </Appear>
+      )}
+
+      {/* Hooks stay a static card with a CLI hint while the trigger surface
+          (webhook secret, deliveries) is gated off below. */}
+      {!AGENT_EXTERNAL_TRIGGERS && (
+        <Appear order={4}>
+          <AgentHooksCard />
         </Appear>
       )}
 

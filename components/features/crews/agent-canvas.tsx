@@ -38,6 +38,7 @@ import { AgentMemoryCards } from "./agent-memory"
 import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
+import { AgentCommandLine } from "./agent-command-line"
 import { CrCard, CrLine, HeadChip, LeadMark } from "./cr-card"
 import { useCrewSpend } from "./crew-spend"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
@@ -462,11 +463,7 @@ export function AgentCanvas({
           {tab === "settings" && (
             <>
               <CreateAgentDialog key={`identity:${editorKey}`} {...editorProps} inlineSections={["identity"]} inlineLabel="Identity" />
-              <CrCard title="Command line" concept="settings">
-                {[`crewship agent get ${agent.slug}`, `crewship agent update ${agent.slug}`, `crewship agent logs ${agent.slug}`].map((cmd) => (
-                  <CrLine key={cmd} title={<code className="font-mono text-label">{cmd}</code>} />
-                ))}
-              </CrCard>
+              <AgentCommandLine agent={agent} />
               {canDelete && (
                 <CrCard title="Danger zone" concept="settings">
                   <CrLine
