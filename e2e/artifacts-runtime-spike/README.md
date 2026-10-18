@@ -31,6 +31,15 @@ closed RPC allowlist, abort on channel close, and suppression of closed-port
 requests and late replies. A fresh channel represents a new connection only;
 it does not pretend an application generation/capability protocol exists.
 
+Worker observations distinguish a synchronous `SecurityError`, constructor
+return, asynchronous error/CSP violation, actual worker message and deadline.
+Silence at the deadline fails. A separate credential-free positive control
+permits only `blob:` workers and must execute the same deterministic payload;
+the negative fixture retains `worker-src 'none'` and must never execute it.
+Individual DOM/storage/worker observations are retained even when an assertion
+fails. The original remote failure from run `39171348217` remains evidence of
+the initial aggregate assertion; it is not retroactively relabelled PASS.
+
 These local primitives do **not** establish cross-site browser process
 isolation, runaway-script stop/restart, HTTP response headers, production Go
 serving, authenticated human/runtime grants, transaction-time revocation,

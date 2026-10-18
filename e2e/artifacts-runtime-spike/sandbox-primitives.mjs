@@ -40,25 +40,48 @@ async function bootstrapChecks(page, bootstrap) {
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const check = (value, message) => { if (!value) throw new Error(message); };
     const events = [];
+    window.spikeObservations = {};
     window.addEventListener('message', event => { if (event.data?.type === 'spike.self') events.push(event.data); });
+    // A returned constructor is not proof that worker code ran. Require an
+    // actual message/error outcome; silence at the deadline is a failure.
+    const workerProbe = `async function observeWorker() {
+      const proof = {constructor:'not-attempted', errorName:null, errorEvent:false, message:null, timedOut:false, cspDirective:null};
+      const violation = event => { if (event.effectiveDirective === 'worker-src') proof.cspDirective = event.effectiveDirective; };
+      document.addEventListener('securitypolicyviolation', violation);
+      let worker, url, timer;
+      await new Promise(resolve => {
+        try {
+          url = URL.createObjectURL(new Blob(['postMessage("spike.worker.executed")'], {type:'text/javascript'}));
+          worker = new Worker(url); proof.constructor = 'returned';
+          worker.onmessage = event => { proof.message = event.data; resolve(); };
+          worker.onerror = event => { event.preventDefault(); proof.errorEvent = true; resolve(); };
+          timer = setTimeout(() => { proof.timedOut = true; resolve(); }, 1000);
+        } catch (error) { proof.constructor = 'threw'; proof.errorName = error.name; resolve(); }
+      });
+      clearTimeout(timer);
+      // CSP violation reporting can follow the worker error event.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      worker?.terminate(); if (url) URL.revokeObjectURL(url);
+      document.removeEventListener('securitypolicyviolation', violation);
+      return proof;
+    }`;
     const artifact = {
       format: 'crewship-page-preview/v1', css: '',
-      javascript: `(() => {
+      javascript: `${workerProbe}; (async () => {
         let parentDenied = false, storageDenied = false;
         try { parent.document.body; } catch { parentDenied = true; }
         try { localStorage.getItem('spike'); } catch { storageDenied = true; }
-        let workerDenied = false;
-        try { new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))); } catch { workerDenied = true; }
         fetch('data:text/plain,blocked').then(() => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:false}), () => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:true}));
-        window.__crewshipPagesPort.postMessage({type:'spike.booted', parentDenied, storageDenied, workerDenied});
+        const worker = await observeWorker();
+        window.__crewshipPagesPort.postMessage({type:'spike.booted', parentDenied, storageDenied, worker});
       })();`,
     };
-    function frame(expectedParent, selfAttempt = false) {
+    function frame(expectedParent, selfAttempt = false, workerSource = "'none'") {
       const element = document.createElement('iframe');
       element.sandbox = 'allow-scripts';
       // No origins, hosts, servers, auth state or outgoing requests are used.
       const selfScript = selfAttempt ? `const selfChannel=new MessageChannel();selfChannel.port1.onmessage=()=>parent.postMessage({type:'spike.self'},'*');window.postMessage({type:'crewship.pages.boot/v1',artifact:${JSON.stringify(artifact)}},'*',[selfChannel.port2]);` : '';
-      element.srcdoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-spike'; style-src 'unsafe-inline'; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><div id="root"></div><script nonce="spike">const expectedParent=${JSON.stringify(expectedParent)};const bootNonce='spike';${bootstrap}\n${selfScript}</script>`;
+      element.srcdoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-spike'; style-src 'unsafe-inline'; connect-src 'none'; worker-src ${workerSource}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><div id="root"></div><script nonce="spike">const expectedParent=${JSON.stringify(expectedParent)};const bootNonce='spike';${bootstrap}\n${selfScript}</script>`;
       return new Promise(resolve => {
         element.onload = () => resolve(element);
         document.body.append(element);
@@ -85,15 +108,35 @@ async function bootstrapChecks(page, bootstrap) {
     const deadline = Date.now() + 3000;
     while (admitted.received.length < 2 && Date.now() < deadline) await delay(10);
     const proof = admitted.received.find(value => value.type === 'spike.booted');
-    check(proof?.parentDenied && proof.storageDenied && proof.workerDenied, 'sandbox permitted parent DOM/storage/worker access');
+    window.spikeObservations.sandbox = proof ?? null;
+    check(proof, 'bootstrap did not return sandbox observations');
+    check(proof.parentDenied, 'opaque sandbox permitted parent DOM read');
+    check(proof.storageDenied, 'opaque sandbox permitted localStorage read');
+    check(proof.worker.message === null, 'worker code executed despite worker-src none');
+    check(!proof.worker.timedOut, 'worker denial unknown: deadline without an error or execution outcome');
+    check((proof.worker.constructor === 'threw' && proof.worker.errorName === 'SecurityError') ||
+      (proof.worker.errorEvent && proof.worker.cspDirective === 'worker-src'), 'worker rejection lacks SecurityError or CSP error evidence');
     check(admitted.received.some(value => value.type === 'spike.network' && value.blocked), 'CSP permitted fetch');
+    // Deterministic positive control proves this worker payload can execute.
+    // Only this separate, credential-free control fixture permits blob workers;
+    // the production-shaped negative fixture above retains worker-src none.
+    const controlFrame = await frame('null', false, 'blob:');
+    const control = send(controlFrame, { ...boot, artifact: { ...artifact,
+      javascript: `${workerProbe}; observeWorker().then(worker => window.__crewshipPagesPort.postMessage({type:'spike.worker-control', worker}));`,
+    } });
+    const controlDeadline = Date.now() + 3000;
+    while (!control.received.length && Date.now() < controlDeadline) await delay(10);
+    const controlProof = control.received.find(value => value.type === 'spike.worker-control')?.worker;
+    window.spikeObservations.workerControl = controlProof ?? null;
+    check(controlProof?.message === 'spike.worker.executed' && !controlProof.timedOut && !controlProof.errorEvent,
+      'worker positive control did not execute; denial test cannot qualify this environment');
     const second = send(child, boot);
     await delay(100);
     check(second.received.length === 0, 'bootstrap admitted a second port');
-    for (const handshake of [wrongType, wrongCount, wrongFormat, rejectedOrigin, admitted, second]) {
+    for (const handshake of [wrongType, wrongCount, wrongFormat, rejectedOrigin, admitted, second, control]) {
       for (const channel of handshake.channels) channel.port1.close();
     }
-    child.remove(); wrongOrigin.remove();
+    child.remove(); wrongOrigin.remove(); controlFrame.remove();
     return ['opaque-parent-dom-denied', 'opaque-storage-denied', 'csp-fetch-denied', 'csp-worker-denied', 'wrong-source-origin-shape-denied', 'single-port-admission'];
   }, bootstrap);
 }
@@ -134,14 +177,14 @@ let failed = false;
 for (const name of ['firefox', 'webkit']) {
   const result = { browser: name, executable: options.get(`--${name}-executable`) ?? playwright[name].executablePath(), checks: [], status: 'not-run' };
   report.browsers.push(result);
-  let browser;
+  let browser, page;
   try {
     browser = await playwright[name].launch({ headless: true, ...(options.has(`--${name}-executable`) ? { executablePath: options.get(`--${name}-executable`) } : {}) });
     result.browserVersion = browser.version();
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] }, serviceWorkers: 'block' });
     const requests = [];
     await context.route('**/*', route => { requests.push(route.request().url()); return route.abort(); });
-    const page = await context.newPage(); page.setDefaultTimeout(5000);
+    page = await context.newPage(); page.setDefaultTimeout(5000);
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     await page.setContent('<!doctype html><title>Isolated runtime primitive spike</title><body></body>');
     result.checks.push(...await bootstrapChecks(page, sources['internal/pagebuild/bootstrap.js']));
@@ -152,7 +195,10 @@ for (const name of ['firefox', 'webkit']) {
     result.status = browser ? 'fail' : 'environment-blocked';
     result.error = String(error.message).split('\nCall log:')[0];
     failed = true;
-  } finally { await browser?.close(); }
+  } finally {
+    if (page) result.observations = await page.evaluate(() => window.spikeObservations ?? null).catch(() => null);
+    await browser?.close();
+  }
 }
 console.log(JSON.stringify(report, null, 2));
 process.exitCode = failed ? 1 : 0;
