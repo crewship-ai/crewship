@@ -1,6 +1,7 @@
 package access
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -36,6 +37,30 @@ func TestPublicationOriginSameVersionCannotContradict(t *testing.T) {
 	a.Recipes = append(a.Recipes, second)
 	if _, _, err := CanonicalPublicationAuthority(a); !errors.Is(err, ErrDenied) {
 		t.Fatal("same immutable version accepted with contradictory origins")
+	}
+}
+
+func TestPublicationOriginRoundTripAndPrivacy(t *testing.T) {
+	for _, root := range []string{"", "root-origin", "kořen"} {
+		for _, child := range []string{"", "child-origin", "子"} {
+			a := publicationIdentityFixture()
+			a.RootOriginID = root
+			a.Recipes[0].VersionOriginID = child
+			raw, fp, err := CanonicalPublicationAuthority(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := DecodePublicationAuthority(raw, fp)
+			if err != nil || got.RootOriginID != root || len(got.Recipes) != 1 || got.Recipes[0].VersionOriginID != child {
+				t.Fatalf("exact source origins lost in roundtrip: %v", err)
+			}
+			for _, v := range []any{got, got.Recipes[0]} {
+				hidden, err := json.Marshal(v)
+				if err != nil || string(hidden) != "{}" {
+					t.Fatal("source origin leaked through generic DTO JSON")
+				}
+			}
+		}
 	}
 }
 

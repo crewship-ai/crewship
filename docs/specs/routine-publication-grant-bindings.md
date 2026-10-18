@@ -66,3 +66,21 @@ completeness, refresh grants or select a broker. It writes no storage and expose
 no request fields. The legacy sentinel identifies exact old child content without
 transferring its execution authority. Strict decoding is a separate prerequisite
 before stored input can be consumed.
+
+
+## Strict identity decoding and provider declarations
+
+Stored identity bytes must decode to the exact canonical schema-2 representation
+and expected v2 fingerprint. Unknown, omitted, null or duplicate fields, malformed
+variable-length tuples, alternate encodings and trailing input are rejected. No
+origin-free schema-1 compatibility decoding silently changes the identity.
+
+The host can read a nonsecret provider declaration in its caller-owned SQL
+transaction for an exact live workspace, crew and agent. The snapshot records the
+existing delegated profile, policy hash, credential/grant identities and revision,
+model and expiries. Deleted, ambiguous, foreign or inert declarations are denied;
+the helper neither decrypts credentials nor writes policy or grants.
+
+These primitives provide no authenticated publisher, permission expansion, live
+provider request, runtime readiness or publication endpoint. Existing provider
+delegation policy and separate publisher grant checks remain required.

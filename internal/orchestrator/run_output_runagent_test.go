@@ -40,7 +40,7 @@ func init() {
 		os.Exit(125)
 	}
 	// Terminal output precedes capacity settlement; signal only after all capture writes finish.
-	if fixture.Delay && fixture.CompletionPath != "" {
+	if fixture.CompletionPath != "" {
 		if err := os.WriteFile(fixture.CompletionPath, []byte("complete\n"), 0600); err != nil {
 			os.Exit(125)
 		}
@@ -96,7 +96,7 @@ func (*runAgentHostProvider) QualifyHostCapture(context.Context, string) (bool, 
 func (p *runAgentHostProvider) PrepareHostCapture(_ context.Context, cfg provider.ExecConfig, _ string, _ []string) (string, json.RawMessage, error) {
 	p.prepared = append(p.prepared, cfg)
 	fixture := map[string]any{"test_fixture": true, "delay": p.delay}
-	if p.delay && p.completionPath != "" {
+	if p.completionPath != "" {
 		fixture["completion_path"] = p.completionPath
 	}
 	authority, _ := json.Marshal(fixture)
@@ -113,7 +113,8 @@ func TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch(t *
 		t.Fatal(err)
 	}
 	defer state.Close()
-	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{})}
+	completionPath := filepath.Join(t.TempDir(), "capture-complete")
+	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{}), completionPath: completionPath}
 	o := New(p, state, covQuietLogger())
 	o.ipcToken = "fixture-key"
 	o.SetHostOutputRoot(runAgentHostOutputRoot(t))
@@ -171,6 +172,7 @@ func TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch(t *
 	if err := o.RunAgent(t.Context(), req, nil); !errors.Is(err, ErrRunAlreadyOwned) {
 		t.Fatalf("duplicate identity relaunched: %v", err)
 	}
+	awaitRunAgentHostFixtureCompletion(t, completionPath, time.Now().Add(3*time.Second))
 }
 
 func TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult(t *testing.T) {
@@ -249,8 +251,14 @@ func TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult(t *testin
 	if run.Status != "completed" {
 		t.Fatalf("recovered state=%s", run.Status)
 	}
-	// Complete/acknowledged output and a released hold do not join the helper's
-	// final reservation write. Await its explicit completion within the same deadline.
+	// Keep the existing recovery deadline, including this final fixture join.
+	awaitRunAgentHostFixtureCompletion(t, completionPath, deadline)
+}
+
+// Terminal output and released holds precede the capture helper's final writes.
+// This fixture marker is emitted only after CaptureHost returns.
+func awaitRunAgentHostFixtureCompletion(t *testing.T, completionPath string, deadline time.Time) {
+	t.Helper()
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
 	limit := time.NewTimer(time.Until(deadline))
