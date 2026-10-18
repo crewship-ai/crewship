@@ -148,9 +148,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setSelectedRun(null, { replace: true })
     setSelectedSlug(null)
   }
-  // The routine and run pages put their actions in the top bar through this
-  // slot (a node inside the SubBar's action area).
-  const [pageActions, setPageActions] = useState<HTMLElement | null>(null)
   // While a run is open the panel lists its routine's runs (v67 rtPanel);
   // "All routines" there goes back to the routine list. A row opens the peek.
   const { records: runRecords } = usePipelineRunRecords(selectedRun && selectedSlug ? workspaceId : null, selectedRun ? selectedSlug : null)
@@ -335,7 +332,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           ) : undefined
         }
         ariaLabel="Routines"
-        actions={!selectedSlug && !selectedRun ? createActions : <span ref={setPageActions} className="flex items-center gap-1.5" data-slot="routine-page-actions" />}
+        actions={!selectedSlug && !selectedRun ? createActions : undefined}
       />
 
       <div className="relative flex flex-1 overflow-hidden">
@@ -386,7 +383,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     key={selectedRun}
                     workspaceId={workspaceId}
                     runId={selectedRun}
-                    actionsTarget={pageActions}
+                    actionsInBar
                     onClose={() => setSelectedRun(null)}
                     onOpenRun={(runId) => setSelectedRun(runId)}
                   />
@@ -409,7 +406,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                       onRunStarted={setSelectedRun}
                       crewName={crewName}
                       routines={pipelines}
-                      actionsTarget={pageActions}
+                      actionsInBar
                       onOpenRoutine={(slug) => {
                         clearRoutineView()
                         setSelectedSlug(slug)
