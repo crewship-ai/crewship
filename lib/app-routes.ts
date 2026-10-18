@@ -49,6 +49,7 @@ export const APP_ROUTE_PATTERNS = [
   "/p/[token]",
   "/pages",
   "/pages/[slug]",
+  "/paymaster",
   "/reset-password",
   "/routines",
   "/runs",

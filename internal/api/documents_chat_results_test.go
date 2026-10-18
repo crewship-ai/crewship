@@ -85,8 +85,8 @@ func TestDocumentChatResultsDurableProvenanceAndCurrentReach(t *testing.T) {
 		t.Fatal("chat reach disclosed private Document")
 	}
 	mustExec(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user','result-reader','read',?)`, saved.PageID, owner)
-	if len(documentResultsDecode(t, read("result-reader"))) != 1 {
-		t.Fatal("authorized result absent")
+	if len(documentResultsDecode(t, read("result-reader"))) != 0 {
+		t.Fatal("ordinary grant widened private audience")
 	}
 	mustExec(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id='result-reader'`, saved.PageID)
 	if len(documentResultsDecode(t, read("result-reader"))) != 0 {

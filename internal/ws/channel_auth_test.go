@@ -186,6 +186,8 @@ func openTestDB(t *testing.T) *sql.DB {
         CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
 		CREATE TABLE pages (
 			id TEXT PRIMARY KEY,
+			owner_user_id TEXT,
+			private_audience INTEGER NOT NULL DEFAULT 0,
 			workspace_id TEXT NOT NULL
 		);
 	`
@@ -193,4 +195,33 @@ func openTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("schema: %v", err)
 	}
 	return db
+}
+
+func TestDBChannelAuthorizer_PrivateArtifactAudience(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	for _, q := range []string{
+		`INSERT INTO users(id) VALUES('private-owner'),('private-admin')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','u1','MEMBER'),('ws1','private-owner','OWNER'),('ws1','private-admin','ADMIN'),('ws1','member','MEMBER')`,
+		`INSERT INTO pages(id,workspace_id,owner_user_id,private_audience) VALUES('private-page','ws1','u1',1)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := NewDBChannelAuthorizer(db)
+	for _, tc := range []struct {
+		user    string
+		allowed bool
+	}{{"u1", true}, {"private-owner", true}, {"private-admin", false}, {"member", false}} {
+		if got := mustVerdict(t, a, tc.user, "page:private-page"); got != tc.allowed {
+			t.Errorf("%s subscription=%v want%v", tc.user, got, tc.allowed)
+		}
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET role='ADMIN' WHERE user_id='private-owner'`); err != nil {
+		t.Fatal(err)
+	}
+	if mustVerdict(t, a, "private-owner", "page:private-page") {
+		t.Error("revoked OWNER retained private channel")
+	}
 }

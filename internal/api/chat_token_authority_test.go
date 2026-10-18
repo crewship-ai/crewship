@@ -40,7 +40,7 @@ func TestChatTokenAuthorityWSTicketNeverDropsLimitedScope(t *testing.T) {
 	h := NewAuthHandler(db, newTestLogger(), validator, sessions.NewDBStore(db), true)
 	for _, tc := range chatTokenScopeCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := withUser(t.Context(), &AuthUser{ID: user})
+			ctx := withUser(t.Context(), &AuthUser{ID: user, TokenID: "scope-test-token"})
 			if tc.scopes != nil {
 				ctx = context.WithValue(ctx, ctxTokenScopes, tc.scopes)
 			}

@@ -144,6 +144,15 @@ Its topic must be a single line containing letters, digits, spaces or hyphens;
 quoted, negated or ambiguous text does not grant creation permission. Use the
 composer control for other wording.
 
+A Document created from a private chat has an explicit private audience: its
+human owner and the workspace OWNER. Other roles, including ADMIN, cannot see
+its title, catalog entry or content; direct reads return 404. Opening somebody
+else's private document as OWNER requires a durable audit entry before access.
+Crew membership, folder inheritance and ordinary Page grants do not widen this
+audience. Legacy public Page links cannot publish it. Storage limits continue
+to count the whole workspace. If its owner leaves, removal returns 409 until
+the workspace OWNER explicitly selects an active human successor.
+
 The run creates a populated document and returns its saved link. Reopening a
 result does not grant a later run permission to edit it. Repeating an uncertain
 operation must reuse the original request, rather than issuing a new chat task.

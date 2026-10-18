@@ -57,7 +57,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 - **Harbor 2 shell.** A 240 px sidebar (a 56 px rail on tablets) with the workspace, Search ⌘K, the sections, Settings, Admin and your profile at the bottom; one 48 px top bar with the area's breadcrumb, the page's title and its one primary action, and the Activity and Inbox bells; each page's header now sits in that top bar instead of a separate strip, with view tabs kept on the page. Phones get a bottom tab bar with More. ⚠️ **Behaviour change:** the profile menu moved from the top bar to the bottom of the sidebar (in More on a phone).
 - **Harbor 2 kit, filters and panels.** Filters open inside a page's side panel, under its Filter button, with at most six values per facet and "All N…" for the rest; on a tablet the side panel starts closed and opens over the page from the top bar. Wizards show every step done when finished, and confirmation lists name what is lost, kept or at risk in words for screen readers. ⚠️ **Behaviour change:** at 768–1279 px the side panel no longer takes a column; open it with the panel button in the top bar.
+### Fixed
+
+- **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
+- ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.
+- **Agent details now show the configured provider and model** in table, JSON and YAML output; these settings remain distinct from evidence of the model serving a run.
+- ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
+- **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
+
 ### Added
+
+- Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
 - Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
 
@@ -186,6 +196,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
+
+- Isolate shared issue-search limiter capacity to 256 accounts and 2048 audience buckets per workspace while retaining global bounds. Ordered idle expiry avoids scanning active buckets on capacity refusal and preserves their rate budgets; global saturation can still refuse new buckets.
 - Waitpoint decision confirmations and CLI errors no longer repeat approval capabilities; transport failures retain their existing error type and exit code.
 - **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
 - **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator/requester checks before commit; per-tool, async and legacy paths retain their existing behavior.

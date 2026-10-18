@@ -227,15 +227,24 @@ Invalid inputs and forbidden explicit projects retain their existing errors.
 A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
 `Retry-After` seconds; it discloses no audience or workspace counts.
 
-The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
-per entry (256 valid List projects plus all-projects), and 32768 audiences
-globally. Existing audiences remain usable at capacity; a refused new audience
-does not allocate an empty account or charge either budget. Capacity overflow is the
-same transient 429; active entries are never evicted to grant a fresh burst.
+The lazy limiter retains at most 4096 user/workspace entries and 32768 audience
+buckets globally. Each workspace may retain at most 256 entries and 2048 audience
+buckets; each entry still supports 257 audiences (256 valid List projects plus
+all-projects). These are process memory quotas, not product tiers or tenant
+capacity guarantees. One workspace cannot consume the entire global allowance,
+but multiple workspaces can fill it: a new entry or audience is then refused
+with the same transient 429. Existing audiences remain usable subject to their
+unchanged rate budgets. Capacity refusal allocates no empty account and spends
+neither budget; active entries are never evicted or reset to grant a fresh burst.
+
 Idle entries expire after at least five minutes and the configured full-refill
-interval. Rate settings are exposed in Rate Limiters; process restart resets
-these in-memory budgets and replicas enforce their own budgets. Rate limiting
-does not truncate counts or bound the cost of one large authorized search.
+interval. Ordered idle lists retain exactly one node per entry and audience;
+cleanup visits only the expired prefix, not all active maps on every full
+request. Audience maps shrink after expiry halves their high-water mark, bounding
+retained backing storage without copying a full active map on capacity denial.
+Rate settings are exposed in Rate Limiters; process restart resets these
+in-memory budgets and replicas enforce their own budgets. Rate limiting does not
+truncate counts or bound the cost of one large authorized search.
 
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
@@ -576,3 +585,51 @@ For an existing restricted member, Settings resource access offers an explicit o
 Known policy-read 401/403/404 responses remove the member editor and its reviewed preset consent. A later transient read failure cannot restore that consent; a fresh successful read starts a new editor. A mutation response from an older verified read cannot overwrite a newer policy read or revive controls after access loss. Transient failures without an earlier access denial retain an existing manual draft.
 
 Switching the member or resource scope invalidates both pending reads and mutation confirmations immediately. Returning to a previously cached scope requires a fresh successful read before an old response can affect visible controls or saved-policy state.
+
+### Client stream credential lifetime
+
+Browser and CLI WebSockets, journal SSE and run NDJSON retain the authenticated
+session or CLI-token row ID and its original expiry. Successful API revocation
+invalidates matching in-memory stream leases after commit and wakes idle streams;
+every frame is fenced again at delivery, including replay and control frames.
+A monotonic admission epoch captured before database authentication prevents
+late registration with a pre-revocation validation result. No TTL or batch skips
+extend access. The registry retains active requests/connections only.
+
+Revocation stops admission of the next frame; already authorized or in-flight
+bytes cannot be recalled. Ordinary logout does not cancel an already started
+routine: its account and grant authority is a separate execution contract.
+CLI-token revocation now also closes an existing CLI WebSocket. Older CLI tickets
+without a source token ID must be replaced through the normal ticket endpoint.
+A short WS ticket lifetime limits admission; it never extends the source expiry.
+Already-issued browser tickets with a session ID use the live persisted session's
+expiry. New browser tickets additionally retain the access JWT's expiry and its
+existing five-second validation grace. Legacy CLI tickets without a source token
+ID cannot establish a connection. This does not change routine run authority.
+Access-token authentication keeps its existing five-second validation grace.
+A non-null malformed CLI-token expiry is invalid and cannot open a stream.
+Offline administrative writes require the exclusive-writer path; this registry
+is an in-process API invalidation mechanism, not cross-process messaging.
+
+A storage failure or conservative stream-admission race rejects the upgrade with
+a generic error; it does not claim the session was revoked. Operational errors
+retain their class for server-side handling and logging.
+
+## Capability and membership audit
+
+A changed capability set appends `member.capabilities_changed`, and a removed
+workspace membership appends `member.removed`, in the same transaction as the
+mutation. Capability changes revalidate the caller’s active, trusted OWNER/ADMIN
+authority inside the write transaction, after reading the request body. Member
+removal requires exactly one deleted membership row. An audit append or commit failure rolls back the mutation, including
+page transfers and crew membership cleanup during departure. Notifications are
+published only after commit. An unchanged capability set or already absent
+membership does not append a duplicate change event.
+
+Both events identify the actor through the standard journal actor fields and
+contain only `subject_user_id` and `action` in their payload. Capability values,
+names of changed capabilities and hashes of those values are excluded: values
+remain available through the existing ADMIN-only capability endpoint. The
+journal records who changed whose access and when; it cannot reconstruct old
+capability sets. This contract does not add chained auditing for instance-level
+CLI token creation or revocation.
