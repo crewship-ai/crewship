@@ -88,6 +88,11 @@ func (r *Router) registerPageRoutes() {
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	// The administrative ceiling never grants a run permission to publish.
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy", authed(wsCtx(http.HandlerFunc(p.GetArtifactCreationPolicy))))
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/artifact-creation-policy", roleManage, p.UpdateArtifactCreationPolicy)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))

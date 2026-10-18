@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
+
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 
 - Refuse unsupported run-admission payloads in raw dump restore before opening the write transaction or invoking callbacks.
