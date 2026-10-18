@@ -21,9 +21,15 @@ func runDocDraft(t *testing.T, op, raw string, transport http.RoundTripper) (str
 	cmd.SetOut(out)
 	cmd.SetErr(io.Discard)
 	err := cmd.Execute()
+	var compact bytes.Buffer
+	if json.Compact(&compact, out.Bytes()) == nil {
+		return compact.String(), err
+	}
 	return out.String(), err
 }
 func TestProtectedDocDraftPrepareApplyAndExactRetry(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
 	const token = "agtv2.synthetic-draft-capability"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", token)
 	t.Setenv("CREWSHIP_SERVER", "https://untrusted.invalid")
@@ -69,6 +75,8 @@ func TestProtectedDocDraftPrepareApplyAndExactRetry(t *testing.T) {
 	}
 }
 func TestProtectedDocDraftReportsCommittedPatchWhenPinFails(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.aaaa")
 	prepared, err := runDocDraft(t, "prepare", draftPrepareFixture, nil)
 	if err != nil {
@@ -87,6 +95,8 @@ func TestProtectedDocDraftReportsCommittedPatchWhenPinFails(t *testing.T) {
 	}
 }
 func TestProtectedDocDraftRefusesUnsafePacketsAndHumanFallback(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.aaaa")
 	prepared, err := runDocDraft(t, "prepare", draftPrepareFixture, nil)
 	if err != nil {
@@ -106,6 +116,8 @@ func TestProtectedDocDraftRefusesUnsafePacketsAndHumanFallback(t *testing.T) {
 	}
 }
 func TestProtectedDocDraftViewAndTransportGuards(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.aaaa")
 	for _, test := range []struct {
 		name, body string
@@ -139,6 +151,8 @@ func TestProtectedDocDraftViewAndTransportGuards(t *testing.T) {
 }
 
 func TestProtectedDocDraftViewPreservesHTTPStatus(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.aaaa")
 	command := newDocDraftCommandWithTransport(docCreateTransport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 409, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"private-body-not-an-error-message"}`))}, nil

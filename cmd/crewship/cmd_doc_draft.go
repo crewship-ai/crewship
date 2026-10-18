@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
@@ -66,7 +67,17 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 				raw = bytes.ReplaceAll(raw, []byte(token), []byte("[REDACTED]"))
 				return response.StatusCode, raw, nil
 			}
-			output := json.NewEncoder(cmd.OutOrStdout())
+			formatter := cli.NewFormatter(cli.ResolveFormat(flagFormat, nil))
+			formatter.Writer = cmd.OutOrStdout()
+			output := func(value any) error {
+				raw, err := json.Marshal(value)
+				if err != nil {
+					return err
+				}
+				// Keep JSON field names, nested receipts and int64 preconditions
+				// intact when the shared formatter renders another format.
+				return formatter.Machine(cli.RawJSON(raw))
+			}
 			if op == "view" {
 				status, raw, err := exchange(http.MethodGet, nil)
 				if err != nil {
@@ -76,7 +87,7 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 					return fmt.Errorf("draft view HTTP%d denied or unavailable", status)
 				}
 				var value json.RawMessage = raw
-				return output.Encode(value)
+				return output(value)
 			}
 			file, _ := cmd.Flags().GetString("file")
 			if file == "" {
@@ -100,14 +111,14 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 				if err != nil {
 					return err
 				}
-				return output.Encode(map[string]any{"status": "prepared_unsaved", "packet": p})
+				return output(map[string]any{"status": "prepared_unsaved", "packet": p})
 			}
 			packet, err := sidecar.ParseDocumentDraftPacket(raw)
 			if err != nil {
 				return err
 			}
 			out, applyErr := sidecar.ApplyDocumentDraft(packet, op == "checkpoint", exchange)
-			if err := output.Encode(out); err != nil {
+			if err := output(out); err != nil {
 				return err
 			}
 			return applyErr

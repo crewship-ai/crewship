@@ -63,6 +63,11 @@ response. Applying that same packet again recovers its receipts without another
 write. Changing an existing mutation's contents conflicts; rereading does not
 rebase or authorize a replacement edit automatically.
 
+Draft commands return JSON by default and honor `--format json`, `--format yaml`
+and `--format ndjson`. Use JSON output for packets passed to another draft
+command; input files remain JSON. Output formats preserve original integer
+revisions and checkpoint identities.
+
 If the text edit commits but the checkpoint confirmation fails, the edit remains
 saved. The result reports `committed_checkpoint_pending`; retry only its original
 checkpoint with `crewship doc draft checkpoint --file <packet.json>`. Do not
