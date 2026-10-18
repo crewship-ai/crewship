@@ -8,9 +8,9 @@
  * that provider's page: how it signs in, which runners use it, how agents get
  * it, renewal and the workspace default.
  *
- * Every figure reads the row's `login` object. Usage windows are drawn only
- * when the server reports them; until then a card says "No usage data yet".
- * Spend per account has no backend and is not drawn.
+ * Usage windows are drawn only when the server reports them (login.quota,
+ * #3442). Recorded tokens and calls come from /paymaster/subscriptions. Spend
+ * per account has no backend ($0 for flat-rate by construction) and is not drawn.
  */
 
 import * as React from "react"
@@ -105,19 +105,50 @@ export function ProviderHealth({ counts, onOpen }: { counts: ProviderHealthCount
 
 // ── One account ─────────────────────────────────────────────────────────────
 
-/** The usage row: both windows when the server reports them, else one honest sentence. */
-export function AccountUsage({ c }: { c: LoginCredential }) {
+/** Recorded use of one account over the last 30 days (paymaster subscriptions). Never a price. */
+export interface AccountTokenUsage {
+  tokens: number
+  calls: number
+}
+
+function compactCount(n: number): string {
+  if (n >= 1_000_000) return `${(Math.round(n / 100_000) / 10).toString()}M`
+  if (n >= 1_000) return `${(Math.round(n / 100) / 10).toString()}k`
+  return String(n)
+}
+
+/** Share of a window from which the card warns. */
+export const NEAR_LIMIT_PCT = 80
+
+/**
+ * The usage row: both windows when the server reports them (with "Near the
+ * limit" from 80 %), and the recorded tokens and calls when there are any;
+ * with neither, one honest sentence.
+ */
+export function AccountUsage({ c, usage }: { c: LoginCredential; usage?: AccountTokenUsage }) {
   const q = c.login?.quota
-  if (!q) return <p className="text-label text-muted-foreground-soft">No usage data yet</p>
+  const used = usage && (usage.tokens > 0 || usage.calls > 0) ? usage : null
+  if (!q && !used) return <p className="text-label text-muted-foreground-soft">No usage data yet</p>
+  const near = q ? Math.max(q.window_5h_pct ?? 0, q.window_weekly_pct ?? 0) >= NEAR_LIMIT_PCT : false
   return (
     <div className="flex flex-col gap-1">
-      <QuotaBar label="5 hours" pct={q.window_5h_pct} />
-      <QuotaBar label="Week" pct={q.window_weekly_pct} />
+      {q && (
+        <>
+          <QuotaBar label="5 hours" pct={q.window_5h_pct} />
+          <QuotaBar label="Week" pct={q.window_weekly_pct} />
+          {near && <p className="text-label font-medium text-warn">Near the limit</p>}
+        </>
+      )}
+      {used && (
+        <p className="text-label text-muted-foreground">
+          {compactCount(used.tokens)} tokens · {used.calls} {used.calls === 1 ? "call" : "calls"} · last 30 days
+        </p>
+      )}
     </div>
   )
 }
 
-export function AccountCard({ c, group, onOpen }: { c: LoginCredential; group?: string | null; onOpen: (id: string) => void }) {
+export function AccountCard({ c, group, usage, onOpen }: { c: LoginCredential; group?: string | null; usage?: AccountTokenUsage; onOpen: (id: string) => void }) {
   const provider = c.login?.provider ?? c.provider
   const pays = paysForLabel(c.login?.pays_for)
   return (
@@ -135,7 +166,7 @@ export function AccountCard({ c, group, onOpen }: { c: LoginCredential; group?: 
         </span>
         <AccountStateMark credential={c} />
       </span>
-      <AccountUsage c={c} />
+      <AccountUsage c={c} usage={usage} />
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-2.5 text-label">
         <span className="inline-flex min-w-0 items-center gap-1 text-foreground/85">
           <UserRound className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -225,6 +256,8 @@ export interface AccountsListProps {
   /** Account group of an account, by credential id. */
   poolOf: (id: string) => string | null
   isPhone?: boolean
+  /** Recorded use per credential id; absent = not loaded, accounts say "No usage data yet". */
+  usage?: Record<string, AccountTokenUsage>
   /** No look or grouping controls — a list inside another page. */
   fixed?: boolean
 }
@@ -234,7 +267,7 @@ export function resolveLayout(layout: ProvidersLayout | null, count: number, isP
   return count >= LIST_FROM && !isPhone ? "list" : "cards"
 }
 
-export function AccountsList({ rows, layout, onLayoutChange, group, onGroupChange, onOpen, onAdd, poolOf, isPhone, fixed = false }: AccountsListProps) {
+export function AccountsList({ rows, layout, onLayoutChange, group, onGroupChange, onOpen, onAdd, poolOf, isPhone, usage, fixed = false }: AccountsListProps) {
   const view = resolveLayout(layout, rows.length, isPhone)
   const [limit, setLimit] = React.useState(ACCOUNTS_PAGE_SIZE)
   const key = rows.map((r) => r.id).join(",")
@@ -293,7 +326,7 @@ export function AccountsList({ rows, layout, onLayoutChange, group, onGroupChang
 
       {view === "cards" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.slice(0, limit).map((c) => <AccountCard key={c.id} c={c} group={poolOf(c.id)} onOpen={onOpen} />)}
+          {rows.slice(0, limit).map((c) => <AccountCard key={c.id} c={c} group={poolOf(c.id)} usage={usage?.[c.id]} onOpen={onOpen} />)}
           {onAdd && <AddAccountCard onAdd={onAdd} />}
         </div>
       ) : groups ? (
