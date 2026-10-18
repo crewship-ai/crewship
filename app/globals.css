@@ -799,6 +799,13 @@ body {
     font-weight: 600;
     letter-spacing: -0.005em;
   }
+  /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
+  .type-group-head {
+    font-size: max(11.5px, 0.72rem);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
   .type-meta {
     font-size: 0.75rem;
     line-height: 1.1rem;
