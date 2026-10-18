@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 
 import {
   SLUG_RE,
+  STEP_KINDS,
   buildDefinition,
   buildDraftDocument,
   buildSaveBody,
@@ -101,6 +102,8 @@ describe("stepToDsl", () => {
       { id: "call1", name: "Post", type: "http", http: { method: "POST", url: "https://tracker.example.com/api", credential_ref: { type: "tracker", inject_as: "bearer" } } }],
     ["sub", { id: "sub1", name: "Digest", pipelineSlug: "daily-digest", passInputs: "topic = {{ steps.task1.output }}\nlimit=3" },
       { id: "sub1", name: "Digest", type: "call_pipeline", pipeline_slug: "daily-digest", inputs: { topic: "{{ steps.task1.output }}", limit: "3" } }],
+    ["panel", { id: "panel1", name: "Status", pageSlug: "ops-board", panelId: "status", panelData: '{"state":"green","count":3}' },
+      { id: "panel1", name: "Status", type: "crewship", action: "page.write", args: { page: "ops-board", panel: "status", data: { state: "green", count: 3 } } }],
   ]
   it.each(cases)("%s", (kind, fields, dsl) => {
     const step = { ...newStep(kind as WizardStep["kind"], []), ...fields }
@@ -117,6 +120,26 @@ describe("stepToDsl", () => {
 
   it("keeps a kind it cannot edit exactly as it was", () => {
     const raw = { id: "shape", type: "transform", transform: { input: "{{ steps.a.output }}", expression: "length" } }
+    const step = stepFromDsl(raw, "k")
+    expect(step.kind).toBe("other")
+    expect(stepToDsl(step)).toEqual(raw)
+  })
+})
+
+describe("panel step (page.write)", () => {
+  it("is offered as 'Update an artifact panel'", () => {
+    expect(STEP_KINDS.find((k) => k.kind === "panel")?.label).toBe("Update an artifact panel")
+  })
+  it("needs the page, the panel and a JSON object", () => {
+    const s = newStep("panel", [])
+    expect(s.id).toBe("panel1")
+    expect(stepProblems(s)).toEqual(["Name the page", "Name the panel", "Write the panel data as a JSON object"])
+    expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: "[1]" })).toEqual(["Write the panel data as a JSON object"])
+    expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: "{oops" })).toEqual(["Write the panel data as a JSON object"])
+    expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: '{"a":"{{ steps.t.output }}"}' })).toEqual([])
+  })
+  it("keeps a page.write step with extra args (state) as it was", () => {
+    const raw = { id: "w", type: "crewship", action: "page.write", args: { page: "p", panel: "x", data: {}, state: "failed" } }
     const step = stepFromDsl(raw, "k")
     expect(step.kind).toBe("other")
     expect(stepToDsl(step)).toEqual(raw)
