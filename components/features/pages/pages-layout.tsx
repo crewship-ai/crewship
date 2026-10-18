@@ -3,6 +3,10 @@
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
+import { PageDocument } from "./page-document"
+import { DocumentCatalog } from "./document-catalog"
+import { NewDocumentDialog } from "./new-document-dialog"
+import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 
 /**
  * The /pages shell — three zones, exactly as PRD §9b.1 draws them:
@@ -114,6 +118,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const canCreateFolder = usePageFolderCreationAccess(workspaceId)
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
+  const [creatingDocument, setCreatingDocument] = React.useState(false)
+  const documentAvailability = useDocumentsAvailability(workspaceId)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
@@ -187,6 +193,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     [pages, filters, search],
   )
 
+  const legacyPages = React.useMemo(() => pages.filter(page => !page.hasDocument), [pages])
+  const filteredLegacyPages = React.useMemo(() => filtered.filter(page => !page.hasDocument), [filtered])
+
   const openPage = React.useCallback(
     (next: string) => {
       // Picking a page on a phone means "show me that", and the overlay
@@ -229,7 +238,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // rendered its grant and mint forms and fired reads against a Page that is
   // not there. The address is not allowed to reach a state the data does not
   // support.
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+  const nativeDocument = detail.page?.hasDocument === true
+  const nativePageId = typeof detail.raw?.id === "string" ? detail.raw.id.trim() : ""
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -278,14 +289,34 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     wantsFocus.current = true
   }, [])
 
+  const pageFallback = selectedSlug ? (
+    <PageView
+      headingRef={viewHeading}
+      page={detail.page}
+      slug={selectedSlug}
+      loading={detail.loading}
+      error={detail.error}
+      notFound={detail.notFound}
+      onBack={closePage}
+      now={now}
+      workspaceId={workspaceId}
+      mayEditAvatar={capabilities.mayEditMetadata}
+      // Straight from the subscription `usePage` registered — the
+      // header indicator is lit only while this page's channel is
+      // on a live socket, never on a timer of its own (epic #1935).
+      live={detail.live}
+    />
+  ) : null
+
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
+        className="coarse:[&>div]:min-h-12"
         icon={CONCEPT_ICON.pages}
-        title="Pages"
+        title="Artifacts"
         section={editing ? "Edit" : undefined}
         description={description}
-        ariaLabel="Pages"
+        ariaLabel="Artifacts"
         actions={
           <>
             {selectedSlug && !editing && applicationAvailable && (
@@ -323,12 +354,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 </button>
               </div>
             )}
-            {selectedSlug && !editing && (
+            {selectedSlug && !editing && !nativeDocument && (
               <SubBarSecondary icon={MessageSquare} onClick={() => setChatHandoffOpen(true)} disabled={detail.page == null}>
                 Ask about this Page
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && (
+            {selectedSlug && !editing && !nativeDocument && (
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
@@ -338,7 +369,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Share
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && (
+            {selectedSlug && !editing && !nativeDocument && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
@@ -354,6 +385,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
+            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-12" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
@@ -458,31 +490,21 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               </motion.div>
             ) : selectedSlug ? (
               <motion.div
-                key={`page-${selectedSlug}`}
+                key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
-                <PageView
-                  headingRef={viewHeading}
-                  page={detail.page}
-                  slug={selectedSlug}
-                  loading={detail.loading}
-                  error={detail.error}
-                  notFound={detail.notFound}
-                  onBack={closePage}
-                  now={now}
-                  workspaceId={workspaceId}
-                  mayEditAvatar={capabilities.mayEditMetadata}
-                  // Straight from the subscription `usePage` registered — the
-                  // header indicator is lit only while this page's channel is
-                  // on a live socket, never on a timer of its own (epic #1935).
-                  live={detail.live}
-                />
-                } />
+                {nativeDocument ? (
+                  detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">{detail.accessDenied ? "Document access is unavailable." : "The original Page identity is unavailable."}</p> : <>
+                  {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
+                  <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
+                  </>
+                ) : detail.page && !detail.loading && !detail.error ? (
+                  <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
+                ) : pageFallback}
               </motion.div>
             ) : (
               <motion.div
@@ -493,9 +515,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
-                <PagesOverview
-                  pages={filtered}
-                  allPages={pages}
+                <DocumentCatalog pages={filtered} onSelect={openPage} />
+                {!loading && !error && pages.length > 0 && legacyPages.length === 0 && filtered.length === 0 && <p role="status" className="p-6 text-muted-foreground">No documents match these filters.</p>}
+                {(loading || error || legacyPages.length > 0 || pages.length === 0) && <PagesOverview
+                  pages={filteredLegacyPages}
+                  allPages={legacyPages}
                   loading={loading}
                   error={error}
                   onSelect={openPage}
@@ -503,12 +527,14 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
                   }
                   now={now}
-                />
+                />}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
+
+      {creatingDocument && <NewDocumentDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setCreatingDocument(false)} onCreated={openPage} />}
 
       {importing && (
         <PageImportDialog

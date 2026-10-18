@@ -1,9 +1,9 @@
 /**
  * Nav registration — PRD §9b.5.
  *
- * "Pages belongs in Plan, after Routines — it is where a person goes to see
+ * "The /pages surface belongs in Plan, after Routines — it is where a person goes to see
  * the state of their work, not a thing they build once." The position is the
- * assertion: Plan reads Dashboard · Inbox · Chat · Issues · Routines · Pages,
+ * assertion: Plan reads Dashboard · Inbox · Chat · Issues · Routines · Artifacts,
  * and an entry that drifts into Build or lands before Routines changes what
  * the group means.
  *
@@ -11,7 +11,7 @@
  * this epic was in flight — it is next to Inbox, both being "someone is
  * waiting on a reply". It is listed here rather than matched loosely because
  * the whole point of this assertion is that the group is exact: a test that
- * only checked "Pages comes after Routines" would not notice an entry landing
+ * only checked "Artifacts comes after Routines" would not notice an entry landing
  * in the wrong group entirely, which is the drift it was written to catch.
  *
  * The icon comes from `CONCEPT_ICON`, pinned by
@@ -46,10 +46,10 @@ function planGroup(): HTMLElement {
   return group
 }
 
-describe("Pages in the nav rail", () => {
+describe("Artifacts in the nav rail", () => {
   beforeEach(() => cleanup())
 
-  it("registers Pages in Plan, immediately after Routines", () => {
+  it("registers Artifacts in Plan, immediately after Routines", () => {
     render(
       <SidebarProvider>
         <AppSidebar />
@@ -58,7 +58,7 @@ describe("Pages in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Dashboard", "Inbox", "Chat", "Issues", "Routines", "Pages"])
+    expect(items).toEqual(["Dashboard", "Inbox", "Chat", "Issues", "Routines", "Artifacts"])
   })
 
   it("points it at /pages", () => {
@@ -67,7 +67,7 @@ describe("Pages in the nav rail", () => {
         <AppSidebar />
       </SidebarProvider>,
     )
-    const link = within(planGroup()).getByRole("link", { name: "Pages" })
+    const link = within(planGroup()).getByRole("link", { name: "Artifacts" })
     expect(link.getAttribute("href")).toBe("/pages")
   })
 

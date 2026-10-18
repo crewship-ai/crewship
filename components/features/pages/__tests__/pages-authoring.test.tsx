@@ -15,6 +15,8 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
   useWorkspace: () => ({ workspaceId: "ws-1", role: "MANAGER", capabilities: [], loading: false, error: false, workspaces: [{ id: "ws-1" }] }),
 }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),

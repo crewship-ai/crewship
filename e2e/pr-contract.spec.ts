@@ -258,9 +258,10 @@ test.describe("PR browser contract subset — phone", () => {
     await tabs.getByRole("button", { name: "More" }).click()
     const sheet = page.getByRole("dialog")
     await expect(sheet).toBeVisible()
-    for (const label of ["Inbox", "Issues", "Routines", "Pages", "Activity", "Journal", "Integrations"]) {
+    for (const label of ["Inbox", "Issues", "Routines", "Artifacts", "Activity", "Journal", "Integrations"]) {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
+    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", "/pages")
 
     // Back closes it in place rather than leaving the page underneath.
     const before = new URL(page.url()).pathname

@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -61,6 +62,15 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	documentsServiceSocket string
+	documentsClient        *http.Client
+	documentsSocket        string
+	documentsSecretFile    string
+	documentsServiceSecret string
+	documentStoreOptions   documents.Options
+	documentsStop          func(context.Context) error
+	documentsStopOnce      sync.Once
+
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
 	transcriptLock         func(context.Context) (func(), error)
@@ -938,6 +948,24 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 		})
 	}
 
+	if r.documentsSocket != "" {
+		secret, err := documents.ReadServiceSecret(r.documentsSecretFile)
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs service credential: %w", err)
+		}
+		r.documentsServiceSecret = secret
+		handler, err := r.DocumentAuthority(context.Background(), secret)
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs authority: %w", err)
+		}
+		r.documentsStop, err = documents.ServePrivateUnix(r.documentsSocket, handler, func() error { return documents.New(r.db, documents.Options{}).InvalidateLeases(context.Background()) })
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs private listener: %w", err)
+		}
+	}
 	return r, nil
 }
 
@@ -983,6 +1011,17 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.documentsClient != nil {
+		r.documentsClient.CloseIdleConnections()
+	}
+	r.documentsStopOnce.Do(func() {
+		if r.documentsStop != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = r.documentsStop(ctx)
+		}
+	})
+
 	r.issueMutationWorker.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
