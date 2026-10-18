@@ -15,7 +15,6 @@ const issue = {
   id: "m1",
   identifier: "ENG-4",
   crew_id: "c1",
-  workspace_id: "ws",
   title: "FAQ",
   status: "IN_PROGRESS",
   updated_at: "2026-10-18T10:00:00Z",
@@ -40,7 +39,7 @@ const cp = (over: Record<string, unknown> = {}) => ({
 })
 
 function route(map: Record<string, unknown>) {
-  apiFetch.mockImplementation(async (url: string) => {
+  apiFetch.mockImplementation(async (url = "") => {
     const hit = Object.keys(map).find((k) => url.includes(k))
     return hit ? json(map[hit]) : json({}, 404)
   })
@@ -64,7 +63,7 @@ describe("IssueCheckpointCard", () => {
       "/sessions/s2/checkpoints": [cp()],
       "/issues/ENG-4/sessions": [session("s1", "other"), session("s2", "a1")],
     })
-    render(<IssueCheckpointCard issue={issue} />)
+    render(<IssueCheckpointCard workspaceId="ws" issue={issue} />)
     await waitFor(() => expect(screen.getByText("Write the remaining four answers")).toBeInTheDocument())
     expect(apiFetch).toHaveBeenCalledWith("/api/v1/crews/c1/issues/ENG-4/sessions?workspace_id=ws")
     expect(apiFetch).toHaveBeenCalledWith("/api/v1/crews/c1/issues/ENG-4/sessions/s2/checkpoints?workspace_id=ws")
@@ -76,27 +75,27 @@ describe("IssueCheckpointCard", () => {
 
   it("renders nothing when the issue has no session", async () => {
     route({ "/issues/ENG-4/sessions": [] })
-    const { container } = render(<IssueCheckpointCard issue={issue} />)
+    const { container } = render(<IssueCheckpointCard workspaceId="ws" issue={issue} />)
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
   })
 
   it("renders nothing and never calls the API for an issue without an agent delegate", () => {
-    const { container } = render(<IssueCheckpointCard issue={{ ...issue, delegate: undefined } as Mission} />)
+    const { container } = render(<IssueCheckpointCard workspaceId="ws" issue={{ ...issue, delegate: undefined } as Mission} />)
     expect(apiFetch).not.toHaveBeenCalled()
     expect(container).toBeEmptyDOMElement()
   })
 
   it("renders nothing when the session has written no checkpoint", async () => {
     route({ "/sessions/s1/checkpoints": [], "/issues/ENG-4/sessions": [session("s1", "a1")] })
-    const { container } = render(<IssueCheckpointCard issue={issue} />)
+    const { container } = render(<IssueCheckpointCard workspaceId="ws" issue={issue} />)
     await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
     expect(container).toBeEmptyDOMElement()
   })
 
   it("compact (peek, phone) leaves out the plan and the done list but keeps next step and blockers", async () => {
     route({ "/sessions/s1/checkpoints": [cp()], "/issues/ENG-4/sessions": [session("s1", "a1")] })
-    render(<IssueCheckpointCard issue={issue} compact />)
+    render(<IssueCheckpointCard workspaceId="ws" issue={issue} compact />)
     await waitFor(() => expect(screen.getByText("Write the remaining four answers")).toBeInTheDocument())
     expect(screen.getByText("Pricing page is not published")).toBeInTheDocument()
     expect(screen.queryByText("Drafted 6 of 10 answers")).not.toBeInTheDocument()
