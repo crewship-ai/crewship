@@ -25,8 +25,16 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { LockKeyhole } from "lucide-react"
+
+import { AUTH_BUTTON, AUTH_INPUT, AuthCard } from "@/components/branding/auth-card"
+import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { EmptyState } from "@/components/layout/empty-state"
-import { Skeleton } from "@/components/ui/skeleton"
+import { PageLoading, PageNotFound } from "@/components/layout/page-state"
+import { Button } from "@/components/ui/button"
+import { ConceptIcon } from "@/components/ui/concept-icon"
+import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { PanelRenderer } from "@/components/features/pages/panels"
 import { formatInstant, toDate } from "@/components/features/pages/panels/freshness"
@@ -41,6 +49,8 @@ export interface PublicPageViewProps {
   onSubmitPassword: (password: string) => void
   /** Injected clock — absolute ages are computed, so a test can pin `now`. */
   now?: Date
+  /** The loading state offers this after 10 s ("Still loading…" + Retry). */
+  onRetry?: () => void
 }
 
 export function PublicPageView({
@@ -50,20 +60,26 @@ export function PublicPageView({
   submitting,
   onSubmitPassword,
   now,
+  onRetry,
 }: PublicPageViewProps) {
+  // No page-level height of its own: the caller's frame (the public bar plus
+  // this) decides how tall the page is, so the bar and the content never
+  // fight over the viewport. 16 px gutter on a phone, 24 px from tablet.
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto flex max-w-[1200px] flex-col gap-5 px-4 py-8 md:px-6 md:py-10">
-        <PublicPageBody
-          status={status}
-          page={page}
-          message={message}
-          submitting={submitting}
-          onSubmitPassword={onSubmitPassword}
-          now={now}
-        />
-      </div>
-    </div>
+    <main
+      data-slot="public-page-frame"
+      className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-5 px-4 py-6 md:px-6 md:py-8"
+    >
+      <PublicPageBody
+        status={status}
+        page={page}
+        message={message}
+        submitting={submitting}
+        onSubmitPassword={onSubmitPassword}
+        now={now}
+        onRetry={onRetry}
+      />
+    </main>
   )
 }
 
@@ -74,17 +90,11 @@ function PublicPageBody({
   submitting,
   onSubmitPassword,
   now,
+  onRetry,
 }: PublicPageViewProps) {
   if (status === "loading") {
-    return (
-      <div className="flex flex-col gap-4" data-slot="public-page-loading">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-          <Skeleton className="h-40 md:col-span-6" />
-          <Skeleton className="h-40 md:col-span-6" />
-        </div>
-      </div>
-    )
+    // The kit's card skeleton, the same one a dashboard shows while loading.
+    return <PageLoading variant="cards" onRetry={onRetry} className="p-0" />
   }
 
   if (status === "password") {
@@ -95,25 +105,34 @@ function PublicPageBody({
     // One sentence for every unavailable case, because the server gives one
     // answer for all of them (§7.3.1): expired, revoked, mistyped and never
     // existed are facts about a workspace this reader is outside of.
+    // The server's own sentence is deliberately NOT shown: one fixed text,
+    // no actions (the reader has no account and nowhere to go), so nothing
+    // on screen can tell the four cases apart.
     return (
-      <EmptyState
-        icon={CONCEPT_ICON.pages}
+      <PageNotFound
         title="This link is not available"
-        description={
-          message?.trim() ||
-          "It may have expired, or it may have been withdrawn. Ask whoever shared it for a new one."
-        }
+        description="It may have expired or been withdrawn. Ask whoever shared it for a new one."
+        className="p-0"
       />
     )
   }
 
+  const generated = toDate(page.generated_at)
   return (
     <>
-      <header className="flex flex-col gap-1" data-slot="public-page-header">
-        <h1 className="text-xl font-semibold text-foreground">{page.name}</h1>
-        {page.description ? (
-          <p className="max-w-[70ch] text-sm text-muted-foreground">{page.description}</p>
-        ) : null}
+      <header className="flex items-center gap-3" data-slot="public-page-header">
+        <span data-slot="public-page-tile" className="shrink-0">
+          <ConceptIcon concept="pages" variant="chip" size="lg" />
+        </span>
+        <div className="min-w-0">
+          <h1 className="text-title font-semibold text-foreground">{page.name}</h1>
+          <p data-slot="public-page-meta" className="type-page-meta text-muted-foreground">
+            {generated ? `Shared read-only · rendered ${formatInstant(generated, now)}` : "Shared read-only"}
+          </p>
+          {page.description ? (
+            <p className="mt-1 max-w-[70ch] text-body text-muted-foreground">{page.description}</p>
+          ) : null}
+        </div>
       </header>
 
       <PublicPanelGrid page={page} now={now} />
@@ -201,14 +220,12 @@ export function publicPanelProps(panel: PublicPanel, page: PublicPage, now?: Dat
  * holding the token already, so telling them costs nothing.
  */
 function PublicPageFooter({ page, now }: { page: PublicPage; now?: Date }) {
-  const generated = toDate(page.generated_at)
   const expires = toDate(page.expires_at)
   return (
     <footer
       data-slot="public-page-footer"
       className="type-page-meta flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-muted-foreground-soft"
     >
-      {generated ? <span>Rendered {formatInstant(generated, now)}</span> : null}
       {expires ? <span data-slot="public-page-expiry">This link stops working {formatInstant(expires, now)}</span> : null}
     </footer>
   )
@@ -239,23 +256,27 @@ export function PublicPasswordForm({
 }) {
   const [password, setPassword] = React.useState("")
   return (
-    <form
-      data-slot="public-password-form"
-      className="mx-auto flex w-full max-w-sm flex-col gap-3 rounded-lg border border-border bg-card p-5"
+    <AuthCard
+      icon={LockKeyhole}
+      title="This artifact is protected"
+      description="Enter the password you were given alongside the link."
       onSubmit={(e) => {
         e.preventDefault()
         onSubmit(password)
       }}
+      formProps={{ autoComplete: "off" }}
+      // The server's words, unchanged, in the refusal band.
+      refusal={message || null}
+      actions={
+        <Button type="submit" disabled={submitting || password.length === 0} className={AUTH_BUTTON}>
+          {submitting && <Spinner className="size-3.5" />}
+          {submitting ? "Checking…" : "Open"}
+        </Button>
+      }
+      className="mx-auto w-full md:max-w-[480px]"
     >
-      <div className="flex flex-col gap-1">
-        <h1 className="text-base font-semibold text-foreground">This page is protected</h1>
-        <p className="text-sm text-muted-foreground">
-          Enter the password you were given alongside the link.
-        </p>
-      </div>
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="public-page-password">
-        Password
-        <input
+      <CreateSurfaceField label="Password" htmlFor="public-page-password">
+        <Input
           id="public-page-password"
           name="password"
           type="password"
@@ -263,21 +284,9 @@ export function PublicPasswordForm({
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={AUTH_INPUT}
         />
-      </label>
-      {message ? (
-        <p role="alert" className="text-xs text-destructive">
-          {message}
-        </p>
-      ) : null}
-      <button
-        type="submit"
-        disabled={submitting || password.length === 0}
-        className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-      >
-        {submitting ? "Checking…" : "Open the page"}
-      </button>
-    </form>
+      </CreateSurfaceField>
+    </AuthCard>
   )
 }

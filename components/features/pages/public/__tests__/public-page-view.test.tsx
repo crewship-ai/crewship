@@ -11,11 +11,16 @@
  *      link? (§7.3.3 — it must not, and the UI is the easiest place to break
  *      a property the API got right.)
  */
-import { describe, it, expect, vi } from "vitest"
-import { render, screen, within, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi, afterEach } from "vitest"
+import { render, screen, within, fireEvent, act, cleanup } from "@testing-library/react"
 
 import { PublicPageView, publicPanelProps } from "../public-page-view"
 import type { PublicPage } from "../types"
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 const NOW = new Date("2026-08-12T13:00:00Z")
 
@@ -198,7 +203,7 @@ describe("an unavailable link", () => {
     // expired, revoked, mistyped and never-existed are facts about a workspace
     // this reader is outside of, and the server answers all four the same way.
     const body = document.body.textContent ?? ""
-    expect(body).toMatch(/may have/i)
+    expect(body).toMatch(/may have expired or been withdrawn/i)
     expect(body).not.toMatch(/this link expired|was revoked on|no such page/i)
     // And nowhere to log in: there is no account behind this page.
     expect(screen.queryByText(/sign in|log in|login/i)).toBeNull()
@@ -218,7 +223,7 @@ describe("§7.3.3 — the password", () => {
         onSubmitPassword={() => {}}
       />,
     )
-    const form = screen.getByText("This page is protected").closest("form")
+    const form = screen.getByText("This artifact is protected").closest("form")
     expect(form).not.toBeNull()
     const input = within(form!).getByLabelText(/password/i) as HTMLInputElement
     expect(input.type).toBe("password")
@@ -258,7 +263,7 @@ describe("§7.3.3 — the password", () => {
         onSubmitPassword={onSubmit}
       />,
     )
-    const form = screen.getByText("This page is protected").closest("form")!
+    const form = screen.getByText("This artifact is protected").closest("form")!
     const input = within(form).getByLabelText(/password/i)
     fireEvent.change(input, { target: { value: "uzaverka-2026" } })
     fireEvent.submit(form)
@@ -266,5 +271,155 @@ describe("§7.3.3 — the password", () => {
     // A form that navigated would put the field in the query string.
     expect(form.getAttribute("action")).toBeNull()
     expect(form.getAttribute("method")).toBeNull()
+  })
+})
+
+// ── Harbor 2 public frame (AUTH-02: P01–P04) ───────────────────────────────
+
+function renderStatus(status: "loading" | "password" | "unavailable" | "error" | "ready", extra: Record<string, unknown> = {}) {
+  return render(
+    <PublicPageView
+      status={status}
+      page={status === "ready" ? page() : null}
+      message={null}
+      submitting={false}
+      onSubmitPassword={() => {}}
+      now={NOW}
+      {...extra}
+    />,
+  )
+}
+
+describe("P01 — loading is the card skeleton", () => {
+  it("draws six card skeletons, not ad-hoc Skeleton blocks", () => {
+    const { container } = renderStatus("loading")
+    const loading = container.querySelector('[data-state="loading"]')
+    expect(loading).not.toBeNull()
+    expect(loading!.querySelectorAll(".page-sk-card")).toHaveLength(6)
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull()
+  })
+
+  it("says Still loading… with a working Retry after 10 s", () => {
+    vi.useFakeTimers()
+    const onRetry = vi.fn()
+    renderStatus("loading", { onRetry })
+    expect(screen.queryByText(/still loading/i)).toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+    expect(screen.getByText(/still loading/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the frame owns no viewport height of its own", () => {
+  it.each(["loading", "password", "unavailable", "ready"] as const)("%s: no min-h-screen anywhere", (status) => {
+    const { container } = renderStatus(status)
+    expect(container.querySelector(".min-h-screen, .min-h-dvh, [class*='min-h-screen']")).toBeNull()
+  })
+
+  it("keeps 1200 px content with a 16 px gutter on a phone and 24 px from tablet", () => {
+    const { container } = renderStatus("ready")
+    const frame = container.querySelector('[data-slot="public-page-frame"]')!
+    expect(frame.className).toContain("max-w-[1200px]")
+    expect(frame.className).toContain("px-4")
+    expect(frame.className).toContain("md:px-6")
+  })
+})
+
+describe("P02 — the password sits in the auth card", () => {
+  function password(message: string | null = null) {
+    return renderStatus("password", { message })
+  }
+
+  it("is an AuthCard titled 'This artifact is protected' with the primary Open and no lockup", () => {
+    const { container } = password()
+    const card = container.querySelector('[data-slot="auth-card"]')
+    expect(card).not.toBeNull()
+    expect(card!.tagName).toBe("FORM")
+    expect(within(card as HTMLElement).getByRole("heading", { name: "This artifact is protected" })).toBeTruthy()
+    expect(within(card as HTMLElement).getByRole("button", { name: "Open" })).toBeTruthy()
+    // The mark is in the public bar; a second one above the card would repeat it.
+    expect(container.querySelector('[data-slot="auth-lockup"]')).toBeNull()
+  })
+
+  it("shows the server's refusal verbatim in the refusal band, role alert", () => {
+    const text = "that link and password do not match"
+    const { container } = password(text)
+    const band = screen.getByRole("alert")
+    expect(band.textContent).toContain(text)
+    expect(band.closest('[data-slot="auth-card"]')).not.toBeNull()
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1)
+  })
+
+  it("has no forgot-password, sign-in or sign-up way out", () => {
+    const { container } = password()
+    expect(container.querySelectorAll("a")).toHaveLength(0)
+    expect(container.textContent).not.toMatch(/forgot|sign in|log in|sign up|create an account/i)
+  })
+
+  it("disables Open until something is typed and says Checking… while submitting", () => {
+    const { rerender } = password()
+    expect((screen.getByRole("button", { name: "Open" }) as HTMLButtonElement).disabled).toBe(true)
+    rerender(
+      <PublicPageView status="password" page={null} message={null} submitting onSubmitPassword={() => {}} />,
+    )
+    expect(screen.getByRole("button", { name: /checking/i })).toBeTruthy()
+  })
+})
+
+describe("P03 — unavailable is one shape, one text, no actions", () => {
+  it("renders the not-found state with the fixed sentence", () => {
+    const { container } = renderStatus("unavailable")
+    expect(container.querySelector('[data-state="not-found"]')).not.toBeNull()
+    expect(screen.getByRole("heading", { name: "This link is not available" })).toBeTruthy()
+    expect(container.textContent).toContain(
+      "It may have expired or been withdrawn. Ask whoever shared it for a new one.",
+    )
+    expect(container.querySelectorAll("button, a, input")).toHaveLength(0)
+  })
+
+  it("expired, revoked and unknown render identical DOM whatever the server said", () => {
+    const html = (status: "unavailable" | "error", message: string | null) => {
+      const { container, unmount } = renderStatus(status, { message })
+      const out = container.innerHTML
+      unmount()
+      return out
+    }
+    const expired = html("unavailable", "this link has expired")
+    const revoked = html("unavailable", "this link was revoked")
+    const unknown = html("unavailable", null)
+    const failed = html("error", "boom")
+    expect(revoked).toBe(expired)
+    expect(unknown).toBe(expired)
+    expect(failed).toBe(expired)
+    expect(expired).not.toMatch(/was revoked|has expired/i)
+  })
+})
+
+describe("P04 — ready: page head, grid, expiry footer, no actions", () => {
+  it("draws the pages tile, the h1, the read-only meta line and the description", () => {
+    const { container } = renderStatus("ready")
+    const head = container.querySelector('[data-slot="public-page-header"]')!
+    expect(within(head as HTMLElement).getByRole("heading", { level: 1, name: "Uzávěrka" })).toBeTruthy()
+    expect(head.querySelector('[data-slot="public-page-tile"]')).not.toBeNull()
+    const meta = head.querySelector('[data-slot="public-page-meta"]')!
+    expect(meta.textContent).toBe("Shared read-only · rendered 12 Aug 13:00")
+    expect(head.textContent).toContain("Monthly close")
+  })
+
+  it("puts only the expiry in the footer and no control anywhere on the page", () => {
+    const { container } = renderStatus("ready")
+    const footer = container.querySelector('[data-slot="public-page-footer"]')!
+    expect(footer.textContent).toBe("This link stops working 11 Sep 13:00")
+    expect(container.querySelectorAll("button, a[href], input, form")).toHaveLength(0)
+  })
+
+  it("is one column on a phone and twelve from tablet", () => {
+    const { container } = renderStatus("ready")
+    const grid = container.querySelector('[data-slot="public-panel-grid"]')!
+    expect(grid.className).toContain("grid-cols-1")
+    expect(grid.className).toContain("md:grid-cols-12")
   })
 })
