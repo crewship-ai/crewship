@@ -153,16 +153,20 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
   test("editing a schedule's cron shows a live preview and the saved cron sticks", async ({ page }) => {
     await page.goto(`/routines?slug=${SLUG}`)
 
-    await page.getByRole("button", { name: "Plan", exact: true }).click()
+    // Harbor 2 (routines R08): the Plan tab became Triggers — one list of
+    // everything that starts the routine.
+    await page.getByRole("tab", { name: /^Triggers/ }).click()
 
     // Every locator is scoped to the row of the schedule this run seeded —
-    // the tab renders one <li id="schedule-{id}"> per schedule (the deep-link
-    // anchor), and a page-wide "Edit schedule <name>" button lookup breaks
-    // the moment a second schedule carries the same name (#2532).
+    // the list renders one <li id="schedule-{id}"> per schedule (the deep-link
+    // anchor), and a page-wide "Edit schedule …" button lookup breaks the
+    // moment a second schedule carries the same name (#2532).
     const row = page.locator(`#schedule-${seeded.scheduleId}`)
     await expect(row).toBeVisible({ timeout: TIMEOUT })
 
-    const editButton = row.getByRole("button", { name: `Edit schedule ${SCHEDULE_NAME}`, exact: true })
+    // A trigger row is titled by its recurrence in words (v67 RT-TRIG), so
+    // the Edit button names the recurrence rather than the schedule name.
+    const editButton = row.getByRole("button", { name: "Edit schedule Every day at 09:00", exact: true })
     await expect(editButton).toBeVisible({ timeout: TIMEOUT })
     await editButton.click()
 
@@ -190,12 +194,12 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
     await dialog.getByRole("button", { name: "Save" }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
-    // The operator console shows recurrence, timezone and next start in
-    // separate elements. Keep assertions scoped to this schedule, then read
-    // it back from the server so optimistic UI alone cannot satisfy the test.
+    // The trigger row shows the recurrence as its title and the timezone and
+    // next start on its detail line. Keep assertions scoped to this schedule,
+    // then read it back from the server so optimistic UI alone cannot
+    // satisfy the test.
     await expect(row.getByText("Every day at 03:15", { exact: true })).toBeVisible({ timeout: TIMEOUT })
-    await expect(row.getByText("· Europe/Prague", { exact: true })).toBeVisible({ timeout: TIMEOUT })
-    await expect(row.getByTestId(`schedule-uses-${seeded.scheduleId}`)).toContainText(/ · next .+ · with:/, { timeout: TIMEOUT })
+    await expect(row.getByText(/^Europe\/Prague · next .+ · /)).toBeVisible({ timeout: TIMEOUT })
 
     const saved = await page.evaluate(async ({ workspaceId, scheduleId }) => {
       const response = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules`)
