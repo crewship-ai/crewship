@@ -22,7 +22,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-it("publishes title and validated latest body only after both no-store immutable-ID reads", async () => {
+it.each([2,3] as const)("publishes schema %s title and latest body only after both no-store immutable-ID reads", async schema => {
   const pending = deferred()
   vi.mocked(apiFetch).mockResolvedValueOnce(response(metadata())).mockReturnValueOnce(pending.promise)
   const { result } = renderHook(() => useDocumentViewerRead(input()))
@@ -36,9 +36,9 @@ it("publishes title and validated latest body only after both no-store immutable
     expect(init?.cache).toBe("no-store"); expect(init?.signal).toBeInstanceOf(AbortSignal)
     expect(init?.method).toBeUndefined()
   }
-  await act(async () => { pending.resolve(response(saved())) })
+  await act(async () => { pending.resolve(response({ ...saved(), schema })) })
   await waitFor(() => expect(result.current.read.status).toBe("ready"))
-  expect(result.current.read).toMatchObject({ title: "Current authorized title", content: { schema: 3, rev: 8, content: body }, scopeKey: result.current.scopeKey, target: input().target })
+  expect(result.current.read).toMatchObject({ title: "Current authorized title", content: { schema, rev: 8, content: body }, scopeKey: result.current.scopeKey, target: input().target })
 })
 
 it.each(["disabled", "not exactly enabled", "no epoch", "no human", "no chat", "no workspace", "closed", "wrong workspace", "empty Page", "wrong type", "pinned mode"])("makes no request for invalid activation: %s", kind => {
@@ -148,4 +148,18 @@ it("does not start an obsolete body read after late metadata or expose data afte
   await act(async () => { old.resolve(response(metadata())) })
   expect(apiFetch).toHaveBeenCalledTimes(2)
   expect(result.current.read).toEqual({ status: "error" })
+})
+
+it.each([[403,"denied"],[503,"unavailable"]] as const)("withholds authorized metadata when the second read returns %s", async (status, expected) => {
+  vi.mocked(apiFetch).mockResolvedValueOnce(response(metadata())).mockResolvedValueOnce(response({error:"Private body failure"},status))
+  const {result}=renderHook(()=>useDocumentViewerRead(input()))
+  await waitFor(()=>expect(result.current.read).toEqual({status:expected}))
+})
+
+it("fails closed for malformed JSON and encodes the Page identity as one path segment", async () => {
+  const p=input();p.target={...p.target!,pageId:"page /&"}
+  vi.mocked(apiFetch).mockResolvedValueOnce(response(metadata("page /&"))).mockResolvedValueOnce(new Response("not JSON"))
+  const {result}=renderHook(()=>useDocumentViewerRead(p))
+  await waitFor(()=>expect(result.current.read.status).toBe("unavailable"))
+  expect(vi.mocked(apiFetch).mock.calls[1][0]).toBe("/api/v1/pages/%40page%20%2F%26/document?workspace_id=ws+%2F%26")
 })
