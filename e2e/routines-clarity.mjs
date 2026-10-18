@@ -52,7 +52,7 @@ async function publish(definition) {
 try {
   await page.goto(base + "/login")
   await page.getByLabel(/email/i).fill(account.email)
-  await page.getByLabel(/password/i).fill(account.password)
+  await page.getByLabel("Password", { exact: true }).fill(account.password)
   await page.getByRole("button", { name: /sign in|log in/i }).click()
   await page.waitForURL((url) => !url.pathname.includes("/login"))
   report.version = await request("GET", "/api/v1/system/version")

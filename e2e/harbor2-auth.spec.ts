@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test"
 
-// Harbor 2 acceptance for the sign-in and public pages (#3410): one auth card
-// on every unauthenticated route, measured in a real browser at the three
-// layout widths and in both themes, plus the keyboard path and the deep-link
-// round trip. Runs signed out.
+// Harbor 2 acceptance for the sign-in and public pages (#3410, #3583): the
+// sail panel beside a frameless form on every auth route, measured in a real
+// browser at the three layout widths and in both themes, plus the keyboard
+// path and the deep-link round trip. Runs signed out.
 //
 // E2E_EMAIL / E2E_PASSWORD name an existing account for the round trip.
 
@@ -26,6 +26,16 @@ async function theme(page: Page, scheme: "light" | "dark") {
   }, scheme)
 }
 
+// The sign-up form is drawn only when setup-status says sign-up is on; CI's
+// server runs with it off, so the form tests answer that one request.
+async function signupOpen(page: Page, open = true) {
+  await page.route("**/api/v1/system/setup-status", async (route) => {
+    const res = await route.fetch()
+    const body = await res.json().catch(() => ({}))
+    await route.fulfill({ response: res, json: { ...body, allow_signup: open } })
+  })
+}
+
 async function card(page: Page) {
   const c = page.locator("[data-slot=auth-card]").first()
   await expect(c).toBeVisible()
@@ -43,39 +53,49 @@ for (const w of WIDTHS) {
       // Exactly one primary in the card.
       expect(await c.locator("button.bg-primary-strong, a.bg-primary-strong").count()).toBe(1)
       const box = (await c.boundingBox())!
-      if (w.width >= 768) {
-        // A 480 px card with a frame on a desk and a tablet.
-        expect(Math.round(box.width)).toBe(480)
-        await expect(c).toHaveCSS("border-top-left-radius", "14px")
+      const panel = (await page.locator("[data-slot=auth-panel]").boundingBox())!
+      // The form drops its frame inside the split screen.
+      await expect(c).toHaveCSS("border-top-width", "0px")
+      if (w.width >= 1024) {
+        // Desk and tablet landscape: form on the left (44 %), sails on the right.
+        expect(Math.round(box.width)).toBe(352)
+        expect(panel.x).toBeGreaterThan(box.x + box.width)
+        expect(panel.height).toBeGreaterThanOrEqual(w.height - 1)
+        await expect(page.getByText("Command the whole fleet.")).toBeVisible()
       } else {
-        // The whole screen on a phone, with the primary across the width.
-        expect(Math.round(box.width)).toBe(w.width)
+        // Phone: a 12rem sail banner above a full-width form, no copy on it.
+        expect(Math.round(panel.height)).toBe(192)
+        expect(panel.y + panel.height).toBeLessThanOrEqual(box.y)
+        expect(Math.round(panel.width)).toBe(w.width)
+        expect(box.x).toBeGreaterThanOrEqual(16)
+        expect(box.x + box.width).toBeLessThanOrEqual(w.width - 16)
+        await expect(page.getByText("Command the whole fleet.")).toBeHidden()
         const primary = (await c.getByRole("button", { name: "Sign in" }).boundingBox())!
-        expect(primary.width).toBeGreaterThan(w.width - 40)
+        expect(Math.round(primary.width)).toBe(Math.round(box.width))
       }
       await page.screenshot({ path: info.outputPath(`login-${w.width}-${scheme}.png`), fullPage: true })
     })
   }
 }
 
-test("tab order Email → Password → Forgot → Sign in", async ({ page }) => {
+test("tab order Email → Password → Show password → Forgot → Sign in", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/login")
   await card(page)
   await page.getByLabel("Email").focus()
   const order: string[] = []
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     await page.keyboard.press("Tab")
     order.push(
       await page.evaluate(() => {
         const el = document.activeElement as HTMLElement | null
-        return el?.id || el?.textContent?.trim() || ""
+        return el?.id || el?.getAttribute("aria-label") || el?.textContent?.trim() || ""
       }),
     )
   }
-  // The primary comes before the footer links in the DOM, so this holds
-  // whether or not sign-up is on.
-  expect(order).toEqual(["password", "Forgot password?", "Sign in"])
+  // The reveal button sits right after its field. The primary comes before
+  // the footer links in the DOM, so this holds whether or not sign-up is on.
+  expect(order).toEqual(["password", "Show password", "Forgot password?", "Sign in"])
 })
 
 test("touch targets are 44 px with a coarse pointer", async ({ browser }) => {
@@ -86,6 +106,7 @@ test("touch targets are 44 px with a coarse pointer", async ({ browser }) => {
     storageState: { cookies: [], origins: [] },
   })
   const page = await context.newPage()
+  await signupOpen(page)
   await page.goto("/signup")
   const c = await card(page)
   for (const label of ["Full name", "Email", "Password", "Confirm password"]) {
@@ -99,6 +120,7 @@ test("touch targets are 44 px with a coarse pointer", async ({ browser }) => {
 })
 
 test("a wrong confirmation is shown under its field, not above the form", async ({ page }) => {
+  await signupOpen(page)
   await page.goto("/signup")
   await card(page)
   await page.getByLabel("Full name").fill("Playwright Reader")
@@ -109,6 +131,14 @@ test("a wrong confirmation is shown under its field, not above the form", async 
   const error = page.locator("#confirm_password-error")
   await expect(error).toHaveText("Passwords do not match")
   await expect(page.getByLabel("Confirm password")).toHaveAttribute("aria-invalid", "true")
+})
+
+// #3583: with sign-up off the page says so before anyone types a form out.
+test("sign-up off shows the closed state, no form", async ({ page }) => {
+  await signupOpen(page, false)
+  await page.goto("/signup")
+  await expect(page.getByText("Sign-up is closed")).toBeVisible()
+  await expect(page.getByLabel("Full name")).toHaveCount(0)
 })
 
 test("deep link → login → back to the same URL incl. query", async ({ page }) => {
