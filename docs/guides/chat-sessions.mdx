@@ -30,6 +30,29 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 ## Key concepts
 
+### Reading progress and restored replies
+
+When a server supplies versioned progress, the transcript keeps the server's
+turn and part identities across live updates and history. A provider result or
+closed connection does not confirm that a reply was saved. A missing replay
+segment displays **Partial response — stream recovery pending** until received
+progress or a confirmed history checkpoint covers the gap. Requesting Stop
+keeps the turn pending until the server reports its outcome.
+
+Reasoning blocks show only an explicitly permitted summary. Private reasoning
+is redacted, and older records without summary provenance show **Reasoning
+unavailable**. Displayed duration comes from completed server-recorded intervals;
+legacy content does not acquire an estimated timer.
+
+Activity uses correlated tool identities, including nested calls. Failed,
+denied, interrupted and unknown outcomes remain distinct from success. Open a
+step for its permitted details; bounded output and diff previews indicate when
+their contents were truncated.
+
+Temporary history failures preserve the current user's visible response.
+Definitive access denial or a change of signed-in identity clears protected
+transcript state. These presentation rules do not grant access to a source.
+
 ### Questions and decisions
 
 When an agent asks for information, its authorized decision form appears at the
