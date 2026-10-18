@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react"
 import Link from "next/link"
 
 import {
-  AlertCircle, AlertTriangle, ArrowDownUp, Bell, Brain, Check, CircleSlash, Clock3, History,
+  AlertCircle, AlertTriangle, Bell, Brain, Check, CircleSlash, Clock3, History,
   Inbox, LayoutDashboard, ListChecks, MessageSquare, ShieldCheck, Workflow, type LucideIcon,
 } from "lucide-react"
 
@@ -18,10 +18,6 @@ import {
 } from "@/components/layout/sidebar-facets"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Badge } from "@/components/ui/badge"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup,
-  DropdownMenuRadioItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
@@ -222,12 +218,18 @@ export function InboxV2Explorer({
     // carries the collapse button; the panel owns width and the phone pattern.
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <SidebarToolbar>
-        <div ref={searchRef} data-inbox-search className="min-w-0 flex-1">
+        <div ref={searchRef} data-inbox-search className="relative min-w-0 flex-1">
           <SidebarSearch
             value={filters.search}
             onValueChange={(search) => set({ search })}
             placeholder="Search inbox…"
           />
+          {/* The v67 shortcut hint; the clear button takes its place once there is text. */}
+          {filters.search === "" && (
+            <kbd aria-hidden className="pointer-events-none absolute right-2 top-1/2 hidden h-[18px] min-w-4 -translate-y-1/2 items-center justify-center rounded border border-border bg-muted px-1 text-micro leading-none text-muted-foreground-soft md:inline-flex">
+              /
+            </kbd>
+          )}
         </div>
         <SidebarFilterButton activeCount={activeCount} {...facets.triggerProps}>
           Filter
@@ -242,21 +244,6 @@ export function InboxV2Explorer({
           >
             <ListChecks className="h-3.5 w-3.5" />
           </SidebarViewButton>
-        )}
-        {onSort && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SidebarViewButton aria-label="View: sort">
-                <ArrowDownUp className="h-3.5 w-3.5" />
-              </SidebarViewButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Sort</DropdownMenuLabel>
-              <DropdownMenuRadioGroup value={sort} onValueChange={(next) => onSort(next as InboxSort)}>
-                {INBOX_SORTS.map((s) => <DropdownMenuRadioItem key={s.key} value={s.key}>{s.label}</DropdownMenuRadioItem>)}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
         )}
       </SidebarToolbar>
 
@@ -305,6 +292,16 @@ export function InboxV2Explorer({
             onClear={() => set({ crew: null })}
           />
         )}
+        {onSort && (
+          // v67 keeps Sort under Display in the Filter block, not in the toolbar.
+          <SidebarInlineFacet
+            label="Sort"
+            values={INBOX_SORTS.map((o) => ({ value: o.key, label: o.label }))}
+            selected={sort === "urgency" ? null : sort}
+            onToggle={(value) => onSort(value as InboxSort)}
+            onClear={() => onSort("urgency")}
+          />
+        )}
         {agentValues.length > 0 && (
           <SidebarInlineFacet
             label="Agent"
@@ -337,7 +334,7 @@ export function InboxV2Explorer({
               >
                 <s.icon className={cn("h-3.5 w-3.5 shrink-0", on ? "text-primary-hover" : "text-muted-foreground-soft")} aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                {s.key !== "history" && <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{viewCounts[s.key]}</span>}
+                {s.key !== "history" && <span className="text-micro tabular-nums text-muted-foreground">{viewCounts[s.key]}</span>}
               </button>
             )
           })}
@@ -487,9 +484,9 @@ function EntryRow({ entry, selected, picking = false, onOpen, lookup }: { entry:
             {deadlineMins! > 0 ? `in ${remainingLabel(deadlineMins!)}` : "expired"}
           </span>
         ) : (
-          <span className="whitespace-nowrap font-mono text-micro tabular-nums text-muted-foreground-soft">{ageLabel(entry.createdAt)}</span>
+          <span className="whitespace-nowrap text-micro tabular-nums text-muted-foreground-soft">{ageLabel(entry.createdAt)}</span>
         )}
-        {merged > 1 && <Badge variant="outline" className="h-4 px-1 font-mono text-micro tabular-nums">×{merged}</Badge>}
+        {merged > 1 && <Badge variant="outline" className="h-4 px-1 text-micro tabular-nums">×{merged}</Badge>}
       </span>
     </SidebarRow>
   )

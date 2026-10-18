@@ -60,11 +60,12 @@ describe("AppearanceSection", () => {
     expect(setTheme).toHaveBeenCalledWith("light")
   })
 
+  // v67 `.swatches`: named by tooltip and accessible name only (PAR-097).
   it("labels every accent swatch", () => {
     render(<AppearanceSection />)
     for (const { label } of ACCENTS) {
-      expect(screen.getByRole("radio", { name: label })).toBeTruthy()
-      expect(screen.getByText(label)).toBeTruthy()
+      expect(screen.getByRole("radio", { name: label })).toHaveAttribute("title", label)
+      expect(screen.queryByText(label)).toBeNull()
     }
   })
 
@@ -108,7 +109,7 @@ describe("AppearanceSection", () => {
     cleanup()
     workspaceHex = "#E11D48"
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/workspace's brand colour, adjusted/i)
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent("The workspace brand colour from General › Pages appearance")
     fireEvent.click(screen.getByRole("radio", { name: "Team colour" }))
     expect(document.documentElement.dataset.accent).toBe("workspace")
   })
@@ -134,7 +135,8 @@ describe("AppearanceSection", () => {
 
   it("previews the accent with real controls, and offers every preset as a tile", () => {
     render(<AppearanceSection />)
-    expect(screen.getByRole("group", { name: "Accent preview" })).toHaveTextContent("Primary action")
+    // v67 `.s-prev`: a primary button, a link, a selected row, a focused field.
+    expect(screen.getByRole("group", { name: "Accent preview" })).toHaveTextContent("PrimaryA linkSelected rowFocused field")
     const tiles = screen.getByRole("radiogroup", { name: "Accent colour" }).querySelectorAll('[role="radio"]')
     expect(tiles).toHaveLength(ACCENTS.length)
   })

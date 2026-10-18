@@ -43,7 +43,7 @@ export function RecipesEmptyState({ workspaceId, onInstalled }: Props) {
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold tracking-wider uppercase text-muted-foreground">Get started in one click</h2>
+          <h2 className="text-control font-semibold text-muted-foreground">Get started in one click</h2>
         </div>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
           {recipes.map((r, idx) => (

@@ -433,7 +433,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                 {showRevokedTokens && revokedTokens.map((token) => (
                   <div key={token.id} className="flex items-center justify-between border-b border-border px-4 py-2 opacity-60">
                     <span className="font-mono text-control text-muted-foreground line-through">{token.name}</span>
-                    <span className="font-mono text-label text-muted-foreground">revoked</span>
+                    <span className="text-label text-muted-foreground">revoked</span>
                   </div>
                 ))}
                 <SettingsCardActions className="pt-2.5">

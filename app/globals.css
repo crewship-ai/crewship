@@ -799,6 +799,13 @@ body {
     font-weight: 600;
     letter-spacing: -0.005em;
   }
+  /* A dialog's title (v67 .dlg-ht b): 15 px bold. */
+  .type-dialog-title {
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
   /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
   .type-group-head {
     font-size: max(11.5px, 0.72rem);
@@ -850,7 +857,7 @@ body {
      every schema, so they get names once here rather than a size each, in each
      schema's component, eleven times over.
 
-       .type-page-label    11.5px          panel header, card header, column head
+       .type-page-label    11px UPPERCASE  panel header, card header, column head
        .type-page-value    14px            the content: cells, rows, prose, banners
        .type-page-meta     12px            the qualifier: status word, age, counts, hints
        .type-page-stamp    11px mono       machine text: ids, slugs, run ids, versions
@@ -891,10 +898,11 @@ body {
      the detail pane beside it, which is the exact defect this surface was
      already fixed for once. */
   .type-page-label {
-    font-size: max(11.5px, 0.72rem);
+    font-size: var(--typo-micro);
     line-height: var(--typo-micro-lh);
     font-weight: 600;
-    letter-spacing: -0.005em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
   .type-page-value {
     font-size: var(--typo-body);

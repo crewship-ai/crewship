@@ -6,12 +6,8 @@ import Link from "next/link"
 import { ChevronRight, PanelLeft, Search } from "lucide-react"
 
 import { areaOf } from "@/lib/nav-sections"
-import { useRealtime } from "@/hooks/use-realtime"
 import { Button } from "@/components/ui/button"
-import { useEngineStatus } from "@/hooks/use-engine-status"
-import { useCrewsStatus } from "@/hooks/use-crews-status"
-import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { useAccessMode, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
@@ -19,9 +15,6 @@ import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 
-import { ProvisioningBadge } from "./app-toolbar-provisioning"
-import { SystemStatusPill } from "./status-pill"
-import { UserMenu } from "./user-menu"
 import { useIsTabletPanel } from "./secondary-panel"
 import { MobileMoreSheet } from "./mobile-more-sheet"
 
@@ -64,15 +57,10 @@ import { MobileMoreSheet } from "./mobile-more-sheet"
 // back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
-  // Engine, crews, provisioning, inbox and runs are not on the restricted
-  // allowlist. Their hooks idle on a null workspace, and their widgets are not
-  // rendered unless the session is trusted.
+  // Inbox and runs are not on the restricted allowlist: their bells are not
+  // rendered unless the session is trusted. (The connection, fleet and build
+  // status are inside the Activity bell's panel.)
   const trusted = useAccessMode() === "trusted"
-  const workspaceId = useTrustedWorkspaceId()
-  const { status: engineStatus } = useEngineStatus(workspaceId)
-  const crewsStatus = useCrewsStatus(workspaceId)
-  const provisioning = useProvisioningStatus(workspaceId)
-  const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
   const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
   const secondaryPanel = useAppStore((st) => st.secondaryPanel)
@@ -204,37 +192,13 @@ export function AppToolbar() {
           this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
-        {/* On a phone the slot stays empty and hidden; SubBar still reads the
-            area it names so the page row does not repeat it. */}
-        <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className={cn("flex min-w-0 flex-1 items-center gap-2", isMobile && "hidden")} />
+        {/* On a phone the slot holds the page's primary action (icon-only) and
+            its explorer toggle, between the title and the search (v67). */}
+        <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className="flex min-w-0 flex-1 items-center gap-2" />
       </div>
 
       {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* One status pill: connection on the left, fleet on the right.
-          *
-          * These were two — "Online" and "Crews idle" — and the second was
-          * losing an argument it should not have been in. Its busy state
-          * repeated the Activity panel's live count without the routine name,
-          * elapsed time, cost or Cancel that panel carries; its quiet state
-          * asserted "idle" from `agents.status`, a column that flips for the
-          * six seconds an agent takes to answer, so the word was wrong about
-          * as often as it was right.
-          *
-          * Merged rather than merely reworded, because two pills could state a
-          * contradiction side by side: "Offline" next to "7 agents", where the
-          * second is last-known and nobody can currently know it. One pill
-          * drops the fleet half while the link is down. See status-pill.tsx.
-          *
-          * The provisioning badge stays separate and stays to the LEFT, so the
-          * status pill never reflows when a build appears. */}
-        {trusted && (
-          <div className="hidden lg:flex items-center gap-1.5 mr-1">
-            <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
-            <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} workspaceId={workspaceId} />
-          </div>
-        )}
-
         {/* Search lives in the sidebar on desktop and tablet (Harbor 2); the
             phone has no sidebar, so it keeps an icon here. ⌘K is still owned
             by the listener above. */}
@@ -282,23 +246,18 @@ export function AppToolbar() {
           * RealtimeStatusBanner — because a notice nobody can afford to miss
           * does not belong behind a closed dropdown. */}
         {trusted && (
-          <div className="hidden md:flex items-center gap-0.5">
-            {/* The strip reads in two halves: the system (status, search) and
-                you (what is running for you, what is asked of you, your
-                account). The rule marks where one ends. */}
-            <span className="mx-1 h-5 w-px bg-foreground/[0.1]" aria-hidden />
+          <div className="flex items-center gap-0.5">
+            {/* The strip reads in two halves: the page's actions and search,
+                then the two bells. The rule marks where one ends. On a phone
+                it is the activity bell only: Inbox is a tab, and the account
+                is a row in the More sheet. */}
+            <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />
             <ActivityBell />
-            <InboxBell />
+            <div className="hidden md:flex">
+              <InboxBell />
+            </div>
           </div>
         )}
-
-
-        {/* The profile menu is the sidebar's last row on desktop and tablet
-            (Harbor 2); the phone has no sidebar, so it stays here. */}
-        <div className="md:hidden">
-          <UserMenu />
-        </div>
-
       </div>
 
       {/* Mobile: the More sheet (v67 pop-more) */}
@@ -308,19 +267,3 @@ export function AppToolbar() {
     </header>
   )
 }
-
-/**
- * Toolbar provisioning badge — single source of UI truth for "an image
- * somewhere needs work".
- *
- * Sits at the LEFT edge of the status group so the fixed Online / Crews
- * pills don't reflow when it appears. Click opens a popover whose rows
- * are state-aware:
- *   - needs_provision → Build now button
- *   - running         → live step/total progress bar + last message
- *   - failed          → error + Retry button
- *
- * Crew name is a Link to the canvas (where the user can edit config or
- * see the full provisioning banner); action buttons live on the row
- * itself so the user never has to navigate away to act.
- */

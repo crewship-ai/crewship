@@ -7,8 +7,7 @@ import path from "node:path"
 // is for code, ids, hashes and log timestamps. The mono + UPPERCASE micro
 // label ("eyebrow") is retired, so:
 //
-//  1. the kit utilities that used to be it (`.eyebrow`, `.type-section`,
-//     `.type-page-label`) must not declare `text-transform: uppercase` or the
+//  1. the kit utilities that used to be it (`.eyebrow`, `.type-section`) must not declare `text-transform: uppercase` or the
 //     mono family any more, and
 //  2. no class string in components/** or app/** may carry `uppercase` AND
 //     `font-mono`.
@@ -30,14 +29,6 @@ const BASELINE: Record<string, number> = {
   "components/features/logs/logs-toolbar.tsx": 1,
   "components/features/paymaster/time-range-picker.tsx": 1,
   "components/features/paymaster/top-spenders-table.tsx": 1,
-  "components/features/settings/audit-log/audit-time.tsx": 2,
-  "components/features/settings/crew-links/crew-profile.tsx": 2,
-  "components/features/settings/hooks/hook-editor.tsx": 1,
-  "components/features/settings/hooks/hooks-page.tsx": 1,
-  "components/features/settings/members/member-detail.tsx": 1,
-  "components/features/settings/members/members-page.tsx": 1,
-  "components/features/settings/members/people-table.tsx": 3,
-  "components/features/settings/sections/crew-audit-section.tsx": 1,
 }
 
 const STRING_LITERAL = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g
@@ -71,7 +62,10 @@ function cssRule(css: string, selector: string): string {
 describe("mono-caps micro labels are retired", () => {
   it("kit utilities are sentence-case sans", () => {
     const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf8")
-    for (const sel of [".eyebrow", ".type-section", ".type-page-label"]) {
+    // `.type-page-label` is the Pages register's own role (uppercase sans, not
+    // mono) and is pinned by components/features/pages/__tests__/type-register;
+    // the Pages owner retires it together with that test.
+    for (const sel of [".eyebrow", ".type-section"]) {
       const rule = cssRule(css, sel)
       expect(rule, `${sel} is defined`).not.toBe("")
       expect(rule, `${sel} uppercases`).not.toMatch(/text-transform:\s*uppercase/)

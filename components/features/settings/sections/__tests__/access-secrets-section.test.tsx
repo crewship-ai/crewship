@@ -94,7 +94,10 @@ describe("the reveal switch", () => {
   it("is read-only for an ADMIN, and says who can move it", async () => {
     renderSection("ADMIN")
     await waitFor(() => expect(screen.getByLabelText(/enable credential reveal/i)).toBeDisabled())
-    expect(screen.getByText(/only a workspace owner can move this switch/i)).toBeInTheDocument()
+    // The rule is on the lock beside the label (its tooltip), not repeated as
+    // the row's hint: v67 explains the switch itself there (PAR-118).
+    expect(screen.getByTitle(/only a workspace owner can move this switch/i)).toHaveTextContent("Owner")
+    expect(screen.queryByText(/only a workspace owner can move this switch/i)).toBeNull()
   })
 
   it("is read-only for a MANAGER, who still needs to know the rule", async () => {
@@ -141,9 +144,10 @@ describe("who holds credentials:reveal", () => {
     route({ caps: { u1: ["chat", "credentials:reveal"], u2: ["chat"] } })
     renderSection("OWNER")
 
-    expect(await screen.findByText(/person can reveal secrets/)).toHaveTextContent("1 person can reveal secrets")
-    expect(screen.getByText("Pavel")).toBeInTheDocument()
+    // The count and the avatars only (PAR-119): who they are is Members' job.
+    expect(await screen.findByText("1 person")).toBeInTheDocument()
     expect(screen.queryByText(/tom@firma.cz/)).not.toBeInTheDocument()
+    expect(document.querySelectorAll("[data-slot=reveal-holders] > *")).toHaveLength(1)
   })
 
   // Reveal being ON with nobody holding the capability is a real and common
@@ -154,7 +158,9 @@ describe("who holds credentials:reveal", () => {
     expect(await screen.findByText(/no value can be revealed until someone is granted it/i)).toBeInTheDocument()
   })
 
-  it("warns once the capability is spread wider than the recommendation", async () => {
+  // The amber footer moved to Members' "Needs attention" (PAR-119); this card
+  // keeps the rule in its hint and the count.
+  it("keeps the recommendation in the hint once the capability is spread wider", async () => {
     route({
       caps: {
         u1: ["credentials:reveal"],
@@ -163,7 +169,9 @@ describe("who holds credentials:reveal", () => {
       },
     })
     renderSection("OWNER")
-    expect(await screen.findByText(/3 people can read secrets in plaintext/i)).toBeInTheDocument()
+    expect(await screen.findByText("3 people")).toBeInTheDocument()
+    expect(screen.getByText(/More than 2 shows a warning/)).toBeInTheDocument()
+    expect(screen.queryByText(/can read secrets in plaintext/i)).toBeNull()
   })
 
   // A failed read is not an empty answer: "Nobody holds …" is a claim about
@@ -230,7 +238,7 @@ describe("acting on who may reveal", () => {
   it("counts the holders and sends grants and revocations to Members", async () => {
     route({ caps: { u1: ["credentials:reveal"], u2: ["credentials:reveal"] } })
     renderSection("OWNER")
-    expect(await screen.findByText(/people can reveal secrets/)).toHaveTextContent("2 people can reveal secrets")
+    expect(await screen.findByText("2 people")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
     expect(screen.queryByRole("button", { name: /^Revoke reveal/ })).toBeNull()
     expect(screen.queryByLabelText("Person to grant reveal to")).toBeNull()
