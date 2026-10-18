@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Download, Mail, MessageSquare, Terminal, Users, X } from "lucide-react"
+import { ChevronDown, Download, Mail, MessageSquare, Terminal, TriangleAlert, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -11,6 +11,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { ALL_CAPABILITIES, CAPABILITY_BUNDLES, CAPABILITY_LABELS, Capability, type CapabilityBundle, type CapabilityValue } from "@/lib/capabilities"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { personLabel } from "@/components/ui/user-avatar"
@@ -471,9 +472,14 @@ export function MembersPage() {
           )}
 
           {capsFailed && (
-            <p role="alert" data-slot="members-caps-error" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              Could not read what people may do, so it cannot be changed until it loads. <button type="button" className="underline" onClick={() => void capsQuery.refetch()}>Retry</button>
-            </p>
+            <PageBanner
+              tone="bad"
+              icon={TriangleAlert}
+              data-slot="members-caps-error"
+              action={<Button variant="outline" size="sm" onClick={() => void capsQuery.refetch()}>Retry</Button>}
+            >
+              Could not read what people may do, so it cannot be changed until it loads.
+            </PageBanner>
           )}
 
           {findings && !filters.status && <MembersAttention findings={findings} />}

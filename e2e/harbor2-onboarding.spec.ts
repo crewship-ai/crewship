@@ -156,6 +156,8 @@ test.describe("setup card — desktop", () => {
     await page.goto("/onboarding")
     await page.getByRole("button", { name: /Also pair my CLI/ }).click()
     await expect(page.getByText(/crewship login --pair --code=E2E-PAIR/)).toBeVisible()
+    // one pairing component for Connect CLI and the setup (COM-09)
+    await expect(page.locator("[data-slot=cli-pairing]")).toHaveCount(1)
     await expect(page.getByText("CLI paired and model token received.")).toBeVisible({ timeout: 15_000 })
     await expect(page.locator("#api_key")).toBeDisabled()
     await expect(page.locator("#api_key")).toHaveAttribute("placeholder", "Token saved — encrypted on the server")
@@ -186,6 +188,23 @@ test.describe("setup card — desktop", () => {
   })
 })
 
+
+async function pairingPending(page: Page) {
+  await mockSetup(page, { preferredLanguage: "English" })
+  await page.route("**/api/v1/auth/pair/start", (r) =>
+    r.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ code: "E2E-PAIR", expires_at: new Date(Date.now() + 600_000).toISOString() }),
+    }),
+  )
+  await page.route("**/api/v1/auth/pair/poll?*", (r) =>
+    r.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "pending" }) }),
+  )
+  await page.goto("/onboarding")
+  await page.getByRole("button", { name: /Also pair my CLI/ }).click()
+  await expect(page.getByTestId("pair-command")).toContainText("E2E-PAIR")
+}
+
 test.describe("setup card — tablet", () => {
   test.use({ viewport: { width: 1024, height: 768 } })
 
@@ -195,6 +214,14 @@ test.describe("setup card — tablet", () => {
     const card = await box(page, "[data-slot=setup-card]")
     expect(Math.round(card.width)).toBe(800)
     expect(card.x).toBeGreaterThanOrEqual(16)
+  })
+
+  test("pairing block: command, labelled Copy and the waiting note fit the card", async ({ page }) => {
+    await pairingPending(page)
+    await expect(page.getByRole("button", { name: "Copy command" })).toHaveText("Copy")
+    await expect(page.getByText(/Waiting for the CLI/)).toBeVisible()
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
   })
 })
 
@@ -214,6 +241,14 @@ test.describe("setup card — phone", () => {
       expect(b, name).not.toBeNull()
       expect(b!.height, name).toBeGreaterThanOrEqual(44)
     }
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+
+  test("pairing block: 44 px Copy, no horizontal overflow", async ({ page }) => {
+    await pairingPending(page)
+    const copy = await page.getByRole("button", { name: "Copy command" }).boundingBox()
+    expect(copy!.height).toBeGreaterThanOrEqual(44)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow).toBeLessThanOrEqual(0)
   })
