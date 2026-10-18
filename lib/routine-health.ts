@@ -41,7 +41,7 @@ const isFailed = (r: HealthRun) => runBarTone(r).tone === "bad"
 const isFinished = (r: HealthRun) => !["running", "queued", "waiting"].includes(r.status)
 
 /** The checks the server's data can prove, worst first. */
-export function routineChecks({ routine, runs }: { routine: HealthRoutine; runs: HealthRun[] }): Check[] {
+export function routineChecks({ routine, runs }: { routine: Pick<HealthRoutine, "status" | "draft">; runs: HealthRun[] }): Check[] {
   const list = newestFirst(runs)
   const out: Check[] = []
 
