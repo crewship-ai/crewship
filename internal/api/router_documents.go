@@ -9,6 +9,7 @@ import (
 
 func (r *Router) registerDocumentRoutes() {
 	p := r.pages
+	p.documentStoreOptions = r.documentStoreOptions
 	if r.documentsServiceSocket != "" && r.documentsSocket != "" {
 		r.documentsClient = &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", r.documentsServiceSocket)
@@ -22,6 +23,8 @@ func (r *Router) registerDocumentRoutes() {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, DocumentAvailability{Enabled: p.documentCall != nil})
 	}))))
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
 	// The private authority retains the ownership gate; inline also records

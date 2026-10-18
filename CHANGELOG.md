@@ -76,6 +76,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
+- **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 
 - **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.

@@ -36,12 +36,14 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"slides_heads":        IntentInclude,
-	"slides_revisions":    IntentInclude,
-	"slides_receipts":     IntentInclude,
-	"slides_object_ids":   IntentInclude,
-	"slides_writer_fence": IntentExcludeRuntime, // installation-local serialization singleton
+	"document_creation_consents": IntentExcludeRuntime, // live creation permission must be freshly admitted after restore
+	"slides_heads":               IntentInclude,
+	"slides_revisions":           IntentInclude,
+	"slides_receipts":            IntentInclude,
+	"slides_object_ids":          IntentInclude,
+	"slides_writer_fence":        IntentExcludeRuntime, // installation-local serialization singleton
 
+	"document_creations":    IntentInclude, // durable provenance, never live creation consent
 	"documents":             IntentInclude,
 	"document_updates":      IntentInclude,
 	"document_receipts":     IntentInclude,

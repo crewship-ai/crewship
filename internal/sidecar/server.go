@@ -592,6 +592,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/create":
+				s.handleDocumentCreate(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/"):
 				s.handlePageWebhook(w, r)
 				return
