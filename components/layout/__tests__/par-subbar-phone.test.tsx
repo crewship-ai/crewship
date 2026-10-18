@@ -81,6 +81,25 @@ describe("SubBar on a phone", () => {
     expect(slot).toContainElement(screen.getByRole("button", { name: "Invite" }))
   })
 
+  // PAR-052 (v67 core.js topbar): a phone header names only the area. The
+  // current view of an area page (Routines / Overview) is not a second row;
+  // the page's h1 keeps the full path for assistive technology.
+  it("draws no row for the area's current view, and keeps the full path as the h1", () => {
+    withSlot()
+    const { container } = render(<SubBar title="Routines" section="Overview" />)
+    expect(container.querySelector("[data-slot=sub-bar-row]")).toBeNull()
+    const h1 = screen.getByRole("heading", { level: 1, name: "Routines / Overview" })
+    expect(h1).toHaveClass("sr-only")
+  })
+
+  it("draws no row when only the leading control would have kept it", () => {
+    const slot = withSlot()
+    const { container } = render(<SubBar title="Routines" leading={<button type="button">Panel</button>} />)
+    expect(slot).toContainElement(screen.getByRole("button", { name: "Panel" }))
+    expect(container.querySelector("[data-slot=sub-bar-row]")).toBeNull()
+    expect(screen.getByRole("heading", { level: 1, name: "Routines" })).toHaveClass("sr-only")
+  })
+
   it("keeps the leading control (the explorer toggle) in the top bar too", () => {
     const slot = withSlot()
     render(<SubBar title="Routines" leading={<button type="button">Panel</button>} />)
