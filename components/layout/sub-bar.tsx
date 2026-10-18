@@ -246,7 +246,12 @@ export function SubBar<T extends string = string>({
       <div className={cn("shrink-0", className)}>
         {createPortal(
           <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" role="group" aria-label={ariaLabel}>
-            {leading && <div className="flex shrink-0 items-center">{leading}</div>}
+            {/* v67 phone detail: the way back first, then what is open — the
+                area's name in the top bar gives way (globals.css :has rule). */}
+            {leading && <div className="flex shrink-0 items-center" data-phone-back>{leading}</div>}
+            {leading && (
+              <span className="min-w-0 truncate text-default font-semibold text-foreground">{section ?? title}</span>
+            )}
             <div className="flex-1" />
             <ActionsSlot>{actions}</ActionsSlot>
           </div>,

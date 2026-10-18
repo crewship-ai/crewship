@@ -148,7 +148,7 @@ export function AppToolbar() {
     }
 
     return (
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1.5 min-w-0" data-slot="area-crumb">
         {area ? (
           <>
             <span className="area-tile" aria-hidden><area.icon /></span>

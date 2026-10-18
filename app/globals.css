@@ -2147,3 +2147,8 @@ body {
     --mobile-tab-bar-h: var(--app-frame-y);
   }
 }
+
+/* v67 phone detail (core.js:331): one bar with the way back first and the
+   item's name; the area's name gives way while a page puts a back control in
+   the bar (SubBar `leading`, marked data-phone-back). */
+header:has([data-phone-back]) [data-slot="area-crumb"] { display: none; }

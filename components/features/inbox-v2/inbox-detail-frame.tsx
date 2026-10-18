@@ -185,6 +185,9 @@ export function Dock({ note, children, standalone = false }: { note?: React.Reac
       data-testid="decision-dock"
       className={cn(
         "sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle px-3.5 py-2.5",
+        // Phone (v67): the actions share one row, right-aligned, instead of
+        // wrapping one under the other.
+        "max-sm:flex-nowrap max-sm:gap-1.5 max-sm:px-2.5 max-sm:[&>a]:px-2.5 max-sm:[&>button]:px-2.5",
         standalone && "rounded-xl border",
       )}
     >
