@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -227,6 +227,10 @@ interface InboxListResponse {
   decision_count?: number
 }
 
+/** First page is small so it paints fast; the background walk uses the server cap. */
+const INBOX_FIRST_PAGE_SIZE = 100
+const INBOX_PAGE_SIZE = 500
+
 // "active" = everything not archived (unread + read), resolved excluded
 // server-side — the Inbox tab's filter.
 type StateFilter = "unread" | "read" | "resolved" | "all" | "active"
@@ -281,36 +285,86 @@ export function useInbox(
     ? inboxKeys.completeList(workspaceId ?? "", stateParam)
     : inboxKeys.list(workspaceId ?? "", stateParam)
 
+  // loadAll walks the whole history, but never in front of first paint: the
+  // query resolves with the first page and the remaining pages are appended to
+  // the cache in the background. `backfill` owns that walk; a newer fetch (or
+  // unmount) aborts the previous one so two walks never write the same entry.
+  const backfill = useRef<AbortController | null>(null)
+  useEffect(() => () => backfill.current?.abort(), [listKey.join("|")]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [loadingMore, setLoadingMore] = useState(false)
+
   const query = useQuery<InboxListResponse>({
     queryKey: listKey,
     queryFn: async ({ signal }) => {
-      const pageSize = loadAll ? 500 : 100
-      const rows: InboxItem[] = []
-      let offset = 0
-      let unreadCount = 0
-      let activeByKind: Record<string, number> | undefined
-      let decisionCount: number | undefined
-      do {
-        const params = new URLSearchParams({
-          workspace_id: workspaceId!,
-        })
+      backfill.current?.abort()
+      const fetchPage = async (offset: number, limit: number, sig: AbortSignal) => {
+        const params = new URLSearchParams({ workspace_id: workspaceId! })
         if (loadAll) {
-          params.set("limit", String(pageSize))
+          params.set("limit", String(limit))
           params.set("offset", String(offset))
         }
         if (stateParam !== "all") params.set("state", stateParam)
-        const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal })
+        const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal: sig })
         if (!res.ok) throw new Error(`inbox: ${res.status}`)
-        const page = (await res.json()) as InboxListResponse
-        rows.push(...(page.rows ?? []))
-        unreadCount = page.unread_count ?? unreadCount
-        // Page-independent aggregate — take it from whichever page answered.
-        activeByKind = page.active_by_kind ?? activeByKind
-        decisionCount = page.decision_count ?? decisionCount
-        if (!loadAll || !page.has_more) break
-        offset += page.rows.length
-      } while (true)
-      return { rows, count: rows.length, unread_count: unreadCount, has_more: false, active_by_kind: activeByKind, decision_count: decisionCount }
+        return (await res.json()) as InboxListResponse
+      }
+      const first = await fetchPage(0, loadAll ? INBOX_FIRST_PAGE_SIZE : 100, signal)
+      const firstRows = first.rows ?? []
+      const more = loadAll && Boolean(first.has_more)
+      if (more) {
+        const controller = new AbortController()
+        backfill.current = controller
+        void loadRemainingPages(controller.signal, firstRows, firstRows.length)
+      }
+      return {
+        rows: firstRows,
+        count: firstRows.length,
+        unread_count: first.unread_count ?? 0,
+        // has_more stays true until the background walk finishes or gives up.
+        has_more: more,
+        active_by_kind: first.active_by_kind,
+        decision_count: first.decision_count,
+      }
+
+      async function loadRemainingPages(sig: AbortSignal, seedRows: InboxItem[], startOffset: number) {
+        const seen = new Set(seedRows.map((row) => row.id))
+        let offset = startOffset
+        setLoadingMore(true)
+        try {
+          while (!sig.aborted) {
+            const page = await fetchPage(offset, INBOX_PAGE_SIZE, sig)
+            if (sig.aborted) return
+            const rows = page.rows ?? []
+            const fresh = rows.filter((row) => !seen.has(row.id))
+            // The server says there is more, but the offset cannot advance or
+            // the page taught us nothing new: stop rather than loop forever.
+            const stalled = Boolean(page.has_more) && (rows.length === 0 || fresh.length === 0)
+            for (const row of fresh) seen.add(row.id)
+            offset += rows.length
+            const done = !page.has_more || stalled
+            qc.setQueryData<InboxListResponse>(listKey, (prev) => {
+              if (!prev) return prev
+              const have = new Set((prev.rows ?? []).map((row) => row.id))
+              const merged = [...(prev.rows ?? []), ...fresh.filter((row) => !have.has(row.id))]
+              return {
+                ...prev,
+                rows: merged,
+                count: merged.length,
+                unread_count: page.unread_count ?? prev.unread_count,
+                active_by_kind: page.active_by_kind ?? prev.active_by_kind,
+                decision_count: page.decision_count ?? prev.decision_count,
+                has_more: !done,
+              }
+            })
+            if (done) return
+          }
+        } catch {
+          // First page is already on screen; a failed tail keeps what loaded.
+          // The next inbox.updated refetch restarts the walk.
+        } finally {
+          if (!sig.aborted) setLoadingMore(false)
+        }
+      }
     },
     enabled: Boolean(workspaceId),
     // Single-shot like the previous hand-rolled fetch — the error
@@ -503,6 +557,8 @@ export function useInbox(
     // isFetching (not isLoading) mirrors the old loading flag, which
     // was set on every refresh, not just the first one.
     loading: query.isFetching,
+    /** loadAll only: later pages are still arriving after the first paint. */
+    loadingMore,
     error: patchError ?? (query.error ? query.error.message : null),
     refresh,
     patch,

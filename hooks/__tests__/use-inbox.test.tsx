@@ -149,7 +149,7 @@ describe("useInbox", () => {
     await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1", "i2"]))
 
     expect(mockFetch.mock.calls.map((call) => call[0])).toEqual([
-      "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=0&state=resolved",
+      "/api/v1/inbox?workspace_id=ws-1&limit=100&offset=0&state=resolved",
       "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=1&state=resolved",
     ])
     expect(qc.getQueryData(inboxKeys.completeList("ws-1", "resolved"))).toBeTruthy()
