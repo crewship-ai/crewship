@@ -20,7 +20,7 @@ it("rejects mismatched passwords without submitting personal data", async () => 
   fill("different-passphrase")
   await submit()
   expect(screen.getByText("Passwords do not match")).toBeVisible()
-  expect(serverFetch).not.toHaveBeenCalled()
+  expect(serverFetch).not.toHaveBeenCalledWith("/api/v1/auth/signup", expect.anything())
 })
 it("mismatch shows field error under Confirm password, no toast", async () => {
   render(<SignupPage />)

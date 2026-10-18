@@ -128,11 +128,23 @@ describe("sign in", () => {
 })
 
 describe("sign up", () => {
-  it("turns the server's 'registration is disabled' into a closed screen, not an operator hint", async () => {
-    render(<SignupPage />)
-    vi.mocked(serverFetch).mockResolvedValueOnce(
-      Response.json({ error: "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable." }, { status: 403 }),
+  it("shows the closed screen before the form when setup-status says sign-up is off", async () => {
+    vi.mocked(serverFetch).mockImplementation(async (url) =>
+      String(url).includes("setup-status") ? Response.json({ needs_bootstrap: false, allow_signup: false }) : Response.json({}),
     )
+    render(<SignupPage />)
+    expect(await screen.findByRole("heading", { name: "Sign-up is closed" })).toBeVisible()
+    expect(screen.queryByLabelText("Full name")).not.toBeInTheDocument()
+    expect(serverFetch).not.toHaveBeenCalledWith("/api/v1/auth/signup", expect.anything())
+  })
+
+  it("turns the server's 'registration is disabled' into a closed screen, not an operator hint", async () => {
+    vi.mocked(serverFetch).mockImplementation(async (url) =>
+      String(url).includes("setup-status")
+        ? Response.json({ needs_bootstrap: false, allow_signup: true })
+        : Response.json({ error: "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable." }, { status: 403 }),
+    )
+    render(<SignupPage />)
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Test Reader" } })
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
     fireEvent.change(screen.getByLabelText("Password", { exact: true }), { target: { value: "synthetic-passphrase" } })
@@ -180,6 +192,16 @@ describe("field errors take focus", () => {
     submit.focus()
     await act(async () => { fireEvent.click(submit) })
     expect(document.activeElement).toBe(screen.getByLabelText("Confirm password"))
+  })
+})
+
+describe("reset without a token", () => {
+  it("says the link is incomplete before asking for a password", () => {
+    nav.query = ""
+    render(<ResetPasswordPage />)
+    expect(screen.getByText("This reset link is incomplete")).toBeVisible()
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Request a new link" })).toHaveAttribute("href", "/forgot-password")
   })
 })
 

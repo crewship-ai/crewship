@@ -64,7 +64,7 @@ describe("password recovery", () => {
 
 describe("reset password", () => {
   it.each([
-    ["", "new-passphrase", "new-passphrase", "Missing or invalid reset link", null],
+    // A link without a token never shows the form (auth-panel.test.tsx).
     ["token=synthetic-reset", "short", "short", "Password must be at least 8 characters", "New password"],
     ["token=synthetic-reset", "new-passphrase", "different-passphrase", "Passwords don't match", "Confirm new password"],
   ])("refuses invalid local input (%s / %s)", async (query, password, confirmation, message, field) => {
