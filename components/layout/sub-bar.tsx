@@ -353,7 +353,7 @@ function SubBarTabButton<T extends string>({
       {tab.label}
       {tab.badge != null && <span className="text-micro text-muted-foreground/70">{tab.badge}</span>}
       {tab.locked && (
-        <span className="text-micro uppercase tracking-wider text-warn/70 font-mono">
+        <span className="text-micro text-warn/70">
           {tab.lockedLabel ?? "soon"}
         </span>
       )}
