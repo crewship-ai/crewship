@@ -149,10 +149,62 @@ describe("useInbox", () => {
     await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1", "i2"]))
 
     expect(mockFetch.mock.calls.map((call) => call[0])).toEqual([
-      "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=0&state=resolved",
+      "/api/v1/inbox?workspace_id=ws-1&limit=100&offset=0&state=resolved",
       "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=1&state=resolved",
     ])
     expect(qc.getQueryData(inboxKeys.completeList("ws-1", "resolved"))).toBeTruthy()
+  })
+
+  it("shows the first page before the later pages resolve", async () => {
+    let releaseSecond: (r: Response) => void = () => {}
+    mockFetch
+      .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 2, has_more: true }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { releaseSecond = resolve }))
+
+    const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), {
+      wrapper: makeWrapper(qc),
+    })
+    // Page two is still in flight: page one must already be usable.
+    await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1"]))
+    expect(result.current.unreadCount).toBe(2)
+
+    await act(async () => {
+      releaseSecond(okJSON({ rows: [item({ id: "i2" })], count: 1, unread_count: 2, has_more: false }))
+    })
+    await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1", "i2"]))
+  })
+
+  it("stops paging when a page claims more but returns no rows", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
+    // Bounded so a regression fails the assertion instead of hanging the runner.
+    for (let i = 0; i < 20; i++) {
+      mockFetch.mockResolvedValueOnce(okJSON({ rows: [], count: 0, unread_count: 1, has_more: true }))
+    }
+    mockFetch.mockResolvedValue(okJSON({ rows: [], count: 0, unread_count: 1, has_more: false }))
+
+    const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), {
+      wrapper: makeWrapper(qc),
+    })
+    await waitFor(() => expect(result.current.items).toHaveLength(1))
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
+    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
+  it("stops paging when a page only repeats rows already loaded", async () => {
+    mockFetch.mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
+    for (let i = 0; i < 20; i++) {
+      mockFetch.mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
+    }
+    mockFetch.mockResolvedValue(okJSON({ rows: [], count: 0, unread_count: 1, has_more: false }))
+
+    const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), {
+      wrapper: makeWrapper(qc),
+    })
+    await waitFor(() => expect(result.current.items).toHaveLength(1))
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
+    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(result.current.items.map((row) => row.id)).toEqual(["i1"])
   })
 
   it("surfaces a non-ok list response as the same `inbox: <status>` error string", async () => {

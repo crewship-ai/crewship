@@ -76,6 +76,7 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
     try {
       const pageSize = loadAll ? 200 : limit
       const allRows: ApprovalRow[] = []
+      const seen = new Set<string>()
       let offset = 0
       let configured = true
       do {
@@ -112,8 +113,13 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
           setError("Malformed response from /api/v1/approvals")
           return
         }
-        allRows.push(...parsed.data.rows)
+        const fresh = parsed.data.rows.filter((row) => !seen.has(row.id))
+        for (const row of fresh) seen.add(row.id)
+        allRows.push(...fresh)
         if (!loadAll || !parsed.data.has_more) break
+        // has_more without any new row: the offset is not advancing. Stop
+        // rather than re-request the same page forever.
+        if (fresh.length === 0) break
         offset += parsed.data.rows.length
       } while (true)
       setNotConfigured(!configured)

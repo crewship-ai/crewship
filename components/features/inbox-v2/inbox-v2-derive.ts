@@ -327,8 +327,10 @@ export function matchesSearch(entry: InboxV2Entry, search: string): boolean {
 /**
  * Facet counts.
  *
- * Counted over the whole feed, which is exact ONLY because inbox-v2 loads
- * every page before rendering (`useInbox(..., { loadAll: true })`). The day
+ * Counted over the whole feed, which is exact once inbox-v2 has loaded every
+ * page (`useInbox(..., { loadAll: true })` shows page one at once and appends
+ * the rest in the background, so these converge while `loadingMore` is true;
+ * the API returns no per-facet totals to use instead). The day
  * the feed becomes lazily paginated these numbers stop being counts and
  * become "counts of what happens to be downloaded" — at which point they have
  * to come from the server as a GROUP BY, the way Routines gets its bucket
