@@ -71,7 +71,7 @@ describe("human Document history controller", () => {
   })
   it.each([
     { ...snapshot, page_id: "other" }, { ...snapshot, id: "other" }, { ...snapshot, rev: 3 }, { ...snapshot, schema: 2 },
-    { ...snapshot, schema: 99 }, { ...snapshot, epoch: "SECRET" }, { ...snapshot, content: { ...content, html: "SECRET" } },
+    { ...snapshot, schema: 99 }, { ...snapshot, content: content.content[0] }, { ...snapshot, epoch: "SECRET" }, { ...snapshot, content: { ...content, html: "SECRET" } },
     { ...snapshot, content: { type: "doc", content: [{ type: "image", attrs: { src: "https://example.invalid/" } }] } },
   ])("clears list and body for mismatched or unclosed selected response %#", async body => {
     fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })).mockResolvedValueOnce(response(body))
@@ -88,11 +88,54 @@ describe("human Document history controller", () => {
   it.each(["page.updated", "realtime.reconnected"])("refreshes on %s and cleans subscriptions", async type => {
     fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })).mockResolvedValueOnce(response({ checkpoints: [] }))
     const { result, unmount } = setup(); await ready(result)
-    act(() => events.get(type)?.forEach(callback => callback({ type, payload: { page_id: "other", workspace_id: "ws" }, channel: "workspace:ws" })))
-    if (type === "page.updated") expect(fetchMock).toHaveBeenCalledTimes(1)
+    act(() => events.get(type)?.forEach(callback => callback({ type, payload: { page_id: "other", workspace_id: "other" }, channel: "workspace:other" })))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     act(() => events.get(type)?.forEach(callback => callback({ type, payload: { page_id: "page", workspace_id: "ws" }, channel: "workspace:ws" })))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(type === "page.updated" ? 2 : 3))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     await ready(result); unmount(); expect([...events.values()].every(set => set.size === 0)).toBe(true)
+  })
+
+  it("accepts schema2 only through the actual closed model", async () => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [{ ...pin, schema: 2 }] })).mockResolvedValueOnce(response({ ...snapshot, schema: 2 }))
+    const { result } = setup(); await ready(result); await selected(result)
+    expect(result.current.snapshot.status === "ready" && result.current.snapshot.data.schema).toBe(2)
+  })
+  it("never reads a selection absent from the current admitted list", async () => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })); const { result } = setup(); await ready(result)
+    act(() => result.current.onSelect("other")); expect(result.current.selectedId).toBeUndefined(); expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it.each([401, 403, 404, 503])("clears list metadata on selected HTTP failure %s", async status => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })).mockResolvedValueOnce(response({}, status))
+    const { result } = setup(); await ready(result); act(() => result.current.onSelect("pin"))
+    const expected = status === 503 ? "unavailable" : "denied"
+    await waitFor(() => expect(result.current.snapshot.status).toBe(expected)); expect(result.current.list.status).toBe(expected)
+  })
+  it("refreshes an opaque private update only on the current workspace channel", async () => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })).mockResolvedValueOnce(response({ checkpoints: [] }))
+    const { result } = setup(); await ready(result)
+    act(() => events.get("page.updated")?.forEach(callback => callback({ type: "page.updated", payload: {}, channel: "workspace:ws" })))
+    expect(result.current.list.status).not.toBe("ready"); await ready(result); expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("masks protected results in the first render before scope-change effects", async () => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin] })).mockResolvedValueOnce(response(snapshot)).mockReturnValueOnce(pending().promise)
+    const renders: { human: string; list: string; snapshot: string }[] = []
+    const { result, rerender } = renderHook((input: DocumentHistoryScope) => {
+      const value = useDocumentHistory(input)
+      renders.push({ human: input.humanId, list: value.list.status, snapshot: value.snapshot.status })
+      return value
+    }, { initialProps: scope })
+    await ready(result); await selected(result); rerender({ ...scope, humanId: "new-human" })
+    const first = renders.find(value => value.human === "new-human")!
+    expect(first.list).not.toBe("ready"); expect(first.snapshot).not.toBe("ready")
+  })
+  it("rejects a late original list after an identical scope is reopened", async () => {
+    const late = pending(); fetchMock.mockReturnValueOnce(late.promise).mockResolvedValueOnce(response({ checkpoints: [] }))
+    const { result, rerender } = setup(); const signal = fetchMock.mock.calls[0][1]!.signal!
+    rerender({ ...scope, enabled: false }); rerender(scope); await ready(result)
+    await act(async () => late.resolve(response({ checkpoints: [pin] })))
+    expect(signal.aborted).toBe(true)
+    expect(result.current.list.status === "ready" && result.current.list.data.checkpoints).toEqual([])
   })
   it("aborts pending work on unmount and ignores delivery even when transport ignores abort", async () => {
     const late = pending(); fetchMock.mockReturnValueOnce(late.promise); const { unmount } = setup(); const signal = fetchMock.mock.calls[0][1]!.signal!
