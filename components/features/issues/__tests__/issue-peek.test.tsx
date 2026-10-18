@@ -1,3 +1,4 @@
+import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
@@ -72,6 +73,27 @@ describe("IssuePeek", () => {
     fireEvent.keyDown(document.activeElement!, { key: "Enter" })
     expect(onOpenFull).toHaveBeenCalledTimes(1)
     expect(onPrev).not.toHaveBeenCalled()
+  })
+
+  it("takes focus on the sheet the moment it opens and gives it back to the opener on close", async () => {
+    function Harness() {
+      const [open, setOpen] = React.useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>row</button>
+          <IssuePeek open={open} identifier="ENG-4" row={row} workspaceId="ws" onOpenChange={setOpen} onOpenFull={() => {}} />
+        </>
+      )
+    }
+    render(<Harness />)
+    const opener = screen.getByRole("button", { name: "row" })
+    opener.focus()
+    fireEvent.click(opener)
+    // No frame to wait for: the kit's initialFocus="content" focuses it on open.
+    expect(document.activeElement).toBe(screen.getByRole("dialog"))
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(document.activeElement).toBe(opener)
   })
 
   it("says the issue is gone when the server does not know it", async () => {
