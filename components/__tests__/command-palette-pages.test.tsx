@@ -115,7 +115,7 @@ describe("⌘K — Pages group", () => {
     expect(row).toHaveTextContent("Fleet board")
     expect(row).toHaveAttribute("data-href", "/pages/fleet")
     // The generic destination is still there, in its own group.
-    const nav = await group(/navigation/i)
+    const nav = await group(/go to/i)
     expect(within(nav).getByText("Pages")).toBeInTheDocument()
   })
 
@@ -168,7 +168,7 @@ describe("⌘K — Pages group", () => {
 
   it("asks for the whole index — no limit, the caller's workspace", async () => {
     openPalette()
-    await group(/navigation/i)
+    await group(/go to/i)
     await waitFor(() => expect(pagesCalls()).toHaveLength(1))
     const url = pagesCalls()[0]
     expect(url).toBe("/api/v1/pages?workspace_id=ws-A")

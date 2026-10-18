@@ -63,7 +63,7 @@ describe("CommandPalette — feature coverage", () => {
   // instead of through the /journal redirect (ACT-05).
   it("never links the old Journal; Runs opens Activity's work, and 'journal' finds Activity", async () => {
     openPalette()
-    await group(/navigation/i)
+    await group(/go to/i)
     const hrefs = [...document.body.querySelectorAll("[data-href]")].map((el) => el.getAttribute("data-href") ?? "")
     expect(hrefs.filter((h) => h.startsWith("/journal"))).toEqual([])
     expect(document.body.querySelector("[data-href='/activity?what=work']")).toHaveTextContent("Runs")
@@ -77,7 +77,7 @@ describe("CommandPalette — feature coverage", () => {
   // for old links. Offering it beside "Decisions waiting" listed one place twice.
   it("offers approvals as Inbox decisions, not the retired /approvals page", async () => {
     openPalette()
-    await group(/navigation/i)
+    await group(/go to/i)
     const hrefs = [...document.body.querySelectorAll("[data-href]")].map((el) => el.getAttribute("data-href"))
     expect(hrefs).not.toContain("/approvals")
     expect(screen.queryByText("Approvals")).not.toBeInTheDocument()
@@ -110,7 +110,7 @@ describe("CommandPalette — feature coverage", () => {
     // CommandDialog renders through a Radix portal, so the rows live in
     // document.body, not in render()'s container. Querying the container
     // found nothing and passed vacuously.
-    await group(/navigation/i)
+    await group(/go to/i)
     const dead = [...document.body.querySelectorAll("[data-href]")]
       .map((el) => el.getAttribute("data-href") ?? "")
       .filter((h) => /^\/crews\//.test(h))
@@ -125,7 +125,9 @@ describe("CommandPalette — RBAC", () => {
   // role gate nor the enabled flag.
   it("offers a MANAGER-tier settings section to an owner", async () => {
     openPalette()
-    const g = await group(/settings/i)
+    // The settings pages are a search result (ODCH-G05): they join once something is typed.
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "settings" } })
+    const g = await group(/^settings$/i)
     expect(within(g).getByText("Audit Log")).toBeInTheDocument()
     expect(within(g).getByText("Access & Secrets")).toBeInTheDocument()
   })
@@ -133,7 +135,9 @@ describe("CommandPalette — RBAC", () => {
   it("hides MANAGER-tier settings sections from a member", async () => {
     h.role = "MEMBER"
     openPalette()
-    const g = await group(/settings/i)
+    // The settings pages are a search result (ODCH-G05): they join once something is typed.
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "settings" } })
+    const g = await group(/^settings$/i)
     expect(within(g).queryByText("Audit Log")).not.toBeInTheDocument()
     expect(within(g).queryByText("Access & Secrets")).not.toBeInTheDocument()
     // Profile is the one section every role owns.
@@ -299,7 +303,7 @@ describe("CommandPalette — recent", () => {
 
   it("reads the history of this user in this workspace, and drops the old shared key", async () => {
     openPalette()
-    await group(/navigation/i)
+    await group(/go to/i)
     // One key per identity: a shared browser profile, a workspace switch or
     // a different login must not be offered somebody else's rows.
     expect(vi.mocked(localStorage.getItem)).toHaveBeenCalledWith("crewship.palette.recent:u-test:ws-test")
@@ -312,7 +316,7 @@ describe("CommandPalette — recent", () => {
     vi.mocked(localStorage.getItem).mockReturnValue("{not json")
     openPalette()
     // The palette still renders; the unreadable history is simply dropped.
-    expect(await group(/navigation/i)).toBeInTheDocument()
+    expect(await group(/go to/i)).toBeInTheDocument()
     expect(screen.queryByRole("group", { name: /recent/i })).not.toBeInTheDocument()
   })
 
