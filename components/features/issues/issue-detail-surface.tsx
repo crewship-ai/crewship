@@ -27,6 +27,7 @@ import { toast } from "@/lib/toast"
 
 import { IssueFilesCard } from "./issue-files-card"
 import { IssueSessionCard } from "./issue-session-card"
+import { IssueCheckpointCard } from "./issue-checkpoint-card"
 import { IssueWorkCard } from "./issue-work-card"
 import { IssueWorkDialogs } from "./issue-work-dialogs"
 import { sessionState } from "./issue-session"
@@ -1048,7 +1049,7 @@ export function IssueDetailSurface({
     <IssueCardDetail
       issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
-      session={<IssueSessionCard issue={issue} state={sessionState(issue, { latestOutcome: runs[0]?.outcome })} work={work} can={workCan} meId={meId} />}
+      session={<><IssueSessionCard issue={issue} state={sessionState(issue, { latestOutcome: runs[0]?.outcome })} work={work} can={workCan} meId={meId} /><IssueCheckpointCard issue={issue} workspaceId={workspaceId} className="mt-3" /></>}
       workPanel={
         <IssueWorkCard
           issue={issue}

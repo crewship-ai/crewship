@@ -44,6 +44,18 @@ describe("IssuePeek", () => {
     expect(screen.getByText(/answer the ten questions/)).toBeInTheDocument()
   })
 
+  it("shows the agent's latest checkpoint (next step, blockers) from its session", async () => {
+    apiFetch.mockImplementation(async (url = "") => {
+      if (url.includes("/sessions/s1/checkpoints")) return json(200, [{ id: "k", session_id: "s1", next_step: "Write the last four answers", blockers: "Pricing page missing", created_at: "2026-10-18T09:00:00Z" }])
+      if (url.includes("/ENG-4/sessions")) return json(200, [{ id: "s1", agent_id: "a1", state: "active" }])
+      return json(200, { ...row, crew_id: "c1" })
+    })
+    render(<IssuePeek open identifier="ENG-4" row={{ ...row, crew_id: "c1" } as Mission} workspaceId="ws" onOpenChange={() => {}} onOpenFull={() => {}} />)
+    await waitFor(() => expect(screen.getByText("Write the last four answers")).toBeInTheDocument())
+    expect(screen.getByText("Pricing page missing")).toBeInTheDocument()
+    expect(apiFetch).toHaveBeenCalledWith("/api/v1/crews/c1/issues/ENG-4/sessions?workspace_id=ws")
+  })
+
   it("J/K moves, Enter opens full page, Esc closes", async () => {
     const onPrev = vi.fn()
     const onNext = vi.fn()

@@ -8,6 +8,7 @@ import { toast } from "@/lib/toast"
 import { getIssueWorker } from "@/lib/issue-execution"
 import { Button } from "@/components/ui/button"
 import { Peek } from "@/components/ui/peek"
+import { IssueCheckpointCard } from "./issue-checkpoint-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -204,6 +205,8 @@ export function IssuePeek({
             </Prop>
             {issue.estimate != null && <Prop label="Estimate"><span className="font-mono">{issue.estimate}</span></Prop>}
           </dl>
+
+          <IssueCheckpointCard issue={issue} workspaceId={workspaceId} compact />
 
           <section className="grid gap-1.5" aria-label="Brief">
             <div className="flex items-baseline gap-2">
