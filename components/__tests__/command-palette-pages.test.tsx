@@ -183,7 +183,7 @@ describe("⌘K — Pages group", () => {
     expect(h.push).toHaveBeenCalledWith("/pages/fleet")
     expect(vi.mocked(localStorage.setItem)).toHaveBeenCalledWith(
       "crewship.palette.recent:u-alice:ws-A",
-      JSON.stringify([{ href: "/pages/fleet", label: "Fleet board", group: "Pages" }]),
+      JSON.stringify([{ href: "/pages/fleet", label: "Fleet board", group: "Artifacts" }]),
     )
 
     h.push.mockReset()
