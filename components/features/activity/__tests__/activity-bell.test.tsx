@@ -27,6 +27,12 @@ const h = vi.hoisted(() => ({
   role: "OWNER" as string | null,
 }))
 
+// The status summary has its own tests (layout/__tests__/par-system-status);
+// here only its place in the panel is asserted.
+vi.mock("@/components/layout/activity-system-status", () => ({
+  ActivitySystemStatus: () => <div data-testid="activity-system-status-stub" />,
+}))
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
@@ -564,5 +570,15 @@ describe("activity chip helpers", () => {
     { chip: "failed", live: 0, waiting: 0, want: "/activity?status=failed" },
   ])("activityFooterHref($chip, $live, $waiting) → $want", ({ chip, live, waiting, want }) => {
     expect(activityFooterHref(chip, live, waiting)).toBe(want)
+  })
+})
+
+// PAR-001: the connection, fleet and container-build status that used to sit
+// in the top bar as an amber chip and a Wi-Fi button live in this panel.
+describe("ActivityBell status summary (PAR-001)", () => {
+  it("renders the system status inside the open panel", async () => {
+    render(<ActivityBell />)
+    fireEvent.click(screen.getByTestId("activity-trigger"))
+    expect(await screen.findByTestId("activity-system-status-stub")).toBeInTheDocument()
   })
 })
