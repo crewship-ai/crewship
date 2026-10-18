@@ -1,5 +1,6 @@
 "use client"
 
+import { ActivitySystemStatus } from "@/components/layout/activity-system-status"
 import { useState } from "react"
 import Link from "next/link"
 import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
@@ -234,6 +235,10 @@ function ActivityDropdownBody({
         }
         meta={liveTotal > 0 ? `${liveTotal} live` : "nothing live"}
       />
+
+      {/* The connection, the fleet and the container builds (v67 "Now"
+          summary): the top bar no longer carries them. */}
+      <ActivitySystemStatus onNavigate={onNavigate} />
 
       {!isEmpty && (
         <BarMenuChips<ActivityChip>

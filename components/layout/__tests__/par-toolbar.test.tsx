@@ -71,7 +71,8 @@ describe("the phone's top bar (PAR-025 ... PAR-136)", () => {
   it("keeps Inbox for the tab bar, and the account for the More sheet", () => {
     h.mobile = true
     const header = bar()
-    expect(within(header).queryByRole("button", { name: "Inbox" })).toBeNull()
+    // Hidden below md by its wrapper (no stylesheet in jsdom): Inbox is a tab.
+    expect(within(header).getByRole("button", { name: "Inbox" }).parentElement).toHaveClass("hidden", "md:flex")
     expect(within(header).queryByRole("button", { name: /user menu/i })).toBeNull()
   })
 })
