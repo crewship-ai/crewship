@@ -23,7 +23,7 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8")
 describe("crews rail type register", () => {
   it("defines the register in globals.css, with both steps", () => {
     const css = read("app/globals.css")
-    expect(css).toMatch(/\.type-nav\s*\{[^}]*font-size:\s*0\.8125rem/)
+    expect(css).toMatch(/\.type-nav\s*\{[^}]*font-size:\s*0\.875rem/)
     expect(css).toMatch(/\.type-nav-sub\s*\{[^}]*font-size:\s*0\.6875rem/)
   })
 

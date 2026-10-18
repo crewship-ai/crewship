@@ -277,3 +277,13 @@ describe("Admin overview — card headers and rows as v67", () => {
     expect(row).toHaveAttribute("title", "/var/run/docker.sock")
   })
 })
+
+describe("PAR-094/095 one-line card headers", () => {
+  it("draws Platform, Integrity and License with the 50 px v67 card header", () => {
+    renderTab()
+    for (const name of ["Platform", "Integrity", "License"]) {
+      const header = screen.getByRole("region", { name }).querySelector("[data-slot=settings-card-header]")!
+      expect(header.className.split(" "), name).toContain("min-h-[3.3654rem]")
+    }
+  })
+})
