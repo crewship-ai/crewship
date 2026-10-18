@@ -1958,7 +1958,11 @@ directory (an instance bundle records exactly what it lands). `format`: the
 bundle's format version, and whether this server reads it directly or through
 a converter. `runtime`: whether Docker answers; a crew built on another
 architecture gets a warning that its environment is rebuilt from the crew
-image. `unsafe`: host settings in the crews' devcontainer configuration that a
+image. `runtime.images_checked` / `runtime.images_older`: how many of the
+archive's crews pinned a runtime image digest this server could compare with
+the image it holds now, and how many of those were built on a different one
+(each also a runtime warning); `0` checked says nothing either way, e.g. the
+archive predates digest pinning or the image is not pulled here. `unsafe`: host settings in the crews' devcontainer configuration that a
 restore does not switch back on by itself — Docker socket mounts, privileged
 mode, host path binds; read only when a key is given, otherwise a runtime
 warning says they were not checked. `conflicts`: what the `target`

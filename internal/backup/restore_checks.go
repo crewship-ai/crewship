@@ -53,6 +53,12 @@ type RuntimeCheck struct {
 	OK       bool     `json:"ok"`
 	Detail   string   `json:"detail"`
 	Warnings []string `json:"warnings"`
+	// ImagesChecked is how many of the archive's crews could be compared with
+	// the image this server resolves today (the archive pinned a digest and
+	// the server knows the image); ImagesOlder how many of those were built
+	// on a different, older one. Zero checked says nothing either way.
+	ImagesChecked int `json:"images_checked"`
+	ImagesOlder   int `json:"images_older"`
 }
 
 // ConflictsCheck: what the target already holds.
@@ -113,6 +119,10 @@ type RestoreCheckInput struct {
 	// Slugs answers what the server holds under a workspace slug, deleted
 	// rows included (the slug stays UNIQUE after a soft delete).
 	Slugs SlugLookup
+	// CurrentImageDigest resolves an image reference to the digest this server
+	// holds for it now; false when it cannot (no Docker, image not pulled).
+	// Nil: the archive's image age is not compared.
+	CurrentImageDigest func(image string) (digest string, ok bool)
 }
 
 // RestoreNeedBytes estimates the room a restore needs on the data directory.
@@ -185,6 +195,22 @@ func EvaluateRestoreChecks(in RestoreCheckInput) RestoreChecks {
 				continue // its environment check above already says so
 			}
 			out.Runtime.Warnings = append(out.Runtime.Warnings, fmt.Sprintf("crew %s was built on %s and this server is %s: its environment is rebuilt from the crew image", c.Slug, src, host))
+		}
+	}
+	if in.CurrentImageDigest != nil {
+		for _, c := range m.Contents.Crews {
+			if c.RuntimeImage == "" || c.BaseImageDigest == "" {
+				continue
+			}
+			cur, ok := in.CurrentImageDigest(c.RuntimeImage)
+			if !ok || cur == "" {
+				continue
+			}
+			out.Runtime.ImagesChecked++
+			if cur != c.BaseImageDigest {
+				out.Runtime.ImagesOlder++
+				out.Runtime.Warnings = append(out.Runtime.Warnings, fmt.Sprintf("%s: built on an older image than this server's %s", c.Slug, c.RuntimeImage))
+			}
 		}
 	}
 	if !in.UnsafeChecked && crews > 0 {

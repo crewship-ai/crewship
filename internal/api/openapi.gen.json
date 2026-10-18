@@ -28893,6 +28893,12 @@
                         "detail": {
                           "type": "string"
                         },
+                        "images_checked": {
+                          "type": "integer"
+                        },
+                        "images_older": {
+                          "type": "integer"
+                        },
                         "ok": {
                           "type": "boolean"
                         },
@@ -28906,7 +28912,9 @@
                       "required": [
                         "ok",
                         "detail",
-                        "warnings"
+                        "warnings",
+                        "images_checked",
+                        "images_older"
                       ],
                       "type": "object"
                     },

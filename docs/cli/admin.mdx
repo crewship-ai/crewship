@@ -1174,7 +1174,9 @@ crewship admin instance backups check /var/lib/crewship/backups/crewship-instanc
 `POST /api/v1/admin/instance/backups/restore/checks`. What a restore checks
 before anything changes: room on the data directory, whether the bundle's
 format is read directly or through a converter, whether Docker answers (a crew
-built on another architecture is rebuilt from its image), host settings that
+built on another architecture is rebuilt from its image; crews built on an
+older image than this server holds are named, with an `images` line counting
+them), host settings that
 are not carried over for safety (Docker socket mounts, privileged mode, host
 path binds — read only with a key), and conflicts with the target. For a
 bundle with complete container environments it prints one line per

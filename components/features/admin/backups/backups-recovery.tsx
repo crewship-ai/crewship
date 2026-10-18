@@ -536,7 +536,14 @@ function ChecksCard({ checks, workspaceId }: { checks: RestoreChecks | "unavaila
         <SettingsRow label="Not carried over for safety" description={checks.unsafe.join(" · ")}><StatusPill tone="warn" label="off" /></SettingsRow>
       )}
       <SettingsRow label="Conflicts" description={checks.conflicts.detail}>{checks.conflicts.ok ? <Check ok /> : <StatusPill tone="warn" label="review" />}</SettingsRow>
-      {workspaceId && <ImageAgeCheck workspaceId={workspaceId} />}
+      {/* The archive's own images are compared by the server when it pinned
+          them; only otherwise the crews on this server stand in. */}
+      {(checks.runtime.images_checked ?? 0) > 0 ? (
+        <SettingsRow
+          label="Crew images"
+          description={`${checks.runtime.images_older ?? 0} of ${checks.runtime.images_checked} crews in the archive were built on an older image than this server's`}
+        ><StatusPill tone={(checks.runtime.images_older ?? 0) > 0 ? "warn" : "success"} label={(checks.runtime.images_older ?? 0) > 0 ? "older" : "ok"} /></SettingsRow>
+      ) : workspaceId && <ImageAgeCheck workspaceId={workspaceId} />}
     </SettingsCard>
   )
 }
