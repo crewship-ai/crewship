@@ -46,6 +46,8 @@ test.describe("Admin console", () => {
       await page.setViewportSize({ width, height: 1000 })
       await seed(page, PINNED)
       await page.goto("/admin")
+      // COM-05: on a tablet the panel starts closed; its button opens it.
+      if (width < 1280) await page.getByTestId("secondary-panel-button").click()
       const panel = page.locator("[data-slot=secondary-panel][data-panel-id=admin]")
       await expect(panel.getByRole("navigation", { name: "Admin sections" })).toBeVisible()
       await expect(panel.locator("[data-slot=admin-panel-head]")).toContainText("Instance admin")
@@ -139,7 +141,9 @@ test.describe("Admin console", () => {
     await seed(page, PINNED)
     await page.route("**/api/v1/admin/instance/retention", async (route) => {
       if (route.request().method() !== "PUT") return route.fallback()
-      await route.fulfill({ json: { applied: false, dry_run: true, preview_id: "p0", changes: [] } })
+      // The server's shape (internal/api/admin_instance_retention.go): per
+      // workspace, and no workspace has anything to change.
+      await route.fulfill({ json: { dry_run: true, preview_id: "p0", workspaces: [] } })
     })
     await page.goto("/admin?tab=retention")
     const row = page.locator("[data-slot=retention-table] [data-key]").first()
