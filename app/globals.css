@@ -1967,3 +1967,15 @@ body {
     --mobile-tab-bar-h: var(--app-frame-y);
   }
 }
+
+/* Auth screens (#3583): the sail panel beside the form. The ground is the
+   logo file's own tile gradient (#1B75FE → #2B90FF) deepened toward the top so
+   it does not glare next to a dark form; the shade only darkens the corner the
+   copy sits in, so the lower half of the mark stays white. A CSS gradient, not
+   canvas: without a 2D context the panel is still the brand colour. */
+.auth-panel {
+  background: linear-gradient(160deg, #062a86 0%, #1257c8 45%, #1e7bfe 80%, #2b90ff 100%);
+}
+.auth-panel-shade {
+  background: linear-gradient(to bottom right, transparent 55%, rgb(3 20 60 / 0.3) 100%);
+}

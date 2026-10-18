@@ -132,6 +132,19 @@ describe("auth pages wear the product mark", () => {
     expect(page.source).not.toMatch(/AuthSplitShell|@\/components\/ui\/card/)
   })
 
+  it.each(pages.map((p) => p.name))("%s draws the sail panel beside the form", (name) => {
+    // Owner decision 2026-10-18 (#3583): the animated sails from main stay on
+    // every auth screen. A page without `panel` would fall back to the plain card.
+    const page = pages.find((p) => p.name === name)!
+    for (const tag of page.source.match(/<AuthScreen\b[^>]*>/g) ?? []) {
+      expect(tag, `${name}: ${tag}`).toMatch(/\bpanel="/)
+    }
+  })
+
+  it("the panel is the animated mark", () => {
+    expect(card).toMatch(/<AnimatedMark\b/)
+  })
+
   it("the auth card is what puts the mark on the pages", () => {
     expect(card).toMatch(SHARED_MARK)
   })

@@ -39,7 +39,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <AuthScreen>
+    <AuthScreen panel="recovery">
       <AuthCard
         icon={KeyRound}
         title="Reset your password"
@@ -79,7 +79,7 @@ export default function ForgotPasswordPage() {
             <Input
               id="email"
               type="email"
-              autoComplete="email"
+              autoComplete="username"
               placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}

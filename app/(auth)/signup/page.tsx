@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Info, UserPlus } from "lucide-react"
-import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthLink, AuthScreen } from "@/components/branding/auth-card"
+import { AUTH_BUTTON, AUTH_INPUT, AuthBanner, AuthCard, AuthLink, AuthPasswordInput, AuthScreen } from "@/components/branding/auth-card"
 import { CreateSurfaceField, CreateSurfaceNotice } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +20,9 @@ export default function SignupPage() {
   // A wrong value belongs under its field; `error` is what the server refused.
   const [confirmError, setConfirmError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // The server refused because sign-up is off. Its message is for the
+  // operator (an env var); the visitor gets the way in that exists.
+  const [closed, setClosed] = useState(false)
   const router = useRouter()
  const [invitationToken,setInvitationToken]=useState("")
  useEffect(()=>{setInvitationToken(captureInvitationProof())},[])
@@ -45,6 +48,10 @@ export default function SignupPage() {
       })
 
       if (!res.ok) {
+        if (res.status === 403) {
+          setClosed(true)
+          return
+        }
         const data = await res.json().catch(() => null)
         if (data?.error?.fieldErrors) {
           const messages = Object.values(data.error.fieldErrors).flat()
@@ -68,8 +75,30 @@ export default function SignupPage() {
     }
   }
 
+  if (closed) {
+    return (
+      <AuthScreen panel="signup">
+        <AuthCard
+          icon={UserPlus}
+          title="Sign-up is closed"
+          description="This Crewship server only adds people by invitation."
+          banner={
+            <AuthBanner tone="info">
+              Ask an administrator for an invitation. Its email has a link that brings you back here.
+            </AuthBanner>
+          }
+          links={
+            <span className="text-muted-foreground">
+              Already have an account? <AuthLink href={loginPath}>Sign in</AuthLink>
+            </span>
+          }
+        />
+      </AuthScreen>
+    )
+  }
+
   return (
-    <AuthScreen>
+    <AuthScreen panel="signup">
       <AuthCard
         icon={UserPlus}
         title="Create your account"
@@ -120,22 +149,20 @@ export default function SignupPage() {
             className={AUTH_INPUT}
           />
         </CreateSurfaceField>
-        <CreateSurfaceField label="Password" htmlFor="password" hint="At least 8 characters.">
-          <Input
+        <CreateSurfaceField label="Password" htmlFor="password">
+          <AuthPasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={8}
-            className={AUTH_INPUT}
+            rule
           />
         </CreateSurfaceField>
         <CreateSurfaceField label="Confirm password" htmlFor="confirm_password" error={confirmError}>
-          <Input
+          <AuthPasswordInput
             id="confirm_password"
-            type="password"
             autoComplete="new-password"
             value={confirmPassword}
             onChange={(e) => {
@@ -146,7 +173,6 @@ export default function SignupPage() {
             minLength={8}
             aria-invalid={confirmError ? true : undefined}
             aria-describedby={confirmError ? "confirm_password-error" : undefined}
-            className={AUTH_INPUT}
           />
         </CreateSurfaceField>
       </AuthCard>

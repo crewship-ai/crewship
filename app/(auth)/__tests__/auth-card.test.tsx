@@ -46,10 +46,11 @@ afterEach(() => {
 describe("login card", () => {
   it("renders one primary Sign in and hides Create an account when allow_signup=false", async () => {
     await renderLogin("", { needs_bootstrap: false, allow_signup: false })
-    const buttons = screen.getAllByRole("button")
+    // One primary; the only other button is the password field's show/hide.
+    const buttons = screen.getAllByRole("button").filter((b) => b.getAttribute("type") === "submit")
     expect(buttons).toHaveLength(1)
     expect(buttons[0]).toHaveAccessibleName("Sign in")
-    expect(buttons[0]).toHaveAttribute("type", "submit")
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Show password", "Sign in"])
     expect(screen.queryByRole("link", { name: "Create an account" })).not.toBeInTheDocument()
   })
 

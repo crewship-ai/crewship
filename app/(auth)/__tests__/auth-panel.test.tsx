@@ -84,9 +84,15 @@ describe("password field", () => {
     await renderLogin()
     const input = screen.getByLabelText("Password", { exact: true })
     expect(screen.queryByText("Caps Lock is on")).not.toBeInTheDocument()
-    fireEvent.keyDown(input, { key: "A", modifierCapsLock: true })
+    // jsdom does not track Caps Lock, so the event says what a browser would.
+    const key = (type: "keydown" | "keyup", capsLock: boolean, k: string) => {
+      const event = new KeyboardEvent(type, { key: k, bubbles: true })
+      Object.defineProperty(event, "getModifierState", { value: (m: string) => m === "CapsLock" && capsLock })
+      fireEvent(input, event)
+    }
+    key("keydown", true, "A")
     expect(screen.getByText("Caps Lock is on")).toBeVisible()
-    fireEvent.keyUp(input, { key: "CapsLock", modifierCapsLock: false })
+    key("keyup", false, "CapsLock")
     expect(screen.queryByText("Caps Lock is on")).not.toBeInTheDocument()
   })
 

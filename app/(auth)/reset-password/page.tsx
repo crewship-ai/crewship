@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, KeyRound } from "lucide-react"
-import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthLink, AuthReceipt, AuthScreen } from "@/components/branding/auth-card"
+import { AUTH_BUTTON, AuthCard, AuthLink, AuthPasswordInput, AuthReceipt, AuthScreen } from "@/components/branding/auth-card"
 import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { serverFetch } from "@/lib/server-base"
+
+const REDIRECT_SECONDS = 5
 
 export default function ResetPasswordPage() {
   return (
@@ -69,20 +70,24 @@ function ResetForm() {
     }
   }
 
-  // Delayed redirect with cleanup — if the user closes the tab or
-  // navigates away before the 2s elapses, the timer is cleared so we
-  // don't fire router.push() on an unmounted component.
+  // A visible countdown to sign-in (#3583) instead of a silent 2 s jump: the
+  // person sees where they are going and can go now. The interval is cleared
+  // on unmount, so a closed tab never fires router.push().
+  const [secondsLeft, setSecondsLeft] = useState(REDIRECT_SECONDS)
   useEffect(() => {
     if (!done) return
-    const timer = window.setTimeout(() => router.push("/login"), 2000)
-    return () => window.clearTimeout(timer)
-  }, [done, router])
+    const timer = window.setInterval(() => setSecondsLeft((s) => s - 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [done])
+  useEffect(() => {
+    if (done && secondsLeft <= 0) router.push("/login")
+  }, [done, secondsLeft, router])
 
   const passwordError = fieldError?.field === "password" ? fieldError.message : null
   const confirmError = fieldError?.field === "confirm" ? fieldError.message : null
 
   return (
-    <AuthScreen>
+    <AuthScreen panel="reset">
       <AuthCard
         icon={KeyRound}
         title="Choose a new password"
@@ -99,10 +104,8 @@ function ResetForm() {
         }
         actions={
           done ? (
-            // The redirect still fires after 2 s; this is for whoever does not
-            // want to wait for it.
             <Button asChild className={AUTH_BUTTON}>
-              <a href="/login">Sign in now</a>
+              <a href="/login">Sign in</a>
             </Button>
           ) : (
             <Button type="submit" disabled={loading} className={AUTH_BUTTON}>
@@ -115,15 +118,15 @@ function ResetForm() {
         {done ? (
           <div role="status" aria-live="polite">
             <AuthReceipt title="Password updated">
-              All existing sessions have been signed out. Taking you to sign in…
+              All existing sessions have been signed out.
             </AuthReceipt>
+            <p className="mt-3 text-label text-muted-foreground">Opening sign-in in {Math.max(secondsLeft, 0)} s…</p>
           </div>
         ) : (
           <>
             <CreateSurfaceField label="New password" htmlFor="password" error={passwordError}>
-              <Input
+              <AuthPasswordInput
                 id="password"
-                type="password"
                 autoComplete="new-password"
                 value={password}
                 onChange={(e) => {
@@ -134,13 +137,12 @@ function ResetForm() {
                 autoFocus
                 aria-invalid={passwordError ? true : undefined}
                 aria-describedby={passwordError ? "password-error" : undefined}
-                className={AUTH_INPUT}
+                rule
               />
             </CreateSurfaceField>
             <CreateSurfaceField label="Confirm new password" htmlFor="confirm" error={confirmError}>
-              <Input
+              <AuthPasswordInput
                 id="confirm"
-                type="password"
                 autoComplete="new-password"
                 value={confirm}
                 onChange={(e) => {
@@ -150,7 +152,6 @@ function ResetForm() {
                 required
                 aria-invalid={confirmError ? true : undefined}
                 aria-describedby={confirmError ? "confirm-error" : undefined}
-                className={AUTH_INPUT}
               />
             </CreateSurfaceField>
           </>
