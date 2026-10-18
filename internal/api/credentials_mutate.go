@@ -336,13 +336,6 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		legacyCrewID = &crewIDs[0]
 	}
 
-	// Remove soft-deleted credential with same name so the INSERT doesn't hit a unique constraint.
-	if _, err := h.db.ExecContext(r.Context(),
-		"DELETE FROM credentials WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL",
-		workspaceID, req.Name); err != nil {
-		h.logger.Warn("cleanup soft-deleted credential", "name", req.Name, "error", err)
-	}
-
 	// Resolve attribution (v98). Done BEFORE BeginTx so a malformed
 	// request doesn't open and abandon a transaction — see the
 	// "transaction leak" trail at credentials_mutate_test.go.
@@ -455,6 +448,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin tx", err)
+		return
+	}
+
+	defer tx.Rollback()
+	if err := releaseCredentialNameIn(r.Context(), tx, workspaceID, req.Name); err != nil {
+		replyInternalError(w, h.logger, "release retired credential name", err)
 		return
 	}
 

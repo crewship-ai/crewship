@@ -155,3 +155,24 @@ credential it:
 
 The frontend wizard + list/detail update for the four new types is
 tracked separately (follow-up PR after `feat/credentials-vault-types`).
+
+## Credential retirement and audit history
+
+Deleting a credential retains its row with `deleted_at` set. Live selection,
+secret delivery, reveal, refresh and rotation exclude tombstones; forensic audit
+reads retain access to their historical identity. Credential audit foreign keys
+refuse a hard delete while history references the credential. Configured audit
+retention and whole-workspace erasure remain separate operations. Hard workspace
+erasure removes its credential history, including legacy rows whose audit
+workspace attribution is NULL; soft deletion never performs this cleanup.
+
+Reusing a retired name creates a new credential ID. Within the replacement
+transaction, the old name gains ` [retired:<unchanged credential ID>]`; the full
+original name remains before that exact suffix, without truncation. A name
+collision or failed replacement rolls back the rename. Old assignments cannot
+become grants to the replacement ID. The retirement does not rewrite encrypted
+values, credential IDs or historical audit rows. Workspace backups retain tombstones
+and workspace-attributed history; legacy audit rows with NULL workspace
+attribution remain outside that scope. A replacement restore that would orphan
+those rows is refused and rolled back, rather than deleting history absent from
+the bundle. The separate active-secret export excludes tombstones.

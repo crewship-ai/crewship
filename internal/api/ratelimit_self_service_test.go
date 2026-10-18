@@ -1,6 +1,6 @@
 package api
 
-// Managing your own sessions and CLI tokens used to sit in the SAME 10/min
+// Managing your own sessions and CLI tokens used to sit in the SAME strict
 // per-IP bucket as unauthenticated login, because both live under
 // /api/v1/auth/. Revoking a token costs two requests (the DELETE plus the
 // list refresh), so a user tidying up four stale tokens hit 429 — and the
@@ -16,13 +16,14 @@ package api
 
 import (
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
-// authBucketLimit is the strict per-IP budget (router.go NewRateLimiter(10)).
+// The strict per-IP budget comes from the current rate-limit registry.
 // Firing comfortably more than that from one IP separates "strict bucket"
 // from "general bucket" without depending on the exact number.
 // Enough probes to exhaust the auth bucket whatever it is set to, and still
@@ -34,6 +35,9 @@ var authBucketProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin) +
 
 func hammer(t *testing.T, r *Router, method, path string) (got429 bool) {
 	t.Helper()
+	// This classifies routes, not throughput. Preserve the real burst but
+	// freeze refill for this synthetic IP so slow/race runs cannot replenish it.
+	r.authRL.getLimiter("198.51.100.7").SetLimit(0)
 	for i := 0; i < authBucketProbes; i++ {
 		req := httptest.NewRequest(method, path, nil)
 		req.RemoteAddr = fmt.Sprintf("198.51.100.7:%d", 1000+i)

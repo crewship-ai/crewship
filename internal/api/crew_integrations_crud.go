@@ -305,7 +305,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Collect credential IDs from bindings — cascade-delete OAuth credentials
+	// Collect credential IDs from bindings — retire OAuth credentials
 	// that were created specifically for this integration (auto-connect flow).
 	var credIDs []string
 	rows, err := tx.QueryContext(r.Context(),
@@ -335,7 +335,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Cascade-delete OAuth credentials only if no other bindings reference them
+	// Retire OAuth credentials only if no other bindings reference them
 	for _, cid := range credIDs {
 		var remaining int
 		if err := tx.QueryRowContext(r.Context(),
@@ -346,9 +346,27 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		if remaining > 0 {
 			continue // still referenced elsewhere
 		}
-		if _, err := tx.ExecContext(r.Context(),
-			"DELETE FROM credentials WHERE id = ? AND workspace_id = ?", cid, workspaceID); err != nil {
-			h.logger.Warn("cascade delete OAuth credential", "credential_id", cid, "error", err)
+		res, err := tx.ExecContext(r.Context(),
+			"UPDATE credentials SET deleted_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339), cid, workspaceID)
+		if err != nil {
+			h.logger.Warn("retire OAuth credential", "credential_id", cid, "error", err)
+			continue
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			continue
+		}
+		// Retain the historical row, but release the live assignments and slot
+		// claims that the former hard-delete cascade removed.
+		for _, query := range []string{
+			"DELETE FROM agent_credentials WHERE credential_id = ?",
+			"DELETE FROM credential_bindings WHERE credential_id = ?",
+			"DELETE FROM credential_crews WHERE credential_id = ?",
+		} {
+			if _, err := tx.ExecContext(r.Context(), query, cid); err != nil {
+				tx.Rollback()
+				replyInternalError(w, h.logger, "release retired credential assignments", err)
+				return
+			}
 		}
 	}
 

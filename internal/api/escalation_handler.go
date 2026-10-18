@@ -329,11 +329,11 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
 		// to approve it through — roll it back. (createPendingCredential commits
-		// before this insert; this is the compensating delete.)
+		// before this insert; retire its orphan without erasing audit.)
 		if cid, ok := credentialID.(string); ok && cid != "" {
 			if _, delErr := h.db.ExecContext(r.Context(),
-				`DELETE FROM credentials WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL'`,
-				cid, body.WorkspaceID); delErr != nil {
+				`UPDATE credentials SET deleted_at = ?, updated_at = ?, status = 'REJECTED' WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL`,
+				now, now, cid, body.WorkspaceID); delErr != nil {
 				h.logger.Error("rollback orphaned pending credential", "error", delErr, "credential_id", cid)
 			}
 		}
