@@ -267,6 +267,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "invitation.revoked": "audit",
   "invitation.accepted": "audit",
   "member.access_changed": "audit",
+  "member.capabilities_changed": "audit",
+  "member.removed": "audit",
   // Provisioning — container build lifecycle.
   "provisioning.queued": "provisioning",
   "provisioning.building": "provisioning",
@@ -500,6 +502,8 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "invitation.revoked": "invite−",
   "invitation.accepted": "invite✓",
   "member.access_changed": "access",
+  "member.capabilities_changed": "caps",
+  "member.removed": "member removed",
   "provisioning.queued": "prov·queue",
   "provisioning.building": "prov·build",
   "provisioning.complete": "prov·done",

@@ -604,3 +604,22 @@ is an in-process API invalidation mechanism, not cross-process messaging.
 A storage failure or conservative stream-admission race rejects the upgrade with
 a generic error; it does not claim the session was revoked. Operational errors
 retain their class for server-side handling and logging.
+
+## Capability and membership audit
+
+A changed capability set appends `member.capabilities_changed`, and a removed
+workspace membership appends `member.removed`, in the same transaction as the
+mutation. Capability changes revalidate the caller’s active, trusted OWNER/ADMIN
+authority inside the write transaction, after reading the request body. Member
+removal requires exactly one deleted membership row. An audit append or commit failure rolls back the mutation, including
+page transfers and crew membership cleanup during departure. Notifications are
+published only after commit. An unchanged capability set or already absent
+membership does not append a duplicate change event.
+
+Both events identify the actor through the standard journal actor fields and
+contain only `subject_user_id` and `action` in their payload. Capability values,
+names of changed capabilities and hashes of those values are excluded: values
+remain available through the existing ADMIN-only capability endpoint. The
+journal records who changed whose access and when; it cannot reconstruct old
+capability sets. This contract does not add chained auditing for instance-level
+CLI token creation or revocation.

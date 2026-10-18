@@ -624,10 +624,18 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 		return err // *ErrPagesNeedManualTransfer passes through for a 409
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	removed, err := tx.ExecContext(ctx,
 		"DELETE FROM workspace_members WHERE user_id = ? AND workspace_id = ?",
-		memberUserID, workspaceID); err != nil {
+		memberUserID, workspaceID)
+	if err != nil {
 		return fmt.Errorf("delete member: %w", err)
+	}
+	removedCount, err := removed.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count removed members: %w", err)
+	}
+	if removedCount != 1 {
+		return fmt.Errorf("member removal affected %d rows, expected one", removedCount)
 	}
 
 	// crew_members has no workspace_id of its own (prisma/schema.prisma:
@@ -652,9 +660,24 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 			return err
 		}
 	}
+	actorType := journal.ActorUser
+	if actorID == "" {
+		actorType = journal.ActorSystem
+	}
+	notify, err := appendAuthorizationAudit(ctx, tx, j, journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryMemberRemoved,
+		ActorType: actorType, ActorID: actorID, Summary: "Workspace member removed",
+		Payload: map[string]any{"subject_user_id": memberUserID, "action": "member_removed"},
+	})
+	if err != nil {
+		return fmt.Errorf("audit member removal: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit member removal: %w", err)
+	}
+	if notify != nil {
+		notify()
 	}
 	emitPageOwnerTransferJournals(ctx, j, workspaceID, actorID, memberUserID, transferred)
 	return nil
