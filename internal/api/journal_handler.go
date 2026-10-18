@@ -729,6 +729,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 }
 
 // Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// OWNER/ADMIN only (#3590).
 // Query params:
 //
 //	window=24h|7d|30d — default 24h
@@ -737,6 +738,9 @@ func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 

@@ -380,6 +380,8 @@ The journal entries themselves never carry display strings — they store stable
 
 Cost rollup over `cost.incurred` journal entries and `pipeline_runs.cost_usd` (#1404) — a separate, journal-native surface from [Paymaster](/api-reference/paymaster)'s `/api/v1/paymaster/spend/*`.
 
+**Authorization:** caller must hold `OWNER` or `ADMIN` on the workspace. Every other role gets `403`.
+
 ```
 GET /api/v1/journal/spend
 ```
@@ -428,6 +430,7 @@ GET /api/v1/journal/spend
 |---|---|
 | 400 | Bad `window` or `top`. |
 | 401 | No workspace context. |
+| 403 | Caller is not `OWNER` / `ADMIN`. |
 | 500 | DB error. |
 
 CLI: `crewship spend --window 7d --top 10` — see [`crewship spend`](/cli/spend).

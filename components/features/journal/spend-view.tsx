@@ -217,7 +217,12 @@ export function SpendView() {
               <TimeRangePicker value={range} onChange={setRange} />
             </div>
 
-            {crewSpend.error && (
+            {crewSpend.error === "HTTP 403" && (
+              <div className="rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-[12px] text-muted-foreground">
+                Spend is unavailable: only workspace owners and admins can see costs.
+              </div>
+            )}
+            {crewSpend.error && crewSpend.error !== "HTTP 403" && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[12px] text-destructive flex items-center justify-between gap-2">
                 <span>Couldn&apos;t load spend ({crewSpend.error}).</span>
                 <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setReloadKey((k) => k + 1)}>

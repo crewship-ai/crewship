@@ -96,10 +96,12 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
 
   const runs = useRecentRuns(workspaceId)
   const { waitpoints: allWaitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
-  const spend = useJournalSpend(workspaceId, win)
+  const { role } = useAbilities()
+  // The cost read is OWNER/ADMIN on the server (#3590); other roles never ask,
+  // so the headline simply carries no cost figure for them.
+  const spend = useJournalSpend(roleAtLeast(role, "ADMIN") ? workspaceId : null, win)
   const failureGroups = useFailureGroups(workspaceId)
   const calendar = useUpcoming(workspaceId, now)
-  const { role } = useAbilities()
 
   const from = now - WINDOW_MS[win]
   const rows = scopeRuns(runs.rows, scope?.origins ?? null)

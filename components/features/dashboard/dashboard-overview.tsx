@@ -522,6 +522,7 @@ export function OutcomeKpis({
   window,
   spendUsd = null,
   spendPerRun = null,
+  showSpend = true,
 }: {
   data: OutcomeKpiData
   window: DashboardWindow
@@ -529,6 +530,8 @@ export function OutcomeKpis({
    *  ledger rows; undefined while pending or after a failed fetch. */
   spendUsd?: number | null | undefined
   spendPerRun?: number | null
+  /** The cost ledger is OWNER/ADMIN only (#3590); other roles get no tile. */
+  showSpend?: boolean
 }) {
   const reduce = useReducedMotion()
   // Nothing ran in the window: four tiles of zeros and dashes say one thing,
@@ -589,10 +592,10 @@ export function OutcomeKpis({
       value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
       detail: spendUsd === undefined ? "ledger unavailable" : spendUsd === null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
     },
-  ]
+  ].filter((card) => showSpend || card.label !== "Spend")
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className={cn("grid grid-cols-2 gap-3", showSpend ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
       {cards.map((card, index) => {
         const Icon = card.icon
         return (

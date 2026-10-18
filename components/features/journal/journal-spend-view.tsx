@@ -141,11 +141,15 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
         </Select>
       </div>
 
-      {error && (
+      {error === "HTTP 403" ? (
+        <div className="rounded-lg border border-border/60 bg-card/50 px-4 py-3 text-sm text-muted-foreground">
+          Spend is unavailable: only workspace owners and admins can see costs.
+        </div>
+      ) : error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
-      )}
+      ) : null}
 
       {/* Spend over time */}
       <div className="rounded-lg border border-border/60 bg-card/50 p-4">

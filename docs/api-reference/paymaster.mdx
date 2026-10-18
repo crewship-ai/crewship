@@ -10,6 +10,10 @@ tag: Stable
 Paymaster exposes read-only cost rollups across crew, agent, and mission scopes, plus a leaderboard of top spenders and a flat-rate subscription usage view. Every spend figure comes from the `cost_ledger`, which is written exclusively by the internal cost-record path — there are no public write endpoints. See the [Paymaster guide](/guides/paymaster) for the cost ledger and budget model, and the [Sidecar coverage section](/guides/paymaster#sidecar-coverage-of-agent-cli-calls) for the known limitation around agent CLI bypass.
 
 <Note>
+  **Cost figures are `OWNER` / `ADMIN` only.** The four spend endpoints (`spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders`) answer `403` to every other role (`MANAGER`, `MEMBER`, `VIEWER`, `GUEST`); the Spend views in the web app are hidden for them and ask nothing. `subscriptions` is `OWNER` / `ADMIN` as well. An empty window returns `"rows": []`, never `null`.
+</Note>
+
+<Note>
   All read endpoints require authentication and are workspace-scoped. The write path is **exclusively internal** via the [LLM middleware](/guides/llm-middleware) — there are no POST endpoints on the public surface.
 </Note>
 
@@ -75,7 +79,7 @@ described above; the workspace is taken from the authenticated session.
 | `rows[].input_tokens` | integer | Sum of `input_tokens`. |
 | `rows[].output_tokens` | integer | Sum of `output_tokens`. |
 
-**Errors:** `401` no workspace; `500` DB error.
+**Errors:** `401` no workspace; `403` caller is not `OWNER` / `ADMIN`; `500` DB error.
 
 ---
 
@@ -114,6 +118,7 @@ GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h
 |---|---|
 | 400 | Missing `crewId`. |
 | 401 | No workspace. |
+| 403 | Caller is not `OWNER` / `ADMIN`. |
 | 404 | `crewId` not in your workspace (same shape as "not found"). |
 | 500 | DB error. |
 
@@ -158,6 +163,7 @@ spend has been recorded they come back as the zero time
 |---|---|
 | 400 | Missing `missionId`. |
 | 401 | No workspace. |
+| 403 | Caller is not `OWNER` / `ADMIN`. |
 | 404 | `missionId` not in your workspace. |
 | 500 | DB error. |
 

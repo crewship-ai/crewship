@@ -27,4 +27,15 @@ describe("OutcomeKpis", () => {
     render(<OutcomeKpis data={{ ...EMPTY, successTotal: 2, successPct: 0 }} window="7d" spendUsd={null} />)
     expect(screen.getByText("Success")).toBeTruthy()
   })
+
+  // #3590: the cost ledger is OWNER/ADMIN on the server, so other roles get no
+  // Spend tile at all (not "ledger unavailable").
+  it.each([
+    { showSpend: true, spend: true },
+    { showSpend: false, spend: false },
+  ])("Spend tile follows showSpend=$showSpend", ({ showSpend, spend }) => {
+    render(<OutcomeKpis data={{ ...EMPTY, completed: 3, successOk: 3, successTotal: 3, successPct: 100 }} window="24h" spendUsd={1.5} showSpend={showSpend} />)
+    expect(screen.queryByText("Spend") !== null).toBe(spend)
+    expect(screen.getByText("Completed")).toBeTruthy()
+  })
 })

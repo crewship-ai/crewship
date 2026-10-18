@@ -7,6 +7,7 @@ const mock = vi.hoisted(() => ({
   waitpoints: [] as unknown[],
   refreshWaitpoints: vi.fn(),
   role: "OWNER" as string | null,
+  spend: vi.fn((ws: string | null) => ({ data: ws ? { total_cost_usd: 0.42 } : null })),
 }))
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: mock.fetch }))
@@ -14,7 +15,7 @@ vi.mock("@/lib/api/waitpoints", () => ({ waitpointDecide: mock.decide }))
 vi.mock("@/hooks/use-run-waitpoints", () => ({
   useWorkspaceWaitpoints: () => ({ waitpoints: mock.waitpoints, refresh: mock.refreshWaitpoints }),
 }))
-vi.mock("@/hooks/use-journal-spend", () => ({ useJournalSpend: () => ({ data: { total_cost_usd: 0.42 } }) }))
+vi.mock("@/hooks/use-journal-spend", () => ({ useJournalSpend: mock.spend }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mock.role }) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {} }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -58,6 +59,23 @@ describe("ActivityHome", () => {
     mount()
     const summary = screen.getByLabelText("Summary")
     await waitFor(() => expect(summary).toHaveTextContent("3 runs·1 running·1 needs you·1 could not finish·$0.42"))
+  })
+
+  // #3590: the server answers 403 to the cost read below ADMIN, so those roles
+  // never ask and the summary carries no dollar figure.
+  it.each([
+    { role: "OWNER", asks: true },
+    { role: "ADMIN", asks: true },
+    { role: "MANAGER", asks: false },
+    { role: "MEMBER", asks: false },
+    { role: "VIEWER", asks: false },
+  ])("asks for the cost only as admin: $role -> $asks", async ({ role, asks }) => {
+    mock.role = role
+    mount()
+    const summary = screen.getByLabelText("Summary")
+    await waitFor(() => expect(summary).toHaveTextContent("3 runs"))
+    expect(mock.spend).toHaveBeenLastCalledWith(asks ? "ws" : null, expect.anything())
+    expect(summary.textContent?.includes("$0.42")).toBe(asks)
   })
 
   it("lets a manager approve a plain decision from the card, as in Inbox", async () => {

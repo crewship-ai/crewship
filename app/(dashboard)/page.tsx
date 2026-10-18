@@ -14,6 +14,7 @@ import {
   deriveFleetHealth,
   kpisFromInsights,
 } from "@/components/features/dashboard/dashboard-overview"
+import { roleAtLeast } from "@/lib/routine-governance"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fleet-board"
@@ -80,7 +81,7 @@ function runVolumeParams(window: DashboardWindow): TimeseriesParams {
 }
 
 export default function DashboardPage() {
-  const { workspaceId, loading: workspaceLoading } = useWorkspace()
+  const { workspaceId, role, loading: workspaceLoading } = useWorkspace()
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
@@ -124,7 +125,10 @@ export default function DashboardPage() {
   const capacityQ = useRuntimeCapacity(queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
-  const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
+  // The ledger read is OWNER/ADMIN on the server (#3590): other roles neither
+  // ask for it nor see the Spend tile.
+  const canSeeSpend = roleAtLeast(role, "ADMIN")
+  const spendQ = useCrewSpend(workspaceId, reportWindow, { enabled: onboardingChecked && canSeeSpend })
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
   const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
@@ -287,6 +291,7 @@ export default function DashboardPage() {
             data={kpis}
             window={reportWindow}
             spendUsd={spendTotal}
+            showSpend={canSeeSpend}
             spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
           />
         </Appear>
