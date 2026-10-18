@@ -112,7 +112,7 @@ export function Segmented<T extends string>({
               // A disabled segment keeps pointer events, so its title (the
               // reason) still shows on hover.
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",
-              size === "xs" ? "h-6 text-xs" : "h-7 text-sm",
+              size === "xs" ? "h-[var(--control-xs)] text-xs" : "h-[var(--control-sm)] text-sm",
               fill && "flex-1",
               on
                 ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]"

@@ -4,21 +4,15 @@ import * as React from "react"
 import { Settings as SettingsIcon, type LucideIcon } from "lucide-react"
 
 import { DrillPage } from "@/components/layout/drill-page"
-import { SettingsPageHead } from "@/components/features/settings/shared"
+import type { PanelSpacesConfig } from "@/components/layout/panel-spaces"
 
 /**
- * A Settings page one level down (Members, Crew links, Audit log): the
- * shared DrillPage frame with the section head drawn ONCE, here, from the
- * same title, icon and sentence — never again by the page (#3487 SET-07).
- *
- * The top bar names the place ("Settings › Members") and carries the page's
- * actions; the section head under it says what the page is in one sentence,
- * with who may change it on the right (`note`). The head is drawn before the
- * page's data arrives, so a loading page already says where you are.
- *
- * The sentence is not passed to the top bar: DrillPage would print it a
- * second time beside the title. Making the shared frame own the head for
- * every nested page (Admin's too) is a kit request — see the PR.
+ * A Settings page one level down (Members, Crew links, Audit log): the kit
+ * DrillPage with Settings as the parent. The kit owns the path in the top bar
+ * ("Settings / Members"), the section head - drawn from the same title, icon
+ * and sentence, once, before the data arrives - and the panel's back row,
+ * facets and spaces (#3487 SET-07, PRD SHL-05). `note` is who may change what
+ * is here, on the right of the head.
  */
 export function SettingsDrillPage({
   title,
@@ -27,6 +21,8 @@ export function SettingsDrillPage({
   note,
   panelId,
   toolbar,
+  facets,
+  spaces,
   nav,
   mobileNav,
   actions,
@@ -41,6 +37,8 @@ export function SettingsDrillPage({
   note?: React.ReactNode
   panelId: string
   toolbar?: React.ReactNode
+  facets?: React.ReactNode
+  spaces?: PanelSpacesConfig
   nav?: React.ReactNode
   mobileNav?: React.ReactNode
   actions?: React.ReactNode
@@ -54,21 +52,16 @@ export function SettingsDrillPage({
       panelId={panelId}
       title={title}
       icon={icon}
+      description={description}
+      note={note}
+      head={!headless}
       toolbar={toolbar}
+      facets={facets}
+      spaces={spaces}
       nav={nav}
       mobileNav={mobileNav}
       actions={actions}
     >
-      {!headless && (
-        <div className="px-4 pt-4 md:px-6 md:pt-6">
-          <SettingsPageHead
-            icon={icon}
-            title={title}
-            description={description}
-            actions={note != null ? <span className="text-label text-muted-foreground" data-slot="settings-page-note">{note}</span> : undefined}
-          />
-        </div>
-      )}
       {children}
     </DrillPage>
   )

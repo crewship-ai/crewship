@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useAppStore } from "@/lib/store"
+import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 
 /** Lets the kit's SidebarToolbar know it is the panel's toolbar: it then
@@ -57,6 +58,7 @@ export function SecondaryPanel({
   toolbar,
   footer,
   phoneInline = false,
+  spaces,
   className,
   children,
 }: {
@@ -74,9 +76,13 @@ export function SecondaryPanel({
    *  for sections whose panel IS the list (Inbox), while nothing is open.
    *  List → detail → back (PNL-05). */
   phoneInline?: boolean
+  /** Two to nine places that each show a different page body, listed first in
+   *  the body (under the toolbar) and switched on keys 1-9 (PNL-02). */
+  spaces?: PanelSpacesConfig
   className?: string
   children?: React.ReactNode
 }) {
+  const spacesNode = spaces ? <PanelSpaces {...spaces} /> : null
   const isMobile = useIsMobile()
   const tablet = useIsTabletPanel() && !isMobile
   // Whether the content brought its own kit toolbar (which then carries the
@@ -108,10 +114,10 @@ export function SecondaryPanel({
           {toolbar ? (
             <>
               <div className="secondary-panel-toolbar">{toolbar}</div>
-              <div className="secondary-panel-body">{children}</div>
+              <div className="secondary-panel-body">{spacesNode}{children}</div>
             </>
           ) : (
-            <div className="secondary-panel-content">{children}</div>
+            <div className="secondary-panel-content">{spacesNode}{children}</div>
           )}
         </SecondaryPanelContext.Provider>
         {footer && <div className="secondary-panel-footer">{footer}</div>}
@@ -130,10 +136,10 @@ export function SecondaryPanel({
             {toolbar ? (
               <>
                 <div className="secondary-panel-toolbar">{toolbar}</div>
-                <div className="secondary-panel-body">{children}</div>
+                <div className="secondary-panel-body">{spacesNode}{children}</div>
               </>
             ) : (
-              <div className="secondary-panel-content">{children}</div>
+              <div className="secondary-panel-content">{spacesNode}{children}</div>
             )}
           </SecondaryPanelContext.Provider>
           {footer && <div className="secondary-panel-footer">{footer}</div>}
@@ -182,7 +188,7 @@ export function SecondaryPanel({
                   <span className="ml-auto" />
                   {closeButton}
                 </div>
-                <div className="secondary-panel-body">{children}</div>
+                <div className="secondary-panel-body">{spacesNode}{children}</div>
               </>
             ) : (
               <>
@@ -192,7 +198,7 @@ export function SecondaryPanel({
                     {closeButton}
                   </div>
                 )}
-                <div className="secondary-panel-content">{children}</div>
+                <div className="secondary-panel-content">{spacesNode}{children}</div>
               </>
             )}
             {footer && <div className="secondary-panel-footer">{footer}</div>}
@@ -234,7 +240,7 @@ export function SecondaryPanel({
                 <span className="ml-auto" />
                 {toggle}
               </div>
-              <div className="secondary-panel-body">{children}</div>
+              <div className="secondary-panel-body">{spacesNode}{children}</div>
             </>
           ) : (
             <>
@@ -244,7 +250,7 @@ export function SecondaryPanel({
                   {toggle}
                 </div>
               )}
-              <div className="secondary-panel-content">{children}</div>
+              <div className="secondary-panel-content">{spacesNode}{children}</div>
             </>
           )}
           {footer && <div className="secondary-panel-footer">{footer}</div>}

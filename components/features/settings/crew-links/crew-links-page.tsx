@@ -42,7 +42,6 @@ import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
 import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
-import { SettingsSpaces } from "@/components/features/settings/settings-spaces"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageEmpty, PageError } from "@/components/layout/page-state"
 
@@ -148,37 +147,42 @@ export function CrewLinksPage() {
     </>
   )
 
+  // The facets open inside the panel under the toolbar (kit COM-01, v67
+  // panel() -> pk-fx), never as a floating popover; the kit DrillPage gives
+  // them their own slot (SET-07).
+  const facetBlock = (
+    <SidebarFacetBlock {...facets.blockProps} label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} className="mt-2">
+      <SidebarInlineFacet
+        label="Agents"
+        values={[
+          { value: "with", label: "With agents", count: countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0) },
+          { value: "none", label: "No agents (collectors)", count: countWhere((c) => agentCount(c, agentsOf(c)) === 0) },
+        ]}
+        selected={filters.agents || null}
+        onToggle={(v) => setFilters({ agents: filters.agents === v ? "" : v as CrewLinkFilters["agents"] })}
+        onClear={() => setFilters({ agents: "" })}
+      />
+      <SidebarInlineFacet
+        label="Network"
+        values={[
+          { value: "restricted", label: "Restricted", count: countWhere((c) => c.network_mode != null && !isOpenNetwork(c)) },
+          { value: "open", label: "Open", count: countWhere(isOpenNetwork) },
+        ]}
+        selected={filters.net || null}
+        onToggle={(v) => setFilters({ net: filters.net === v ? "" : v as CrewLinkFilters["net"] })}
+        onClear={() => setFilters({ net: "" })}
+      />
+    </SidebarFacetBlock>
+  )
+
+  const spaces = {
+    items: VIEWS.map((v) => ({ ...v, count: v.key === "crew" ? crews.length : v.key === "all" ? stats.directions : undefined })),
+    value: view,
+    onChange: setView,
+  }
+
   const nav = (
     <>
-      {/* The facets open here, inside the panel under the toolbar (kit
-          COM-01, v67 panel() → pk-fx), never as a floating popover. */}
-      <SidebarFacetBlock {...facets.blockProps} label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} className="mt-2">
-        <SidebarInlineFacet
-          label="Agents"
-          values={[
-            { value: "with", label: "With agents", count: countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0) },
-            { value: "none", label: "No agents (collectors)", count: countWhere((c) => agentCount(c, agentsOf(c)) === 0) },
-          ]}
-          selected={filters.agents || null}
-          onToggle={(v) => setFilters({ agents: filters.agents === v ? "" : v as CrewLinkFilters["agents"] })}
-          onClear={() => setFilters({ agents: "" })}
-        />
-        <SidebarInlineFacet
-          label="Network"
-          values={[
-            { value: "restricted", label: "Restricted", count: countWhere((c) => c.network_mode != null && !isOpenNetwork(c)) },
-            { value: "open", label: "Open", count: countWhere(isOpenNetwork) },
-          ]}
-          selected={filters.net || null}
-          onToggle={(v) => setFilters({ net: filters.net === v ? "" : v as CrewLinkFilters["net"] })}
-          onClear={() => setFilters({ net: "" })}
-        />
-      </SidebarFacetBlock>
-      <SettingsSpaces
-        spaces={VIEWS.map((v) => ({ ...v, count: v.key === "crew" ? crews.length : v.key === "all" ? stats.directions : undefined }))}
-        value={view}
-        onChange={setView}
-      />
       <DrillNavSection label="Links" count={crews.length}>
         {LINK_FACETS.map((f, i) => {
           const n = facetCount(f.key)
@@ -232,6 +236,8 @@ export function CrewLinksPage() {
       description="Who hands work to whom, and whose shared files they see."
       note="Managers and up change links"
       toolbar={toolbar}
+      facets={facetBlock}
+      spaces={spaces}
       nav={nav}
       mobileNav={mobileNav}
     >

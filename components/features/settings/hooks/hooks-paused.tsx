@@ -21,6 +21,7 @@ export function HooksPaused() {
       title="Lifecycle hooks"
       icon={Webhook}
       description="Paused"
+      head={false}
     >
       <section aria-label="Lifecycle hooks are paused" className="mx-auto w-full max-w-xl p-4 md:p-6">
         <EmptyState
