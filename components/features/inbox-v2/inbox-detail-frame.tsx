@@ -316,7 +316,7 @@ export function DetailRail({ entry, lookup, earlier, onOpen, slotRef }: {
           {earlier.map((e) => (
             <button key={e.key} type="button" onClick={() => onOpen(e)} className="row-hover flex w-full justify-between gap-2.5 rounded-md px-1 py-1.5 text-left text-body">
               <span className="min-w-0 truncate">{entryTitle(e)}</span>
-              <span className="shrink-0 font-mono text-micro text-muted-foreground">{ageLabel(e.createdAt)}</span>
+              <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{ageLabel(e.createdAt)}</span>
             </button>
           ))}
         </section>

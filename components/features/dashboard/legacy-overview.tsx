@@ -247,7 +247,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
                   </span>
                   <span className="block truncate text-label text-muted-foreground">{schedule.name}</span>
                 </span>
-                <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
+                <span className="shrink-0 text-label tabular-nums text-muted-foreground">
                   {scheduleTime(schedule.next_run_at!)}
                 </span>
                 <span
@@ -383,7 +383,7 @@ export function OutcomeKpis({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-xl font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
-                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
+                <span className="text-micro font-semibold text-muted-foreground">{card.label}</span>
               </div>
               <div className="mt-1 line-clamp-2 text-label leading-snug text-muted-foreground">{card.detail}</div>
             </div>
