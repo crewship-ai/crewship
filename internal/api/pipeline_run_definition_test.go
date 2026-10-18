@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 
@@ -10,16 +11,24 @@ import (
 
 func TestRunDefinition_UsesArchivedContentAndNeverHead(t *testing.T) {
 	h, db, _, ws := runsHandlerRig(t)
-	seedRunsPipeline(t, db, ws, "definition_pipeline", "historical")
+	saved := seedArchivedAPIFixture(t, db, ws, "historical", `{"steps":[{"id":"old"}]}`, pipeline.AuthorMeta{})
 	store := pipeline.NewStore(db)
-	old, err := store.SaveVersion(context.Background(), pipeline.SaveVersionInput{PipelineID: "definition_pipeline", DefinitionJSON: `{"steps":[{"id":"old"}]}`})
+	old, err := store.GetVersion(context.Background(), saved.ID, apiFixtureHeadVersion(t, db, saved.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SaveVersion(context.Background(), pipeline.SaveVersionInput{PipelineID: "definition_pipeline", DefinitionJSON: `{"steps":[{"id":"new"}]}`}); err != nil {
+	latest := seedArchivedAPIFixture(t, db, ws, "historical", `{"steps":[{"id":"new"}]}`, pipeline.AuthorMeta{})
+	if latest.ID != saved.ID {
+		t.Fatal("fixture update replaced routine identity")
+	}
+	seedRunRow(t, db, ws, saved.ID, "historical", "historic_run", "completed")
+	var historicalPin sql.NullInt64
+	if err := db.QueryRow(`SELECT pipeline_version FROM pipeline_runs WHERE id='historic_run'`).Scan(&historicalPin); err != nil {
 		t.Fatal(err)
 	}
-	seedRunRow(t, db, ws, "definition_pipeline", "historical", "historic_run", "completed")
+	if historicalPin.Valid {
+		t.Fatal("historical nil pin was fabricated from current HEAD")
+	}
 	if _, err := db.Exec(`UPDATE pipeline_runs SET definition_hash = ? WHERE id = 'historic_run'`, old.DefinitionHash); err != nil {
 		t.Fatal(err)
 	}
