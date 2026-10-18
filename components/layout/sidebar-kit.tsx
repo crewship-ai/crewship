@@ -272,7 +272,7 @@ export function SidebarFilterPopover({
               )}
             >
               <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
-                <span className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
+                <span className="text-micro font-semibold text-muted-foreground-soft">
                   Filters
                 </span>
                 {activeCount > 0 && onClear && (
@@ -321,7 +321,7 @@ export function SidebarFacet({
   return (
     <>
       {!first && <div className="mt-1 border-t border-foreground/[0.06]" />}
-      <div className="px-3 py-1 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
+      <div className="px-3 py-1 text-micro font-semibold text-muted-foreground-soft">
         {label}
       </div>
       <button
@@ -514,7 +514,7 @@ export function SidebarSection({
         {label}
       </span>
       {count != null && (
-        <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{count}</span>
+        <span className="text-micro tabular-nums text-muted-foreground-soft">{count}</span>
       )}
       {!collapsible && actions && <span className="ml-auto" />}
       {!collapsible && actions}

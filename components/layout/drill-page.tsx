@@ -256,7 +256,7 @@ export function DrillNavSection({
       {count != null && <span className="ml-auto tabular-nums">{count}</span>}
     </>
   )
-  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft"
+  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 text-micro font-semibold text-muted-foreground-soft"
   return (
     <div className="px-1.5 pt-2.5" data-slot="drill-section">
       {collapsible ? (
@@ -339,7 +339,7 @@ export function DrillNavItem({
         <span className="block truncate">{label}</span>
         {sub != null && <span className="block truncate text-[11px] font-normal text-muted-foreground">{sub}</span>}
       </span>
-      {meta != null && <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
+      {meta != null && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
     </button>
   )
 }

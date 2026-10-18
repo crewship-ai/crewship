@@ -108,7 +108,7 @@ export function SaveFooter({
     if (!wantsReason || !dirty) return null
     return (
       <div className={cn("space-y-1.5 border-t border-primary/25 bg-primary/[0.05] px-4 py-2.5", className)}>
-        <label htmlFor={reasonId} className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+        <label htmlFor={reasonId} className="block text-micro font-semibold text-muted-foreground">
           {reasonLabel}
         </label>
         <Input
@@ -149,7 +149,7 @@ export function SaveFooter({
     >
       {wantsReason && !saved && (
         <div className="space-y-1.5">
-          <label htmlFor={reasonId} className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+          <label htmlFor={reasonId} className="block text-micro font-semibold text-muted-foreground">
             {reasonLabel}
           </label>
           <Input
