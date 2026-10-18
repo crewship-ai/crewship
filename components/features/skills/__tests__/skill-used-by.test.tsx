@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { parseActivityUrl } from "@/lib/activity-url"
 import { SkillPage, type SkillPageProps } from "@/components/features/skills/skill-page"
 import type { SkillAgentRef, SkillDetail, SkillsAgent, SkillsCrew } from "@/components/features/skills/skills-model"
 
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span /> }))
-vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
+vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...rest}>{children}</a> }))
 vi.mock("streamdown", () => ({ Streamdown: () => null }))
 vi.mock("@/hooks/use-journal-list", () => ({ useJournalList: () => ({ entries: [], loading: false, error: null }) }))
 
@@ -40,22 +41,37 @@ function renderUsedBy(mutate: typeof h.mutate) {
   render(<SkillPage {...props} />)
 }
 
-describe("Activity button", () => {
-  it("has its own name next to the shell's Activity button and opens Used by", () => {
+describe("Activity action (ODCH-SK-14)", () => {
+  function renderOverview(onTab = vi.fn()) {
     h.mutate = () => Promise.resolve()
     h.detail = {
       id: "sk", name: "web", slug: "web", display_name: "Web", description: null, version: null, author: null, category: "RESEARCH",
       source: "BUNDLED", icon: null, scan_status: "CLEAN", verification: "VERIFIED", content: "", license: null, agent_count: 0, installed_on: [],
     } satisfies SkillDetail
-    const onTab = vi.fn()
     render(
       <SkillPage workspaceId="ws" skillId="sk" agents={agents} crews={crews} tab="overview" onTab={onTab} onBack={vi.fn()} onGive={vi.fn()}
         onDeleted={vi.fn()} onEditor={vi.fn()} canGive canManage />,
     )
+    return onTab
+  }
+
+  it("opens Activity filtered to the skill, with its own name next to the shell's Activity button", () => {
+    const onTab = renderOverview()
     // The top bar already has the shell's "Activity" (live runs) button.
-    expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Skill activity" }))
-    expect(onTab).toHaveBeenCalledWith("used")
+    expect(screen.queryByRole("link", { name: "Activity" })).not.toBeInTheDocument()
+    const link = screen.getByRole("link", { name: "Skill activity" })
+    const href = link.getAttribute("href") ?? ""
+    expect(href.startsWith("/activity?")).toBe(true)
+    const state = parseActivityUrl(new URL(href, "http://x").searchParams)
+    expect(state.path.stops).toEqual([{ kind: "skill", id: "sk", label: "Web" }])
+    // It leaves the page; it does not switch tabs in place.
+    fireEvent.click(link)
+    expect(onTab).not.toHaveBeenCalled()
+  })
+
+  it("is not hidden at phone width", () => {
+    renderOverview()
+    expect(screen.getByRole("link", { name: "Skill activity" }).className).not.toMatch(/max-sm:hidden/)
   })
 })
 
