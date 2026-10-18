@@ -96,7 +96,7 @@ export function AuthScreen({
           <AnimatedMark replayKey={replayKey} />
           <div className="auth-panel-shade pointer-events-none absolute inset-0" />
           <div className="absolute inset-x-10 bottom-14 z-10 hidden max-w-md text-white lg:block">
-            <p className="font-mono text-micro uppercase tracking-widest text-white/70">{eyebrow}</p>
+            <p className="text-micro font-semibold uppercase tracking-widest text-white/70">{eyebrow}</p>
             <p className="mt-3 text-display font-extrabold tracking-tight text-balance">{headline}</p>
             <p className="mt-3 max-w-[36ch] text-body leading-relaxed text-white/80">{blurb}</p>
           </div>
