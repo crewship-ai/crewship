@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Archive only verified native legacy routine heads during upgrade, preserving exact content, origins and integer pins without reconstructing historical versions. Verify each persisted archive before recording the cutover.
+
 - Await final host-capture fixture writes before removing temporary directories.
 
 - Preserve distinct routine version authority identities and legacy history without enabling Guest publication or runtime.

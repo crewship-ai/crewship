@@ -34,3 +34,24 @@ a separate prerequisite before a bounded producer is enabled.
 Chat origins remain independent, as described by
 [routine authority bindings](routine-origin-binding.md). This migration neither
 clears nor infers them.
+
+A later append-only `legacy_pipeline_current_heads` cutover archives the known
+current physical definition of an existing positive HEAD only when that
+routine has no archive rows at all and its stored hash matches SHA256 of the
+exact bytes. The archive keeps the existing HEAD integer and chat origin;
+HEAD, publication revision, drafts, run/schedule pins and NULL run versions
+remain unchanged. No earlier definitions or historical authoring timestamps
+are reconstructed: capture uses system upgrade attribution and capture time.
+Archive-bearing missing HEADs, inconsistent hashes and head=0 rows are left
+untouched. Explicit head=0 compatibility and narrowly proven old-backup
+restoration require separate prerequisites before strict HEAD readers ship.
+This cutover is never registered as a global restore backfill; an old source
+bundle cannot prove unrelated target rows have legacy authority.
+
+Capture also requires native TEXT id/definition/hash, positive INTEGER HEAD and
+NULL-or-TEXT origin before scanning. Unsupported BLOB storage remains uncaptured
+and source rows, archive absence and integer pins are never normalized or repaired.
+
+The cutover requires exactly one inserted archive and an exact native persisted
+row acknowledgement after triggers. Ignored, deleted or changed archive writes
+roll back all captures and leave the migration unrecorded for a clean retry.
