@@ -190,7 +190,7 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		return
 	}
 
-	current, targetRole, err := loadMemberCapabilitiesByMemberID(r.Context(), h.db, workspaceID, memberID)
+	_, targetRole, err := loadMemberCapabilitiesByMemberID(r.Context(), h.db, workspaceID, memberID)
 	if err != nil {
 		h.logger.Error("load member capabilities", "error", err, "member_id", memberID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -261,7 +261,7 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		replyError(w, http.StatusForbidden, "OWNER capabilities are immutable")
 		return
 	}
-	current = resolveCapabilitiesFromRow(capsJSON, targetRole)
+	current := resolveCapabilitiesFromRow(capsJSON, targetRole)
 	next, err := applyCapabilityMutation(current, body)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
