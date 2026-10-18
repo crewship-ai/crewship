@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Clarify that resource preset preview, confirmed application and the Settings selector are available; remove obsolete foundation-only descriptions without changing access behavior.
+
 - Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
 
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
