@@ -32,6 +32,13 @@ function ResetForm() {
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
 
+  // A wrong value goes under its field and focus goes with it; the field's
+  // id is the field key.
+  const refuse = (field: NonNullable<typeof fieldError>["field"], message: string) => {
+    setFieldError({ field, message })
+    document.getElementById(field)?.focus()
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
@@ -41,11 +48,11 @@ function ResetForm() {
       return
     }
     if (password.length < 8) {
-      setFieldError({ field: "password", message: "Password must be at least 8 characters." })
+      refuse("password", "Password must be at least 8 characters.")
       return
     }
     if (password !== confirm) {
-      setFieldError({ field: "confirm", message: "Passwords don't match." })
+      refuse("confirm", "Passwords don't match.")
       return
     }
     setLoading(true)

@@ -69,20 +69,27 @@ export default function BootstrapPage() {
       .catch(() => setChecking(false))
   }, [router])
 
+  // A wrong value goes under its field and focus goes with it; the field's
+  // id is the field key.
+  const refuse = (field: NonNullable<typeof fieldError>["field"], message: string) => {
+    setFieldError({ field, message })
+    document.getElementById(field)?.focus()
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setFieldError(null)
     if (fullName.trim().length < 2) {
-      setFieldError({ field: "full_name", message: "Name must be at least 2 characters." })
+      refuse("full_name", "Name must be at least 2 characters.")
       return
     }
     if (password.length < 8) {
-      setFieldError({ field: "password", message: "Password must be at least 8 characters." })
+      refuse("password", "Password must be at least 8 characters.")
       return
     }
     if (password !== confirmPassword) {
-      setFieldError({ field: "confirm_password", message: "Those passwords don't match." })
+      refuse("confirm_password", "Those passwords don't match.")
       return
     }
     setLoading(true)

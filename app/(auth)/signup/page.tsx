@@ -36,6 +36,8 @@ export default function SignupPage() {
 
     if (password !== confirmPassword) {
       setConfirmError("Passwords do not match")
+      // The error sits under the field; focus goes there with it.
+      document.getElementById("confirm_password")?.focus()
       return
     }
 
