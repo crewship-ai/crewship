@@ -52,8 +52,8 @@ it.each(["disabled", "not exactly enabled", "no epoch", "no human", "no chat", "
   if (kind === "closed") p.target = null
   if (kind === "wrong workspace") p.target = { ...p.target!, workspaceId: "other" }
   if (kind === "empty Page") p.target = { ...p.target!, pageId: "" }
-  if (kind === "wrong type") p.target = { ...p.target!, type: "app" } as typeof p.target
-  if (kind === "pinned mode") p.target = { ...p.target!, mode: "pinned" } as typeof p.target
+  if (kind === "wrong type") p.target = { ...p.target!, type: "app" } as unknown as typeof p.target
+  if (kind === "pinned mode") p.target = { ...p.target!, mode: "pinned" } as unknown as typeof p.target
   const { result } = renderHook(() => useDocumentViewerRead(p))
   expect(apiFetch).not.toHaveBeenCalled(); expect(result.current.read).toEqual({ status: "unavailable" })
 })
