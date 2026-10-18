@@ -64,7 +64,7 @@ describe("password recovery", () => {
 
 describe("reset password", () => {
   it.each([
-    ["", "new-passphrase", "new-passphrase", "Missing or invalid reset link", null],
+    // A link without a token never shows the form (auth-panel.test.tsx).
     ["token=synthetic-reset", "short", "short", "Password must be at least 8 characters", "New password"],
     ["token=synthetic-reset", "new-passphrase", "different-passphrase", "Passwords don't match", "Confirm new password"],
   ])("refuses invalid local input (%s / %s)", async (query, password, confirmation, message, field) => {
@@ -114,9 +114,9 @@ describe("reset password", () => {
     expect(serverFetch).toHaveBeenCalledWith("/api/v1/auth/reset", expect.objectContaining({ method: "POST", body: JSON.stringify({ token: "synthetic-reset", new_password: "new-passphrase" }) }))
     await act(async () => { finish(Response.json({ ok: true })) })
     expect(screen.getByRole("status")).toHaveTextContent("All existing sessions have been signed out")
-    expect(screen.getByRole("link", { name: "Sign in now" })).toHaveAttribute("href", "/login")
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login")
     if (unmountBeforeRedirect) view.unmount()
-    act(() => { vi.advanceTimersByTime(1999) })
+    act(() => { vi.advanceTimersByTime(4999) })
     expect(navigation.router.push).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(1) })
     if (unmountBeforeRedirect) expect(navigation.router.push).not.toHaveBeenCalled()

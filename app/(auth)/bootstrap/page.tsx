@@ -4,7 +4,7 @@ import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Rocket } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthCardSkeleton, AuthScreen } from "@/components/branding/auth-card"
+import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthCardSkeleton, AuthPasswordInput, AuthScreen, AuthSteps } from "@/components/branding/auth-card"
 import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,6 +39,9 @@ import { serverFetch } from "@/lib/server-base"
 
 type BootstrapField = "full_name" | "password" | "confirm_password"
 
+/** First run is one of four setup steps; the other three live in /onboarding. */
+const SETUP_STEPS = ["Account", "Workspace", "Model", "Crew"] as const
+
 export default function BootstrapPage() {
   const router = useRouter()
   const { refresh } = useAuth()
@@ -66,20 +69,27 @@ export default function BootstrapPage() {
       .catch(() => setChecking(false))
   }, [router])
 
+  // A wrong value goes under its field and focus goes with it; the field's
+  // id is the field key.
+  const refuse = (field: NonNullable<typeof fieldError>["field"], message: string) => {
+    setFieldError({ field, message })
+    document.getElementById(field)?.focus()
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setFieldError(null)
     if (fullName.trim().length < 2) {
-      setFieldError({ field: "full_name", message: "Name must be at least 2 characters." })
+      refuse("full_name", "Name must be at least 2 characters.")
       return
     }
     if (password.length < 8) {
-      setFieldError({ field: "password", message: "Password must be at least 8 characters." })
+      refuse("password", "Password must be at least 8 characters.")
       return
     }
     if (password !== confirmPassword) {
-      setFieldError({ field: "confirm_password", message: "Those passwords don't match." })
+      refuse("confirm_password", "Those passwords don't match.")
       return
     }
     setLoading(true)
@@ -115,7 +125,7 @@ export default function BootstrapPage() {
 
   if (checking) {
     return (
-      <AuthScreen>
+      <AuthScreen panel="bootstrap">
         <AuthCardSkeleton />
       </AuthScreen>
     )
@@ -129,11 +139,13 @@ export default function BootstrapPage() {
   }
 
   return (
-    <AuthScreen>
+    <AuthScreen panel="bootstrap">
       <AuthCard
         icon={Rocket}
         title="Create the administrator account"
         description="This is the first sign-in for this Crewship instance. The account you create will own the workspace and can invite additional members afterwards."
+        // The account is step one; /onboarding asks for the other three.
+        steps={<AuthSteps steps={SETUP_STEPS} current={0} />}
         onSubmit={handleSubmit}
         refusal={error}
         actions={
@@ -172,9 +184,8 @@ export default function BootstrapPage() {
           />
         </CreateSurfaceField>
         <CreateSurfaceField label="Password" htmlFor="password" error={errorFor("password")}>
-          <Input
+          <AuthPasswordInput
             id="password"
-            type="password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
@@ -183,7 +194,7 @@ export default function BootstrapPage() {
             placeholder="At least 8 characters"
             required
             autoComplete="new-password"
-            className={AUTH_INPUT}
+            rule
             {...invalid("password")}
           />
         </CreateSurfaceField>
@@ -193,9 +204,8 @@ export default function BootstrapPage() {
             next sign-in — by which point the only way back in is a
             password reset the fresh install may not be able to send. */}
         <CreateSurfaceField label="Confirm password" htmlFor="confirm_password" error={errorFor("confirm_password")}>
-          <Input
+          <AuthPasswordInput
             id="confirm_password"
-            type="password"
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value)
@@ -204,7 +214,6 @@ export default function BootstrapPage() {
             placeholder="Repeat it"
             required
             autoComplete="new-password"
-            className={AUTH_INPUT}
             {...invalid("confirm_password")}
           />
         </CreateSurfaceField>

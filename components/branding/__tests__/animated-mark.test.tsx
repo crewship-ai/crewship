@@ -1,15 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { MotionConfig } from "motion/react"
 import { AnimatedMark } from "@/components/branding/animated-mark"
 import { MARK_SAILS } from "@/lib/brand-mark"
 
 // Reduced motion is a branch, not a stylesheet, so it needs to be steerable
 // per test. vi.mock is hoisted above the imports, hence vi.hoisted for the
 // flag it closes over.
-const motionState = vi.hoisted(() => ({ reduced: false }))
-vi.mock("motion/react", () => ({
-  useReducedMotion: () => motionState.reduced,
-}))
+// `null` defers to the real hooks, so a test can drive the app's own
+// <MotionConfig> instead of the flag.
+const motionState = vi.hoisted(() => ({ reduced: false as boolean | null }))
+vi.mock("motion/react", async (importActual) => {
+  const actual = await importActual<typeof import("motion/react")>()
+  return {
+    ...actual,
+    useReducedMotion: () => {
+      const real = actual.useReducedMotion()
+      return motionState.reduced ?? real
+    },
+    useReducedMotionConfig: () => {
+      const real = actual.useReducedMotionConfig()
+      return motionState.reduced ?? real
+    },
+  }
+})
 
 // The mark sits on the login screen, which is the one page every user and
 // every e2e run passes through. A canvas that throws on mount takes the
@@ -118,6 +132,31 @@ describe("AnimatedMark", () => {
 
     // The mark is drawn — a frozen panel is not an empty one — but nothing
     // is scheduled, so a user who asked for stillness gets it.
+    expect(ctx.fill).toHaveBeenCalled()
+    expect(rafSpy).not.toHaveBeenCalled()
+
+    getContext.mockRestore()
+  })
+
+  it("stays still when the app's MotionConfig says so, not only the OS", () => {
+    // Settings › Appearance › Reduce motion reaches components through
+    // <MotionConfig reducedMotion="always"> (components/providers.tsx); the
+    // OS media query alone would ignore that choice.
+    motionState.reduced = null
+    const ctx = fakeContext()
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(ctx as unknown as CanvasRenderingContext2D)
+    vi.stubGlobal("DOMMatrix", FakeMatrix)
+    vi.stubGlobal("Path2D", FakePath)
+    rafSpy = vi.spyOn(window, "requestAnimationFrame")
+
+    render(
+      <MotionConfig reducedMotion="always">
+        <AnimatedMark />
+      </MotionConfig>,
+    )
+
     expect(ctx.fill).toHaveBeenCalled()
     expect(rafSpy).not.toHaveBeenCalled()
 

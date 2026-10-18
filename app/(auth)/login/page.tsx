@@ -10,6 +10,7 @@ import {
   AuthCard,
   AuthCardSkeleton,
   AuthLink,
+  AuthPasswordInput,
   AuthScreen,
 } from "@/components/branding/auth-card"
 import { CreateSurfaceField } from "@/components/layout/create-surface"
@@ -100,7 +101,7 @@ function LoginForm() {
     setLoading(false)
 
     if (!result.ok) {
-      setError(result.error ?? "Invalid email or password")
+      setError(result.status === 429 ? tooManyAttempts(result.retryAfter) : (result.error ?? "Invalid email or password"))
       return
     }
 
@@ -112,7 +113,7 @@ function LoginForm() {
   // redirecting to /bootstrap. The skeleton stays empty for the first second.
   if (!gateChecked) {
     return (
-      <AuthScreen>
+      <AuthScreen panel="login">
         <AuthCardSkeleton />
       </AuthScreen>
     )
@@ -132,7 +133,7 @@ function LoginForm() {
   const refusal = error ?? (refused ? "We could not sign you in. Try again, or ask your administrator." : null)
 
   return (
-    <AuthScreen>
+    <AuthScreen panel="login">
       <AuthCard
         icon={User}
         title="Sign in to Crewship"
@@ -154,7 +155,12 @@ function LoginForm() {
           // is switched off (2026-07-27) and its routes are no longer
           // registered, so a divider promising an alternative and a button
           // that cannot work are both worse than nothing.
-          signupAllowed ? <AuthLink href="/signup">Create an account</AuthLink> : undefined
+          signupAllowed ? (
+            <AuthLink href="/signup">Create an account</AuthLink>
+          ) : (
+            // Without sign-up the page must still say how to get in.
+            <span>Need access? Ask an administrator for an invitation.</span>
+          )
         }
         actions={
           <Button type="submit" disabled={loading} className={AUTH_BUTTON}>
@@ -167,7 +173,8 @@ function LoginForm() {
           <Input
             id="email"
             type="email"
-            autoComplete="email"
+            // "username" is what password managers pair with current-password.
+            autoComplete="username"
             placeholder="you@company.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -181,14 +188,12 @@ function LoginForm() {
             instead of overlapping it. */}
         <div className="relative flex flex-col">
           <CreateSurfaceField label="Password" htmlFor="password">
-            <Input
+            <AuthPasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className={AUTH_INPUT}
             />
           </CreateSurfaceField>
           <AuthLink href="/forgot-password" className="absolute top-0 right-0 text-label leading-none coarse:static coarse:self-end">
@@ -198,4 +203,10 @@ function LoginForm() {
       </AuthCard>
     </AuthScreen>
   )
+}
+
+/** The sign-in limiter answers 429 with Retry-After in seconds. */
+function tooManyAttempts(retryAfter?: number): string {
+  const minutes = Math.max(1, Math.ceil((retryAfter ?? 60) / 60))
+  return `Too many sign-in attempts. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}, or reset your password.`
 }

@@ -42,7 +42,9 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated"
 interface AuthContextValue {
   session: AuthSession | null
   status: AuthStatus
-  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
+  /** `status` and `retryAfter` (seconds) are set when the server refused with
+   *  a status the page words on its own, e.g. 429 from the sign-in limiter. */
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string; status?: number; retryAfter?: number }>
   signOut: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -256,7 +258,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null)
-        return { ok: false, error: data?.error ?? "Login failed" }
+        const error = data?.error ?? "Login failed"
+        if (res.status !== 429) return { ok: false, error }
+        // The sign-in limiter: the page words this one itself.
+        const retryAfter = Number(res.headers?.get?.("Retry-After"))
+        return { ok: false, error, status: 429, ...(retryAfter > 0 ? { retryAfter } : {}) }
       }
 
       const data = await res.json()

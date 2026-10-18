@@ -61,7 +61,7 @@ export default function JoinPage() {
 
   if (token === "") {
     return (
-      <AuthScreen>
+      <AuthScreen panel="join">
         <AuthCard icon={UserPlus} title="Accept the invitation">
           <PageEmpty
             icon={Link2Off}
@@ -76,7 +76,7 @@ export default function JoinPage() {
 
   if (status === "signin") {
     return (
-      <AuthScreen>
+      <AuthScreen panel="join">
         <AuthCard
           icon={UserPlus}
           title="Accept the invitation"
@@ -101,7 +101,7 @@ export default function JoinPage() {
   const primaryDisabled = !token || saving || (guestConfirmation && !guestAcknowledged)
 
   return (
-    <AuthScreen>
+    <AuthScreen panel="join">
       <AuthCard
         icon={UserPlus}
         title={guestConfirmation ? "Accepting makes this account a Guest" : "Accept the invitation"}

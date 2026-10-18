@@ -48,7 +48,8 @@ describe("bootstrap card", () => {
 
   it("renders one primary Continue", async () => {
     await renderOpen()
-    const buttons = screen.getAllByRole("button")
+    // One primary; the other buttons are the two password fields' show/hide.
+    const buttons = screen.getAllByRole("button").filter((b) => b.getAttribute("type") === "submit")
     expect(buttons).toHaveLength(1)
     expect(buttons[0]).toHaveAccessibleName("Continue")
   })

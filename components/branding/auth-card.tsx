@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
-import { CheckCircle2, Clock, Info } from "lucide-react"
+import { Check, CheckCircle2, Clock, Eye, EyeOff, Info } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { AnimatedMark } from "@/components/branding/animated-mark"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
+import { Input } from "@/components/ui/input"
 import { ConceptIcon } from "@/components/ui/concept-icon"
 import { CreateSurfaceNotice, CreateSurfaceRefusal } from "@/components/layout/create-surface"
 
@@ -32,11 +34,40 @@ import { CreateSurfaceNotice, CreateSurfaceRefusal } from "@/components/layout/c
  * become a bottom sheet.
  */
 
-/** Ground + lockup. Wraps one `AuthCard`. */
+/**
+ * Copy for the sail panel, one per screen. Branding, not a document section:
+ * it is a `<p>`, never a heading, so the form's h1 stays the first heading a
+ * screen reader meets.
+ */
+export const AUTH_PANELS = {
+  login: ["Self-hosted", "Command the whole fleet.", "Every agent in its own container, on hardware you own."],
+  signup: ["Self-hosted", "Bring your own hardware.", "Every agent runs in its own container, on machines you own."],
+  recovery: ["Account recovery", "Back on deck in a minute.", "A reset link goes to the email on your account. Nothing else changes until you use it."],
+  reset: ["Account recovery", "Choose a new password.", "Every other session signs out as soon as the new password is saved."],
+  bootstrap: ["First run", "You’re the first aboard.", "Nothing has been created yet. This account owns the workspace and invites the rest."],
+  join: ["Workspace invitation", "Join your workspace.", "Accept the invitation using the account it was sent to."],
+} as const satisfies Record<string, readonly [string, string, string]>
+export type AuthPanel = keyof typeof AUTH_PANELS
+
+/** "split" inside a screen with the sail panel; the card then drops its frame. */
+const AuthLayout = React.createContext<"card" | "split">("card")
+
+/**
+ * Ground + lockup. Wraps one `AuthCard`.
+ *
+ * With `panel` (every screen under app/(auth), approved 2026-10-18, #3583) the
+ * form sits in a column on the left and the animated sail mark fills the right
+ * 56 %. Below `lg` the panel becomes a 12rem banner above the form — tall
+ * enough to read as the mark, short enough that the form stays above the fold
+ * on a phone — and drops its copy, which would run through the sails.
+ * Without `panel` (the public pages' password prompt) it is the plain card.
+ */
 export function AuthScreen({
   children,
   lockup = true,
   width = "sm",
+  panel,
+  replayKey,
   className,
 }: {
   children: React.ReactNode
@@ -44,8 +75,45 @@ export function AuthScreen({
   lockup?: boolean
   /** Match the card's `size`: 480 or 640. */
   width?: "sm" | "md"
+  /** The sail panel and its copy. */
+  panel?: AuthPanel
+  /** Changing this sends a light sweep across the sails — use it for a step change. */
+  replayKey?: string | number
   className?: string
 }) {
+  if (panel) {
+    const [eyebrow, headline, blurb] = AUTH_PANELS[panel]
+    return (
+      <main
+        data-slot="auth-screen"
+        data-layout="split"
+        className={cn(
+          "grid min-h-dvh grid-rows-[12rem_1fr] bg-background text-foreground lg:grid-cols-[minmax(0,44fr)_minmax(0,56fr)] lg:grid-rows-1",
+          className,
+        )}
+      >
+        <div data-slot="auth-panel" className="auth-panel relative overflow-hidden lg:order-last">
+          <AnimatedMark replayKey={replayKey} />
+          <div className="auth-panel-shade pointer-events-none absolute inset-0" />
+          <div className="absolute inset-x-10 bottom-14 z-10 hidden max-w-md text-white lg:block">
+            <p className="text-micro font-semibold uppercase tracking-widest text-white/70">{eyebrow}</p>
+            <p className="mt-3 text-display font-extrabold tracking-tight text-balance">{headline}</p>
+            <p className="mt-3 max-w-[36ch] text-body leading-relaxed text-white/80">{blurb}</p>
+          </div>
+        </div>
+        {/* touch-form raises every field, button and link to 44 px under a
+            coarse pointer (globals.css). */}
+        <div className="touch-form flex min-w-0 flex-col p-6 lg:p-10">
+          {lockup && <AuthLockup className="justify-start px-0 pt-0 pb-0 md:justify-start" />}
+          <div className="flex flex-1 items-center py-8">
+            <div className={cn("mx-auto w-full", width === "md" ? "max-w-[640px]" : "max-w-[352px]")}>
+              <AuthLayout value="split">{children}</AuthLayout>
+            </div>
+          </div>
+        </div>
+      </main>
+    )
+  }
   return (
     <main
       data-slot="auth-screen"
@@ -125,9 +193,41 @@ export function AuthCard({
 }: AuthCardProps) {
   const titleId = React.useId()
   const descId = React.useId()
+  const split = React.useContext(AuthLayout) === "split"
   // No empty padded box when a state has nothing but its header and footer.
   const hasBody = banner != null || React.Children.toArray(children).length > 0
-  const inner = (
+  // Beside the sail panel the form is the page: no frame, a large title,
+  // the primary across the column and the links under it.
+  const inner = split ? (
+    <>
+      {steps}
+      <div data-slot="auth-card-header">
+        <h1 id={titleId} className="text-title font-bold tracking-tight text-balance lg:text-display">
+          {title}
+        </h1>
+        {description != null && (
+          <p id={descId} className="mt-2 text-body text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+      {hasBody && (
+        <div data-slot="auth-card-body" className="mt-6 flex flex-col gap-4">
+          {banner}
+          {children}
+        </div>
+      )}
+      <CreateSurfaceRefusal message={refusal} className="mt-4 rounded-md px-3" />
+      {(links != null || actions != null) && (
+        <div data-slot="auth-card-footer" className="mt-6 flex flex-col gap-3">
+          {actions != null && <div className="flex flex-col-reverse gap-2 [&>*]:w-full">{actions}</div>}
+          {links != null && (
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-body text-muted-foreground">{links}</div>
+          )}
+        </div>
+      )}
+    </>
+  ) : (
     <>
       <div data-slot="auth-card-header" className="flex items-start gap-3 border-b border-border px-4 pt-4 pb-3 md:pl-5">
         <ConceptIcon icon={icon} accent="blue" variant="chip" size="md" className="mt-px" />
@@ -178,12 +278,14 @@ export function AuthCard({
     </>
   )
 
-  const shell = cn(
-    "flex flex-col bg-card",
-    // A frame on a desk; the whole screen on a phone.
-    "max-md:flex-1 md:rounded-xl md:border md:border-border",
-    className,
-  )
+  const shell = split
+    ? cn("flex flex-col", className)
+    : cn(
+        "flex flex-col bg-card",
+        // A frame on a desk; the whole screen on a phone.
+        "max-md:flex-1 md:rounded-xl md:border md:border-border",
+        className,
+      )
 
   return onSubmit ? (
     <form
@@ -284,22 +386,138 @@ export function AuthCardSkeleton({ delayMs = 1000 }: { delayMs?: number }) {
     const t = window.setTimeout(() => setShown(true), delayMs)
     return () => window.clearTimeout(t)
   }, [delayMs])
+  const split = React.useContext(AuthLayout) === "split"
   return (
     <div
       data-slot="auth-card-skeleton"
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="flex flex-col bg-card max-md:flex-1 md:rounded-xl md:border md:border-border"
+      className={split ? "flex flex-col" : "flex flex-col bg-card max-md:flex-1 md:rounded-xl md:border md:border-border"}
     >
       <span className="sr-only">Loading</span>
       {shown && (
-        <div className="flex flex-col gap-3 px-4 py-5 md:px-5" aria-hidden>
+        <div className={cn("flex flex-col gap-3", split ? "py-2" : "px-4 py-5 md:px-5")} aria-hidden>
           <span className="page-sk page-sk-h" />
           <span className="page-sk page-sk-l w-full" />
           <span className="page-sk page-sk-l w-3/4" />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A password input with the details people expect on a sign-in page: show /
+ * hide (the caret stays where it was), a "Caps Lock is on" line while it is,
+ * and on a new password the one rule the server has — 8 characters — ticked as
+ * it is typed. Everything else is the kit `Input`.
+ */
+export function AuthPasswordInput({
+  rule = false,
+  className,
+  onKeyDown,
+  onKeyUp,
+  onBlur,
+  ...props
+}: Omit<React.ComponentProps<typeof Input>, "type"> & {
+  /** Show "At least 8 characters" under the field and tick it once met. */
+  rule?: boolean
+}) {
+  const [shown, setShown] = React.useState(false)
+  const [caps, setCaps] = React.useState(false)
+  const ref = React.useRef<HTMLInputElement>(null)
+  const readCaps = (e: React.KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState?.("CapsLock") ?? false)
+  const met = String(props.value ?? "").length >= 8
+  return (
+    <>
+      <div className="relative">
+        <Input
+          {...props}
+          ref={ref}
+          type={shown ? "text" : "password"}
+          className={cn(AUTH_INPUT, "pr-10 coarse:pr-[44px]", className)}
+          onKeyDown={(e) => {
+            readCaps(e)
+            onKeyDown?.(e)
+          }}
+          onKeyUp={(e) => {
+            readCaps(e)
+            onKeyUp?.(e)
+          }}
+          onBlur={(e) => {
+            setCaps(false)
+            onBlur?.(e)
+          }}
+        />
+        <button
+          type="button"
+          aria-label={shown ? "Hide password" : "Show password"}
+          aria-pressed={shown}
+          aria-controls={props.id}
+          disabled={props.disabled}
+          // Keep focus (and the caret) in the field.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const input = ref.current
+            const at = input?.selectionStart ?? null
+            setShown((v) => !v)
+            requestAnimationFrame(() => {
+              input?.focus()
+              if (at != null) input?.setSelectionRange(at, at)
+            })
+          }}
+          className={cn(
+            "absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-md text-muted-foreground hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50 coarse:w-[44px]",
+          )}
+        >
+          {shown ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
+        </button>
+      </div>
+      {rule && (
+        <p
+          data-slot="password-rule"
+          data-met={met}
+          className={cn("flex items-center gap-1.5 text-label", met ? "text-success" : "text-muted-foreground")}
+        >
+          <Check aria-hidden className={cn("size-3.5", !met && "opacity-40")} />
+          At least 8 characters
+        </p>
+      )}
+      {caps && (
+        <p data-slot="caps-lock" className="flex items-center gap-1.5 text-label text-warn">
+          <Info aria-hidden className="size-3.5" />
+          Caps Lock is on
+        </p>
+      )}
+    </>
+  )
+}
+
+/** The step row on First run: where the account sits in setup. */
+export function AuthSteps({ steps, current }: { steps: readonly string[]; current: number }) {
+  return (
+    <ol aria-label="Setup steps" className="mb-6 flex flex-wrap items-center gap-x-1 gap-y-2 text-label text-muted-foreground">
+      {steps.map((label, i) => (
+        <li
+          key={label}
+          aria-current={i === current ? "step" : undefined}
+          className={cn("flex items-center gap-1.5 pr-1", i === current && "font-semibold text-foreground")}
+        >
+          {i > 0 && <span aria-hidden className="mr-1 h-px w-3 bg-border" />}
+          <span
+            aria-hidden
+            className={cn(
+              "grid size-4.5 place-items-center rounded-full border text-micro font-semibold",
+              i === current ? "border-primary bg-primary text-primary-foreground" : "border-border",
+            )}
+          >
+            {i + 1}
+          </span>
+          {label}
+        </li>
+      ))}
+    </ol>
   )
 }
