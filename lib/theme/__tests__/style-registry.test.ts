@@ -161,9 +161,8 @@ describe("knobs (STY-03)", () => {
   })
 
   it("corners scale all six radius tokens by one factor", () => {
-    const theme = globals.slice(globals.indexOf("@theme inline"))
     for (const t of ["radius-sm", "radius-md", "radius-lg", "radius-xl", "radius-card", "radius-row"]) {
-      expect(theme, t).toMatch(new RegExp(`--${t}:[^;]*var\\(--radius-k, 1\\)`))
+      expect(globals, t).toMatch(new RegExp(`--${t}:[^;]*var\\(--radius-k, 1\\)`))
     }
     expect(bare).toMatch(/\[data-knob-radius="sharp"\]\s*\{\s*--radius-k:\s*0\.4;/)
     expect(bare).toMatch(/\[data-knob-radius="round"\]\s*\{\s*--radius-k:\s*1\.5;/)
