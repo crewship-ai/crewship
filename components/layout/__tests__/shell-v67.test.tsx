@@ -179,6 +179,23 @@ describe("top-bar actions on a tablet", () => {
   })
 })
 
+// v67 phone top bar: the page's one primary is a 32 px blue square — on a
+// touch screen its 44 px target is an invisible ring around it, not a
+// bigger button filling the bar.
+describe("phone primary", () => {
+  it("draws a 32 px square with a 44 px hit area", () => {
+    render(<SubBarPrimary icon={Plus}>New issue</SubBarPrimary>)
+    const cls = screen.getByRole("button", { name: "New issue" }).className.split(" ")
+    for (const c of ["max-md:size-8", "max-md:p-0", "coarse:max-md:min-h-0", "max-md:after:absolute", "max-md:after:-inset-1.5"]) expect(cls).toContain(c)
+    expect(cls).not.toContain("coarse:max-xl:min-w-[44px]")
+  })
+
+  it("is what Issues puts in the phone bar, like every other area", () => {
+    const src = readFileSync(path.resolve(__dirname, "../../features/orchestration/orchestration-layout.tsx"), "utf8")
+    expect(src).not.toMatch(/SubBarIconButton icon=\{Plus\}/)
+  })
+})
+
 // v67 core.js:345-348 and index.html .tabbar: the phone tab bar's More tab is
 // a grid (it opens a grid of every place), and the bar is 62 px tall.
 describe("phone tab bar", () => {

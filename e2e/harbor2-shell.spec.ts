@@ -83,7 +83,12 @@ test.describe("touch", () => {
           document.querySelectorAll("header button, [data-sidebar=sidebar] button, nav[aria-label=Primary] a, nav[aria-label=Primary] button").forEach((el) => {
             const r = el.getBoundingClientRect()
             if (r.width === 0 || r.height === 0) return
-            if (r.height < 43.5) out.push(`${el.getAttribute("aria-label") ?? el.textContent?.trim()} ${Math.round(r.height)}px`)
+            // A drawn-small control may carry its 44 px target as an
+            // invisible ::after ring (the phone primary, v67's 32 px square).
+            const ring = getComputedStyle(el, "::after")
+            const grow = ring.position === "absolute" ? -(parseFloat(ring.top) || 0) - (parseFloat(ring.bottom) || 0) : 0
+            const h = r.height + Math.max(0, grow)
+            if (h < 43.5) out.push(`${el.getAttribute("aria-label") ?? el.textContent?.trim()} ${Math.round(h)}px`)
           })
           return out
         })
