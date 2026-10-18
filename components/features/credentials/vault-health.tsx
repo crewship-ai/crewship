@@ -85,7 +85,7 @@ export function VaultHealth({
             className="kit-tap grid min-w-0 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-0.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-foreground/25 focus-visible:outline-2 focus-visible:outline-ring"
           >
             <Icon className={cn("size-4", t.count > 0 ? TONE[t.tone] : "text-muted-foreground-soft")} aria-hidden />
-            <b className="font-mono text-heading font-semibold tabular-nums text-foreground">{t.count}</b>
+            <b className="text-heading font-semibold tabular-nums text-foreground">{t.count}</b>
             <span className="col-span-2 min-w-0 text-label text-foreground/85">
               {t.label}
               <small className="block truncate text-micro text-muted-foreground">{t.hint}</small>

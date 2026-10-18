@@ -70,7 +70,7 @@ export function ToolsTab({
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
         <Wrench className="h-3.5 w-3.5" /> Tools
         <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
           · the actions a connector exposes
@@ -131,7 +131,7 @@ export function ToolsTab({
                 {["Tool", "Name", "Description"].map((h) => (
                   <th
                     key={h}
-                    className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    className="px-3 py-2.5 text-left text-micro font-semibold text-muted-foreground"
                   >
                     {h}
                   </th>

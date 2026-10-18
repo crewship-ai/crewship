@@ -75,7 +75,7 @@ export function BackupsConsole({ page, onNavigate }: {
           <span className="text-control text-muted-foreground">{head.sub}</span>
           {actions && <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">{actions}</div>}
         </div>
-        {demo && <p className="font-mono text-micro uppercase tracking-wide text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
+        {demo && <p className=" text-micro text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
         {page === "overview" && <BackupsOverview ctx={ctx} />}
         {page === "history" && <BackupsHistory ctx={ctx} />}
         {page === "schedules" && <BackupsSchedules ctx={ctx} />}

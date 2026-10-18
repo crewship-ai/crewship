@@ -484,7 +484,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                   runResult={runResults[r.id]}
                 />
               ) : (
-                <span className="text-xs text-muted-foreground font-mono tabular-nums text-right">
+                <span className="text-xs text-muted-foreground tabular-nums text-right">
                   {r.provider || "—"}
                   {r.model ? ` / ${r.model}` : ""}
                   {r.timeout_ms ? ` · ${Math.round(r.timeout_ms / 1000)}s` : ""}

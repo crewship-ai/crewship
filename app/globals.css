@@ -799,6 +799,13 @@ body {
     font-weight: 600;
     letter-spacing: -0.005em;
   }
+  /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
+  .type-group-head {
+    font-size: max(11.5px, 0.72rem);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
   .type-meta {
     font-size: 0.75rem;
     line-height: 1.1rem;
@@ -1096,7 +1103,9 @@ body {
      40 px wide in the 56 px rail and 224 px open, the icon column never moves.
      Sizes are px: the rail must not grow with the user's text size. */
   .rail-inset {
-    padding-inline: 8px !important;
+    /* The sidebar's own p-2 is the 8 px inset (v67 rail padding 8, icon at
+       x = 18); a second 8 px here pushed everything 7 px right. */
+    padding-inline: 0 !important;
   }
   .rail-row {
     height: 30px !important;
@@ -1206,7 +1215,7 @@ body {
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--muted-foreground-soft);
-    font-size: var(--typo-label);
+    font-size: 12.5px;
   }
   .rail-search:hover { border-color: var(--line-strong); color: var(--muted-foreground); }
   .rail-search > svg { width: 14px; height: 14px; flex-shrink: 0; }

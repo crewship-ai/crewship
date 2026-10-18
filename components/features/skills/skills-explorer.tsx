@@ -6,11 +6,13 @@ import { AlertTriangle, Archive, Bot, Check, CircleDashed, Library, Search, Spar
 import {
   SidebarActiveChip,
   SidebarActiveChips,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { useSidebarFacets } from "@/components/layout/sidebar-facets"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -57,7 +59,7 @@ function sourceKind(key: string): SkillSourceKind {
 }
 
 function Count({ n }: { n: number }) {
-  return <span className="ml-auto font-mono text-micro tabular-nums text-muted-foreground-soft">{n.toLocaleString("en-US").replace(/,/g, " ")}</span>
+  return <span className="ml-auto text-micro tabular-nums text-muted-foreground-soft">{n.toLocaleString("en-US").replace(/,/g, " ")}</span>
 }
 
 function Option({ on, onToggle, children, n, testId }: { on: boolean; onToggle: () => void; children: React.ReactNode; n: number; testId?: string }) {
@@ -96,6 +98,9 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
   const [open, setOpen] = useState<Record<FacetKey, boolean | undefined>>({ source: undefined, domain: undefined, trust: undefined, status: undefined, crewId: undefined })
   const [pickQuery, setPickQuery] = useState("")
   const [pickOpen, setPickOpen] = useState(false)
+  // v67 (pk-f): the toolbar's Filter button opens the facets under it; closed,
+  // the active choices show as chips.
+  const facets = useSidebarFacets()
 
   const pick = (patch: Partial<SkillFilters>) => {
     onChange(patch)
@@ -144,16 +149,21 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
             aria-label="Search skills"
           />
         </div>
+        <SidebarFilterButton activeCount={activeFilterCount(filters)} {...facets.triggerProps}>
+          Filter
+        </SidebarFilterButton>
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        <SidebarActiveChips className="pt-1">
-          {chips.map((c) => (
-            <SidebarActiveChip key={c.key} label={c.label} onRemove={c.remove}>
-              {c.label}
-            </SidebarActiveChip>
-          ))}
-        </SidebarActiveChips>
+        {!facets.open && (
+          <SidebarActiveChips className="pt-1">
+            {chips.map((c) => (
+              <SidebarActiveChip key={c.key} label={c.label} onRemove={c.remove}>
+                {c.label}
+              </SidebarActiveChip>
+            ))}
+          </SidebarActiveChips>
+        )}
 
         <SidebarSection label="Views">
           <nav aria-label="Skill views">
@@ -179,6 +189,8 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
           </nav>
         </SidebarSection>
 
+        {facets.open && (
+          <>
         <SidebarSection
           label="Filter"
           count={any ? activeFilterCount(filters) : undefined}
@@ -224,7 +236,7 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
                     >
                       <SourceMark kind={sourceKind(s.key)} size={16} />
                       <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                      <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{s.count}</span>
+                      <span className="text-micro tabular-nums text-muted-foreground-soft">{s.count}</span>
                     </button>
                   ))}
                   {picked.length === 0 && <p className="px-3 py-2 text-label text-muted-foreground">No source matches.</p>}
@@ -267,6 +279,8 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
             </Option>
           ))}
         </SidebarSection>
+          </>
+        )}
       </div>
     </div>
   )

@@ -125,9 +125,9 @@ export function SecretValueHistory({
             {rows.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-2 text-label">
                 <span className="text-foreground">Replaced · {graceLabel(r.grace_seconds)}</span>
-                {r.status === "ACTIVE" && <StatusPill tone="warn" label="Old value still works" />}
-                {r.status === "CANCELLED" && <StatusPill tone="muted" label="Grace ended early" />}
-                <span className="ml-auto font-mono text-muted-foreground">{formatDateTime(r.rotated_at)}</span>
+                {r.status === "ACTIVE" && <StatusPill className="font-sans tracking-normal" tone="warn" label="Old value still works" />}
+                {r.status === "CANCELLED" && <StatusPill className="font-sans tracking-normal" tone="muted" label="Grace ended early" />}
+                <span className="ml-auto tabular-nums text-muted-foreground">{formatDateTime(r.rotated_at)}</span>
               </li>
             ))}
           </ul>

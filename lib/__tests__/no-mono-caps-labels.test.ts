@@ -22,13 +22,7 @@ const ROOT = path.resolve(__dirname, "../..")
 const DIRS = ["components", "app"]
 
 const BASELINE: Record<string, number> = {
-  "app/(dashboard)/admin/tabs/admin-kit.tsx": 1,
   "components/admin/member-capabilities.tsx": 1,
-  "components/features/admin/backups/backups-console.tsx": 1,
-  "components/features/admin/backups/backups-kit.tsx": 1,
-  "components/features/admin/backups/backups-page.tsx": 1,
-  "components/features/admin/backups/data-retention.tsx": 1,
-  "components/features/admin/security/security-activity.tsx": 1,
   "components/features/chat/right-panel-tabs/agent-artifacts-tab.tsx": 1,
   "components/features/journal/journal-entry-card.tsx": 1,
   "components/features/journal/runs-view.tsx": 2,

@@ -1,73 +1,128 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
-import { Activity, CheckCircle2, CircleAlert, MessageSquare, Sparkles, Inbox, Wallet, Play } from "lucide-react"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { StatusDonut } from "@/components/features/dashboard/status-donut"
+import { ChevronRight, CircleDot, Inbox, MessageSquare, Square, Users, Workflow } from "lucide-react"
+
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { WorkspaceEmpty, WorkspaceGlyph } from "./workspace-visuals"
-import { AssignedConnected } from "./assigned-connected"
 import { Button } from "@/components/ui/button"
-import { StatusPill } from "@/components/ui/status-pill"
-import { InlineEmpty } from "@/components/ui/inline-empty"
-import { kpiStripIsEmpty } from "@/lib/kpi-strip"
-import { formatStatus } from "@/lib/format-status"
+import { EntityChip } from "@/components/ui/detail"
+import { ConceptIcon } from "@/components/ui/concept-icon"
+import { usePagedList } from "@/hooks/use-paged-list"
+import { entityHref } from "@/lib/entity-links"
+import { formatRelativeTime } from "@/lib/time"
+
+import { CrCard, CrKv, CrLine, CrNote } from "./cr-card"
+import { formatSpend } from "./crew-spend"
 import { useWorkspaceResource } from "./memory-workspace"
+import { useAgentRelations } from "./canvas/use-agent-relations"
 import type { AgentRecord, ChatRow, InboxSummary, PeerMessageRow, RunRow } from "./agent-canvas-tabs/types"
 
-export function RunMetrics({ workspaceId, agentId, crewId, revision = 0, cost }: { workspaceId: string; agentId?: string; crewId?: string; revision?: number; cost?: number }) {
-  const [retry, setRetry] = useState(0)
-  const query = new URLSearchParams({ workspace_id: workspaceId, window: "7d" })
-  if (agentId) query.set("agent_id", agentId)
-  if (crewId) query.set("crew_id", crewId)
-  const { data, error } = useWorkspaceResource<{ totals: { succeeded: number; failed: number; running: number }; truncated: boolean; by_trigger?: { key: string; total: number }[] }>(`/api/v1/runs/insights?${query}`, revision + retry, true)
-  const totals = data?.totals
-  return <section aria-label="Runs in the last 7 days" className="space-y-3">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Agent runs started in the last 7 days{data?.truncated ? " · most recent 20,000 runs only" : ""}</p>{typeof cost === "number" && <span className="inline-flex items-center gap-2 rounded-lg bg-success/5 px-3 py-1.5 text-xs text-muted-foreground" title="Recorded spending in the current calendar month (UTC)"><Wallet aria-hidden="true" className="h-3.5 w-3.5 text-success" /><span className="font-medium tabular-nums text-foreground">${cost.toFixed(2)}</span> this month · UTC</span>}</div>
-    {error ? <p role="alert" className="text-sm text-muted-foreground">Run metrics are unavailable. <Button size="sm" variant="ghost" onClick={() => setRetry(n => n + 1)}>Retry metrics</Button></p> : totals && kpiStripIsEmpty([totals.succeeded, totals.failed, totals.running]) ? <InlineEmpty icon={Play} text="No runs in the last 7 days. Start a chat or assign an issue and they will show here." /> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <KpiCard label="Completed runs" value={totals?.succeeded ?? "—"} subtitle="Last 7 days" valueColor={totals?.succeeded ? "var(--success)" : undefined} />
-      <KpiCard label="Failed or timed out" value={totals?.failed ?? "—"} subtitle="Last 7 days" valueColor={totals?.failed ? "var(--destructive)" : undefined} />
-      <KpiCard label="Still running" value={totals?.running ?? "—"} subtitle="Started in the last 7 days" valueColor={totals?.running ? "var(--primary)" : undefined} />
-    </div>}
-    {!error && totals && totals.succeeded + totals.failed + totals.running > 0 && <div className="grid min-w-0 gap-4 xl:grid-cols-2"><DashboardCard title="Run outcomes" icon={Activity} hint="Last 7 days" className="min-w-0"><StatusDonut centerLabel="runs" data={[
-      { key: "succeeded", label: "Completed", count: totals.succeeded, color: "var(--success)" },
-      { key: "failed", label: "Failed or timed out", count: totals.failed, color: "var(--destructive)" },
-      { key: "running", label: "Running", count: totals.running, color: "var(--primary)" },
-    ]} /><p className="mt-3 text-xs text-muted-foreground">Excludes cancelled runs</p></DashboardCard><RunStartBreakdown rows={data?.by_trigger} /></div>}
-  </section>
+const CARD_LINK = "inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[44px]"
+
+/** The agent's runs over 30 days: how many, how many finished, and the run limit. */
+function useRuns30d(workspaceId: string, agentId: string, revision: number) {
+  const q = new URLSearchParams({ workspace_id: workspaceId, window: "30d", agent_id: agentId })
+  const { data } = useWorkspaceResource<{ totals: { succeeded: number; failed: number; running: number } }>(`/api/v1/runs/insights?${q}`, revision, true)
+  return data?.totals ?? null
 }
 
-function RunStartBreakdown({ rows }: { rows?: { key: string; total: number }[] }) {
-  const sorted = [...(rows ?? [])].filter(row => row.total > 0).sort((a, b) => b.total - a.total)
-  const total = sorted.reduce((sum, row) => sum + row.total, 0)
-  const visible = sorted.length > 5 ? [...sorted.slice(0, 4), { key: "__other", total: sorted.slice(4).reduce((sum, row) => sum + row.total, 0) }] : sorted
-  const labels: Record<string, string> = { CHAT: "Chat", MANUAL: "Manual", SCHEDULE: "Schedule", SCHEDULED: "Schedule", CRON: "Schedule", WEBHOOK: "Webhook", API: "API", ASSIGNMENT: "Assignment", UNKNOWN: "Not recorded", __OTHER: "Other" }
-  return <DashboardCard title="How runs start" icon={Play} hint="Last 7 days" className="min-w-0 flex flex-col">
-    {total ? <><ul className="flex-1 space-y-3 py-2">{visible.map(row => {
-      const label = labels[row.key.toUpperCase()] ?? row.key.replaceAll("_", " ").toLowerCase()
-      return <li key={row.key}><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="truncate capitalize">{label}</span><span className="font-mono tabular-nums text-muted-foreground">{row.total}</span></div><div role="meter" aria-label={label} aria-valuenow={row.total} aria-valuemin={0} aria-valuemax={total} className="h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary/70" style={{ width: `${row.total / total * 100}%` }} /></div></li>
-    })}</ul><p className="mt-3 text-xs text-muted-foreground">Includes cancelled runs</p></> : <WorkspaceEmpty icon={Play} title="Run sources are not available yet." />}
-  </DashboardCard>
+function limitLabel(seconds: number | null | undefined): string | null {
+  if (!seconds || seconds <= 0) return null
+  if (seconds % 3600 === 0) return `${seconds / 3600} h`
+  return `${Math.round(seconds / 60)} min`
 }
 
-export function AgentOverview({ workspaceId, agent, inbox, runs, chats, error, onRetry, onWork, revision }: {
-  workspaceId: string; agent: AgentRecord; inbox: InboxSummary; runs: RunRow[] | null; chats: ChatRow[] | null;
-  /** Shown by the page's Messages from teammates card, not here. */ peerMessages?: PeerMessageRow[]; error?: string | null; onRetry: () => void; onWork: () => void; revision: number
+/**
+ * A-OV (Harbor 2): what the agent is doing now, what it holds, who it talks
+ * with and how the last 30 days went. "Messages from teammates" follows on the
+ * page itself.
+ */
+export function AgentOverview({ workspaceId, agent, inbox, runs, chats, error, onRetry, onStop, cost30d = null, revision }: {
+  workspaceId: string; agent: AgentRecord; inbox: InboxSummary; runs: RunRow[] | null; chats: ChatRow[] | null
+  /** Shown by the page's Messages from teammates card, not here. */ peerMessages?: PeerMessageRow[]
+  error?: string | null; onRetry: () => void
+  /** Opens the Tools and access tab; the card links of the old layout. */ onWork?: () => void
+  onStop?: () => void
+  /** This agent's cost over 30 days; null when unknown or not for this reader. */ cost30d?: number | null
+  revision: number
 }) {
-  const active = runs?.filter((run) => run.status === "RUNNING") ?? []
-  const outcomes = runs?.filter((run) => run.status !== "RUNNING").slice(0, 5)
-  return <div className="space-y-6 max-w-7xl">
-    {error && <div role="alert" className="rounded-xl border border-border p-4 text-sm">{error} <Button variant="ghost" size="sm" onClick={onRetry}>Retry</Button></div>}
-    {inbox.count > 0 && <div className="rounded-2xl border border-warn/30 bg-warn/5 p-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-medium flex items-center gap-2"><Inbox className="h-4 w-4" />Needs a decision</h2><p className="text-sm text-muted-foreground">{inbox.summary}</p></div><Button asChild size="sm"><Link href={`/inbox?agent=${encodeURIComponent(agent.slug)}`}>Review in Inbox</Link></Button></div>}
-    <RunMetrics workspaceId={workspaceId} agentId={agent.id} revision={revision} cost={inbox.cost} />
-    <DashboardCard title="Current work" icon={Activity} action={<button className="text-primary" onClick={onWork}>All work →</button>}>{runs === null ? <p className="mt-3 text-sm text-muted-foreground">{error ? "Current work unavailable." : "Loading current work…"}</p> : active.length ? active.slice(0, 3).map((run) => <Link key={run.id} href={`/activity?run=${encodeURIComponent(run.id)}`} className="mt-3 flex items-center gap-3 rounded-xl bg-surface-subtle p-2.5 text-sm transition-colors hover:bg-foreground/[0.05]"><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style || agent.crew?.avatar_style} avatarUrl={agent.avatar_url} className="h-10 w-10" /><span className="min-w-0 flex-1"><span className="block font-medium">{run.trigger_type ? formatStatus(run.trigger_type).label : "Agent"} run</span><span className="mt-1 block text-xs text-primary-hover">Open execution →</span></span><StatusPill status="RUNNING" live /></Link>) : <WorkspaceEmpty icon={Sparkles} title={agent.status === "RUNNING" ? "This agent is running. Open Activity for its current run." : agent.llm_model ? "Ready for the next idea" : "Choose a model to get started"} description={agent.llm_model ? "Start a conversation or assign an issue." : "Use Edit to choose a provider and model."} />}</DashboardCard>
-    <div className="grid gap-4 xl:grid-cols-2">
-      <DashboardCard title="Recent outcomes" icon={CheckCircle2} action={<Link className="text-primary" href={`/activity?agent=${encodeURIComponent(agent.id)}`}>Activity ↗</Link>}>{outcomes === undefined ? <p className="mt-4 text-sm text-muted-foreground">{error ? "Outcomes unavailable." : "Loading outcomes…"}</p> : !outcomes.length ? <WorkspaceEmpty icon={CheckCircle2} title="Completed work will appear here." /> : <ul className="mt-3 divide-y divide-border">{outcomes.map((run) => <li key={run.id} className="py-3 flex items-start gap-3"><WorkspaceGlyph icon={run.status === "COMPLETED" ? CheckCircle2 : CircleAlert} tone={run.status === "COMPLETED" ? "green" : "amber"} /><div className="min-w-0"><Link className="text-sm" href={`/activity?run=${encodeURIComponent(run.id)}`}>{run.trigger_type || "Agent"} run · {run.status.toLowerCase()}</Link>{run.error_message && <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{run.error_message}</p>}<p className="mt-1 text-xs text-muted-foreground">{new Date(run.finished_at ?? run.created_at).toLocaleString()}</p></div></li>)}</ul>}</DashboardCard>
-      <DashboardCard title="Recent conversations" icon={MessageSquare}>{chats === null ? <p className="mt-4 text-sm text-muted-foreground">{error ? "Conversations unavailable." : "Loading conversations…"}</p> : !chats.length ? <WorkspaceEmpty icon={MessageSquare} title="Conversations with this agent will appear here." /> : <ul className="mt-3 divide-y divide-border">{chats.slice(0, 5).map((chat) => <li key={chat.id} className="py-3 flex items-start gap-3"><WorkspaceGlyph icon={MessageSquare} /><div className="min-w-0"><Link href={`/chat/${encodeURIComponent(agent.slug)}?session=${encodeURIComponent(chat.id)}`} className="text-sm">{chat.title || "Conversation"}</Link><p className="mt-1 text-xs text-muted-foreground">{chat.message_count} messages · {new Date(chat.last_activity_at ?? chat.created_at).toLocaleString()}</p></div></li>)}</ul>}
-      </DashboardCard>
+  const running = runs?.find((r) => r.status === "RUNNING") ?? null
+  const totals = useRuns30d(workspaceId, agent.id, revision)
+  const relations = useAgentRelations(workspaceId, agent.id)
+  const mine = relations.pipelines.filter((p) => p.author_agent_id === agent.id)
+  const crewAgents = usePagedList<{ id: string; name: string; slug: string }>({
+    url: agent.crew_id ? `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(agent.crew_id)}` : null,
+  })
+  const teammates = crewAgents.items.filter((a) => a.id !== agent.id).map((a) => a.name)
+
+  const total = totals ? totals.succeeded + totals.failed + totals.running : null
+  const finished = totals && totals.succeeded + totals.failed > 0 ? `${Math.round((totals.succeeded / (totals.succeeded + totals.failed)) * 100)} %` : "—"
+  const limit = limitLabel(agent.timeout_seconds)
+  const lastChat = chats?.[0]
+
+  return (
+    <div className="space-y-4" data-testid="agent-overview">
+      {error && <div role="alert" className="rounded-card border border-border p-4 text-body">{error} <Button variant="ghost" size="sm" onClick={onRetry}>Retry</Button></div>}
+      {inbox.count > 0 && (
+        <CrCard title="Needs a decision" concept="inbox" count={inbox.count}>
+          <CrLine
+            lead={<Inbox className="size-4 text-chip-warn-fg" aria-hidden />}
+            title={inbox.summary ?? `${inbox.count} items in this agent’s inbox.`}
+            right={<Button asChild size="sm"><Link href={`/inbox?agent=${encodeURIComponent(agent.slug)}`}>Review in Inbox</Link></Button>}
+          />
+        </CrCard>
+      )}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <CrCard
+          title="Now"
+          concept="activity"
+          link={{ label: "All in Activity", href: `/activity?what=work&agent=${encodeURIComponent(agent.id)}` }}
+        >
+          <CrLine
+            lead={<AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style || agent.crew?.avatar_style} avatarUrl={agent.avatar_url} className="size-7 rounded-md" />}
+            title={running ? "Working" : "Not working right now"}
+            sub={running ? `${running.trigger_type ? `${running.trigger_type.toLowerCase()} run` : "Run"}${running.started_at ? ` · started ${formatRelativeTime(running.started_at)}` : ""}` : runs === null ? "Loading…" : undefined}
+            right={running && onStop ? <Button variant="ghost" size="sm" onClick={onStop}><Square className="size-3.5" aria-hidden /> Stop</Button> : null}
+          />
+        </CrCard>
+
+        <CrCard title="Last 30 days" concept="activity">
+          <CrKv rows={[
+            ["Runs", <span key="r" className="tabular-nums">{total ?? "—"}</span>],
+            ["Finished", <span key="f" className="tabular-nums">{finished}</span>],
+            ["Cost", <span key="c" className="tabular-nums">{cost30d == null ? "—" : formatSpend(cost30d)}</span>],
+            ["Runs at most", <span key="l" className="tabular-nums">{limit ?? "—"}</span>],
+          ]} />
+        </CrCard>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <CrCard title="Holds" concept="crews">
+          {relations.issues.length + mine.length === 0 ? (
+            <CrNote>{relations.loading ? "Loading…" : "Nothing assigned to it."}</CrNote>
+          ) : (
+            <div className="flex flex-wrap gap-1.5 border-t border-border px-4 py-3">
+              {mine.slice(0, 8).map((p) => <EntityChip key={p.id} icon={Workflow} label={p.name || p.slug} href={entityHref({ kind: "routines" })} />)}
+              {relations.issues.slice(0, 8).map((i) => <EntityChip key={i.id} icon={CircleDot} label={i.identifier || i.title} href={`/issues/${encodeURIComponent(i.identifier ?? i.id)}`} />)}
+            </div>
+          )}
+        </CrCard>
+
+        <CrCard title="Talks with" concept="chat">
+          <CrLine
+            lead={<ConceptIcon icon={MessageSquare} accent="blue" variant="chip" size="md" />}
+            title="Chats"
+            sub={chats === null ? "Loading…" : chats.length === 0 ? "No conversations yet" : `${chats.length} ${chats.length === 1 ? "conversation" : "conversations"}${lastChat ? ` · last ${formatRelativeTime(lastChat.last_activity_at ?? lastChat.started_at)}` : ""}`}
+            right={<Link href={`/chat/${encodeURIComponent(agent.slug)}`} className={CARD_LINK}>Open chat<ChevronRight className="size-3.5" aria-hidden /></Link>}
+          />
+          <CrLine
+            lead={<ConceptIcon icon={Users} accent="blue" variant="chip" size="md" />}
+            title="Teammates"
+            sub={teammates.length ? teammates.join(", ") : "Works alone"}
+          />
+        </CrCard>
+      </div>
     </div>
-    <AssignedConnected workspaceId={workspaceId} agentId={agent.id} crewId={agent.crew_id ?? undefined} slug={agent.slug} name={agent.name} revision={revision} />
-  </div>
+  )
 }

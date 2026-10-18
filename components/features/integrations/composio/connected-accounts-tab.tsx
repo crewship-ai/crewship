@@ -64,7 +64,7 @@ export function ConnectedAccountsTab({
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
         <Users className="h-3.5 w-3.5" /> Connected accounts
         <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
           · grouped by Composio user ({data.users.length})

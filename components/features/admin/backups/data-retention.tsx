@@ -36,7 +36,7 @@ export function RetentionPage() {
     <div data-slot="retention-page" className="space-y-4 text-control">
       <RetentionScope workspaces={workspaces} selected={selected} picking={urlState.ws !== null}
         onChange={(next) => commit(urlState.scope, next)} />
-      {demo && <p className="font-mono text-micro uppercase tracking-wide text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
+      {demo && <p className=" text-micro text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
       <DataRetention ctx={ctx} />
     </div>
   )

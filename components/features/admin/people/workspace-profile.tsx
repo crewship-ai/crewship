@@ -128,7 +128,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
       </section>
 
       <SettingsCard icon={Users} tint="var(--primary)" title="Members" description="Everyone who can open this workspace"
-        actions={<span className="font-mono text-micro text-muted-foreground">{members.length}</span>}>
+        actions={<span className="text-micro tabular-nums text-muted-foreground">{members.length}</span>}>
         {members.map((p) => {
           const role = roleIn(p, ws.id)!
           const lastOwner = role === "OWNER" && isLastOwner(people, ws.id, p.id)
