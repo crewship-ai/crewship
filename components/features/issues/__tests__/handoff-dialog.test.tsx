@@ -5,6 +5,8 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 
 const fetchMock = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
+const mobile = vi.hoisted(() => ({ value: false }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }))
 vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "person", name: "Petra" }], error: false }) }))
 
 import { IssueWorkDialogs } from "../issue-work-dialogs"
@@ -31,7 +33,23 @@ function Harness({ open, changed, runWorkflow }: { open: Exclude<WorkDialog, nul
 const dialog = () => screen.getByRole("dialog")
 const primary = (name: RegExp | string) => within(dialog()).getByRole("button", { name })
 
-beforeEach(() => fetchMock.mockReset())
+// The "Who" field is the kit Combobox (COM-13): a button named Who that opens
+// a searchable list. Type to filter, arrows move, Enter picks, Esc closes the
+// list and leaves the dialog open.
+const whoTrigger = () => within(dialog()).getByRole("combobox", { name: "Who" })
+const whoSearch = () => screen.findByRole("combobox", { name: "Search Who" })
+async function pickWho(name: RegExp | string) {
+  fireEvent.click(whoTrigger())
+  await whoSearch()
+  fireEvent.click(within(await screen.findByRole("listbox")).getByRole("option", { name }))
+}
+
+beforeEach(() => {
+  fetchMock.mockReset()
+  mobile.value = false
+  Element.prototype.scrollIntoView ??= vi.fn()
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver
+})
 
 describe("Hand off dialog", () => {
   it("note required, sends revision + operation_id", async () => {
@@ -39,7 +57,7 @@ describe("Hand off dialog", () => {
     render(<Harness open={{ kind: "handoff", to: "person" }} />)
     fireEvent.click(screen.getByText("open"))
     expect(within(dialog()).getByText("Revision 3 · operation id is generated")).toBeInTheDocument()
-    fireEvent.click(within(dialog()).getByRole("radio", { name: /Petra/ }))
+    await pickWho(/Petra/)
     expect(primary("Hand off")).toBeDisabled()
     fireEvent.change(within(dialog()).getByLabelText(/Note \(required\)/), { target: { value: "Please verify the report" } })
     fireEvent.click(primary("Hand off"))
@@ -57,7 +75,7 @@ describe("Hand off dialog", () => {
     const changed = vi.fn().mockResolvedValue(undefined)
     render(<Harness open={{ kind: "handoff", to: "person" }} changed={changed} />)
     fireEvent.click(screen.getByText("open"))
-    fireEvent.click(within(dialog()).getByRole("radio", { name: /Petra/ }))
+    await pickWho(/Petra/)
     fireEvent.change(within(dialog()).getByLabelText(/Note \(required\)/), { target: { value: "Keep me" } })
     fireEvent.click(primary("Hand off"))
     await waitFor(() => expect(within(dialog()).getByRole("alert")).toHaveTextContent("Work changed. Refresh before transferring."))
@@ -69,7 +87,7 @@ describe("Hand off dialog", () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ detail: "Try again" }) }).mockResolvedValueOnce({ ok: true })
     render(<Harness open={{ kind: "handoff", to: "agent" }} />)
     fireEvent.click(screen.getByText("open"))
-    fireEvent.click(within(dialog()).getByRole("radio", { name: /Scout/ }))
+    await pickWho(/Scout/)
     fireEvent.click(within(dialog()).getByRole("switch", { name: "Start work now" }))
     fireEvent.change(within(dialog()).getByLabelText(/Note \(required\)/), { target: { value: "Same" } })
     fireEvent.click(primary("Hand off"))
@@ -81,6 +99,53 @@ describe("Hand off dialog", () => {
   })
 })
 
+describe("Hand off dialog: the Who combobox", () => {
+  it("types to filter, arrows move, Enter picks, and Escape closes only the list", async () => {
+    render(<Harness open={{ kind: "handoff", to: "agent" }} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(whoTrigger()).toHaveTextContent("Choose")
+    expect(within(dialog()).queryByRole("radiogroup", { name: "Who" })).toBeNull()
+    fireEvent.click(whoTrigger())
+    const search = await whoSearch()
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2)
+    fireEvent.change(search, { target: { value: "sco" } })
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Scout"])
+    fireEvent.change(search, { target: { value: "" } })
+    fireEvent.keyDown(search, { key: "ArrowDown" })
+    fireEvent.keyDown(search, { key: "Enter" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(whoTrigger()).toHaveTextContent("Scout")
+    // Escape inside the list closes the list, not the dialog.
+    fireEvent.click(whoTrigger())
+    fireEvent.keyDown(await whoSearch(), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("lists people when handing off to a person, and says so when nobody matches", async () => {
+    render(<Harness open={{ kind: "handoff", to: "person" }} />)
+    fireEvent.click(screen.getByText("open"))
+    fireEvent.click(whoTrigger())
+    fireEvent.change(await whoSearch(), { target: { value: "zzz" } })
+    expect(screen.getByText("Nobody matches.")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["phone (390 px, sheet)", true],
+    ["tablet (1024 px, dialog)", false],
+  ])("on a %s the list opens inside the dialog and a pick fills the field", async (_name, isMobile) => {
+    mobile.value = isMobile
+    render(<Harness open={{ kind: "handoff", to: "agent" }} />)
+    fireEvent.click(screen.getByText("open"))
+    await pickWho(/Scout/)
+    expect(whoTrigger()).toHaveTextContent("Scout")
+    // The list never outgrows a narrow screen (kit width: min(360px, 100vw - 24px)).
+    fireEvent.click(whoTrigger())
+    await whoSearch()
+    expect(document.querySelector('[data-slot="popover-content"]')?.className ?? "").toContain("100vw-24px")
+  })
+})
+
 describe("Delegate dialog", () => {
   it("hands the work to the agent and starts it when Start work now is on", async () => {
     fetchMock.mockResolvedValue({ ok: true })
@@ -88,7 +153,7 @@ describe("Delegate dialog", () => {
     render(<Harness open={{ kind: "delegate" }} runWorkflow={runWorkflow} />)
     fireEvent.click(screen.getByText("open"))
     expect(within(dialog()).queryByRole("radiogroup", { name: "Hand off to" })).toBeNull()
-    fireEvent.click(within(dialog()).getByRole("radio", { name: /Scout/ }))
+    await pickWho(/Scout/)
     fireEvent.change(within(dialog()).getByLabelText(/Note \(required\)/), { target: { value: "Draft the FAQ" } })
     fireEvent.click(primary("Delegate and start"))
     await waitFor(() => expect(runWorkflow).toHaveBeenCalledWith("start"))

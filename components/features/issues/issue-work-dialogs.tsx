@@ -3,8 +3,7 @@
 import * as React from "react"
 import { Bot, Play, Send, User } from "lucide-react"
 
-import { cn } from "@/lib/utils"
-import { Input } from "@/components/ui/input"
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -61,6 +60,7 @@ interface Candidate {
   id: string
   name: string
   seed?: string
+  description?: string
 }
 
 function WhoPicker({
@@ -76,42 +76,31 @@ function WhoPicker({
   onChange: (id: string) => void
   error?: string
 }) {
-  const [q, setQ] = React.useState("")
-  const shown = candidates.filter((c) => c.name.toLowerCase().includes(q.trim().toLowerCase()))
+  const options: ComboboxOption[] = candidates.map((c) => ({
+    value: c.id,
+    label: c.name,
+    description: c.description,
+    icon:
+      to === "agent" ? (
+        <AgentAvatar seed={c.seed ?? c.id} alt="" className="size-5 rounded-full" />
+      ) : (
+        <span className="grid size-5 place-items-center rounded-full bg-muted text-muted-foreground"><User className="size-3" aria-hidden /></span>
+      ),
+  }))
+  const noun = to === "agent" ? "agents" : "people"
   return (
     <CreateSurfaceField label="Who" htmlFor="work-who" error={error} required>
-      <div className="overflow-hidden rounded-md border border-control-border">
-        <Input
-          id="work-who"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={to === "agent" ? "Search agents" : "Search people"}
-          aria-label={to === "agent" ? "Search agents" : "Search people"}
-          className="rounded-none border-0 border-b border-border shadow-none focus-visible:ring-0"
-        />
-        <div role="radiogroup" aria-label="Who" className="max-h-44 overflow-y-auto py-1">
-          {shown.length === 0 && (
-            <p className="px-3 py-2 text-label text-muted-foreground">{q ? "Nobody matches." : to === "agent" ? "No agents to hand off to." : "No people to hand off to."}</p>
-          )}
-          {shown.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              role="radio"
-              aria-checked={value === c.id}
-              onClick={() => onChange(c.id)}
-              className={cn("row-hover flex w-full items-center gap-2 px-3 py-1.5 text-left text-body", value === c.id && "row-selected")}
-            >
-              {to === "agent" ? (
-                <AgentAvatar seed={c.seed ?? c.id} alt="" className="size-5 rounded-full" />
-              ) : (
-                <span className="grid size-5 place-items-center rounded-full bg-muted text-muted-foreground"><User className="size-3" aria-hidden /></span>
-              )}
-              <span className="truncate">{c.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <Combobox
+        id="work-who"
+        modal
+        ariaLabel="Who"
+        value={value || null}
+        onChange={onChange}
+        options={options}
+        placeholder={to === "agent" ? "Choose an agent" : "Choose a person"}
+        searchPlaceholder={`Search ${noun}`}
+        emptyText={candidates.length === 0 ? `No ${noun} to hand off to.` : "Nobody matches."}
+      />
     </CreateSurfaceField>
   )
 }
@@ -153,7 +142,7 @@ function HandOffDialog({
 
   const candidates: Candidate[] =
     to === "agent"
-      ? agents.map((a) => ({ id: a.id, name: a.name, seed: a.avatar_seed ?? a.slug }))
+      ? agents.map((a) => ({ id: a.id, name: a.name, seed: a.avatar_seed ?? a.slug, description: a.role_title ?? undefined }))
       : people.map((p) => ({ id: p.id, name: p.name }))
 
   // The work endpoint takes no transfer without a note (issue_handler_work.go):

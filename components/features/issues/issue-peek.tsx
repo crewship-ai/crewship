@@ -90,16 +90,18 @@ export function IssuePeek({
     }
   }, [open, identifier, workspaceId, row?.updated_at])
 
-  // Initial focus on the sheet itself, not its first button. The sheet's
-  // focus trap lands on Previous, so the Enter that should open the full page
-  // pressed Previous instead (POP-04). The kit's `initialFocus="content"`
-  // (#3423) does this; until this branch carries it, the peek does it here.
-  React.useEffect(() => {
+  // Closing returns focus to whatever opened the peek (the row, or the search
+  // field). The Radix sheet has no trigger here, so it would drop to <body>;
+  // the kit has no option for this yet, so it is kept here (see the report).
+  React.useLayoutEffect(() => {
     if (!open) return
-    const frame = requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('[data-slot="peek"]')?.focus()
-    })
-    return () => cancelAnimationFrame(frame)
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    return () => {
+      if (!opener || opener === document.body) return
+      window.setTimeout(() => {
+        if (opener.isConnected && (document.activeElement === document.body || !document.activeElement)) opener.focus({ preventScroll: true })
+      }, 0)
+    }
   }, [open])
 
   const issue = fresh?.id === identifier ? fresh.issue : row
@@ -121,6 +123,9 @@ export function IssuePeek({
       onPrev={onPrev}
       onNext={onNext}
       onOpenFull={onOpenFull}
+      // Focus the sheet, not its first button: Enter must open the full page,
+      // never press Previous (POP-04). Radix returns focus to the opener on close.
+      initialFocus="content"
       footer={
         <div className="flex items-center gap-2 text-label text-muted-foreground-soft">
           <span className="max-sm:hidden">

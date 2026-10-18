@@ -189,6 +189,41 @@ test.describe("S05/S06 follow-up desktop", () => {
     await page.keyboard.press("Escape")
   })
 
+  // COM-13: the Who field is the kit Combobox (type to filter, arrows, Enter,
+  // Escape closes only the list). Checked at 1440, 1024 and 390 px.
+  for (const vp of [{ w: 1440, h: 1000 }, { w: 1024, h: 800 }, { w: 390, h: 844 }]) {
+    test(`COM-13 Hand off Who is a searchable combobox at ${vp.w}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h })
+      await seed(page, PINNED)
+      await listView(page)
+      await page.goto("/issues")
+      const id = await firstRow(page).getAttribute("data-issue")
+      await page.goto(`/issues/${id}`)
+      const handOff = page.getByRole("button", { name: "Hand off…" }).first()
+      test.skip((await handOff.count()) === 0, "the first issue offers no handoff")
+      await handOff.click()
+      const dialog = page.getByRole("dialog")
+      const who = dialog.getByRole("combobox", { name: "Who" })
+      await who.click()
+      const search = page.getByRole("combobox", { name: "Search Who" })
+      await expect(search).toBeFocused()
+      const list = page.getByRole("listbox")
+      const box = (await list.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.w)
+      const options = list.getByRole("option")
+      test.skip((await options.count()) === 0, "nobody to hand off to in the seed")
+      await page.keyboard.press("ArrowDown")
+      await page.keyboard.press("Enter")
+      await expect(list).toHaveCount(0)
+      await expect(who).not.toHaveText(/Choose/)
+      await who.click()
+      await page.keyboard.press("Escape")
+      await expect(list).toHaveCount(0)
+      await expect(dialog).toBeVisible()
+    })
+  }
+
   test("S06 ?project= opens Overview; tabs keep ?tab= in URL; unknown id shows not found", async ({ page }) => {
     await seed(page, PINNED)
     const projects = await (await page.request.get("/api/v1/projects")).json()
@@ -261,6 +296,16 @@ test.describe("#3484 finish desktop", () => {
     await expect(peek).toBeFocused()
     await page.keyboard.press("Enter")
     await expect(page).toHaveURL(/\/issues\/[^/?]+\?from=/)
+  })
+
+  test("COM-15 closing the peek returns focus to the row that opened it", async ({ page }) => {
+    await firstIssueId(page)
+    const opener = firstRow(page).locator("button").last()
+    await opener.click()
+    await expect(page.locator("[data-slot=peek]")).toBeFocused()
+    await page.keyboard.press("Escape")
+    await expect(page.locator("[data-slot=peek]")).toHaveCount(0)
+    await expect(opener).toBeFocused()
   })
 
   test("ISS-02 /issues/<id> shows the Issues panel; a project row opens it on /issues", async ({ page }) => {
