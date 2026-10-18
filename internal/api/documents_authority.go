@@ -86,6 +86,9 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.SetPathValue("page", parts[3])
 	r.SetPathValue("operation", parts[4])
 	operation := http.HandlerFunc(h.operation)
+	if h.authenticateDocumentDraftAgent(w, r, operation) {
+		return
+	}
 	h.middleware.RequireAuth(h.middleware.RequireWorkspace(operation)).ServeHTTP(w, r)
 }
 func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, initialize bool) documents.Authorize {
@@ -128,6 +131,12 @@ func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, i
 			if installed && (tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", k.PageID).Scan(&attached) != nil || attached) {
 				return "", errDocumentAccess
 			}
+		}
+		if a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); ok {
+			if initialize {
+				return "", errDocumentAccess
+			}
+			return h.pages.authorizeDocumentDraft(ctx, a, k, r.PathValue("operation"))
 		}
 		// Exact session, not merely some other active session for this user.
 		var expiry string
@@ -206,23 +215,24 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 	k := documents.Key{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: r.PathValue("page")}
 	op := r.PathValue("operation")
 	var in struct {
-		Generation   *int64            `json:"generation"`
-		ID           string            `json:"id"`
-		Fingerprint  string            `json:"fingerprint"`
-		Schema       int               `json:"schema"`
-		TargetSchema int               `json:"targetSchema"`
-		Snapshot     []byte            `json:"snapshot"`
-		Update       []byte            `json:"update"`
-		Blocks       json.RawMessage   `json:"blocks"`
-		Owner        string            `json:"owner"`
-		Token        string            `json:"token"`
-		LeaseOwner   string            `json:"leaseOwner"`
-		LeaseToken   string            `json:"leaseToken"`
-		Epoch        int64             `json:"epoch"`
-		IfRev        int64             `json:"ifRev"`
-		IfHashes     map[string]string `json:"ifHashes"`
-		Kind         string            `json:"kind"`
-		Checkpoint   string            `json:"checkpoint"`
+		Generation   *int64                 `json:"generation"`
+		ID           string                 `json:"id"`
+		Fingerprint  string                 `json:"fingerprint"`
+		Schema       int                    `json:"schema"`
+		TargetSchema int                    `json:"targetSchema"`
+		Snapshot     []byte                 `json:"snapshot"`
+		Update       []byte                 `json:"update"`
+		Blocks       json.RawMessage        `json:"blocks"`
+		Owner        string                 `json:"owner"`
+		Token        string                 `json:"token"`
+		LeaseOwner   string                 `json:"leaseOwner"`
+		LeaseToken   string                 `json:"leaseToken"`
+		Epoch        int64                  `json:"epoch"`
+		IfRev        int64                  `json:"ifRev"`
+		IfHashes     map[string]string      `json:"ifHashes"`
+		Semantic     *documentSemanticPatch `json:"semantic"`
+		Kind         string                 `json:"kind"`
+		Checkpoint   string                 `json:"checkpoint"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
 	decoder := json.NewDecoder(r.Body)
@@ -289,12 +299,17 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "document generation required")
 			return
 		}
-		if in.Kind != "human" {
+		a, agent := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+		if (!agent && in.Kind != "human") || (agent && in.Kind != "agent") {
 			replyError(w, 403, "human document commit required")
 			return
 		}
 		var receipt documents.Receipt
-		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind}, auth)
+		var guard documents.MutationGuard
+		if agent {
+			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
+		}
+		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: guard}, auth)
 		result = documentReceiptWire(receipt)
 	case "checkpoint":
 		if in.Generation == nil {
@@ -302,7 +317,11 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var c documents.Checkpoint
-		c, err = h.store.CheckpointRequestGuarded(ctx, k, lease, in.ID, in.Fingerprint, in.Snapshot, in.IfRev, in.Generation, auth, nil)
+		var guard documents.MutationGuard
+		if a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); ok {
+			guard = h.pages.documentDraftGuard(a, k, "checkpoint", in.IfRev)
+		}
+		c, err = h.store.CheckpointRequestGuarded(ctx, k, lease, in.ID, in.Fingerprint, in.Snapshot, in.IfRev, in.Generation, auth, guard)
 		result = map[string]any{"id": c.ID, "rev": c.Rev, "schema": c.Schema, "checkpoint": c.ID, "epoch": lease.Epoch}
 	case "checkpoint-read":
 		var c documents.Checkpoint

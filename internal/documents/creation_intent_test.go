@@ -28,3 +28,28 @@ func TestCreationIntentWireRejectsUnknownFields(t *testing.T) {
 		}
 	}
 }
+
+func TestCreationIntentComposerMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+		valid    bool
+	}{
+		{"explicit composer", map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer-id", "drafting": true}}, true},
+		{"legacy", map[string]any{"document_creation": map[string]any{"submission_id": "composer-id"}}, true},
+		{"conflicting sources", map[string]any{"document_creation_intent": map[string]any{"submission_id": "a"}, "document_creation": map[string]any{"submission_id": "b"}}, false},
+		{"forged identity", map[string]any{"document_creation_intent": map[string]any{"submission_id": "a", "user_id": "other"}}, false},
+		{"malformed", map[string]any{"document_creation_intent": true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := CreationIntentFromMetadata(tc.metadata)
+			if tc.valid {
+				if err != nil || got == nil {
+					t.Fatalf("missing explicit intent: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("accepted ambiguous or malformed intent")
+			}
+		})
+	}
+}

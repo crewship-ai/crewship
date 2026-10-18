@@ -24,7 +24,7 @@ func documentCreateMCPCatalog() []memoryMCPToolDescriptor {
 		props[key] = p
 	}
 	schema, _ := json.Marshal(map[string]any{"type": "object", "properties": props, "required": documentCreateMCPFields, "additionalProperties": false})
-	return []memoryMCPToolDescriptor{{Name: "doc_create", Description: "Create one complete private human-owned Docs from explicit pre-send chat permission for this live run. Supply title/name, slug, mutation_id and readable paragraph/heading/list/codeBlock blocks; the server supplies IDs and hashes. This creation-only permission cannot edit existing Pages or continue editing the created document. Exact payload/mutation_id retry only. No HTML, images or raw Yjs.", InputSchema: schema}}
+	return []memoryMCPToolDescriptor{{Name: "doc_create", Description: "Create one complete private human-owned Docs from explicit pre-send chat permission for this live run. Supply title/name, slug, mutation_id and readable paragraph/heading/list/codeBlock blocks; the server supplies IDs and hashes. A one-shot admission cannot continue editing. Only an original admission that includes drafting permits doc_draft tools for this one new Document in the same live run; it never grants access to another Page or a later run. Exact payload/mutation_id retry only. No HTML, images or raw Yjs.", InputSchema: schema}}
 }
 
 func decodeDocumentCreateMCPArgs(raw []byte) (map[string]json.RawMessage, error) {
