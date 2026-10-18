@@ -145,7 +145,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
           size="sm"
           // h-9 is 33px here, not 36 — `--spacing: 0.23rem`. The phone value has
           // to be h-12 to clear 44.
-          className={cn("h-[44px] gap-1.5 px-3 sm:h-8 sm:px-2", className)}
+          className={cn("h-[44px] gap-1.5 px-3 sm:h-8 sm:px-2 coarse:h-[44px]", className)}
           aria-label={`Provider: ${current.label}. Click to change.`}
         >
           <CurrentIcon
