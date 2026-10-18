@@ -352,7 +352,7 @@ export function SecretSettings({
             </div>
           </SettingsCard>
         )}
-        <PageSaveBar />
+        <PageSaveBar className="sticky left-auto mx-auto w-fit translate-x-0" />
       </div>
       <ConfirmDialog
         open={confirm}
