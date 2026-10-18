@@ -133,7 +133,8 @@ describe("panel step (page.write)", () => {
   it("needs the page, the panel and a JSON object", () => {
     const s = newStep("panel", [])
     expect(s.id).toBe("panel1")
-    expect(stepProblems(s)).toEqual(["Name the page", "Name the panel", "Write the panel data as a JSON object"])
+    expect(stepProblems(s)).toEqual(["Name the page", "Name the panel"])
+    expect(stepProblems({ ...s, panelData: "" })).toContain("Write the panel data as a JSON object")
     expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: "[1]" })).toEqual(["Write the panel data as a JSON object"])
     expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: "{oops" })).toEqual(["Write the panel data as a JSON object"])
     expect(stepProblems({ ...s, pageSlug: "p", panelId: "x", panelData: '{"a":"{{ steps.t.output }}"}' })).toEqual([])

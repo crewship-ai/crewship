@@ -12,6 +12,7 @@ import {
   Copy,
   Globe,
   Hand,
+  LayoutDashboard,
   ListChecks,
   Play,
   Plus,
@@ -584,6 +585,7 @@ export const STEP_ICON: Record<StepKind, LucideIcon> = {
   notify: Bell,
   wait: Clock,
   issue: ListChecks,
+  panel: LayoutDashboard,
   http: Globe,
   sub: Workflow,
   other: SquareTerminal,
@@ -969,6 +971,22 @@ function StepEditor({
             </>
           )}
           <InsertRefs refs={refs} onInsert={(r) => append("body", r)} />
+        </>
+      )
+    case "panel":
+      return (
+        <>
+          {nameField}
+          <CreateSurfaceField label="Page" htmlFor={f("page")} hint="The slug of a page this routine is the declared producer of.">
+            <Input id={f("page")} value={step.pageSlug ?? ""} onChange={(e) => onChange({ pageSlug: e.target.value })} className={cn(INPUT, "font-mono")} />
+          </CreateSurfaceField>
+          <CreateSurfaceField label="Panel" htmlFor={f("panel")} hint="The panel's id on that page.">
+            <Input id={f("panel")} value={step.panelId ?? ""} onChange={(e) => onChange({ panelId: e.target.value })} className={cn(INPUT, "font-mono")} />
+          </CreateSurfaceField>
+          <CreateSurfaceField label="Data" htmlFor={f("pdata")} hint="A JSON object checked against the panel's schema when it runs. Templates such as {{ steps.task1.output }} work inside strings.">
+            <Textarea id={f("pdata")} rows={5} value={step.panelData ?? ""} onChange={(e) => onChange({ panelData: e.target.value })} className="font-mono text-xs coarse:text-base" />
+          </CreateSurfaceField>
+          <InsertRefs refs={refs} onInsert={(r) => append("panelData", r)} />
         </>
       )
     case "http":
