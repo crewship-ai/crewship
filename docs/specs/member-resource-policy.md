@@ -632,3 +632,22 @@ remain available through the existing ADMIN-only capability endpoint. The
 journal records who changed whose access and when; it cannot reconstruct old
 capability sets. This contract does not add chained auditing for instance-level
 CLI token creation or revocation.
+
+### Per-frame realtime authorization cost
+
+Workspace, keeper, journal, crew, files, agent, mission and page channels resolve
+live account eligibility, the global restricted-profile ceiling and the selected
+resource's workspace membership in one SQL snapshot for every frame. Private
+page channels additionally require the current page owner or live workspace
+OWNER in that snapshot; ownership bypasses neither membership nor account
+eligibility. Shared page channels retain their membership audience. Session and
+chat-hints channels retain their existing single audience snapshot. Definitive
+denials remain distinct from storage or cancellation errors; both refuse delivery.
+There is no TTL cache or skipped batch check. Stream credential revocation and
+expiry retain their separate per-frame fence described above.
+
+`BenchmarkChatDeliveryAuthorization` measures workspace, agent and private-chat
+frames with 1×1, 16×8 and 64×16 concurrent clients and channels sharing a
+five-connection pool. It reports time per authorization, SQL statements per
+frame, and pool wait count and duration per frame. These are concurrent
+throughput measurements, not end-to-end socket latency or p99 claims.
