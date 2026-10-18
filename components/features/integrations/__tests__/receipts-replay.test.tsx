@@ -10,7 +10,7 @@ import { RecentReceipts } from "../views/incoming-webhooks-view"
 import type { IncomingEndpoint, IncomingTarget } from "../incoming-model"
 
 vi.mock("@/lib/api-fetch", async (original) => ({ ...(await original<typeof import("@/lib/api-fetch")>()), apiFetch: vi.fn() }))
-vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtime: () => ({}) }))
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtimeEventSafe: () => {}, useRealtime: () => ({}) }))
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 

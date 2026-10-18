@@ -1,6 +1,7 @@
 "use client"
 
 import { IncomingTargetAvatar } from "../incoming-target-avatar"
+import { ReceiptReplay } from "../receipt-replay"
 import * as React from "react"
 import Link from "next/link"
 import { useQuery } from "@tanstack/react-query"
@@ -600,6 +601,8 @@ export function RecentReceipts({
     label: string
     href: string
     status: string
+    /** Agent calls only: the work this call became and whether its payload is kept. */
+    replay?: { workId: string | null; kept: boolean; expiresAt: string | null }
   }
   const query = useQuery({
     queryKey: ["incoming-receipts", workspaceId, target.kind, ...ids],
@@ -612,6 +615,8 @@ export function RecentReceipts({
             received_at: string
             work_id: string | null
             filter_decision: string
+            raw_body_available?: boolean
+            raw_body_expires_at?: string | null
           }[]
         }>(
           `/api/v1/workspaces/${workspaceId}/webhook-deliveries?endpoint_id=${encodeURIComponent(target.id)}`,
@@ -623,6 +628,7 @@ export function RecentReceipts({
           label: r.work_id ?? r.id,
           href: `/activity?walk=agent:${encodeURIComponent(target.id)}`,
           status: `Admission: ${r.filter_decision}`,
+          replay: { workId: r.work_id, kept: Boolean(r.raw_body_available), expiresAt: r.raw_body_expires_at ?? null },
         }))
       }
       const pages = await Promise.all(
@@ -668,13 +674,30 @@ export function RecentReceipts({
           {query.data.map((r) => (
             <li
               key={r.id}
-              className="flex flex-wrap justify-between gap-2 px-4 py-3 text-xs"
+              data-testid={`receipt-${r.id}`}
+              className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs"
             >
               <span>{time(r.received_at)}</span>
               <Link className="text-primary" href={r.href}>
                 {r.label}
               </Link>
               <span>{r.status}</span>
+              {r.replay && (
+                <span className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                  {r.replay.kept ? (
+                    <span>
+                      {r.replay.expiresAt
+                        ? `Kept for replay until ${new Date(r.replay.expiresAt).toLocaleDateString()}`
+                        : "Kept for replay"}
+                    </span>
+                  ) : (
+                    <span>Replay unavailable · payload dropped</span>
+                  )}
+                  {r.replay.kept && r.replay.workId && (
+                    <ReceiptReplay workspaceId={workspaceId} workId={r.replay.workId} expiresAt={r.replay.expiresAt} />
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>
