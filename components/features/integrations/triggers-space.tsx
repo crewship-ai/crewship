@@ -25,10 +25,11 @@ import { Banner, CellMain, CliLines, FlowSteps, GlyphTile, HealthStrip, InfoCard
 /**
  * Triggers (Harbor 2, I-TRIG / I-EP): what starts work from outside.
  *
- * Not drawn, because the server has none: App events (Composio has no
- * receiver yet), Email in, replaying a call, "Kept for replay", testing a
- * mapping or sending a test call from here (the secret is shown only once),
- * and pointing a trigger at an agent (PATCH takes another routine only).
+ * Replay and "Kept for replay" are drawn for an agent's Calls (work item
+ * replay route, INT-08). Not drawn, because the server has none: App events
+ * (Composio has no receiver yet), Email in, testing a mapping or sending a
+ * test call from here (the secret is shown only once; #3478), and pointing a
+ * trigger at an agent (PATCH takes another routine only).
  */
 
 export const KIND_LABEL: Record<IncomingKind, { one: string; many: string }> = {
