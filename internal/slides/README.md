@@ -39,3 +39,24 @@ editor, Present or export path. The existing schema1/2 model and backup lineage
 remain unchanged. Tests cover strict initialization, bounded targeted edits,
 atomic rejection, identity preservation and explicit image upgrade fencing;
 they do not constitute model/browser/Office or complete S0 acceptance.
+
+## Durable initialization and reads
+
+`Store.Initialize` and `Store.Read` use the shipped Slides tables. A fenced
+transaction checks live Go authorization before receipt lookup and again before
+commit, requiring the same authorized actor both times. Initialization retains
+one immutable revision, its request-bound receipt and persistent slide/element
+identity reservations together. Identical authorized retries return the original
+receipt; changed actor or request content conflicts. Reads validate the stored
+schema, stable Page identity and canonical content hash.
+
+Deck-count admission is per workspace. Revision/history-byte and retained-ID
+budgets remain per deck. Capacity rejection and revision-hook rejection roll
+back heads, revisions, receipts and identity reservations together. Images
+require a real `OnRevision` hook that validates access and pins references in
+the same transaction; absence of the hook rejects image initialization.
+
+This cut supplies initialization/read persistence only. It does not connect a
+public handler, create a Page, infer authorization from crew membership, enable
+agent authoring, edit a saved deck, implement comments or select an S0 format.
+The caller supplies the current Go authority and authorized asset-pin hook.
