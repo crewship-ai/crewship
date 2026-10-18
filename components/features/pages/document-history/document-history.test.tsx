@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { DOMSerializer } from "@tiptap/pm/model"
 import { DocumentHistory, type DocumentHistoryProps } from "./document-history"
-afterEach(cleanup)
+afterEach(()=>{cleanup();vi.restoreAllMocks()})
 const row = { id:"pin-1", rev:7, schema:3, actor:"human:writer", created_at:"2026-10-18T20:00:00Z" }
 const content = { type:"doc", content:[{type:"paragraph",attrs:{id:"p1"},content:[{type:"text",text:"Confirmed historical text"}]}] }
 function props(): DocumentHistoryProps {
@@ -86,4 +87,20 @@ it("rejects executable link targets without rendering links or fallback text",()
   expect(screen.queryByRole("link")).toBeNull()
   expect(screen.queryByText("Unsafe label")).toBeNull()
   expect(screen.getByRole("status")).toHaveTextContent("Snapshot unavailable")
+})
+
+it.each([2,3])("refuses a non-document root in schema %s without exposing its text",schema=>{
+  const p=props()
+  const invalid={type:"paragraph",attrs:{id:"p1"},content:[{type:"text",text:"Private non-document root"}]}
+  render(<DocumentHistory {...p} list={{status:"ready",scopeKey:p.scopeKey,data:{checkpoints:[{...row,schema}]}}} snapshot={{status:"ready",scopeKey:p.scopeKey,data:{page_id:p.pageId,id:row.id,rev:row.rev,schema,content:invalid}}}/>)
+  expect(screen.queryByText("Private non-document root")).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
+})
+
+it("fails closed instead of throwing or retaining a prior body when serialization fails",()=>{
+  const p=props();const {rerender}=render(<DocumentHistory {...p}/>)
+  vi.spyOn(DOMSerializer,"fromSchema").mockImplementation(()=>{throw new Error("Serialization unavailable")})
+  expect(()=>rerender(<DocumentHistory {...p} snapshot={{status:"ready",scopeKey:p.scopeKey,data:{page_id:p.pageId,id:row.id,rev:row.rev,schema:3,content:structuredClone(content)}}}/>)).not.toThrow()
+  expect(screen.queryByText("Confirmed historical text")).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
 })
