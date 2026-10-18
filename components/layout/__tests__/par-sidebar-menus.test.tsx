@@ -129,8 +129,8 @@ describe("the user menu (PAR-141)", () => {
   })
   it("names the edition in the footer: Community Edition · dev · a41d725", async () => {
     open()
-    const build = await screen.findByTestId("user-menu-build")
-    expect(build).toHaveTextContent("Community Edition · dev · a41d725")
+    await screen.findByTestId("user-menu-build")
+    expect(screen.getByTestId("user-menu-footer")).toHaveTextContent("Community Edition · dev · a41d725")
     expect(within(screen.getByTestId("user-menu-footer")).getByRole("link", { name: "Update available" })).toBeInTheDocument()
   })
 })

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { HeartPulse } from "lucide-react"
 
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { DashCard } from "@/components/features/dashboard/dash-card"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 import { routineHealthRows, type HealthRoutine, type HealthRun } from "@/lib/routine-health"
@@ -43,11 +43,11 @@ export function RoutinesHealthCard({
   const toCheck = rows.filter((r) => r.checkup.bad === 0 && r.checkup.warn > 0).length
   const byslug = new Map(routines.map((r) => [r.slug, r]))
   return (
-    <DashboardCard
+    <DashCard
       title="Health"
       icon={HeartPulse}
       data-testid="routines-health"
-      hint={<span data-testid="health-summary">{toFix ? plural(toFix, "routine to fix", "routines to fix") : toCheck ? plural(toCheck, "routine to check", "routines to check") : "All good"}</span>}
+      meta={<span data-testid="health-summary">{toFix ? plural(toFix, "routine to fix", "routines to fix") : toCheck ? plural(toCheck, "routine to check", "routines to check") : "All good"}</span>}
     >
       {rows.length === 0 ? (
         <InlineEmpty icon={HeartPulse} text="No routines yet." />
@@ -72,12 +72,12 @@ export function RoutinesHealthCard({
                   <i key={b.id} data-testid="health-bar" title={b.label} className={cn("h-full min-w-px flex-1 rounded-sm", BAR[b.tone], b.tone === "mut" && "h-1/3")} />
                 ))}
               </span>
-              <span className="font-mono text-label tabular-nums text-muted-foreground">
+              <span className="text-label tabular-nums text-muted-foreground">
                 {row.successPct === null ? "—" : `${row.successPct}%`}
                 <span className="text-muted-foreground-soft">{row.finished ? ` · ${row.ok} of ${row.finished}` : " · no finished runs"}</span>
               </span>
-              {row.spentMonth !== null && <span className="font-mono text-label tabular-nums text-muted-foreground">${row.spentMonth.toFixed(2)} this month</span>}
-              <span className={cn("font-mono text-label", row.checkup.bad ? "text-destructive" : row.checkup.warn ? "text-warn" : "text-success")}>
+              {row.spentMonth !== null && <span className="text-label tabular-nums text-muted-foreground">${row.spentMonth.toFixed(2)} this month</span>}
+              <span className={cn("text-label", row.checkup.bad ? "text-destructive" : row.checkup.warn ? "text-warn" : "text-success")}>
                 {row.checkup.bad ? `${row.checkup.bad} to fix` : row.checkup.warn ? `${row.checkup.warn} to check` : "All good"}
               </span>
             </li>
@@ -87,6 +87,6 @@ export function RoutinesHealthCard({
       <p className="mt-2 text-label text-muted-foreground-soft">
         Success counts the newest runs loaded for each routine (up to 20); spend is this calendar month.
       </p>
-    </DashboardCard>
+    </DashCard>
   )
 }
