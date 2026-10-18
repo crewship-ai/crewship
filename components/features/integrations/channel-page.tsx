@@ -311,7 +311,7 @@ X-Crewship-Event: routines.failed
 function ChannelAgents({ workspaceId, channelId }: { workspaceId: string; channelId: string }) {
   const { agents, loading } = useChannelAgents(workspaceId, channelId)
   return (
-    <InfoCard title="Agents that may send here" icon={Bot} right={loading ? undefined : <span className="font-mono text-label text-muted-foreground">{agents.length}</span>}>
+    <InfoCard title="Agents that may send here" icon={Bot} right={loading ? undefined : <span className="text-label tabular-nums text-muted-foreground">{agents.length}</span>}>
       {loading ? (
         <div className="space-y-2 px-4 py-3">
           <Skeleton className="h-4 w-40" />

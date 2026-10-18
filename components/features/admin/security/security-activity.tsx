@@ -191,7 +191,7 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
 function Block({ label, text, mono, empty }: { label: string; text: string | null | undefined; mono?: boolean; empty?: string }) {
   return (
     <section aria-label={label}>
-      <h4 className="mb-1 font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</h4>
+      <h4 className="mb-1 text-micro text-muted-foreground-soft">{label}</h4>
       {text ? (
         <pre className={cn("max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2.5 text-label", mono && "font-mono text-micro")}>{redactSecrets(text)}</pre>
       ) : (

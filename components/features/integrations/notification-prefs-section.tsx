@@ -219,7 +219,7 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
                   <tr key={`group:${group.key}`} className="border-b border-border/30">
                     <td
                       colSpan={usableChannels.length + 1}
-                      className="px-3 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sticky left-0 bg-card"
+                      className="px-3 pt-3 pb-1 text-micro font-medium text-muted-foreground sticky left-0 bg-card"
                     >
                       {group.label}
                     </td>

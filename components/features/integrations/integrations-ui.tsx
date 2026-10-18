@@ -283,7 +283,7 @@ export function FlowSteps({ steps, label }: { steps: FlowStep[]; label: string }
           {i > 0 && <ChevronRight className="hidden size-3.5 shrink-0 self-center text-muted-foreground-soft md:block" aria-hidden />}
           <div className="grid min-w-0 flex-1 content-start gap-0.5 rounded-card border border-border bg-card px-3.5 py-3">
             <span className="flex h-6 items-center text-muted-foreground">{s.icon}</span>
-            <small className="text-micro font-medium uppercase tracking-[0.04em] text-muted-foreground-soft">{s.label}</small>
+            <small className="text-micro font-medium text-muted-foreground-soft">{s.label}</small>
             <b className="break-words text-body font-semibold text-foreground">{s.value}</b>
           </div>
         </li>

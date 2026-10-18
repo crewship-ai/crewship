@@ -212,7 +212,7 @@ function ConnectPanel({ workspaceId, tool, onDone }: { workspaceId: string; tool
   return (
     <div className="grid gap-4 border-t border-border/50 px-4 py-4 md:grid-cols-2" data-testid="crew-tool-connect">
       <div className="space-y-2">
-        <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+        <div className="inline-flex items-center gap-1.5 text-label font-semibold text-foreground/70">
           <KeyRound className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /> Use a credential from the vault
         </div>
         <p className="text-label text-muted-foreground">
@@ -245,7 +245,7 @@ function ConnectPanel({ workspaceId, tool, onDone }: { workspaceId: string; tool
         )}
       </div>
       <div className="space-y-2">
-        <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+        <div className="inline-flex items-center gap-1.5 text-label font-semibold text-foreground/70">
           <Plug className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /> Or sign in with OAuth
         </div>
         {oauthPossible ? (

@@ -361,7 +361,7 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
   return (
     <div role="toolbar" aria-label="Change the selected people" data-slot="people-bulk"
       className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:gap-1.5 max-sm:px-2")}>
-      <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{people.length}</span> selected</span>
+      <span className="px-1 text-xs"><span className="font-semibold tabular-nums">{people.length}</span> selected</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button size="sm" className={selectionBarAction} disabled={workspaces.length === 0}><Building2 />Add to workspace<ChevronDown className="h-3 w-3" /></Button>
