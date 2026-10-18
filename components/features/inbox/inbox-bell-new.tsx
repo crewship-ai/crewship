@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckCircle2, Inbox as InboxIcon, XCircle } from "lucide-react"
+import { Inbox as InboxIcon } from "lucide-react"
 
 import {
   BarMenu,
@@ -113,17 +113,18 @@ const KIND_CHIP_LABEL: Record<InboxAttentionClass, string> = {
 const KIND_CHIP_ORDER: InboxAttentionClass[] = ["decision", "input", "review", "repair"]
 
 /**
- * The chips for this set of rows. All always, with its count; a kind chip only
- * when at least one row carries that class — a chip that filters to nothing is
- * a dead click. Kind chips carry no count (the signed-off wireframe): the
- * badge and the header already count, and four more numbers in one strip
- * stop reading as numbers.
+ * The chips for this set of rows. All, with its count, then every kind in the
+ * wireframe's order (v67 `inbell2`: All / Decisions / Input / Review / Repair),
+ * whether or not a row carries it: the strip is the same five words every time
+ * the bell opens, and a kind with nothing behind it says so in the body.
+ * Kind chips carry no count (the signed-off wireframe): the badge and the
+ * header already count, and four more numbers in one strip stop reading as
+ * numbers.
  */
 export function inboxKindChips(items: InboxItem[]): BarMenuChip<InboxKindChip>[] {
-  const present = new Set(items.map((i) => i.attention_class).filter(Boolean))
   return [
     { id: "all", label: "All", count: items.length },
-    ...KIND_CHIP_ORDER.filter((k) => present.has(k)).map((k) => ({
+    ...KIND_CHIP_ORDER.map((k) => ({
       id: k,
       label: KIND_CHIP_LABEL[k],
       tone: k === "decision" ? ("warn" as const) : undefined,
@@ -237,10 +238,10 @@ export function InboxBellView({
 
   // Chips count what the panel can show — both sections — not the whole
   // active list: "All (n)" disagreeing with the rows beneath it is the first
-  // thing anyone would check. A chosen kind whose last row just resolved falls
-  // back to All rather than leaving an empty panel behind a chip that is gone.
+  // thing anyone would check. A chosen kind whose last row just resolved stays
+  // chosen and says there is nothing in it: the chip is still there.
   const chips = useMemo(() => inboxKindChips([...decisions, ...recent]), [decisions, recent])
-  const kind: InboxKindChip = chips.some((c) => c.id === pickedKind) ? pickedKind : "all"
+  const kind: InboxKindChip = pickedKind
   const shownDecisions = filterInboxByKind(decisions, kind)
   const shownRecent = filterInboxByKind(recent, kind)
 
@@ -285,8 +286,8 @@ export function InboxBellView({
         }
       />
 
-      {/* Only when there is a choice to make: "All" alone filters nothing. */}
-      {chips.length > 1 && (
+      {/* Only when there is something to filter. */}
+      {decisions.length + recent.length > 0 && (
         <BarMenuChips<InboxKindChip>
           ariaLabel="Filter by kind"
           testId="bell-chip"
@@ -298,7 +299,7 @@ export function InboxBellView({
 
       <BarMenuBody>
         {shownDecisions.length === 0 && shownRecent.length === 0 && (
-          <BarMenuEmpty icon={InboxIcon} message="All caught up" />
+          <BarMenuEmpty icon={InboxIcon} message={kind === "all" ? "All caught up" : `Nothing in ${KIND_CHIP_LABEL[kind]}`} />
         )}
 
         {shownDecisions.length > 0 && (
@@ -404,13 +405,12 @@ function BellRow({
     <>
       {inline && (
         <>
-          <BarMenuRowAction onClick={() => decide(true)} disabled={busy !== null} ariaLabel={`Approve ${item.title}`}>
-            <CheckCircle2 className="h-3 w-3" />
-            {busy === "approved" ? "Approving…" : "Approve"}
-          </BarMenuRowAction>
-          <BarMenuRowAction danger onClick={() => decide(false)} disabled={busy !== null} ariaLabel={`Deny ${item.title}`}>
-            <XCircle className="h-3 w-3" />
+          {/* v67: Deny, then Approve as the primary action. */}
+          <BarMenuRowAction onClick={() => decide(false)} disabled={busy !== null} ariaLabel={`Deny ${item.title}`}>
             {busy === "denied" ? "Denying…" : "Deny"}
+          </BarMenuRowAction>
+          <BarMenuRowAction primary onClick={() => decide(true)} disabled={busy !== null} ariaLabel={`Approve ${item.title}`}>
+            {busy === "approved" ? "Approving…" : "Approve"}
           </BarMenuRowAction>
         </>
       )}
@@ -425,13 +425,13 @@ function BellRow({
       testId={`bell-row-${item.id}`}
       onClick={onOpen}
       actions={actions}
-      leading={<ActorAvatar actor={subject} size={24} />}
+      leading={<ActorAvatar actor={subject} size={28} />}
       title={item.title}
       meta={
         <>
           <span className="truncate">{subject.label}</span>
           <span>·</span>
-          <span className="truncate font-mono">{categoryOf(item)}</span>
+          <span className="truncate">{categoryOf(item)}</span>
           {blocked && <span className="shrink-0">· admin decides</span>}
         </>
       }

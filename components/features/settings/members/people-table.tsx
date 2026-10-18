@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
+import { formatSettingsDate } from "@/components/features/settings/shared"
 import { ROLE_LABEL, aboveRole, type Member } from "./members-model"
 import { AreaChips, AreaIcons, RestrictedPill, RolePill } from "./member-bits"
 import { daysUntil, expiryText, reissueInvitation, revokeInvitation, type Invitation } from "./use-invitations"
@@ -20,17 +21,15 @@ export interface PeopleGroup {
   people: Member[]
 }
 
-/** "3 Sep", with the year once it is not this one. */
+/** "3 Sep", with the year once it is not this one (v67: day first, English). */
 export function joinedDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return "—"
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })
+  return formatSettingsDate(iso, { year: "if-not-current" })
 }
 
-const groupHead = "sticky top-0 z-[1] border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-left font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground"
+// v67 `.m-grp`: a small sans group row ("OWNERS · 1"), and a sans sentence-case head.
+const groupHead = "sticky top-0 z-[1] border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground"
 const cell = "border-b border-border/60 px-3 py-2.5 align-middle first:pl-4 last:pr-4"
-const head = "border-b border-border/60 bg-surface-subtle px-3 py-2 text-left font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground first:pl-4 last:pr-4"
+const head = "border-b border-border/60 bg-surface-subtle px-3 py-2 text-left text-label font-medium text-muted-foreground first:pl-4 last:pr-4"
 
 /**
  * The roster on a desktop: people grouped (by role, or A–Z as one group), one
@@ -79,7 +78,7 @@ export function PeopleTable({
         <tbody key={g.key}>
           <tr>
             <th scope="rowgroup" colSpan={cols} className={groupHead}>
-              {g.label}<span className="ml-2 font-normal text-muted-foreground-soft">{g.people.length}</span>
+              {g.label}<span className="ml-1.5 font-normal tabular-nums text-muted-foreground-soft">· {g.people.length}</span>
             </th>
           </tr>
           {g.people.map((m) => {
@@ -108,7 +107,7 @@ export function PeopleTable({
                         {isSelf && <span className="text-micro text-muted-foreground">you</span>}
                         {unsaved && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--save-bar-fg)]" title="Unsaved" />}
                       </span>
-                      {m.user.full_name?.trim() && <span className="block truncate font-mono text-micro text-muted-foreground-soft">{m.user.email}</span>}
+                      {m.user.full_name?.trim() && <span className="block truncate text-micro text-muted-foreground-soft">{m.user.email}</span>}
                     </span>
                   </button>
                 </td>
@@ -124,7 +123,7 @@ export function PeopleTable({
                   </span>
                 </td>
                 {caps && <td className={cn(cell, "overflow-hidden")}><AreaChips granted={granted} /></td>}
-                <td className={cn(cell, "font-mono text-micro tabular-nums text-muted-foreground")}>{joinedDate(m.created_at)}</td>
+                <td className={cn(cell, "text-label tabular-nums text-muted-foreground")}>{joinedDate(m.created_at)}</td>
                 <td className={cn(cell, "text-muted-foreground-soft group-hover:text-foreground")}><ChevronRight className="h-3.5 w-3.5" aria-hidden /></td>
               </tr>
             )
@@ -147,7 +146,7 @@ export function PeopleList({ groups, caps, currentUserId, onOpen }: {
     <div data-slot="members-list">
       {groups.map((g) => (
         <section key={g.key} aria-label={g.label}>
-          <h3 className="border-b border-border/60 bg-surface-subtle px-4 py-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <h3 className="border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             {g.label}<span className="ml-2 font-normal text-muted-foreground-soft">{g.people.length}</span>
           </h3>
           {g.people.map((m) => {
@@ -244,7 +243,7 @@ export function InvitationList({ invitations, workspaceId, manage = false, calle
               <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-dashed border-border text-muted-foreground"><Mail className="h-3.5 w-3.5" aria-hidden /></span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-control">{inv.email}</span>
-                <span className="block truncate font-mono text-micro text-muted-foreground-soft">{inviter ? `invited by ${inviter} · ` : ""}{joinedDate(inv.created_at)}</span>
+                <span className="block truncate text-micro text-muted-foreground-soft">{inviter ? `invited by ${inviter} · ` : ""}{joinedDate(inv.created_at)}</span>
               </span>
               <RolePill role={inv.role} />
               <StatusPill tone={days < 0 ? "danger" : days <= 2 ? "warn" : "muted"} label={expiryText(inv.expires_at)} />

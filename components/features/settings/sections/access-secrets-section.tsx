@@ -23,7 +23,7 @@ import * as React from "react"
 import Link from "next/link"
 import { AlertTriangle, Building, ChevronRight, Eye, FolderLock, Layers, Lock, Shield, UserCheck, Users, type LucideIcon } from "lucide-react"
 
-import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsCard, SettingsCounts, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
@@ -183,11 +183,11 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
           lockTitle={OWNER_ONLY}
           border={!policyError}
           description={
+            // The same explanation for every role (v67); who may move the
+            // switch is said by the lock beside the label and on the switch.
             enabled === null && !policyError
               ? "Reading the current setting…"
-              : !isOwner
-                ? OWNER_ONLY
-                : enabled
+              : enabled
                   ? "Holders of the capability can reveal a value, with a fresh sign-in and a written reason, recorded in the audit log first."
                   : "Off for new workspaces. Each reveal still needs a fresh sign-in and a reason, and is written to the audit log first."
           }
@@ -217,12 +217,6 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
       <SettingsCard icon={UserCheck}
         title="Who may reveal"
         description="People who hold credentials:reveal"
-        footer={holders && holders.length > 2 ? (
-          <span className="flex items-start gap-1.5 text-warn">
-            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-            {holders.length} people can read secrets in plaintext. The recommendation for a corporate workspace is two.
-          </span>
-        ) : undefined}
       >
         {capsHidden ? (
           <SettingsEmpty>
@@ -239,12 +233,12 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             on, no value can be revealed until someone is granted it in Members.
           </SettingsEmpty>
         ) : (
+          // v67: the count, the avatars and the way into Members. Who they are,
+          // and the warning when there are more than two, are Members' job
+          // (its "Needs attention" says so) — not a second list here.
           <SettingsRow
-            label={<><span className="font-mono tabular-nums">{holders.length}</span> {holders.length === 1 ? "person can" : "people can"} reveal secrets</>}
-            description={<>
-              {holders.slice(0, 4).map((m) => personLabel(m.user.full_name, m.user.email)).join(", ")}{holders.length > 4 ? ` and ${holders.length - 4} more` : ""}
-              <span className="block">Owners and admins by default. More than 2 shows a warning.</span>
-            </>}
+            label={<span className="tabular-nums">{holders.length} {holders.length === 1 ? "person" : "people"}</span>}
+            description="Owners and admins by default. More than 2 shows a warning."
             border={false}
           >
             <span className="flex shrink-0 -space-x-1.5" aria-hidden data-slot="reveal-holders">

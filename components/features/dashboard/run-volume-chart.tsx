@@ -55,7 +55,7 @@ export function RunVolumeChart({
             axisLine={false}
             tickMargin={8}
             minTickGap={window === "24h" ? 28 : 18}
-            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)" }}
             tickFormatter={(value) => {
               const date = new Date(value)
               if (window === "24h") return `${String(date.getHours()).padStart(2, "0")}h`
@@ -67,7 +67,7 @@ export function RunVolumeChart({
             tickLine={false}
             axisLine={false}
             width={32}
-            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)" }}
           />
           <ChartTooltip
             cursor={{ fill: "var(--chart-cursor)" }}

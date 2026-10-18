@@ -1,10 +1,10 @@
 "use client"
 
-import { ActivitySystemStatus } from "@/components/layout/activity-system-status"
 import { useState } from "react"
+import { ActivitySystemStatus } from "@/components/layout/activity-system-status"
 import Link from "next/link"
 import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
-import { Activity, Bot } from "lucide-react"
+import { Activity, AlertTriangle, Bot, Hand, Play } from "lucide-react"
 import {
   BarMenu,
   BarMenuBody,
@@ -14,70 +14,50 @@ import {
   BarMenuFooterLink,
   BarMenuHeader,
   BarMenuRow,
+  BarMenuRowAction,
   BarMenuSection,
 } from "@/components/layout/bar-menu"
 import { StatusPill } from "@/components/ui/status-pill"
-import {
-  LiveRunRow,
-  MAX_LIVE_ROWS,
-  useCancelRoutineRun,
-} from "@/components/features/routines/live-run-row"
-import { formatStepCost } from "@/components/features/routines/routine-cost-format"
-import { SourcePill } from "@/components/features/activity/source-pill"
-import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import { MAX_LIVE_ROWS } from "@/components/features/routines/live-run-row"
+import { formatElapsedSince } from "@/components/features/routines/routine-cost-format"
+import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useActiveRuns, type ActiveRunItem } from "@/hooks/use-active-runs"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { useTick } from "@/hooks/use-tick"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
-import { RUN_TONE_DOT, runStatusLabel, runTone } from "@/lib/activity-run"
-import { roleAtLeast } from "@/lib/routine-governance"
+import { runStatusLabel, runTone } from "@/lib/activity-run"
 
-// ActivityBell — the global "what's running now" surface in the
-// toolbar. The single home for live routine visibility (the header
-// LiveRoutinesChip was retired in favour of this dropdown, feedback
-// 2026-07-02):
+// ActivityBell — the global "what's running now" surface in the toolbar, as the
+// v67 wireframe draws it (`H.POPS.actbell`, PAR-145):
 //
-//   badge   — count of live runs on the Activity icon; amber the
-//             moment anything waits on a human approval, blue while
-//             routines run, emerald preserved for agent-only activity
-//             (the badge's historical meaning). Hidden at zero.
-//   LIVE    — up to MAX_LIVE_ROWS active routine runs with current
-//             step, elapsed + cost and Review / Trace / Cancel
-//             actions (rows shared with nothing else — see
-//             live-run-row.tsx), plus any in-flight agent runs.
-//   RECENT  — the last few terminal routine runs (completed/failed)
-//             so "did my run just finish?" doesn't need a page hop.
-//   FAILED  — the terminal runs whose runTone is failed, on their own.
-//   chips   — Live (n) / Recent / Failed (n) under the header; the panel
-//             shows the selected section only. Default is Live while
-//             anything is live, else Recent. A failure used to be one
-//             red word among three Recent rows and scrolled off the
-//             moment two newer runs finished — the Failed chip is the
-//             place it cannot be pushed out of.
-//   icon    — tinted (BarMenu `active`) while anything is live, on top
-//             of the badge: the badge says how many and how bad, the
-//             tint says "something is moving" at a glance.
-//   footer  — View all activity →, pre-filtered to the bucket the
-//             panel is showing (waiting / active / failed).
+//   badge   — count of live runs on the Activity icon; amber the moment
+//             anything waits on a human approval, blue while routines run,
+//             emerald preserved for agent-only activity. Hidden at zero.
+//   panel   — 480 px (a sheet under md): the header, one fleet line (crews,
+//             agents online, working, idle), the chips All / Waiting /
+//             Running / Could not finish, then the work in those groups with
+//             the action each one needs inline (Decide, Open, Fix
+//             credential), and a footer with today's tally and the way out.
+//   icon    — tinted (BarMenu `active`) while anything is live.
 //
-// No step x/y progress bar on live rows: the list feed carries
-// current_step_id only — no step index and no step total on the run
-// (step_count lives on the pipeline definition, not the run) — so a
-// bar would be invented data. See live-run-row.tsx.
+// What the panel does not draw, and why:
+//   · "Now | Changes" — the Changes feed (issue, routine, artefact and access
+//     changes) has no source in the product yet, so there is no second tab.
+//   · A step progress bar and "Step 3 of 5" — the run feed carries only
+//     current_step_id, no step index and no total; a bar would be invented
+//     data. The row names the step and the elapsed time instead.
+//   · Cancel — it moved to the run's page in v67 (Stop on the run peek).
 //
-// Routine runs come from the shared useActiveRoutineRuns provider
-// (one fetch/poll/WS stream for every live surface); the legacy
-// useActiveRuns feed still contributes agent runs — its routine rows
-// are dropped here to avoid duplicates.
+// Routine runs come from the shared useActiveRoutineRuns provider (one
+// fetch/poll/WS stream for every live surface); the legacy useActiveRuns feed
+// still contributes agent runs — its routine rows are dropped here to avoid
+// duplicates.
 //
-// The chrome is the shared top-bar kit (components/layout/bar-menu.tsx). This
-// was a 400px Radix dropdown with its own uppercase text-[9px] section labels
-// and no header/footer contract, sitting one icon away from a 380px Inbox that
-// had all three. Same panel now, same rows, same footer.
+// The chrome is the shared top-bar kit (components/layout/bar-menu.tsx).
 export function ActivityBell() {
   const router = useRouter()
-  const { workspaceId, role } = useWorkspace()
+  const { workspaceId } = useWorkspace()
   const [open, setOpen] = useState(false)
   const { runs: activeItems } = useActiveRuns(workspaceId)
   const {
@@ -86,22 +66,12 @@ export function ActivityBell() {
     awaitingApproval,
     recentRuns,
     recentDashboardRuns,
-    refresh,
   } = useActiveRoutineRuns()
 
   const agentRuns = activeItems.filter((i) => i.kind === "agent")
   const liveTotal = activeCount + agentRuns.length
 
   // Live-run semantics win the badge tone; the count merges both feeds.
-  // Amber the moment anything waits on a human approval, blue while routines
-  // run, emerald preserved for agent-only activity.
-  //
-  // A tone token, not raw classes. This branch carried the raw form —
-  // `bg-warn text-white` — from the sweep that fixed eight invisible
-  // buttons; main then replaced the whole call with BarMenu's
-  // badge={{count, tone}} API, which routes the same decision through
-  // the shared kit. Keeping the local classes would have meant styling
-  // a prop that no longer exists.
   const badgeTone = awaitingApproval > 0 ? "urgent" : activeCount > 0 ? "active" : "live"
 
   const ariaLabel =
@@ -119,22 +89,21 @@ export function ActivityBell() {
       open={open}
       onOpenChange={setOpen}
       testId="activity"
+      // 480 px on a desktop and a tablet; a sheet between the viewport's edges
+      // on a phone, where the button is too near the right edge for 480 px.
+      widthClass="w-[480px] max-md:fixed max-md:inset-x-2 max-md:top-12 max-md:w-auto"
     >
       {open && (
-        <ActivityDropdownBody
+        <ActivityPanelBody
           workspaceId={workspaceId}
           liveRuns={liveRuns}
           agentRuns={agentRuns}
           liveTotal={liveTotal}
           awaitingApproval={awaitingApproval}
-          // The wider (12-run) terminal window, not the 3-row one: the Failed
-          // chip counts failures across it, and a window of three would
-          // report "Failed (0)" as soon as three runs succeeded after one
-          // failed — the exact loss the chip exists to prevent. Falls back
-          // for a provider that predates the wider slice.
+          // The wider (12-run) terminal window, not the 3-row one: the Could
+          // not finish chip and today's tally count across it. Falls back for
+          // a provider that predates the wider slice.
           recentRuns={recentDashboardRuns ?? recentRuns}
-          refresh={refresh}
-          canCancel={roleAtLeast(role, "ADMIN")}
           onNavigate={() => setOpen(false)}
           onOpenItem={(href) => {
             setOpen(false)
@@ -146,81 +115,107 @@ export function ActivityBell() {
   )
 }
 
-export type ActivityChip = "live" | "recent" | "failed"
+export type ActivityChip = "all" | "waiting" | "running" | "failed"
 
-/**
- * Which chip the panel opens on. Live while anything is live — that is the
- * question the icon's badge just raised — otherwise Recent. Never Failed by
- * default: the chip carries its count, and opening on old failures every time
- * would make the panel read as an alarm when nothing is happening.
- */
-export function defaultActivityChip(liveTotal: number): ActivityChip {
-  return liveTotal > 0 ? "live" : "recent"
+/** The panel opens on All, whatever is live: the chips are the way to narrow. */
+export function defaultActivityChip(_liveTotal: number): ActivityChip {
+  return "all"
 }
 
-/** The terminal runs the Failed chip shows: runTone failed, in feed order. */
+/** The terminal runs the Could not finish chip shows: runTone failed, in feed order. */
 export function failedRuns(runs: PipelineRun[]): PipelineRun[] {
   return runs.filter((r) => runTone(r.status) === "failed")
 }
 
 /**
- * Where "View all activity →" goes. The approval wins whatever the chip —
- * a run parked on a human is the reason to leave the panel — then the chip
- * the reader chose, then the live bucket. /activity accepts `failed` as a
- * scope (lib/activity-deeplink.ts SCOPES).
+ * Where "Open Activity →" goes. The approval wins whatever the chip — a run
+ * parked on a human is the reason to leave the panel — then the chip the
+ * reader chose, then the live bucket. /activity accepts `failed` as a scope
+ * (lib/activity-deeplink.ts SCOPES).
  */
 export function activityFooterHref(chip: ActivityChip, liveTotal: number, awaitingApproval: number): string {
   if (awaitingApproval > 0) return "/activity?status=waiting"
   if (chip === "failed") return "/activity?status=failed"
-  if (chip === "live" && liveTotal > 0) return "/activity?status=active"
+  if ((chip === "all" || chip === "running") && liveTotal > 0) return "/activity?status=active"
   return "/activity"
 }
 
-// How many terminal rows a chip shows. Recent was three while it shared the
-// panel with Live; with a chip of its own it gets the LIVE budget.
-const MAX_TERMINAL_ROWS = MAX_LIVE_ROWS
+/** How many rows one group shows; overflow exits through the footer. */
+const MAX_GROUP_ROWS = MAX_LIVE_ROWS
+/** The terminal window is 12 runs; a full window of today's is "12+". */
+const TERMINAL_WINDOW = 12
+
+const sameDay = (iso: string | undefined, now: Date) => {
+  if (!iso) return false
+  const d = new Date(iso)
+  return !Number.isNaN(d.getTime()) && d.toDateString() === now.toDateString()
+}
+
+/** Pure: today's completed runs and what they cost, from the terminal window. */
+export function completedToday(runs: PipelineRun[], now: Date = new Date()): { count: number; costUsd: number; more: boolean } {
+  const done = runs.filter((r) => runTone(r.status) === "done" && sameDay(r.ended_at || r.started_at, now))
+  return {
+    count: done.length,
+    costUsd: done.reduce((sum, r) => sum + (r.cost_usd > 0 ? r.cost_usd : 0), 0),
+    more: runs.length >= TERMINAL_WINDOW && done.length >= TERMINAL_WINDOW,
+  }
+}
 
 // Body is a separate component, mounted only while the panel is open, so the
-// 1s elapsed tick does not run behind a closed popover. That also makes the
-// chip choice per-opening: each open starts from defaultActivityChip, so a
-// panel last left on Failed does not reopen there while runs are live.
-function ActivityDropdownBody({
+// 1 s elapsed tick and the two list fetches do not run behind a closed
+// popover. That also makes the chip choice per-opening.
+function ActivityPanelBody({
   workspaceId,
   liveRuns,
   agentRuns,
   liveTotal,
   awaitingApproval,
   recentRuns,
-  refresh,
-  canCancel,
   onNavigate,
   onOpenItem,
 }: {
   workspaceId: string | null
-  canCancel: boolean
   liveRuns: PipelineRun[]
   agentRuns: ActiveRunItem[]
   liveTotal: number
   awaitingApproval: number
   recentRuns: PipelineRun[]
-  refresh: () => void
   onNavigate: () => void
   onOpenItem: (href: string) => void
 }) {
   useTick(1000) // re-render each second so elapsed times tick
-  const { cancellingRunId, cancelRun } = useCancelRoutineRun(workspaceId, refresh)
 
-  // Routine rows first (they carry step/cost/actions); agent runs fill
-  // whatever remains of the LIVE budget. Overflow exits via the footer.
-  const visibleRoutine = liveRuns.slice(0, MAX_LIVE_ROWS)
-  const visibleAgents = agentRuns.slice(0, Math.max(0, MAX_LIVE_ROWS - visibleRoutine.length))
+  const waiting = liveRuns.filter((r) => isAwaitingApproval(r.status))
+  const running = liveRuns.filter((r) => !isAwaitingApproval(r.status))
   const failed = failedRuns(recentRuns)
-  const isEmpty = liveTotal === 0 && recentRuns.length === 0
+  const total = waiting.length + running.length + agentRuns.length + failed.length
 
   const [picked, setPicked] = useState<ActivityChip | null>(null)
   const chip = picked ?? defaultActivityChip(liveTotal)
+  const today = completedToday(recentRuns)
 
-  const hidden = Math.max(0, liveRuns.length + agentRuns.length - visibleRoutine.length - visibleAgents.length)
+  const groups: { id: ActivityChip; label: string; tone?: "warn"; rows: React.ReactNode[]; hidden: number; hiddenLabel: string }[] = []
+  const cap = <T,>(rows: T[]) => rows.slice(0, MAX_GROUP_ROWS)
+  if (chip === "all" || chip === "waiting") {
+    groups.push({
+      id: "waiting", label: "Waiting for a person", tone: "warn", hidden: Math.max(0, waiting.length - MAX_GROUP_ROWS), hiddenLabel: "waiting",
+      rows: cap(waiting).map((run) => <WorkRow key={run.id} state="waiting" run={run} onNavigate={onNavigate} />),
+    })
+  }
+  if (chip === "all" || chip === "running") {
+    const rows = [
+      ...running.map((run) => <WorkRow key={run.id} state="running" run={run} onNavigate={onNavigate} />),
+      ...agentRuns.map((item) => <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />),
+    ]
+    groups.push({ id: "running", label: "Running", hidden: Math.max(0, rows.length - MAX_GROUP_ROWS), hiddenLabel: "running", rows: rows.slice(0, MAX_GROUP_ROWS) })
+  }
+  if (chip === "all" || chip === "failed") {
+    groups.push({
+      id: "failed", label: "Could not finish", hidden: Math.max(0, failed.length - MAX_GROUP_ROWS), hiddenLabel: "could not finish",
+      rows: cap(failed).map((run) => <WorkRow key={run.id} state="failed" run={run} onNavigate={onNavigate} />),
+    })
+  }
+  const shown = groups.filter((g) => g.rows.length > 0)
 
   return (
     <>
@@ -240,157 +235,143 @@ function ActivityDropdownBody({
           summary): the top bar no longer carries them. */}
       <ActivitySystemStatus onNavigate={onNavigate} />
 
-      {!isEmpty && (
+      {total > 0 && (
         <BarMenuChips<ActivityChip>
           ariaLabel="Show"
           testId="activity-chip"
           value={chip}
           onChange={setPicked}
           chips={[
-            { id: "live", label: "Live", count: liveTotal, tone: awaitingApproval > 0 ? "warn" : undefined },
-            { id: "recent", label: "Recent" },
-            { id: "failed", label: "Failed", count: failed.length },
+            { id: "all", label: "All", count: total },
+            { id: "waiting", label: "Waiting", count: waiting.length, tone: waiting.length > 0 ? "warn" : undefined },
+            { id: "running", label: "Running", count: running.length + agentRuns.length },
+            { id: "failed", label: "Could not finish", count: failed.length },
           ]}
         />
       )}
 
       <BarMenuBody>
-        {isEmpty ? (
+        {total === 0 ? (
           <BarMenuEmpty icon={Activity} message="Nothing running right now" />
-        ) : chip === "live" ? (
-          liveTotal > 0 ? (
-            <BarMenuSection
-              label="Live"
-              count={liveTotal}
-              tone={awaitingApproval > 0 ? "warn" : undefined}
-              overflow={hidden > 0 ? `+${hidden} more running` : undefined}
-            >
-              {visibleRoutine.map((run) => (
-                <LiveRunRow
-                  key={run.id}
-                  run={run}
-                  cancelling={cancellingRunId === run.id}
-                  onCancel={() => cancelRun(run.id)}
-                  onNavigate={onNavigate}
-                  canCancel={canCancel}
-                />
-              ))}
-              {visibleAgents.map((item) => (
-                <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />
-              ))}
-            </BarMenuSection>
-          ) : (
-            <BarMenuEmpty icon={Activity} message="Nothing running right now" />
-          )
+        ) : shown.length === 0 ? (
+          <BarMenuEmpty icon={Activity} message={chip === "failed" ? "Nothing failed lately" : chip === "waiting" ? "Nobody is waiting on you" : "Nothing running right now"} />
         ) : (
-          <TerminalSection
-            label={chip === "failed" ? "Failed" : "Recent"}
-            runs={chip === "failed" ? failed : recentRuns}
-            emptyMessage={chip === "failed" ? "No recent failures" : "No recent runs"}
-            onOpenItem={onOpenItem}
-          />
+          shown.map((g) => (
+            <BarMenuSection
+              key={g.id}
+              label={g.label}
+              count={g.rows.length + g.hidden}
+              tone={g.tone}
+              overflow={g.hidden > 0 ? `+${g.hidden} more ${g.hiddenLabel}` : undefined}
+            >
+              {g.rows}
+            </BarMenuSection>
+          ))
         )}
       </BarMenuBody>
 
       <BarMenuFooter>
+        <span data-testid="activity-footer-tally" className="type-meta tabular-nums text-muted-foreground">
+          {today.more ? `${TERMINAL_WINDOW}+` : today.count} completed today
+          {today.costUsd > 0 ? ` · $${today.costUsd.toFixed(2)}` : ""}
+        </span>
         <BarMenuFooterLink asChild onClick={onNavigate}>
-          <Link href={activityFooterHref(chip, liveTotal, awaitingApproval)}>
-            View all activity →
-          </Link>
+          <Link href={activityFooterHref(chip, liveTotal, awaitingApproval)}>Open Activity →</Link>
         </BarMenuFooterLink>
       </BarMenuFooter>
     </>
   )
 }
 
-// TerminalSection — the Recent or the Failed chip's list: one section, capped
-// at MAX_TERMINAL_ROWS, overflow pointing at /activity like Live's does.
-function TerminalSection({
-  label, runs, emptyMessage, onOpenItem,
-}: {
-  label: string
-  runs: PipelineRun[]
-  emptyMessage: string
-  onOpenItem: (href: string) => void
-}) {
-  if (runs.length === 0) return <BarMenuEmpty icon={Activity} message={emptyMessage} />
-  const rows = runs.slice(0, MAX_TERMINAL_ROWS)
+const STATE_ICON = {
+  waiting: { Icon: Hand, tile: "bg-chip-warn-bg text-chip-warn-fg" },
+  running: { Icon: Play, tile: "bg-chip-info-bg text-chip-info-fg" },
+  failed: { Icon: AlertTriangle, tile: "bg-chip-danger-bg text-chip-danger-fg" },
+} as const
+
+function StateTile({ state }: { state: keyof typeof STATE_ICON }) {
+  const { Icon, tile } = STATE_ICON[state]
   return (
-    <BarMenuSection
-      label={label}
-      count={rows.length}
-      overflow={runs.length > rows.length ? `+${runs.length - rows.length} more in activity` : undefined}
-    >
-      {rows.map((run) => (
-        <RecentRunRow
-          key={run.id}
-          run={run}
-          onClick={() => onOpenItem(`/activity?run=${encodeURIComponent(run.id)}`)}
-        />
-      ))}
-    </BarMenuSection>
+    <span className={cn("grid h-7 w-7 place-items-center rounded-md", tile)}>
+      <Icon className="h-3.5 w-3.5" aria-hidden />
+    </span>
   )
 }
 
-// AgentRunRow — an in-flight agent run from the legacy feed. Same row
-// skeleton as everything else in the bar; routine runs get the richer
-// LiveRunRow (step, cost, actions) instead.
-function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => void }) {
+/** The first line of a failed run's error, short enough for a one-line sub. */
+function failureReason(run: PipelineRun): string {
+  const line = (run.error_message ?? "").trim().split("\n")[0]
+  if (!line) return runStatusLabel(run.status)
+  return line.length > 48 ? `${line.slice(0, 47)}…` : line
+}
+
+/**
+ * One piece of work in the panel (v67 `bellRow`): a state tile, the title over
+ * what it needs, the figure on the right, and the one action beneath. The row
+ * opens the run; the action is a link to the same place, so the row is a
+ * clickable region (never a <button> holding a link).
+ */
+function WorkRow({ state, run, onNavigate }: { state: keyof typeof STATE_ICON; run: PipelineRun; onNavigate: () => void }) {
+  const router = useRouter()
+  const href = `/activity?run=${encodeURIComponent(run.id)}`
+  const open = () => {
+    onNavigate()
+    router.push(href)
+  }
+  const credential = state === "failed" && /credential/i.test(run.error_message ?? "")
+  const sub =
+    state === "waiting"
+      ? "Waits for your approval"
+      : state === "running"
+        ? run.current_step_id || "Starting…"
+        : `${failureReason(run)} · ${relTime(run.ended_at || run.started_at)}`
   return (
     <BarMenuRow
-      onClick={onClick}
-      leading={
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15">
-          <Bot className="h-3.5 w-3.5 text-primary" />
-        </span>
-      }
-      title={item.label}
-      meta={
-        <>
-          <span className="h-1 w-1 shrink-0 rounded-full bg-success animate-pulse" />
-          <span>Agent</span>
-          {item.sublabel && <span className="truncate">· {item.sublabel}</span>}
-        </>
-      }
+      testId="activity-row"
+      onClick={open}
+      leading={<StateTile state={state} />}
+      title={run.pipeline_name || run.pipeline_slug}
+      meta={<span className="truncate">{sub}</span>}
       trailing={
-        item.startedAt ? (
-          <span className="type-meta text-muted-foreground-soft">{relTime(item.startedAt)}</span>
+        state === "running" ? (
+          <span className="type-meta tabular-nums text-muted-foreground">{formatElapsedSince(run.started_at)}</span>
+        ) : undefined
+      }
+      actions={
+        state === "waiting" ? (
+          <BarMenuRowAction primary asChild>
+            <Link href={href} onClick={(e) => { e.stopPropagation(); onNavigate() }}>Decide</Link>
+          </BarMenuRowAction>
+        ) : state === "failed" ? (
+          <BarMenuRowAction asChild>
+            <Link href={credential ? "/credentials" : href} onClick={(e) => { e.stopPropagation(); onNavigate() }}>
+              {credential ? "Fix credential" : "Open"}
+            </Link>
+          </BarMenuRowAction>
         ) : undefined
       }
     />
   )
 }
 
-// RecentRunRow — one terminal routine run: status dot, name, then
-// `status · Xm ago · $cost` in mono on the right. Click jumps to the
-// run's trace.
-function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void }) {
-  // The rail's words and colours (#2988): a cancelled or interrupted run is
-  // Stopped-grey, not finished-green.
-  const tone = runTone(run.status)
-  const failed = tone === "failed"
+// AgentRunRow — an in-flight agent run from the legacy feed. Same row
+// skeleton as everything else in the bar.
+function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => void }) {
   return (
     <BarMenuRow
+      testId="activity-row"
       onClick={onClick}
       leading={
-        <span className="flex h-6 w-6 items-center justify-center">
-          <span className={cn("h-2 w-2 rounded-full", RUN_TONE_DOT[tone])} />
+        <span className="grid h-7 w-7 place-items-center rounded-md bg-chip-info-bg text-chip-info-fg">
+          <Bot className="h-3.5 w-3.5" aria-hidden />
         </span>
       }
-      title={run.pipeline_name || run.pipeline_slug}
-      // Unlinked: this whole row is one control that opens the run's trace,
-      // and the kit renders such a row as a <button>. See source-pill.tsx.
-      meta={<SourcePill run={run} linked={false} />}
+      title={item.label}
+      meta={<span className="truncate">Agent{item.sublabel ? ` · ${item.sublabel}` : ""}</span>}
       trailing={
-        <span
-          className={cn(
-            "type-meta font-mono tabular-nums",
-            failed ? "text-destructive" : "text-muted-foreground-soft",
-          )}
-        >
-          {runStatusLabel(run.status)} · {relTime(run.ended_at || run.started_at)}
-          {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}
-        </span>
+        item.startedAt ? (
+          <span className="type-meta tabular-nums text-muted-foreground-soft">{relTime(item.startedAt)}</span>
+        ) : undefined
       }
     />
   )

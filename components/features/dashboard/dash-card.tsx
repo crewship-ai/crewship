@@ -54,9 +54,9 @@ export function DashCard({
         {(concept || icon) && (
           <ConceptIcon concept={concept} icon={icon} accent="blue" variant="chip" className="h-7 w-7 rounded-md" />
         )}
-        <h2 className="min-w-0 truncate text-body font-semibold text-foreground">{title}</h2>
+        <h2 className="min-w-0 truncate text-control font-semibold text-foreground">{title}</h2>
         {meta != null && (
-          <span data-slot="dashboard-card-hint" className="min-w-0 truncate font-mono text-label tabular-nums text-muted-foreground">
+          <span data-slot="dashboard-card-hint" className="min-w-0 truncate text-label tabular-nums text-muted-foreground">
             {meta}
           </span>
         )}
@@ -64,7 +64,7 @@ export function DashCard({
         {link && (
           <Link
             href={link.href}
-            className="inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[44px]"
+            className="inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:-my-2 coarse:min-h-[44px]"
           >
             {link.label}
             <ChevronRight className="size-3.5" aria-hidden />
@@ -78,16 +78,16 @@ export function DashCard({
   )
 }
 
-/** An inline text link in a card line: grey-on-foreground, underlined on
- *  hover, and a 44 px target under a coarse pointer. */
-export const TEXT_LINK = "text-foreground underline-offset-2 hover:underline coarse:inline-flex coarse:min-h-[44px] coarse:items-center"
+/** An inline text link in a card line: foreground ink, underlined so it reads
+ *  as a link, and a 44 px target under a coarse pointer. */
+export const TEXT_LINK = "text-foreground underline underline-offset-2 hover:no-underline coarse:inline-flex coarse:min-h-[44px] coarse:items-center"
 
 /** A group heading inside a card: "Running now 2". */
 export function DashSubHead({ title, count }: { title: string; count?: number }) {
   return (
     <div className="flex items-baseline gap-2 border-t border-border px-4 pb-1.5 pt-3 text-label font-semibold text-muted-foreground">
       {title}
-      {count != null && <span className="font-mono font-normal tabular-nums">{count}</span>}
+      {count != null && <span className="font-normal tabular-nums">{count}</span>}
     </div>
   )
 }
