@@ -17,16 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Badge } from "@/components/ui/badge"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { MenuSheet, MenuSheetItem, MenuSheetSeparator, MenuSheetSub } from "@/components/ui/menu-sheet"
 import { buildLabel } from "./sidebar-version"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
@@ -85,9 +76,16 @@ export function UserMenu({ placement = "toolbar" }: {
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          {placement === "sidebar" ? (
+      <MenuSheet
+        open={open}
+        onOpenChange={setOpen}
+        label="User menu"
+        popoverAlign="end"
+        popoverSide={placement === "sidebar" ? "right" : placement === "row" ? "top" : "bottom"}
+        popoverOffset={placement === "sidebar" ? 8 : 4}
+        popoverClassName="w-72 p-0"
+        trigger={
+          placement === "sidebar" ? (
             <button type="button" className="rail-user" aria-label="User menu">
               <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-6 shrink-0" textClassName="text-micro" />
               <span className="rail-label grid min-w-0 flex-1 leading-tight">
@@ -113,16 +111,11 @@ export function UserMenu({ placement = "toolbar" }: {
               <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
             </button>
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          side={placement === "sidebar" ? "right" : placement === "row" ? "top" : "bottom"}
-          sideOffset={placement === "sidebar" ? 8 : 4}
-          className="w-72 p-0"
-        >
+          )
+        }
+      >
           <div className="p-1">
-            <DropdownMenuItem asChild className="items-center gap-3 px-2 py-2.5">
+            <MenuSheetItem asChild className="items-center gap-3 px-2 py-2.5">
               <Link href="/settings?tab=profile" aria-label={`Your profile: ${userName}`}>
                 <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
                 <span className="min-w-0 flex-1">
@@ -131,7 +124,7 @@ export function UserMenu({ placement = "toolbar" }: {
                 </span>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
               </Link>
-            </DropdownMenuItem>
+            </MenuSheetItem>
             <div className="flex items-center gap-1.5 px-2 pb-1.5">
               <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">
                 {workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}
@@ -143,20 +136,20 @@ export function UserMenu({ placement = "toolbar" }: {
               )}
             </div>
           </div>
-          <DropdownMenuSeparator className="my-0" />
+          <MenuSheetSeparator />
           <div className="p-1">
-            <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=profile">
                 <User className={ICON} />
                 Profile &amp; account
               </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className={ITEM}>
+            </MenuSheetItem>
+            <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=appearance">
                 <Palette className={ICON} />
                 Appearance
               </Link>
-            </DropdownMenuItem>
+            </MenuSheetItem>
             {/* Not a menu item: a row holding its own radiogroup, so picking a
                 theme keeps the menu open and the change is visible. */}
             <div className="flex h-8 items-center gap-3 px-2 text-xs">
@@ -166,22 +159,22 @@ export function UserMenu({ placement = "toolbar" }: {
             </div>
             {soundScope && <SoundsToggleItem key={soundScope} scope={soundScope} />}
             {trusted && (
-              <DropdownMenuItem asChild className={ITEM}>
+              <MenuSheetItem asChild className={ITEM}>
                 <Link href="/integrations?tab=notifications&section=preferences">
                   <Bell className={ICON} />
                   Notification preferences
                 </Link>
-              </DropdownMenuItem>
+              </MenuSheetItem>
             )}
-            <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=sessions">
                 <MonitorSmartphone className={ICON} />
                 <span className="flex-1">Sessions &amp; CLI tokens</span>
                 <ActiveSessionsCount />
               </Link>
-            </DropdownMenuItem>
+            </MenuSheetItem>
             {canPair && (
-              <DropdownMenuItem
+              <MenuSheetItem
                 className={ITEM}
                 onSelect={() => {
                   // Let the menu close first; a dialog opened from inside it
@@ -191,57 +184,55 @@ export function UserMenu({ placement = "toolbar" }: {
               >
                 <SquareTerminal className={ICON} />
                 Connect CLI…
-              </DropdownMenuItem>
+              </MenuSheetItem>
             )}
           </div>
-          <DropdownMenuSeparator className="my-0" />
+          <MenuSheetSeparator />
           <div className="p-1">
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className={ITEM}>
-                <HelpCircle className={ICON} />
-                Help &amp; resources
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-56">
-                <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetSub
+              label="Help & resources"
+              triggerClassName={ITEM}
+              contentClassName="w-56"
+              trigger={<><HelpCircle className={ICON} />Help &amp; resources</>}
+            >
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
                     <BookOpen className={ICON} />
                     Documentation
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
                     <Sparkles className={ICON} />
                     What&apos;s new
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
                     <CircleAlert className={ICON} />
                     Report an issue
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                     <GitBranch className={ICON} />
                     GitHub
                   </a>
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+                </MenuSheetItem>
+            </MenuSheetSub>
           </div>
-          <DropdownMenuSeparator className="my-0" />
+          <MenuSheetSeparator />
           <div className="p-1">
-            <DropdownMenuItem
+            <MenuSheetItem
               className={ITEM}
               onClick={() => { signOut().then(() => window.location.href = "/login") }}
             >
               <LogOut className={ICON} />
               Log out
-            </DropdownMenuItem>
+            </MenuSheetItem>
           </div>
           {trusted && <BuildFooter />}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      </MenuSheet>
       {canPair && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
     </>
   )
@@ -266,9 +257,8 @@ function SoundsToggleItem({ scope }: { scope: string }) {
 
   const on = prefs.enabled
   return (
-    <DropdownMenuItem
-      role="menuitemcheckbox"
-      aria-checked={on}
+    <MenuSheetItem
+      checked={on}
       className={ITEM}
       onSelect={(e) => {
         e.preventDefault()
@@ -292,7 +282,7 @@ function SoundsToggleItem({ scope }: { scope: string }) {
       >
         <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all", on ? "left-3.5" : "left-0.5")} />
       </span>
-    </DropdownMenuItem>
+    </MenuSheetItem>
   )
 }
 

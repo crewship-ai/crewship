@@ -23,6 +23,21 @@ vi.mock("@/lib/api-fetch", () => ({
   apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve(null) }),
 }))
 
+// An in-memory store: the spec here is the switch row, not the storage.
+vi.mock("@/lib/notification-sounds", () => {
+  const store = new Map<string, { enabled: boolean }>()
+  return {
+    SOUND_PREFERENCES_EVENT: "sound-preferences",
+    readSoundPreferences: (scope: string) => store.get(scope) ?? { enabled: false },
+    saveSoundPreferences: (scope: string, v: { enabled: boolean }) => {
+      store.set(scope, v)
+      window.dispatchEvent(new CustomEvent("sound-preferences"))
+      return v
+    },
+    unlockNotificationAudio: () => Promise.resolve(true),
+  }
+})
+
 import { UserMenu } from "../user-menu"
 
 beforeEach(() => {
