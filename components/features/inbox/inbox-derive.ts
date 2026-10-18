@@ -228,6 +228,9 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
     if (sub === "skill_proposal") {
       return { heading: "Proposed skill", tone: "warn", requires: "manage" }
     }
+    if (sub === "routine_trigger_activation") {
+      return { heading: "Routine trigger ready", tone: "warn", requires: "create" }
+    }
     if (sub === "routine_proposal") {
       return { heading: "Proposed routine", tone: "warn", requires: "create" }
     }

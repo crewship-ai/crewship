@@ -10,6 +10,7 @@ import {
   KeyRound,
   MessageSquare,
   Play,
+  Send,
   Power,
   ScrollText,
   XCircle,
@@ -17,9 +18,11 @@ import {
 import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
-import { escalationResolve } from "@/lib/api/escalations"
+import { escalationResolve, escalationSupplyCredential } from "@/lib/api/escalations"
 import { decideApproval } from "@/hooks/use-approvals"
 import type { InboxItem } from "@/hooks/use-inbox"
 
@@ -459,6 +462,48 @@ export function KindActions({
       // was nothing to do while the routine sat at `proposed`, unable to
       // run, with both endpoints waiting on the server. The queue said
       // "your move" and the item said "not here".
+      // A draft trigger waits for a manager (B8, #2359): Activate is
+      // POST /workspaces/{ws}/pipeline-schedules/{id}/activate, which also
+      // closes this row. There is no Dismiss: the only other exit is deleting
+      // the trigger, which is not "leave it off". Below MANAGER the card names
+      // who decides and offers nothing.
+      if (item.payload?.kind === "routine_trigger_activation") {
+        const scheduleID = typeof item.payload?.schedule_id === "string" ? (item.payload.schedule_id as string) : ""
+        if (disabled || scheduleID === "") return null
+        return (
+          <div className={DOCK_ROW}>
+            <Button
+              size="sm"
+              disabled={busy !== null}
+              className="gap-1.5"
+              onClick={() =>
+                wrap("approved", async () => {
+                  let res: Response
+                  try {
+                    res = await apiFetch(
+                      `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipeline-schedules/${encodeURIComponent(scheduleID)}/activate`,
+                      { method: "POST", headers: { "Content-Type": "application/json" } },
+                    )
+                  } catch (e) {
+                    toast.error(e instanceof Error ? `Activation failed: ${e.message}` : "Activation failed")
+                    return
+                  }
+                  if (!res.ok) {
+                    const body = (await res.json().catch(() => null)) as { error?: string } | null
+                    toast.error(body?.error ?? `Activation failed (${res.status})`)
+                    return
+                  }
+                  toast.success("Trigger activated")
+                  await onRefresh("approved")
+                })
+              }
+            >
+              <Play className="h-3 w-3" />
+              {busy === "approved" ? "Activating…" : "Activate trigger"}
+            </Button>
+          </div>
+        )
+      }
       if (item.payload?.kind === "routine_proposal") {
         const slug = typeof item.payload?.slug === "string" ? (item.payload.slug as string) : ""
         // No slug, no endpoint. A button that cannot work is worse than
@@ -679,6 +724,24 @@ export function KindActions({
             </div>
           )
         }
+        if (item.payload?.needs_credential_value === true) {
+          return (
+            <SupplyCredential
+              disabled={disabled || busy !== null}
+              rejecting={busy === "reject"}
+              onReject={() => resolveEsc("reject")}
+              onSupply={(value) => wrap("approve", async () => {
+                const res = await escalationSupplyCredential(item.source_id, value, item.workspace_id)
+                if (!res.ok) {
+                  toast.error(res.status === 404 ? "Supply this from its source (crew escalations)." : res.error)
+                  return
+                }
+                toast.success("Credential supplied · the agent gets its name, never the value")
+                await onRefresh("approved")
+              })}
+            />
+          )
+        }
         return (
           <div className={DOCK_ROW}>
             <span className="text-[11px] text-muted-foreground">
@@ -697,6 +760,31 @@ export function KindActions({
               {busy === "reject" ? "Rejecting…" : "Reject"}
             </Button>
           </div>
+        )
+      }
+      // A question: the answer is the resolution text.
+      if (escType === "TEXT") {
+        return (
+          <AnswerQuestion
+            disabled={disabled || busy !== null}
+            sending={busy === "approve"}
+            rejecting={busy === "reject"}
+            onReject={() => resolveEsc("reject")}
+            onSend={async (text) => {
+              let ok = false
+              await wrap("approve", async () => {
+                const res = await escalationResolve(item.source_id, "approve", text, item.workspace_id)
+                if (!res.ok) {
+                  toast.error(res.status === 404 ? "Resolve this from its source (crew escalations / review panel)." : res.error)
+                  return
+                }
+                toast.success("Answer sent")
+                ok = true
+                await onRefresh("approved")
+              })
+              return ok
+            }}
+          />
         )
       }
       // Real agent escalation (non-credential): inline approve / reject.
@@ -1119,4 +1207,85 @@ export function KindActions({
         </Button>
       )
   }
+}
+
+/** Question from an agent: a written answer, sent as the resolution. */
+function AnswerQuestion({ disabled, sending, rejecting, onReject, onSend }: {
+  disabled: boolean
+  sending: boolean
+  rejecting: boolean
+  onReject: () => void
+  onSend: (text: string) => Promise<boolean>
+}) {
+  const [text, setText] = useState("")
+  const answer = text.trim()
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <Textarea
+        aria-label="Your answer"
+        rows={3}
+        value={text}
+        disabled={disabled}
+        placeholder="Write your answer…"
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className={DOCK_ROW}>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={onReject} className="gap-1.5">
+          <XCircle className="h-3 w-3" />
+          {rejecting ? "Rejecting…" : "Reject"}
+        </Button>
+        <Button size="sm" disabled={disabled || answer === ""} onClick={() => void onSend(answer)} className="gap-1.5">
+          <Send className="h-3 w-3" />
+          {sending ? "Sending…" : "Send answer"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Credential request: the value goes to the vault through /supply and nowhere
+ * else. The field is masked, never prefilled, and is emptied as soon as it is
+ * sent, whatever the answer; the value is not put in a toast, a log or state
+ * beyond this field.
+ */
+function SupplyCredential({ disabled, rejecting, onReject, onSupply }: {
+  disabled: boolean
+  rejecting: boolean
+  onReject: () => void
+  onSupply: (value: string) => Promise<void>
+}) {
+  const [value, setValue] = useState("")
+  const send = () => {
+    const v = value
+    setValue("")
+    void onSupply(v)
+  }
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <label className="flex flex-col gap-1 text-label text-muted-foreground">
+        Value
+        <Input
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          disabled={disabled}
+          placeholder="secret_…"
+          onChange={(e) => setValue(e.target.value)}
+        />
+      </label>
+      <p className="m-0 text-label text-muted-foreground">It goes into the vault. The agent gets the credential’s name, never the value.</p>
+      <div className={DOCK_ROW}>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={onReject} className="gap-1.5">
+          <XCircle className="h-3 w-3" />
+          {rejecting ? "Rejecting…" : "Reject"}
+        </Button>
+        <Button size="sm" disabled={disabled || value === ""} onClick={send} className="gap-1.5">
+          <KeyRound className="h-3 w-3" />
+          Supply credential
+        </Button>
+      </div>
+    </div>
+  )
 }
