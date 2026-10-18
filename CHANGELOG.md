@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Decode exact publication identities and capture nonsecret provider declarations without enabling publication or provider execution.
+
 - Define a host-only canonical publication identity that binds exact grants, actors, source origins and selected child versions without enabling publication or runtime.
 
 - Preserve genuine archived identities in API history, upsert, and resurrection test fixtures.
