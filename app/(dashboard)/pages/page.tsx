@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
@@ -18,15 +19,19 @@ import { PageReferenceEntry } from "@/components/features/pages/page-reference-e
 //
 // Everything below the workspace gate lives in components/features/pages.
 export default function PagesPage() {
-  const [search, setSearch] = useState<string>()
-  useEffect(() => { setSearch(window.location.search) }, [])
+  return <Suspense fallback={<Skeleton className="m-6 h-12" />}><PagesEntry /></Suspense>
+}
+
+function PagesEntry() {
+  const params = useSearchParams()
+  const search = params?.toString() ?? ""
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
   // membership restricts every request the account makes (#2861).
   const accessMode = useAccessMode()
 
-  if (wsLoading || !workspaceId || accessMode === "loading" || search === undefined) {
+  if (wsLoading || !workspaceId || accessMode === "loading") {
     return (
       <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />
