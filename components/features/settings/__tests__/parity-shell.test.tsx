@@ -67,7 +67,7 @@ describe("PAR-087 section list rows", () => {
     expect(cls).toContain("h-[2.2885rem]")
     expect(cls).toContain("py-0")
     expect(row.querySelector("span.truncate")!.className).toContain("text-control")
-    expect(row.querySelector("span[aria-hidden]")!.className).toContain("h-6")
+    expect(row.querySelector("[data-slot=row-tile]")!.className).toContain("size-6")
   })
 
   it("gives every row a tile, the drill rows a chevron", () => {
