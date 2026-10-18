@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { usePageDocument } from "@/hooks/use-page-document"
+import { useSessionSafe } from "@/hooks/use-auth"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -39,11 +40,14 @@ function download(name: string, content: string) {
 
 type DocumentProps = { workspaceId: string; slug: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void }
 export function PageDocument(props: DocumentProps) {
+  const session = useSessionSafe()
+  const human = session.status === "authenticated" ? session.data?.user.id : undefined
   const availability = useDocumentsAvailability(props.workspaceId)
-  const identity = `${props.workspaceId}:${props.pageId}`
+  const identity = JSON.stringify([human, props.workspaceId, props.pageId])
   const [admitted,setAdmitted] = useState<string>()
   const available = availability.data === true
-  useEffect(()=>{if(available)setAdmitted(identity)},[available,identity])
+  useEffect(()=>{if(human && available)setAdmitted(identity)},[human,available,identity])
+  if (!human) return <p role="alert" className="p-6">Document access is unavailable.</p>
   if (!props.workspaceId || !props.pageId) return <p role="alert" className="p-6">The original Page identity is unavailable.</p>
   if (availability.isPending && admitted !== identity) return <p role="status" className="p-6">Checking document availability…</p>
   if (!available && admitted !== identity) return <p role="status" className="p-6">Documents are unavailable. Your Page remains in the list.</p>

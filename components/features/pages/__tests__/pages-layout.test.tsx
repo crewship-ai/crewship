@@ -13,6 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/use-workspace")>(),

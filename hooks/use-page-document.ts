@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { apiFetch } from "@/lib/api-fetch"
+import { useSessionSafe } from "@/hooks/use-auth"
 
 import { useQueryClient } from "@tanstack/react-query"
 import { verifyMutationReceipt, type DocumentState } from "@/lib/documents/contracts"
 export type { DocumentState } from "@/lib/documents/contracts"
 
-export const documentKeys = { all: (workspace: string) => ["page-document",workspace] as const, detail: (workspace: string, pageId: string) => ["page-document",workspace,pageId] as const }
+export const documentKeys = { all: (workspace: string) => ["page-document",workspace] as const, detail: (workspace: string, pageId: string, human: string) => ["page-document",workspace,pageId,human] as const }
 class UnconfirmedReceipt extends Error {}
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
@@ -25,13 +26,17 @@ export async function documentRequest<T>(workspace: string, slug: string, path =
  * updates merge into the same CRDT, never replace a locally edited JSON body. */
 export function usePageDocument(workspace: string, slug: string, pageId: string, allowWrites = true) {
   const client = useQueryClient()
+  const session = useSessionSafe()
+  const human = session.status === "authenticated" ? session.data?.user.id ?? "" : ""
   const writesAllowed = useRef(allowWrites); writesAllowed.current = allowWrites
-  const identity = pageId
+  const identity = JSON.stringify([human, workspace, pageId])
+  const [activeIdentity, setActiveIdentity] = useState(identity)
+  const current = Boolean(human) && activeIdentity === identity
   const endpoint = useRef(slug); endpoint.current = slug
   const doc = useMemo(() => new Y.Doc({ gc: false, guid: `${workspace}:${identity}` }), [workspace, identity])
   const [confirmed, setConfirmed] = useState<{identity:string;value:DocumentState}>()
-  const state = confirmed?.identity === `${workspace}:${identity}` ? confirmed.value : undefined
-  const setState = (value: DocumentState) => setConfirmed({identity:`${workspace}:${identity}`,value})
+  const state = current && confirmed?.identity === identity ? confirmed.value : undefined
+  const setState = (value: DocumentState) => setConfirmed({identity,value})
   const [status, setStatus] = useState("Loading document…")
   const [error, setError] = useState<string>()
   const [pending, setPending] = useState(0)
@@ -40,8 +45,13 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const authorizationLost=useRef(false)
   const deny=useCallback(()=>{authorizationLost.current=true;setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
   useEffect(() => {
+    setActiveIdentity(identity)
+    setConfirmed(undefined)
     authorizationLost.current=false
     setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
+    if (!human) return () => { doc.destroy() }
+    const queryKey = documentKeys.detail(workspace,pageId,human)
+    const controller = new AbortController()
     let requiredRev = 0
     let active = true, epoch: string | undefined, polling = false, blocked = false
     const queue: { id: string; update: string; attempted: boolean; baselineRev?: number; request?: {id:string;update:string;schema:number;epoch:string;kind:string;page_id?:string} }[] = []
@@ -73,7 +83,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (!next.can_write && queue.length) { blocked = true; setRecovery(true); setStatus("Write access changed. Recover your unsaved draft."); return false }
         return true
     }
-    const read = () => client.fetchQuery({queryKey:documentKeys.detail(workspace,pageId),staleTime:0,gcTime:0,retry:false,queryFn:({signal})=>documentRequest<DocumentState>(workspace,endpoint.current,"",undefined,signal)})
+    const read = () => client.fetchQuery({queryKey,staleTime:0,gcTime:0,retry:false,queryFn:({signal})=>documentRequest<DocumentState>(workspace,endpoint.current,"",undefined,signal)})
     async function poll() {
       if (!workspace || !pageId || !active || authorizationLost.current || polling || blocked) return
       polling = true
@@ -86,7 +96,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           if (!epoch) throw new DocumentAPIError("Confirmed document epoch required.",409)
           batch.baselineRev ??= next.rev
           batch.request ??= { id:batch.id,update:batch.update,schema:next.schema===1?2:next.schema,epoch,kind:"human",...((pageId ?? next.page_id)?{page_id:pageId ?? next.page_id}:{}) }
-          const result = await documentRequest(workspace,endpoint.current,"/patch",batch.request)
+          const result = await documentRequest(workspace,endpoint.current,"/patch",batch.request,controller.signal)
           try {
             const receipt = verifyMutationReceipt(result,{...batch.request,baselineRev:batch.baselineRev})
             requiredRev = Math.max(requiredRev,receipt.rev)
@@ -106,7 +116,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (cause instanceof UnconfirmedReceipt) {
           blocked=true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status)) {
-          authorizationLost.current=true;client.removeQueries({queryKey:documentKeys.detail(workspace,pageId)})
+          authorizationLost.current=true;client.removeQueries({queryKey,exact:true})
           blocked = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentAPIError && ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota"))) {
           blocked = true; setRecovery(true); setStatus("Document update was rejected. Recover your draft before reopening.")
@@ -120,15 +130,20 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     }
     if (workspace && pageId) void poll()
     const timer = setInterval(() => void poll(), 500)
-    return () => { active = false; clearInterval(timer); doc.off("update", local); doc.destroy() }
-  // The queue is scoped to immutable Page identity; the ref follows slug renames.
+    return () => {
+      active = false; clearInterval(timer); controller.abort()
+      void client.cancelQueries({queryKey,exact:true})
+      client.removeQueries({queryKey,exact:true})
+      doc.off("update", local); doc.destroy()
+    }
+  // The queue is scoped to the human and immutable Page identity; the ref follows slug renames.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace, pageId, doc, client])
+  }, [workspace, pageId, human, identity, doc, client])
   useEffect(() => {
-    if (!pending) return
+    if (!current || !pending) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
-  }, [pending])
-  return { doc, state, status, error, pending, recovery, denied, deny, editable: Boolean(state?.can_write && allowWrites && !recovery && !denied) }
+  }, [current, pending])
+  return { doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, denied: !human || (current && denied), deny, editable: Boolean(current && state?.can_write && allowWrites && !recovery && !denied) }
 }

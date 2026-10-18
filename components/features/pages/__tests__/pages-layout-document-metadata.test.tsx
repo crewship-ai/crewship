@@ -7,6 +7,8 @@ import { PagesLayout } from "../pages-layout"
 import { pagesKeys } from "@/hooks/use-pages"
 import { documentSchema } from "@/lib/documents/schema"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const requests=vi.hoisted(()=>vi.fn())
 const htmlHost=vi.hoisted(()=>vi.fn())
 vi.mock("@/lib/api-fetch",()=>({apiFetch:requests,broadcastSessionExpired:vi.fn()}))
@@ -44,7 +46,7 @@ async function dirtyDocument() {
   expect(node).toHaveTextContent("Unsaved local text")
   return {node,editor,client,saved,refetch:async(status:number)=>{
     metadataStatus=status
-    await act(async()=>{await client.refetchQueries({queryKey:pagesKeys.detail("ws","notes"),exact:true})})
+    await act(async()=>{await client.refetchQueries({queryKey:pagesKeys.detail("ws","notes"),exact:false})})
   }}
 }
 
@@ -70,7 +72,7 @@ it.each([401,403,404])("hides the native session on denied metadata revalidation
   const view=await dirtyDocument()
   try {
     await view.refetch(status)
-    await screen.findByText("Document access is unavailable.")
+    await screen.findByText(status === 404 ? 'No page is addressed "notes"' : "Page metadata unavailable")
     expect(screen.queryByLabelText("Document editor")).toBeNull()
     expect(screen.queryByText(/Saved private document/)).toBeNull()
     expect(screen.queryByText(/Unsaved local text/)).toBeNull()

@@ -38,6 +38,8 @@ import {
   type WirePage,
 } from "@/hooks/use-pages"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const NOW = new Date("2026-08-12T12:00:00Z")
 
 function wirePage(over: Partial<WirePage> = {}): WirePage {

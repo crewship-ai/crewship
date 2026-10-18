@@ -8,6 +8,7 @@ import { decodeUpdate, usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
 afterEach(() => { vi.restoreAllMocks(); fetchMock.mockReset() })
 
 it.each(["wrong ID", "stale epoch"])("keeps the draft queued when a successful patch returns a %s receipt", async (mismatch) => {

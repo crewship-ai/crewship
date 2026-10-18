@@ -27,10 +27,11 @@
  *     basis to compute, and there is no third glyph).
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { useSessionSafe } from "@/hooks/use-auth"
 import {
   useRealtimeChannelSafe,
   useRealtimeEventSafe,
@@ -1025,8 +1026,10 @@ export function groupPagesByFolder(
 export const pagesKeys = {
   /** Everything for one workspace; the invalidation scope. */
   all: (workspaceId: string) => ["pages", workspaceId] as const,
-  list: (workspaceId: string) => ["pages", workspaceId, { view: "list" }] as const,
-  detail: (workspaceId: string, slug: string) => ["pages", workspaceId, { slug }] as const,
+  // Omitting the human retains the existing invalidation prefix; reads always
+  // append their authenticated human so private metadata cannot cross sessions.
+  list: (workspaceId: string, humanId?: string) => ["pages", workspaceId, { view: "list" }, ...(humanId === undefined ? [] : [humanId])] as const,
+  detail: (workspaceId: string, slug: string, humanId?: string) => ["pages", workspaceId, { slug }, ...(humanId === undefined ? [] : [humanId])] as const,
 }
 
 // ── Hooks ──────────────────────────────────────────────────────────────────
@@ -1077,9 +1080,20 @@ export class PagesRequestError extends Error {
   }
 }
 
-async function fetchJSON(url: string, signal: AbortSignal | undefined, what: string) {
+function usePagesHumanIdentity() {
+  const session = useSessionSafe()
+  const humanId = session.status === "authenticated" ? session.data?.user.id ?? null : null
+  const current = useRef(humanId)
+  current.current = humanId
+  return { humanId, current }
+}
+
+async function fetchJSON(url: string, signal: AbortSignal | undefined, what: string, onDenied: () => void) {
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
+    // An explicit refusal invalidates earlier private metadata. Merely masking
+    // the current error would reveal it again if the next refresh returns 503.
+    if ([401, 403, 404].includes(res.status)) onDenied()
     const body = await res.json().catch(() => null)
     const detail =
       body && typeof body === "object" && typeof (body as { error?: string }).error === "string"
@@ -1104,20 +1118,24 @@ export interface UsePagesResult {
  */
 export function usePages(workspaceId: string | null | undefined): UsePagesResult {
   const qc = useQueryClient()
+  const { humanId, current } = usePagesHumanIdentity()
+  const queryKey = pagesKeys.list(workspaceId ?? "", humanId ?? "")
   const query = useQuery({
-    queryKey: pagesKeys.list(workspaceId ?? ""),
+    queryKey,
     queryFn: async ({ signal }) => {
+      if (!humanId || current.current !== humanId) throw new PagesRequestError(401, "Current human required.")
       const params = new URLSearchParams({ workspace_id: workspaceId! })
-      const body = await fetchJSON(`/api/v1/pages?${params.toString()}`, signal, "pages")
+      const body = await fetchJSON(`/api/v1/pages?${params.toString()}`, signal, "pages", () => qc.setQueryData(queryKey, []))
       return normalizePageList(body)
     },
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId && humanId),
+    gcTime: 0,
     retry: false,
   })
 
   usePagesRealtime(workspaceId)
 
-  const denied = query.error instanceof PagesRequestError && [401,403,404].includes(query.error.status)
+  const denied = !humanId || query.error instanceof PagesRequestError && [401,403,404].includes(query.error.status)
   const pages = useMemo(() => (denied ? [] : query.data ?? []).map(toPageView), [query.data,denied])
 
   return {
@@ -1162,29 +1180,37 @@ export function usePage(
   workspaceId: string | null | undefined,
   slug: string | null | undefined,
 ): UsePageResult {
-  const query = useQuery({
-    queryKey: pagesKeys.detail(workspaceId ?? "", slug ?? ""),
+  const qc = useQueryClient()
+  const { humanId, current } = usePagesHumanIdentity()
+  const queryKey = pagesKeys.detail(workspaceId ?? "", slug ?? "", humanId ?? "")
+  const query = useQuery<WirePage | null>({
+    queryKey,
     queryFn: async ({ signal }) => {
+      if (!humanId || current.current !== humanId) throw new PagesRequestError(401, "Current human required.")
       const params = new URLSearchParams({ workspace_id: workspaceId! })
       const body = await fetchJSON(
         `/api/v1/pages/${encodeURIComponent(slug!)}?${params.toString()}`,
         signal,
         "page",
+        () => qc.setQueryData(queryKey, null),
       )
       return normalizePage(body)
     },
-    enabled: Boolean(workspaceId) && Boolean(slug),
+    enabled: Boolean(workspaceId && slug && humanId),
+    gcTime: 0,
     retry: false,
   })
 
-  const page = useMemo(() => (query.data ? toPageView(query.data) : null), [query.data])
+  const err = query.error as Error | null
+  const denied = !humanId || err instanceof PagesRequestError && [401,403,404].includes(err.status)
+  const raw = denied ? null : query.data ?? null
+  const page = useMemo(() => (raw ? toPageView(raw) : null), [raw])
   const channel = usePagesRealtime(workspaceId, page?.id ?? null)
   const status = useRealtimeStatusSafe()
 
-  const err = query.error as Error | null
   return {
     page,
-    raw: query.data ?? null,
+    raw,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
     accessDenied: err instanceof PagesRequestError && [401,403,404].includes(err.status),
