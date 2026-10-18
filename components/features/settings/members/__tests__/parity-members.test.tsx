@@ -97,7 +97,7 @@ describe("PAR-104 table and pills", () => {
       expect(th.className).not.toContain("font-mono")
       expect(th.className).not.toContain("uppercase")
     }
-    expect(heads.map((t) => t.textContent).filter(Boolean)).toEqual(["Person", "Role", "Can do", "Joined"])
+    expect(heads.map((t) => t.textContent).filter(Boolean)).toEqual(["Person", "Role", "Can do", "Joined", "Open"])
     for (const g of Array.from(table.querySelectorAll("th[scope=rowgroup]"))) expect(g.className).not.toContain("font-mono")
   })
 
@@ -126,5 +126,19 @@ describe("PAR-104 table and pills", () => {
     expect(joined).toHaveTextContent(/^3 Mar( 2026)?$/)
     expect(joined.className).not.toContain("font-mono")
     expect(joined.className).toContain("tabular-nums")
+  })
+})
+
+describe("PAR-103 panel groups", () => {
+  it("are plain sentence-case headings, with no fold chevron", async () => {
+    await renderPage()
+    const sections = Array.from(document.querySelectorAll("[data-slot=drill-section]"))
+    expect(sections.map((e) => e.firstElementChild!.textContent!.replace(/\d+$/, "").trim())).toEqual(["People", "Role", "Can do", "Needs a look"])
+    for (const section of sections) {
+      expect(section.querySelector("button[aria-expanded]")).toBeNull()
+      expect(section.querySelector("svg.lucide-chevron-down")).toBeNull()
+      expect(section.firstElementChild!.className).not.toContain("uppercase")
+      expect(section.firstElementChild!.className).not.toContain("font-mono")
+    }
   })
 })
