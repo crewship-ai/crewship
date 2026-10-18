@@ -207,7 +207,7 @@ describe("Admin overview — integrity", () => {
   // older field names printed "0 entries verified" over a 284k-entry chain.
   it("reads the entry count the server actually sends", () => {
     renderTab({ journal: { ok: true, count: 284249, checkpoints: 4 } })
-    expect(within(screen.getByRole("region", { name: /integrity/i })).getByText(/284,249 entries verified/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: /integrity/i })).getByText(/284,249 verified/)).toBeInTheDocument()
   })
 
   it("says where the encryption key came from", () => {
@@ -268,6 +268,19 @@ describe("Admin overview — card headers and rows as v67", () => {
       expect(r.className).not.toMatch(/border-b|divide-y/)
       expect(r.className).toContain("flex-row")
       expect(r.className).not.toMatch(/min-h-\[?(5|6)\d/)
+    }
+  })
+
+  // v67 rows are one line: a value never wraps under its dot (the Journal
+  // chain and Disk rows grew to 52 px at 1440, M01).
+  it.each(["Platform", "Integrity", "License"])("%s keeps every value on one line", (name) => {
+    renderTab()
+    const values = screen.getByRole("region", { name }).querySelectorAll("[data-slot=admin-row-value]")
+    expect(values.length).toBeGreaterThan(2)
+    for (const v of values) {
+      expect(v.className.split(" ")).toContain("truncate")
+      expect(v.className).not.toMatch(/flex-wrap/)
+      expect(v.querySelector(".flex-wrap")).toBeNull()
     }
   })
 
