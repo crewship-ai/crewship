@@ -351,3 +351,30 @@ test.describe("approval decisions by role (INB-05)", () => {
     expect(decideCalls).toEqual([])
   })
 })
+
+// COM-03: the partial-source banner is the kit PageBanner (bad tone) at every
+// width, the page's one banner, and Retry asks the failed source again.
+for (const vp of [{ name: "tablet 1024", width: 1024, height: 800 }, { name: "phone 390", width: 390, height: 844 }]) {
+  test.describe(`partial-source banner, ${vp.name}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, ...(vp.width < 768 ? { hasTouch: true, isMobile: true } : {}) })
+
+    test(`${vp.name}: a failed approvals source shows one bad PageBanner with Retry inside the viewport`, async ({ page }) => {
+      await seed(page)
+      let approvalsCalls = 0
+      await page.route(/\/api\/v1\/approvals\?/, (route) => { approvalsCalls++; return route.fulfill({ status: 500, json: { error: "approvals unavailable" } }) })
+      await page.goto("/inbox")
+      const banner = page.locator(".page-banner[data-tone=bad]")
+      await expect(banner).toHaveCount(1)
+      await expect(banner).toHaveAttribute("role", "alert")
+      await expect(banner).toContainText("This inbox may be incomplete")
+      const retry = banner.getByRole("button", { name: "Retry" })
+      await expect(retry).toBeVisible()
+      const box = (await banner.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.width)
+      const before = approvalsCalls
+      await retry.click()
+      await expect.poll(() => approvalsCalls).toBeGreaterThan(before)
+    })
+  })
+}

@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Building2, ChevronDown, ChevronRight, Grid3x3, House, Plus, Shield, Trash2, UserPlus, Users, X } from "lucide-react"
+import { Ban, Building2, ChevronDown, ChevronRight, Grid3x3, House, Plus, Shield, Trash2, TriangleAlert, UserPlus, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
@@ -184,7 +185,7 @@ export function PeoplePage() {
   if (loading) {
     body = <div className="space-y-3"><Skeleton className="h-8 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
   } else if (error) {
-    body = <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error} <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>
+    body = <PageBanner tone="bad" icon={TriangleAlert} action={<Button variant="outline" size="sm" onClick={() => void reload()}>Retry</Button>}>{error}</PageBanner>
   } else if (person) {
     // An instance admin may belong to no workspace: the profile opens all the
     // same, and what is per workspace picks one of the person's (below).
