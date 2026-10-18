@@ -127,6 +127,7 @@ can be changed in one place.
 | Text greys | `foreground`, `muted-foreground`, `muted-foreground-soft` | three text tiers; `icon-faint` is a fourth grey for icons and dividers only (3:1), never text |
 | Fonts | `public/fonts/inter`, `public/fonts/jetbrains-mono`, `app/layout.tsx` | Inter for the interface, JetBrains Mono for ids and code; both bundled, never fetched from a font service |
 | Accent (brand) colour | `app/styles/accents.css` + `lib/theme/accents.ts` | one light and one dark block per accent; components never name an accent colour, they use `primary` / `primary-hover` / `primary-strong` |
+| Style (surfaces, corners, colours) | `app/styles/styles.css` + `lib/theme/appearance-style.ts` | a style is a registry row plus one token block per scheme under `[data-style="<id>"]`; components never read `data-style` (a test greps for it). Picked in Settings › Appearance › Style, kept in the `appearance.style` preference with the Corners, Cards and Lines knobs |
 | Theme + accent pickers | `components/layout/theme-switcher.tsx` (profile menu) | per browser; accent painted before first paint by `ACCENT_BOOT_SCRIPT` |
 | Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | opaque accent tint (`--selection-bg` = `--brand-tint`) + hairline + straight 3px bar; never a translucent grey, never a `border-left` on a rounded row |
 | Status chip | `StatusPill` and the `--chip-*-bg/fg` tokens | the only place a row shows severity |
@@ -146,6 +147,13 @@ what waits on a person (paused, needs a tool, approval).
 **Adding an accent:** a light and a dark block in `accents.css`, a row in
 `ACCENTS`. Never a status hue (green, red, amber). The tests fail if the two
 files disagree or any pair drops below AA.
+
+**Adding a style:** a registry row in `STYLES` (neutral name, never a product's), a
+light and a dark block and a shape block in `styles.css` (one block for a
+single-scheme style). `lib/__tests__/theme-style-contrast.test.ts` holds it to
+the same AA gate as Harbor with every accent; a style that fails does not
+ship. A style sets tokens only: no font (Inter and JetBrains Mono are the only
+families), no rule about a component.
 
 ### Admin › Backups
 

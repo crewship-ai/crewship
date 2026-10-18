@@ -44,7 +44,7 @@ describe("Harbor 2 shape", () => {
     const css = read("app/globals.css")
     // A radius is drawn, not read: it does not grow with the text size
     // (0.625rem measured 9.29 px at Small, found by the Settings e2e).
-    expect(css).toMatch(/--radius-card:\s*10px;/)
+    expect(css).toMatch(/--radius-card:\s*calc\(10px \* var\(--radius-k, 1\)\);/)
     expect(css).toMatch(/--radius:\s*0\.625rem;/)
   })
 })
