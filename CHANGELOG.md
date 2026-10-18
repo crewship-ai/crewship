@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
+
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
@@ -77,6 +79,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
 - **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+- **Document creation runs can save confirmed draft checkpoints.** An original drafting request permits guarded edits only to its new document in the same live run. Exact retries preserve saved work; a human edit or replacement run never silently extends the permission.
 
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 

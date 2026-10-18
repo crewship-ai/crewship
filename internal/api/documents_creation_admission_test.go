@@ -13,7 +13,7 @@ import (
 )
 
 // Real B2 admission and journal plus B3 policy, without exposing a new route.
-func documentCreationAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, documents.CreationIntent) {
+func documentCreationAdmissionFixture(t *testing.T, drafting ...bool) (*artifactPrincipalFixture, documents.CreationIntent) {
 	t.Helper()
 	f := newArtifactPrincipalFixture(t)
 	mustExec(t, f.rig.db, `UPDATE workspace_members SET capabilities='["chat","page.create"]' WHERE user_id=?`, f.a.HumanUserID)
@@ -24,9 +24,12 @@ func documentCreationAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, 
 	}
 	f.a.MessageID = "creation-message"
 	intent := documents.CreationIntent{SubmissionID: "explicit-consent"}
+	if len(drafting) > 0 {
+		intent.Drafting = drafting[0]
+	}
 	store := conversation.NewStore(t.TempDir(), newTestLogger(), conversation.WithDB(f.rig.db))
 	t.Cleanup(store.Close)
-	msg := conversation.Message{ID: f.a.MessageID, AgentID: f.a.AgentID, Role: conversation.RoleUser, AuthorUserID: f.a.HumanUserID, Content: "Write a complete document", Metadata: map[string]any{documents.CreationMetadataKey: map[string]any{"submission_id": intent.SubmissionID}}}
+	msg := conversation.Message{ID: f.a.MessageID, AgentID: f.a.AgentID, Role: conversation.RoleUser, AuthorUserID: f.a.HumanUserID, Content: "Write a complete document", Metadata: map[string]any{documents.CreationMetadataKey: intent}}
 	if err := store.AppendDocumentCreation(t.Context(), f.a.ChatID, msg, intent, f.receipt); err != nil {
 		t.Fatal(err)
 	}

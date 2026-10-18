@@ -105,6 +105,7 @@ func newDocCommand() *cobra.Command {
 		root.AddCommand(cmd)
 	}
 	root.AddCommand(newDocCreateCommand())
+	root.AddCommand(newDocDraftCommand())
 	root.AddCommand(newDocResultsCommand())
 	return root
 }

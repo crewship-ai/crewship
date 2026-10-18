@@ -30,7 +30,8 @@ The request is one JSON object with slug, name, mutation_id and blocks. For exam
 {"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team."}]}
 Use --file - for stdin. Keep the original input and mutation_id when retrying
 an uncertain confirmation. Requires the original run capability; no saved human
-profile is used. Creation does not authorize continued reading or editing.`, Args: cobra.NoArgs, PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+profile is used. Creation alone grants no continued access. Only an original
+drafting admission permits doc draft for this new Document in the same live run.`, Args: cobra.NoArgs, PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, name := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(name) || cmd.InheritedFlags().Changed(name) {
 				return errors.New("protected Docs creation does not accept config/server/profile/workspace overrides")

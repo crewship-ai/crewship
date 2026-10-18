@@ -1198,7 +1198,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
 	// concurrent routine/webhook run of the same agent no longer share them.
 	if documentCreation != nil {
-		req.UserMessage = fmt.Sprintf("%s\n\nThe human explicitly requested a new private document in this message. Create one complete saved Document with Crewship's `doc_create` MCP tool. If using the CLI, use `crewship doc create --file -`. Supply JSON like this: {\"slug\":\"document-topic\",\"name\":\"Document title\",\"mutation_id\":%q,\"blocks\":[{\"type\":\"heading\",\"level\":1,\"text\":\"Document title\"},{\"type\":\"paragraph\",\"text\":\"Complete content about the requested topic.\"}]}. Replace the example slug, title and text with useful content matching the request. Keep this mutation_id and the exact input for any retry after uncertain confirmation. The command generates block identities and hashes. Return the saved result link only after success. Do not upload document contents to crew Files. This request does not authorize editing other Pages or later access to the created document.", content, documentCreation.SubmissionID)
+		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
 	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
