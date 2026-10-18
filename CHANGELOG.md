@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Add a scoped, read-only document checkpoint viewer component that rejects mismatched document identities and unavailable content. The editor integration is not enabled by this foundation.
+
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
 - Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
