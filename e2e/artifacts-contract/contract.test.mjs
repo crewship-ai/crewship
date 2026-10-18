@@ -98,3 +98,32 @@ test('fixture CLI writes private incomplete report without browser or provider',
     if(output) await rm(output,{recursive:true,force:true})
   }
 })
+
+test('setup validation fails before browser/provider and retains all seven rows',async()=>{
+  const {mkdtemp,writeFile,readFile,rm}=await import('node:fs/promises')
+  const {tmpdir}=await import('node:os')
+  const {join,resolve}=await import('node:path')
+  const {execFile}=await import('node:child_process')
+  const {promisify}=await import('node:util')
+  const root=await mkdtemp(join(tmpdir(),'artifact-contract-setup-'))
+  let output
+  try {
+    const input=join(root,'config.json')
+    // Missing binary is rejected before importing or launching Playwright.
+    await writeFile(input,JSON.stringify({...config(),variant:'manual-sonnet-5.5',providerModel:'Sonnet 5.5'}),{mode:0o600})
+    let failure
+    try {await promisify(execFile)(process.execPath,[resolve('e2e/artifacts-contract/run.mjs'),input])}
+    catch(error){failure=error}
+    assert.equal(failure?.code,1)
+    output=failure.stdout.match(/Artifacts: (.+)/)?.[1]
+    assert.ok(output)
+    const report=JSON.parse(await readFile(join(output,'report.json'),'utf8'))
+    assert.equal(report.status,'failed')
+    assert.deepEqual(report.steps.map(s=>s.id),STEPS)
+    assert.ok(report.steps.every(s=>s.status==='incomplete' && /not executed/.test(s.reason)))
+    assert.equal(report.liveAcceptance,false)
+  } finally {
+    await rm(root,{recursive:true,force:true})
+    if(output) await rm(output,{recursive:true,force:true})
+  }
+})

@@ -14,13 +14,17 @@ export async function cli(config,role,args) {
   return stdout
 }
 
-export async function documentAdapter(config,browser) {
+export function validateDocumentConfig(config) {
   assert.ok(config.binary?.startsWith('/'),'absolute real CLI binary required')
   for(const key of ['workspace','chatId','chatPath','agent','title','initialText','humanText']) assert.ok(typeof config[key]==='string' && config[key].length>0,`missing ${key}`)
   assert.ok(config.chatPath.startsWith('/') && !config.chatPath.startsWith('//'))
   const chatURL=new URL(config.chatPath,config.server)
   assert.equal(chatURL.origin,new URL(config.server).origin)
   assert.ok(!chatURL.searchParams.has('ref'),'chatPath must open the existing chat')
+}
+
+export async function documentAdapter(config,browser) {
+  validateDocumentConfig(config)
   const contexts={}
   try {
     for(const role of ['OWNER','ADMIN','MEMBER']) {
