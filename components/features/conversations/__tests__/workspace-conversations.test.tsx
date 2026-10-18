@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { WorkspaceConversations } from "../workspace-conversations"
+import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 const reading = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/notification-sound-coordinator", () => ({ setSoundReadingConversation: reading }))
 const fetcher = vi.hoisted(() => vi.fn())
@@ -233,6 +234,27 @@ describe("workspace conversations transport", () => {
     expect(screen.queryByText("Manage people")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument()
     expect(fetcher.mock.calls.some(([url]) => url.includes("old-direct/agents") || url.includes("old-direct/agent-jobs"))).toBe(false)
+  })
+
+  it("asks in the page before removing a member and removes nobody on cancel", async () => {
+    mountConfirmHost()
+    const normal = fetcher.getMockImplementation()!
+    fetcher.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.includes("/workspaces/ws/members")) return Response.json([])
+      if (options?.method === "DELETE") return new Response(null, { status: 204 })
+      if (url.includes("/participants")) return Response.json({ participants: [{ user_id: "alice", name: "Alice", role: "owner" }, { user_id: "bob", name: "Bob", role: "member" }] })
+      return normal(url, options)
+    })
+    setup()
+    await screen.findByRole("textbox", { name: "Message Engineering" })
+    fireEvent.click(screen.getByRole("button", { name: "Members" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Remove Bob" }))
+    expect(await screen.findByRole("alertdialog", { name: "Remove Bob from this conversation?" })).toBeVisible()
+    await answerConfirm("Cancel")
+    expect(fetcher.mock.calls.some(([, o]) => o?.method === "DELETE")).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bob" }))
+    await answerConfirm("Remove")
+    await waitFor(() => expect(fetcher.mock.calls.some(([u, o]) => o?.method === "DELETE" && u.includes("/participants/bob"))).toBe(true))
   })
 
 })
