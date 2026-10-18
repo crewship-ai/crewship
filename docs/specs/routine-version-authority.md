@@ -71,3 +71,11 @@ authentication, grants no execution authority and creates no admission,
 historical receipt or runtime continuation. Runtime writers and readers must
 separately establish current authority, exact source state and transaction
 ownership before using such data.
+
+### Raw run-admission input boundary
+
+Raw dump restore refuses receipt payloads, unknown reserved admission namespaces,
+nonzero or malformed markers, and non-NULL admission references before acquiring
+a write connection or invoking callbacks. Existing UNKNOWN0 transport remains
+permitted. This input check creates no storage or runtime permission; bundle and
+target-history validation require a separate boundary before storage activation.
