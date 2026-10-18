@@ -304,45 +304,57 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 	return Receipt{MutationID: id, Revision: revision, OrderVersion: order, ContentHash: contentHash}, nil
 }
 func (s *Store) Initialize(ctx context.Context, key Key, request InitializeRequest, authorize Authorize) (result Receipt, err error) {
-	raw, err := json.Marshal(request)
-	if err != nil {
-		return result, err
-	}
-	request, err = DecodeInitialize(raw)
-	if err != nil {
-		return result, err
-	}
-	canonical, err := Canonical(request.Deck)
-	if err != nil {
-		return result, err
-	}
-	request.Deck, err = Decode(canonical)
-	if err != nil {
-		return result, err
-	}
-	hash, err := requestHash(key, "initialize", request)
-	if err != nil {
-		return result, err
-	}
 	err = s.tx(ctx, key, authorize, func(tx *sql.Tx, actor string) error {
-		if request.PageID != key.PageID {
-			return ErrConflict
-		}
-		previous, found, err := receipt(ctx, tx, key, request.MutationID, hash, actor, "initialize")
-		if err != nil {
-			return err
-		}
-		if found {
-			result = previous
-			return nil
-		}
-		if _, err = readState(ctx, tx, key, 0); err == nil {
-			return ErrConflict
-		} else if !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		result, err = s.write(ctx, tx, key, State{}, request.Deck, request.MutationID, "initialize", hash, actor, ObjectIDs(request.Deck), false)
+		result, err = s.InitializeTx(ctx, tx, key, request, actor)
 		return err
 	})
 	return
+}
+
+// InitializeTx initializes inside a caller-owned, writer-fenced transaction.
+// The trusted caller must authorize the exact current principal before calling,
+// recheck that same authority before commit, and commit Page, deck, creation
+// allowance and result together. A returned receipt must not be published before
+// that commit succeeds. This method never begins, commits or rolls back the tx.
+// Existing human initialization keeps Initialize's double live-authority wrapper.
+func (s *Store) InitializeTx(ctx context.Context, tx *sql.Tx, key Key, request InitializeRequest, actor string) (Receipt, error) {
+	if tx == nil || actor == "" || key.WorkspaceID == "" || key.PageID == "" {
+		return Receipt{}, errors.New("Slides transaction, key and authorized actor required")
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return Receipt{}, err
+	}
+	request, err = DecodeInitialize(raw)
+	if err != nil {
+		return Receipt{}, err
+	}
+	canonical, err := Canonical(request.Deck)
+	if err != nil {
+		return Receipt{}, err
+	}
+	request.Deck, err = Decode(canonical)
+	if err != nil {
+		return Receipt{}, err
+	}
+	hash, err := requestHash(key, "initialize", request)
+	if err != nil {
+		return Receipt{}, err
+	}
+	if request.PageID != key.PageID {
+		return Receipt{}, ErrConflict
+	}
+	previous, found, err := receipt(ctx, tx, key, request.MutationID, hash, actor, "initialize")
+	if err != nil {
+		return Receipt{}, err
+	}
+	if found {
+		return previous, nil
+	}
+	if _, err = readState(ctx, tx, key, 0); err == nil {
+		return Receipt{}, ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
+		return Receipt{}, err
+	}
+	return s.write(ctx, tx, key, State{}, request.Deck, request.MutationID, "initialize", hash, actor, ObjectIDs(request.Deck), false)
 }

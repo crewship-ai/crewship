@@ -60,3 +60,19 @@ This cut supplies initialization/read persistence only. It does not connect a
 public handler, create a Page, infer authorization from crew membership, enable
 agent authoring, edit a saved deck, implement comments or select an S0 format.
 The caller supplies the current Go authority and authorized asset-pin hook.
+
+`InitializeTx` permits atomic Page/deck creation in a caller-owned transaction.
+It requires a nonempty key and a trusted authorized actor, uses the same strict
+normalization, receipt lookup, identity reservations, quota and revision hook as
+`Initialize`, and never begins or completes the caller's transaction. The caller
+must acquire the writer fence before its authorization checks, verify the exact
+current creation principal, and recheck that same authority before committing
+Page, populated deck, creation allowance and result together. Keep the returned
+receipt private until that outer commit succeeds. No static authorization
+callback, nested transaction or separately committed empty Page is needed.
+
+`Initialize` retains its own fenced transaction and both live authorization
+checks. Caller-transaction tests create a real Page alongside the deck, verify
+rollback across all content/identity/receipt rows, and close/reopen the database
+to verify committed content and its original retry receipt. These checks do not
+implement or qualify the separate public creation-authority integration.
