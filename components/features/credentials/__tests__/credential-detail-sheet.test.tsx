@@ -747,6 +747,29 @@ describe("settings tab save bar saves name/tags/tier", () => {
     expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ name: "STRIPE_LIVE_KEY", tags: [] })
   })
 
+  it("a typed tag is not lost: comma adds it, case duplicates collapse, and text still in the field is saved", async () => {
+    // #2428 kept metadata edits a person typed but had not committed with Enter;
+    // the Settings tab must not drop them on Save.
+    h.role = "OWNER"
+    const onRefresh = vi.fn()
+    render(<Harness workspaceId="ws1" credential={{ ...credential, tags: [] } as never} open tab="settings" onOpenChange={() => {}} onRefresh={onRefresh} onRotate={() => {}} />)
+    const tags = screen.getByPlaceholderText("Add a tag")
+    fireEvent.change(tags, { target: { value: "Demo" } })
+    fireEvent.keyDown(tags, { key: "Enter" })
+    fireEvent.change(tags, { target: { value: "demo" } })
+    fireEvent.keyDown(tags, { key: "," })
+    expect(screen.getAllByRole("button", { name: "Remove tag demo" })).toHaveLength(1)
+    expect(tags).toHaveValue("")
+    fireEvent.click(screen.getByRole("button", { name: "Remove tag demo" }))
+    fireEvent.change(tags, { target: { value: "production" } })
+    const bar = await screen.findByRole("region", { name: /unsaved changes/i })
+    expect(bar).toHaveTextContent("1 unsaved change")
+    fireEvent.click(within(bar).getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+    const patch = h.apiFetch.mock.calls.find(([, o]) => (o as { method?: string })?.method === "PATCH")!
+    expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ tags: ["production"] })
+  })
+
   it("sets the Keeper tier from Access with a PATCH of security_level alone", async () => {
     h.role = "OWNER"
     const onRefresh = vi.fn()
