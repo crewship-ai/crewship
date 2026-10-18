@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { Bot, Box, Clock, Inbox, KeyRound, Plug, Plus } from "lucide-react"
+import { Bot, Box, CircleDot, Clock, Inbox, KeyRound, Plug, Plus, Workflow } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
+import { EntityChip } from "@/components/ui/detail"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 
@@ -17,6 +18,7 @@ import type { ProvisioningState } from "./explorer-groups"
 import { imageLabel } from "./crew-header"
 import { orderAgents, tempHireLabel } from "./crews-panel-model"
 import { formatSpend, type CrewSpend } from "./crew-spend"
+import { useWorkspaceResource } from "./memory-workspace"
 import type { CrewTab } from "./crews-tabs"
 import type { AgentSummary, CrewIntegration, CrewRecord } from "./crew-canvas-tabs/types"
 
@@ -99,21 +101,21 @@ export function CrewOverview({
   const containerValue = runtime == null
     ? <span className="text-muted-foreground">{containers == null ? "Checking…" : "Not created yet · starts on the next run"}</span>
     : runtime.status === "running"
-      ? <><StatusPill tone="success" label="Running" />{" "}<span className="text-label text-muted-foreground">
+      ? <><StatusPill className="font-sans" tone="success" label="Running" />{" "}<span className="text-label text-muted-foreground">
           {[runtime.cpu_percent != null ? `${Math.round(runtime.cpu_percent)} % CPU` : null, runtime.memory_mb != null ? `${(runtime.memory_mb / 1024).toFixed(1)} of ${(crew.container_memory_mb / 1024).toFixed(0)} GB` : null].filter(Boolean).join(" · ")}
         </span></>
       : <span className="text-muted-foreground">Stopped · starts on the next run</span>
 
   const imageValue = provisioning === "running"
-    ? <StatusPill tone="blue" label="Building" live />
+    ? <StatusPill className="font-sans" tone="blue" label="Building" live />
     : provisioning === "failed"
-      ? <StatusPill tone="danger" label="Build failed" />
+      ? <StatusPill className="font-sans" tone="danger" label="Build failed" />
       : provisioning === "needs_provision"
-        ? <StatusPill tone="warn" label="Behind · rebuild" />
+        ? <StatusPill className="font-sans" tone="warn" label="Behind · rebuild" />
         : <span>{imageLabel(crew.runtime_image)} · <span className="text-muted-foreground">current</span></span>
 
   const accessValue = gapCount > 0 || missingIntegrations > 0
-    ? <StatusPill tone="warn" label={[gapCount ? `${gapCount} credential ${gapCount === 1 ? "gap" : "gaps"}` : null, missingIntegrations ? `${missingIntegrations} integration${missingIntegrations === 1 ? "" : "s"} not connected` : null].filter(Boolean).join(" · ")} />
+    ? <StatusPill className="font-sans" tone="warn" label={[gapCount ? `${gapCount} credential ${gapCount === 1 ? "gap" : "gaps"}` : null, missingIntegrations ? `${missingIntegrations} integration${missingIntegrations === 1 ? "" : "s"} not connected` : null].filter(Boolean).join(" · ")} />
     : <span>No gaps found</span>
 
   const networkValue = crew.network_mode === "restricted"
@@ -174,7 +176,7 @@ export function CrewOverview({
             ["Image", imageValue],
             ["Access", accessValue],
             ["Network", networkValue],
-            ...(spend ? [["Spend · 30 d", <span key="spend"><span className="font-mono tabular-nums">{formatSpend(spend.costUsd)}</span> <span className="text-label text-muted-foreground">· {spend.calls.toLocaleString("en-GB")} model {spend.calls === 1 ? "call" : "calls"}</span></span>] as [string, React.ReactNode]] : []),
+            ...(spend ? [["Spend · 30 d", <span key="spend"><span className="tabular-nums">{formatSpend(spend.costUsd)}</span> <span className="text-label text-muted-foreground">· {spend.calls.toLocaleString("en-GB")} model {spend.calls === 1 ? "call" : "calls"}</span></span>] as [string, React.ReactNode]] : []),
           ]} />
         </CrCard>
       </div>
@@ -213,11 +215,52 @@ export function CrewOverview({
           </div>
         </CrCard>
 
-        <CrCard title="Works on" concept="routines" data-testid="crew-works-on" id="crew-works-on">
-          <CrLine title="Routines" sub="Recurring work this crew runs" right={<Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "routines", crewSlug: crew.slug })}>Open</Link></Button>} />
-          <CrLine title="Issues" sub={crew.issue_prefix ? `${crew.issue_prefix}-1, ${crew.issue_prefix}-2 …` : "Issues assigned to this crew"} right={<Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "issues", crewId: crew.id })}>Open</Link></Button>} />
-        </CrCard>
+        <WorksOn workspaceId={workspaceId} crew={crew} />
       </div>
     </div>
+  )
+}
+
+/**
+ * Works on: the crew's routines and issues as chips that open them. With
+ * neither, one compact line; a failed read says so instead of showing nothing.
+ */
+function WorksOn({ workspaceId, crew }: { workspaceId: string; crew: CrewRecord }) {
+  const ws = encodeURIComponent(workspaceId)
+  const routines = useWorkspaceResource<Array<{ id: string; slug: string; name?: string | null }>>(`/api/v1/workspaces/${ws}/pipelines?author_crew_id=${encodeURIComponent(crew.id)}&order=recent`, 0, true)
+  const issues = useWorkspaceResource<Array<{ id: string; identifier?: string | null; title: string }>>(`/api/v1/issues?workspace_id=${ws}&crew_id=${encodeURIComponent(crew.id)}&limit=6&sort=updated_at`, 0, true)
+  const r = routines.data ?? []
+  const i = issues.data ?? []
+  const failed = routines.error && issues.error
+  const loading = !failed && routines.data === undefined && issues.data === undefined
+  return (
+    <CrCard title="Works on" concept="routines" data-testid="crew-works-on" id="crew-works-on">
+      {failed ? (
+        <CrNote tone="error">What this crew works on could not be loaded.</CrNote>
+      ) : loading ? (
+        <CrNote>Loading…</CrNote>
+      ) : r.length + i.length === 0 ? (
+        <CrNote>Nothing assigned to this crew yet.</CrNote>
+      ) : (
+        <div className="space-y-2.5 border-t border-border px-4 py-3">
+          {r.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-label font-medium text-muted-foreground"><Workflow className="size-3.5" aria-hidden /> Routines</p>
+              <div className="flex flex-wrap gap-1.5">
+                {r.slice(0, 6).map((x) => <EntityChip key={x.id} icon={Workflow} label={x.name || x.slug} href={entityHref({ kind: "routines", crewSlug: crew.slug })} />)}
+              </div>
+            </div>
+          )}
+          {i.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-label font-medium text-muted-foreground"><CircleDot className="size-3.5" aria-hidden /> Issues</p>
+              <div className="flex flex-wrap gap-1.5">
+                {i.slice(0, 6).map((x) => <EntityChip key={x.id} icon={CircleDot} label={x.identifier || x.title} href={`/issues/${encodeURIComponent(x.identifier ?? x.id)}`} />)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </CrCard>
   )
 }

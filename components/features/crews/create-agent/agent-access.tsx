@@ -262,7 +262,7 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
 
       {integrations.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
+          <span className="text-label font-medium text-muted-foreground-soft">
             Integrations
           </span>
           {integrations.map((i) => (
@@ -289,7 +289,7 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
 
       {channels.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
+          <span className="text-label font-medium text-muted-foreground-soft">
             Notification channels
           </span>
           {channels.map((c) => (

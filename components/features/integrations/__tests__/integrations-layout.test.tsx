@@ -159,11 +159,52 @@ describe("Integrations on four spaces", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "MCP endpoints" })).toBeInTheDocument()
   })
 
-  it("without a Composio key, Tools offers the key instead of an empty page", async () => {
+  it("PAR-083: without a Composio key, Tools shows v67's empty state with one way to add the key", async () => {
     render(<IntegrationsLayout workspaceId="ws" />)
-    expect(await screen.findByText("Add a Composio API key to connect apps")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Add key" }))
+    expect(await screen.findByRole("heading", { name: "Nothing connected" })).toBeInTheDocument()
+    expect(screen.getByText(/Give agents tools, start work from outside and reach people\./)).toBeInTheDocument()
+    // The banner and the empty card used to ask for the same thing twice.
+    expect(screen.queryByText("Add a Composio API key to connect apps")).toBeNull()
+    const adds = screen.getAllByRole("button", { name: /Add (Composio )?key/ })
+    expect(adds).toHaveLength(1)
+    fireEvent.click(adds[0])
     expect(await screen.findByRole("button", { name: "Close API key editor" })).toBeInTheDocument()
+  })
+
+  it("PAR-083: a person who cannot manage sees the empty state without a key button", async () => {
+    mocks.admin = false
+    render(<IntegrationsLayout workspaceId="ws" />)
+    expect(await screen.findByRole("heading", { name: "Nothing connected" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Add (Composio )?key/ })).toBeNull()
+    expect(screen.getByText(/Ask an admin to add the workspace's Composio API key/)).toBeInTheDocument()
+  })
+
+  it("PAR-083: with accounts the KPI strip and the table carry real figures", async () => {
+    mocks.configured = true
+    mocks.accounts = [
+      { id: "ca_1", user_id: "me", status: "ACTIVE", toolkit: { slug: "github" } },
+      { id: "ca_2", user_id: "me", status: "EXPIRED", toolkit: { slug: "slack" } },
+    ]
+    render(<IntegrationsLayout workspaceId="ws" />)
+    const strip = await screen.findByRole("group", { name: "Tools at a glance" })
+    expect(within(strip).getByText("Connected apps").closest("button")).toHaveTextContent("2")
+    expect(within(strip).getByText("Signed out").closest("button")).toHaveTextContent("1")
+    expect(screen.getByText("2 apps")).toBeInTheDocument()
+    const head = screen.getAllByRole("columnheader").map((c) => c.textContent)
+    expect(head).toEqual(["App", "Account", "Access", "State"])
+  })
+
+  it("PAR-084: the breadcrumb's space is a dropdown that switches space", async () => {
+    render(<IntegrationsLayout workspaceId="ws" />)
+    await screen.findByRole("heading", { level: 1, name: "Tools" })
+    const trigger = screen.getByRole("button", { name: "Integrations space: Tools" })
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(trigger)
+    const items = await screen.findAllByRole("menuitemradio")
+    expect(items.map((i) => i.textContent)).toEqual(["Tools", "Triggers", "Channels", "Webhooks"])
+    fireEvent.click(items[2])
+    expect(await screen.findByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Integrations space: Channels" })).toBeInTheDocument()
   })
 
   it("lists connected accounts with per-agent access", async () => {
@@ -240,6 +281,16 @@ describe("Integrations on four spaces", () => {
     expect(primaries[0]).toHaveAccessibleName("Add channel")
     fireEvent.click(primaries[0])
     expect(await screen.findByRole("navigation", { name: "Add channel steps" })).toBeInTheDocument()
+  })
+
+  it("PAR-139: artifact webhooks are rows of the Triggers table, not a card of their own", async () => {
+    mocks.targets = [{ id: "pg1", slug: "pricing", name: "Pricing", kind: "page" }]
+    window.history.replaceState({}, "", "/integrations?space=triggers")
+    render(<IntegrationsLayout workspaceId="ws" />)
+    const row = await screen.findByRole("row", { name: "Open webhooks of Pricing" })
+    expect(row).toHaveTextContent("Artifact")
+    expect(row).toHaveTextContent("Token in the URL")
+    expect(screen.queryByText(/webhooks are kept per artifact/)).toBeNull()
   })
 
   it("keys 1–4 switch spaces", async () => {

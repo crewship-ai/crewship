@@ -152,7 +152,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
         <SidebarSection label="Categories">
           <SidebarRow selected={category === null} onSelect={() => setCategory(null)}>
             <span className="flex-1 truncate">All</span>
-            <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{servers.length}</span>
+            <span className="text-[10px] tabular-nums text-muted-foreground/60">{servers.length}</span>
           </SidebarRow>
           {categoryCounts.map(([cat, n]) => (
             <SidebarRow
@@ -161,7 +161,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
               onSelect={() => setCategory(cat === category ? null : cat)}
             >
               <span className="flex-1 truncate capitalize">{cat.replace(/-/g, " ")}</span>
-              <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{n}</span>
+              <span className="text-[10px] tabular-nums text-muted-foreground/60">{n}</span>
             </SidebarRow>
           ))}
         </SidebarSection>
@@ -171,7 +171,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
             <SidebarRow key={t} selected={trust === t} onSelect={() => setTrust(t)}>
               <span className="flex-1 truncate capitalize">{t === "all" ? "All" : t}</span>
               {t !== "all" && (
-                <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{trustCounts[t]}</span>
+                <span className="text-[10px] tabular-nums text-muted-foreground/60">{trustCounts[t]}</span>
               )}
             </SidebarRow>
           ))}
@@ -194,7 +194,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
         {/* Featured row */}
         {featured.length > 0 && !debouncedQuery && (
           <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Featured</div>
+            <div className="text-label text-muted-foreground font-medium">Featured</div>
             <div className="grid gap-2 grid-cols-2 lg:grid-cols-3">
               {featured.slice(0, 6).map((s) => (
                 <FeaturedCard key={s.id} entry={s} onAdd={onAdd} installing={installing === s.id} />
@@ -205,7 +205,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
 
         {/* Main grid */}
         <div className="space-y-2">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          <div className="text-label text-muted-foreground font-medium">
             {filtered.length} server{filtered.length === 1 ? "" : "s"}
           </div>
           {loading ? (

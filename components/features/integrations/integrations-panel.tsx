@@ -65,7 +65,7 @@ function Row({ icon: Icon, label, count, selected, onSelect, locked }: { icon: L
       <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {locked && <Lock className="size-3 shrink-0 text-muted-foreground-soft" aria-label="Admins only" />}
-      {count != null && <span className="font-mono text-micro tabular-nums text-muted-foreground">{count}</span>}
+      {count != null && <span className="text-micro tabular-nums text-muted-foreground">{count}</span>}
     </SidebarRow>
   )
 }
@@ -107,7 +107,7 @@ export function SpaceSwitcher({ space, counts, onSpace, segmented = false }: { s
           >
             <Icon className={cn("size-[15px] shrink-0", on && "text-primary-hover")} aria-hidden />
             <span className="min-w-0 flex-1 truncate text-left">{SPACE_META[s].label}</span>
-            {counts[s] != null && <span className="font-mono text-micro tabular-nums text-muted-foreground">{counts[s]}</span>}
+            {counts[s] != null && <span className="text-micro tabular-nums text-muted-foreground">{counts[s]}</span>}
           </button>
         )
       })}
@@ -204,7 +204,7 @@ export function IntegrationsPanel(p: IntegrationsPanelProps) {
             {p.checksOptions.map((o) => (
               <SidebarFacetOption key={o.label} active={p.filters.checks === o.label} onToggle={() => set({ checks: p.filters.checks === o.label ? null : o.label })}>
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                <span className="font-mono text-micro text-muted-foreground">{o.count}</span>
+                <span className="text-micro tabular-nums text-muted-foreground">{o.count}</span>
               </SidebarFacetOption>
             ))}
           </SidebarSection>

@@ -362,7 +362,7 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
           <ul className="mt-0.5 grid gap-0.5" data-slot="log-history">
             {history.data.map((c) => (
               <li key={c.id}>
-                <span className="font-mono tabular-nums">{clock(c.created_at)}</span>
+                <span className="tabular-nums">{clock(c.created_at)}</span>
                 {" · "}<span className="text-foreground">{describeChange(c)}</span>
                 {" · "}{c.action === "instance.log_level_reverted" ? "the server" : c.user_email ?? "someone"}
               </li>

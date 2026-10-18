@@ -465,3 +465,65 @@ for (const vp of [{ name: "1440", width: 1440, height: 1000 }, { name: "1024", w
     })
   })
 }
+
+// v67 parity (PAR-064/065/067/069/120/121/122/123): sizes, order and styles of
+// the crew and agent pages at 1440, 1024 and 390.
+for (const vp of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, { width: 390, height: 844 }]) {
+  test.describe(`v67 parity ${vp.width}`, () => {
+    test.use({ viewport: vp })
+    test.beforeEach(async ({ page }) => seed(page))
+
+    test("PAR-065 the crew head is a 48 px solid tile; PAR-069 panel rows are 30 px with 20 px tiles", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}`)
+      const tile = page.getByTestId("crew-header").locator("[data-slot=crew-tile]")
+      const box = await tile.boundingBox()
+      expect(Math.round(box!.width)).toBe(48)
+      if (vp.width >= 1024) {
+        const row = page.locator(`[data-crew-row="${crew}"] [role=button], [data-crew-row="${crew}"] > div`).first()
+        expect(Math.round((await row.boundingBox())!.height)).toBeGreaterThanOrEqual(30)
+        const small = await page.locator(`[data-crew-row="${crew}"] [data-slot=crew-tile]`).boundingBox()
+        expect(Math.round(small!.width)).toBe(20)
+      }
+    })
+
+    test("PAR-067 Works on shows chips or one compact line, never two Open rows", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=overview`)
+      const works = page.getByTestId("crew-works-on")
+      await expect(works).toBeVisible()
+      await expect(works.getByText("Recurring work this crew runs")).toHaveCount(0)
+    })
+
+    test("PAR-120 Tools and access is one card per kind with checkbox cells; the info note comes last", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=tools`)
+      await expect(page.getByRole("region", { name: "Skills" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Credentials" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Tools and access" })).toHaveCount(0)
+      const note = page.getByText("Credentials never reach an agent as text")
+      const lastCard = page.getByRole("region", { name: "Credentials" })
+      expect((await note.boundingBox())!.y).toBeGreaterThan((await lastCard.boundingBox())!.y)
+    })
+
+    test("PAR-122/123 the agent overview has Now, Holds, Talks with and Last 30 days; the head is a 52 px tile", async ({ page }) => {
+      const crew = await firstCrew(page)
+      const agent = await firstAgentOf(page, crew)
+      await page.goto(`/crews?agent=${agent}`)
+      for (const name of ["Now", "Holds", "Talks with", "Last 30 days"]) await expect(page.getByRole("region", { name })).toBeVisible()
+      await expect(page.getByText("Run outcomes")).toHaveCount(0)
+      const tile = await page.getByTestId("agent-header").locator("[data-slot=agent-head-tile]").boundingBox()
+      expect(Math.round(tile!.width)).toBe(52)
+      expect(Math.round(tile!.height)).toBe(52)
+      await expect(page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
+    })
+
+    test("PAR-121 Team has Cost · 30 d from md up", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      const head = page.getByTestId("crew-team").locator("table").first().getByRole("columnheader", { name: "Cost · 30 d" })
+      if (vp.width >= 768) await expect(head).toBeVisible()
+      else await expect(head).toBeHidden()
+    })
+  })
+}
