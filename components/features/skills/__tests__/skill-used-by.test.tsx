@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
-import { parseActivityUrl } from "@/lib/activity-url"
 import { SkillPage, type SkillPageProps } from "@/components/features/skills/skill-page"
 import type { SkillAgentRef, SkillDetail, SkillsAgent, SkillsCrew } from "@/components/features/skills/skills-model"
 
@@ -55,23 +54,20 @@ describe("Activity action (ODCH-SK-14)", () => {
     return onTab
   }
 
-  it("opens Activity filtered to the skill, with its own name next to the shell's Activity button", () => {
+  // Activity cannot filter by skill yet (FeedFilters has no skill, so a
+  // ?walk=skill: link landed on the unfiltered list). Until it can, the
+  // action opens the skill's own record: Used by › Recent uses.
+  it("opens Used by › Recent uses, with its own name next to the shell's Activity button", () => {
     const onTab = renderOverview()
-    // The top bar already has the shell's "Activity" (live runs) button.
-    expect(screen.queryByRole("link", { name: "Activity" })).not.toBeInTheDocument()
-    const link = screen.getByRole("link", { name: "Skill activity" })
-    const href = link.getAttribute("href") ?? ""
-    expect(href.startsWith("/activity?")).toBe(true)
-    const state = parseActivityUrl(new URL(href, "http://x").searchParams)
-    expect(state.path.stops.map((s) => `${s.kind}:${s.id}`)).toEqual(["skill:sk"])
-    // It leaves the page; it does not switch tabs in place.
-    fireEvent.click(link)
-    expect(onTab).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Skill activity" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Skill activity" }))
+    expect(onTab).toHaveBeenCalledWith("used")
   })
 
   it("is not hidden at phone width", () => {
     renderOverview()
-    expect(screen.getByRole("link", { name: "Skill activity" }).className).not.toMatch(/max-sm:hidden/)
+    expect(screen.getByRole("button", { name: "Skill activity" }).className).not.toMatch(/max-sm:hidden/)
   })
 })
 
