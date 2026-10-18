@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+apiVersion: crewship/v1
+kind: Crew
+metadata:
+    name: Operations
+    slug: ops
+    description: Inspect real crew resources and run the live container monitor.
+    icon: server
+    color: cyan
+spec:
+    devcontainer:
+        runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+        memory_mb: 4096
+        cpus: 2
+        network_mode: restricted
+        raw:
+            containerEnv:
+                PATH: /home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            features:
+                ghcr.io/devcontainers-extra/features/claude-code:2: {}
+                ghcr.io/devcontainers/features/common-utils:2:
+                    installZsh: false
+                    upgradePackages: false
+                    userGid: "1001"
+                    userUid: "1001"
+                    username: agent
+            image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+            postCreateCommand: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3 ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm install -g @openai/codex
+    credentials:
+        - env: CLAUDE_CODE_OAUTH_TOKEN
+          provider: ANTHROPIC
+          type: AI_CLI_TOKEN
+    mcp_servers:
+        - name: harbor-goods
+          display_name: Harbor Goods · local demo records
+          transport: stdio
+          command: python3
+          enabled: true
+    skills:
+        - slug: demo-business-workflow
+        - slug: routine-author
+        - slug: script-runner
+        - slug: system-inspector
+    agents:
+        - slug: morgan
+          name: Morgan
+          role_title: Operations Lead
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          llm:
+            provider: ANTHROPIC
+            model: claude-sonnet-5
+          tool_profile: FULL
+          timeout_seconds: 180
+          memory_enabled: true
+          prompt: |
+            You are Morgan, the Operations Lead for Harbor Goods, a fictional company used to demonstrate Crewship.
+
+            Work only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.
+
+            Sales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.
+
+            When asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.
+          suggested_prompts: |-
+            Explain what the operations lead does in this demo.
+            Show me the sample records and explain the next action.
+            What happened in the latest routine run?
+          skills:
+            - demo-business-workflow
+            - routine-author
+            - system-inspector
+          env_refs:
+            - CLAUDE_CODE_OAUTH_TOKEN
+        - slug: riley
+          name: Riley
+          role_title: Container Monitor
+          agent_role: AGENT
+          cli_adapter: CLAUDE_CODE
+          llm:
+            provider: ANTHROPIC
+            model: claude-haiku-4-5
+          tool_profile: FULL
+          timeout_seconds: 180
+          memory_enabled: true
+          prompt: |
+            You are Riley, the Container Monitor for Harbor Goods, a fictional company used to demonstrate Crewship.
+
+            Work only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.
+
+            Sales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.
+
+            When asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.
+          suggested_prompts: |-
+            Explain what the container monitor does in this demo.
+            Show me the sample records and explain the next action.
+            What happened in the latest routine run?
+          skills:
+            - demo-business-workflow
+            - script-runner
+            - system-inspector
+          env_refs:
+            - CLAUDE_CODE_OAUTH_TOKEN

@@ -16,6 +16,7 @@ import type { ContainerStatus } from "./bottom-panel/types"
 import type { ProvisioningState } from "./explorer-groups"
 import { imageLabel } from "./crew-header"
 import { orderAgents, tempHireLabel } from "./crews-panel-model"
+import { formatSpend, type CrewSpend } from "./crew-spend"
 import type { CrewTab } from "./crews-tabs"
 import type { AgentSummary, CrewIntegration, CrewRecord } from "./crew-canvas-tabs/types"
 
@@ -60,6 +61,8 @@ export interface CrewOverviewProps {
   onTab: (tab: CrewTab) => void
   onNewAgent: () => void
   onHire?: () => void
+  /** Last 30 days of this crew; null = unknown or not for this reader, so the row is left out. */
+  spend?: CrewSpend | null
   now?: number
 }
 
@@ -83,6 +86,7 @@ export function CrewOverview({
   onTab,
   onNewAgent,
   onHire,
+  spend = null,
   now = Date.now(),
 }: CrewOverviewProps) {
   const team = orderAgents(agents.filter((a) => !a.expired_at))
@@ -170,6 +174,7 @@ export function CrewOverview({
             ["Image", imageValue],
             ["Access", accessValue],
             ["Network", networkValue],
+            ...(spend ? [["Spend · 30 d", <span key="spend"><span className="font-mono tabular-nums">{formatSpend(spend.costUsd)}</span> <span className="text-label text-muted-foreground">· {spend.calls.toLocaleString("en-GB")} model {spend.calls === 1 ? "call" : "calls"}</span></span>] as [string, React.ReactNode]] : []),
           ]} />
         </CrCard>
       </div>
