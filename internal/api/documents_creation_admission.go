@@ -54,7 +54,8 @@ func bindDocumentCreationRunTx(r *http.Request, db *sql.DB, tx *sql.Tx, run, mes
 	// Both the original SQL mirror and its consent must agree. Rebinding an
 	// already used submission to a different run/message is never an automatic retry.
 	var storedRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT c.run_id FROM document_creation_consents c JOIN conversation_messages m ON m.id=c.message_id AND m.session_id=c.chat_id AND m.author_user_id=c.human_user_id AND m.agent_id=? AND m.role='user' WHERE c.message_id=? AND c.workspace_id=? AND c.human_user_id=? AND c.chat_id=? AND c.submission_id=? AND c.revoked_at IS NULL`, receipt.AgentID, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID).Scan(&storedRun); err != nil || (storedRun.Valid && storedRun.String != run) {
+	var drafting bool
+	if err := tx.QueryRowContext(ctx, `SELECT c.run_id,c.drafting_allowed FROM document_creation_consents c JOIN conversation_messages m ON m.id=c.message_id AND m.session_id=c.chat_id AND m.author_user_id=c.human_user_id AND m.agent_id=? AND m.role='user' WHERE c.message_id=? AND c.workspace_id=? AND c.human_user_id=? AND c.chat_id=? AND c.submission_id=? AND c.revoked_at IS NULL`, receipt.AgentID, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID).Scan(&storedRun, &drafting); err != nil || drafting != intent.Drafting || (storedRun.Valid && storedRun.String != run) {
 		return errors.New("original document creation consent missing or changed")
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE document_creation_consents SET run_id=?,expires_at=? WHERE message_id=? AND (run_id IS NULL OR run_id=?)`, run, expires, message, run)
