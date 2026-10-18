@@ -130,6 +130,42 @@ describe("/issues/<id> — the top bar (ISS-01)", () => {
     expect(items).toEqual(["Copy link", "Move to project…", "Cancel issue…", "Delete issue…"])
   })
 
+  // What the server sends (issue_chat_metadata.go issueActionsForState): a
+  // writer's actions without "delete" while the issue is not Backlog or
+  // Cancelled. Delete stays in the menu, disabled with the reason (v67 imenu).
+  it("⋯ keeps Delete issue… for a writer on an open issue, disabled with the reason", async () => {
+    const WRITER = ["view", "comment", "edit_fields", "assign", "change_status", "change_workflow", "attach_files", "link", "start_work"]
+    const open = { ...ISSUE, status: "TODO", allowed_actions: WRITER }
+    global.fetch = vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes("/api/v1/issues/OPS-4")) return json(open)
+      if (/\/api\/v1\/issues\?/.test(u)) return json(LIST)
+      if (u.includes("/api/v1/projects?")) return json(PROJECTS)
+      return json([])
+    }) as unknown as typeof fetch
+    await ready()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Issue options" }), { key: "Enter" })
+    const menu = await screen.findByRole("menu")
+    const del = within(menu).getByRole("menuitem", { name: "Delete issue…" })
+    expect(del).toHaveAttribute("data-disabled")
+    expect(del).toHaveAttribute("title", "Only Backlog or Cancelled issues can be deleted. Cancel it first.")
+  })
+
+  it("⋯ has no Delete issue… for a reader", async () => {
+    const read = { ...ISSUE, status: "BACKLOG", allowed_actions: ["view"] }
+    global.fetch = vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes("/api/v1/issues/OPS-4")) return json(read)
+      if (/\/api\/v1\/issues\?/.test(u)) return json(LIST)
+      if (u.includes("/api/v1/projects?")) return json(PROJECTS)
+      return json([])
+    }) as unknown as typeof fetch
+    await ready()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Issue options" }), { key: "Enter" })
+    const menu = await screen.findByRole("menu")
+    expect(within(menu).queryByRole("menuitem", { name: "Delete issue…" })).toBeNull()
+  })
+
   it("Move to project PATCHes the project and reloads the issue", async () => {
     await ready()
     fireEvent.keyDown(screen.getByRole("button", { name: "Issue options" }), { key: "Enter" })
