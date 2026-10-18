@@ -5,7 +5,16 @@ MessagePort channel in fresh Firefox and WebKit contexts. It uses only
 `about:blank` and opaque sandboxed `srcdoc` for negative cases. A separate
 same-origin worker control uses the exact loopback URL
 `http://127.0.0.1:65530/artifacts-runtime-spike-control`, fulfilled entirely by
-Playwright without a server/socket request. All other requests are aborted.
+Playwright without a server/socket request. Each controlled fixture registers
+its exact generated Blob URL with the harness before constructing its worker.
+Only those exact URLs may be fulfilled with the known constant worker payload,
+once each;
+unknown URLs and all other HTTP requests are aborted. Registration records the
+fixture label/frame URL; reports retain registered Blob URLs and fulfilled local worker provenance.
+The CSP-denied fixture must never reach Blob request routing. This exception
+handles WebKit exposing local Blob loads to routing; it permits no HTTP load.
+This is synthetic local route delivery and does not qualify native Blob loader
+compatibility.
 It does not use the repository's authenticated Playwright global setup, start a
 server, access an application session, or change production browser support.
 

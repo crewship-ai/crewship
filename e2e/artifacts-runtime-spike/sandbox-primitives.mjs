@@ -45,14 +45,15 @@ async function bootstrapChecks(page, bootstrap) {
     window.addEventListener('message', event => { if (event.data?.type === 'spike.self') events.push(event.data); });
     // A returned constructor is not proof that worker code ran. Require an
     // actual message/error outcome; silence at the deadline is a failure.
-    const workerProbe = `async function observeWorker() {
+    const workerProbe = `async function observeWorker(label) {
       const proof = {constructor:'not-attempted', errorName:null, errorEvent:false, errorMessage:null, errorFilename:null, message:null, timedOut:false, cspDirective:null};
       const violation = event => { if (event.effectiveDirective === 'worker-src') proof.cspDirective = event.effectiveDirective; };
       document.addEventListener('securitypolicyviolation', violation);
       let worker, url, timer;
-      await new Promise(resolve => {
+      await new Promise(async resolve => {
         try {
           url = URL.createObjectURL(new Blob(['postMessage("spike.worker.executed")'], {type:'text/javascript'}));
+          await window.spikeRegisterLocalBlob(url, label);
           worker = new Worker(url); proof.constructor = 'returned';
           worker.onmessage = event => { proof.message = event.data; resolve(); };
           worker.onerror = event => { event.preventDefault(); proof.errorEvent = true; proof.errorMessage = event.message ?? null; proof.errorFilename = event.filename ?? null; resolve(); };
@@ -74,7 +75,7 @@ async function bootstrapChecks(page, bootstrap) {
         try { parent.document.body; } catch { parentDenied = true; }
         try { localStorage.getItem('spike'); } catch { storageDenied = true; }
         fetch('data:text/plain,blocked').then(() => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:false}), () => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:true}));
-        const worker = await observeWorker();
+        const worker = await observeWorker('negative');
         window.__crewshipPagesPort.postMessage({type:'spike.booted', parentDenied, storageDenied, worker});
       })();`,
     };
@@ -128,7 +129,7 @@ async function bootstrapChecks(page, bootstrap) {
     // reject this worker even when CSP permits blob:, which is not a bypass.
     const controlFrame = await frame('null', false, 'blob:');
     const control = send(controlFrame, { ...boot, artifact: { ...artifact,
-      javascript: `${workerProbe}; observeWorker().then(worker => window.__crewshipPagesPort.postMessage({type:'spike.worker-control', worker}));`,
+      javascript: `${workerProbe}; observeWorker('opaque-control').then(worker => window.__crewshipPagesPort.postMessage({type:'spike.worker-control', worker}));`,
     } });
     const controlDeadline = Date.now() + 3000;
     while (!control.received.length && Date.now() < controlDeadline) await delay(10);
@@ -157,7 +158,7 @@ async function sameOriginWorkerControl(context, workerProbe) {
     await page.route(url, route => route.fulfill({
       status: 200, contentType: 'text/html',
       headers: { 'Content-Security-Policy': "default-src 'none'; script-src 'nonce-spike'; connect-src 'none'; worker-src blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" },
-      body: `<!doctype html><script nonce="spike">${workerProbe}; observeWorker().then(proof => window.workerControlProof = proof);</script>`,
+      body: `<!doctype html><script nonce="spike">${workerProbe}; observeWorker('same-origin-control').then(proof => window.workerControlProof = proof);</script>`,
     }));
     await page.goto(url, { timeout: 5000 });
     await page.waitForFunction(() => window.workerControlProof, undefined, { timeout: 3000 });
@@ -208,11 +209,30 @@ for (const name of ['firefox', 'webkit']) {
   report.browsers.push(result);
   let browser, page;
   const requests = [];
+  const localBlobs = new Map(), fulfilledLocalWorkers = [];
   try {
     browser = await playwright[name].launch({ headless: true, ...(options.has(`--${name}-executable`) ? { executablePath: options.get(`--${name}-executable`) } : {}) });
     result.browserVersion = browser.version();
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] }, serviceWorkers: 'block' });
-    await context.route('**/*', route => { requests.push(route.request().url()); return route.abort(); });
+    await context.exposeBinding('spikeRegisterLocalBlob', ({ frame }, url, label) => {
+      assert.ok(['negative', 'opaque-control', 'same-origin-control'].includes(label), 'unknown worker fixture');
+      assert.equal([...localBlobs.values()].some(entry => entry.label === label), false, 'duplicate worker fixture');
+      const sameOrigin = label === 'same-origin-control';
+      assert.equal(frame.url(), sameOrigin ? 'http://127.0.0.1:65530/artifacts-runtime-spike-control' : 'about:srcdoc', 'unexpected worker fixture frame');
+      const prefix = sameOrigin ? 'blob:http://127.0.0.1:65530/' : 'blob:null/';
+      assert.ok(typeof url === 'string' && url.startsWith(prefix) && /^[0-9a-f-]{36}$/i.test(url.slice(prefix.length)), 'unexpected local Blob URL');
+      assert.equal(localBlobs.has(url), false, 'duplicate Blob URL');
+      localBlobs.set(url, { label, frameURL: frame.url() });
+    });
+    await context.route('**/*', route => {
+      const url = route.request().url(), registered = localBlobs.get(url);
+      if (registered) {
+        assert.equal(fulfilledLocalWorkers.some(entry => entry.url === url), false, 'repeated Blob request');
+        fulfilledLocalWorkers.push({ url, ...registered });
+        return route.fulfill({ status: 200, contentType: 'text/javascript', body: 'postMessage("spike.worker.executed")' });
+      }
+      requests.push(url); return route.abort();
+    });
     page = await context.newPage(); page.setDefaultTimeout(5000);
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     await page.setContent('<!doctype html><title>Isolated runtime primitive spike</title><body></body>');
@@ -223,6 +243,8 @@ for (const name of ['firefox', 'webkit']) {
     assert.equal(workerControl.message, 'spike.worker.executed', 'same-origin worker positive control must execute');
     assert.equal(workerControl.timedOut, false, 'worker control timeout is not acceptance');
     assert.equal(workerControl.errorEvent, false, 'worker control errors cannot qualify this environment');
+    assert.equal(localBlobs.size, 3, 'all three worker fixtures must register before construction');
+    assert.equal(fulfilledLocalWorkers.some(entry => entry.label === 'negative'), false, 'CSP-denied worker reached request routing');
     assert.equal(requests.length, 0, 'fixture attempted a network request');
     result.status = 'pass';
   } catch (error) {
@@ -231,6 +253,8 @@ for (const name of ['firefox', 'webkit']) {
     failed = true;
   } finally {
     result.blockedRequests = requests;
+    result.registeredLocalBlobs = [...localBlobs].map(([url, entry]) => ({ url, ...entry }));
+    result.fulfilledLocalWorkers = fulfilledLocalWorkers;
     if (page) {
       result.observations = { ...await page.evaluate(() => window.spikeObservations ?? {}).catch(() => ({})), ...result.observations };
       result.checks = [...new Set([...await page.evaluate(() => window.spikeChecks ?? []).catch(() => []), ...result.checks])];
