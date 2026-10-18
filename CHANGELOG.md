@@ -83,6 +83,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- Reduce workspace and entity WebSocket delivery authorization to one current SQL snapshot per frame, retaining immediate account, membership and restricted-profile revocation checks, including the private-page owner or workspace OWNER audience.
+
 - OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.
 
 ### Changed
