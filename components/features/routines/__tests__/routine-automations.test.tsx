@@ -280,7 +280,7 @@ describe("overview", () => {
     expect(screen.getByTestId("routine-look-what-you-get")).toHaveTextContent("Change report")
     expect(screen.getByTestId("routine-look-who-does-the-work")).toHaveTextContent("1 script on the crew share")
     expect(screen.getByTestId("routine-look-what-it-can-touch")).toHaveTextContent("Runs scripts on the crew. Stopping does not undo what already happened.")
-    expect(screen.getByText("Written from the definition, not by a model.")).toBeInTheDocument()
+    expect(screen.getByText("Written from the definition by the server, not by a model.")).toBeInTheDocument()
     expect(screen.getByTestId("routine-inputs")).toHaveTextContent("max_stale_hours")
   })
 

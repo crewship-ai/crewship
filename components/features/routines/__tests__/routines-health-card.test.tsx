@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, within, fireEvent } from "@testing-library/react"
 
 import { RoutinesHealthCard } from "../routines-health-card"
+import { RoutinesCheckupCard } from "../routines-checkup-card"
 import { RoutineCheckupCard } from "../routine-checkup-card"
 import { RoutinesDashboard } from "../routines-dashboard"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -78,5 +79,62 @@ describe("<RoutineCheckupCard> (RT-06)", () => {
     expect(screen.queryByText(/Agents exist/)).toBeNull()
     expect(screen.queryByText(/turns itself off/i)).toBeNull()
     expect(screen.getByTestId("checkup")).toHaveTextContent("Everything looks right")
+  })
+})
+
+describe("<RoutinesHealthCard> quiet healthy rows (v67)", () => {
+  const healthy = [{ id: "3", slug: "daily", name: "Daily digest", status: "active" }] as unknown as Pipeline[]
+
+  it("does not repeat dashes, zero spend and All good on a routine that is fine", () => {
+    render(<RoutinesHealthCard routines={healthy} runs={[]} spend={{ month: "2026-10", routines: [], total_budget_usd: 0, total_spent_usd: 0 }} onSelect={vi.fn()} />)
+    const row = screen.getByTestId("health-row-daily")
+    expect(row).toHaveTextContent("Daily digest")
+    expect(row).toHaveTextContent("No runs yet")
+    expect(row).not.toHaveTextContent("—")
+    expect(row).not.toHaveTextContent("no finished runs")
+    expect(row).not.toHaveTextContent("$0.00")
+    expect(row).not.toHaveTextContent("All good")
+  })
+
+  it("still says what needs attention on a row", () => {
+    render(<RoutinesHealthCard routines={routines} runs={[run(0)]} spend={spend} onSelect={vi.fn()} />)
+    expect(screen.getByTestId("health-row-invoice")).toHaveTextContent("1 to fix")
+    expect(screen.getByTestId("health-row-weekly")).toHaveTextContent("$12.50 this month")
+  })
+})
+
+describe("<RoutinesCheckupCard> across routines (v67)", () => {
+  it("lists only the routines that need attention, with the reason and a way in", () => {
+    const onSelect = vi.fn()
+    render(<RoutinesCheckupCard routines={[...routines, { id: "3", slug: "daily", name: "Daily digest", status: "active" }] as unknown as Pipeline[]} runs={[run(0)]} onSelect={onSelect} />)
+    const card = screen.getByRole("region", { name: "Checkup across routines" })
+    expect(within(card).getByText(/Invoice intake/)).toBeInTheDocument()
+    expect(within(card).queryByText(/Daily digest/)).toBeNull()
+    fireEvent.click(within(card).getByRole("button", { name: "Open" }))
+    expect(onSelect).toHaveBeenCalledWith("invoice")
+  })
+
+  it("is not drawn when every routine passes", () => {
+    render(<RoutinesCheckupCard routines={[{ id: "3", slug: "daily", name: "Daily digest", status: "active" }] as unknown as Pipeline[]} runs={[]} onSelect={vi.fn()} />)
+    expect(screen.queryByRole("region", { name: "Checkup across routines" })).toBeNull()
+  })
+
+  it("is part of the Routines overview pane", () => {
+    render(<RoutinesDashboard routines={routines} runs={[run(0)]} spend={spend} schedules={[]} onSelect={vi.fn()} />)
+    expect(screen.getByRole("region", { name: "Checkup across routines" })).toBeInTheDocument()
+  })
+})
+
+describe("<RoutinesHealthCard> with GET /pipeline-health (ODCH-RT-07)", () => {
+  const health = new Map([["weekly", { slug: "weekly", last_outcomes: ["completed", "failed", "completed"], finished: 3, succeeded: 2, success_pct: 67, runs: 40, spend_usd: 4.2 }]])
+
+  it("shows the server's last outcomes, success rate and 30-day spend", () => {
+    render(<RoutinesHealthCard routines={routines} runs={[]} spend={null} health={health} onSelect={vi.fn()} />)
+    const row = screen.getByTestId("health-row-weekly")
+    expect(within(row).getAllByTestId("health-bar")).toHaveLength(3)
+    expect(row).toHaveTextContent("67%")
+    expect(row).toHaveTextContent("2 of 3")
+    expect(row).toHaveTextContent("$4.20 in 30 days")
+    expect(screen.getByTestId("routines-health")).toHaveTextContent("last 20 runs; spend is the last 30 days")
   })
 })

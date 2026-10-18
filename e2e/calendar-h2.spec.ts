@@ -222,7 +222,7 @@ test.describe("desktop", () => {
     await fixtures(page)
     await page.goto("/routines")
     await expect(page.getByRole("navigation", { name: "Routines views" })).toHaveCount(0)
-    await page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" }).click()
+    await page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Calendar", exact: true }).click()
     await expect(page).toHaveURL(/\/calendar$/)
     await workspaceScope(page)
     await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible()
