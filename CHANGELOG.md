@@ -9,7 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Clarify that resource preset preview, confirmed application and the Settings selector are available; remove obsolete foundation-only descriptions without changing access behavior.
+### Added
+
+- Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
 
 - Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
 
@@ -46,6 +48,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Clear reviewed member preset consent on access loss and ignore late mutation responses from an older verified policy read.
 
 - Settings resource access offers explicit immutable presets for existing Guest resources, with exact previews and confirmation. Saved intent stays separate from live grant authority; conflicts and uncertain writes require reloading before new consent.
+
+- Clarify that resource preset preview, confirmed application and the Settings selector are available; remove obsolete foundation-only descriptions without changing access behavior.
 
 - The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
 

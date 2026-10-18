@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const state = vi.hoisted(() => ({ user: "h1", workspace: "w1", send: vi.fn(), fetch: vi.fn() }))
+const state = vi.hoisted(() => ({ user: "h1", workspace: "w1", send: vi.fn(), fetch: vi.fn(), documents: false }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => ({ turns: [], sendMessage: state.send, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected" }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: state.user } } }), useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
@@ -15,15 +15,16 @@ vi.mock("../search/conversation-search", () => ({ ConversationSearch: () => null
 vi.mock("../export/export-dialog", () => ({ ExportDialog: () => null }))
 vi.mock("../files/restricted-files", () => ({ RestrictedFiles: () => null }))
 vi.mock("../restricted-memory", () => ({ RestrictedMemory: () => null }))
-vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ sendMessage, onSent }: { sendMessage: (text: string) => boolean; onSent: () => void }) => <button type="button" onClick={() => { if (sendMessage("Read the selected brief") !== false) onSent() }}>Send fixture message</button> }))
+vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ sendMessage, onSent, documentCreationEnabled }: { sendMessage: (text: string) => boolean; onSent: () => void; documentCreationEnabled?: boolean }) => <><button type="button" onClick={() => { if (sendMessage("Read the selected brief") !== false) onSent() }}>Send fixture message</button>{documentCreationEnabled && <span>Document creation offered</span>}</> }))
 
 import { ChatPanel } from "../chat-panel"
 
 beforeEach(() => {
   vi.clearAllMocks()
-  state.user = "h1"; state.workspace = "w1"
+  state.user = "h1"; state.workspace = "w1"; state.documents = false
   state.send.mockReturnValue(true)
   state.fetch.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => {
+    if (url.includes("documents/status")) return { enabled: state.documents }
     if (url.includes("execution-profile")) return { mode: "restricted", audience: "private" }
     if (url.includes("project-input-options")) return { files: [{ version_id: `version-${state.user}`, name: `${state.user} brief.txt`, project_name: "Own project", size_bytes: 5 }], has_more: false }
     if (url.includes("participants")) return { participants: [] }
@@ -72,5 +73,23 @@ describe("project source selection in the chat panel", () => {
     expect(checkbox).not.toBeChecked()
     fireEvent.click(screen.getByRole("button", { name: "Send fixture message" }))
     expect(state.send).toHaveBeenLastCalledWith("Read the selected brief")
+  })
+})
+
+
+describe("document creation availability in the chat panel", () => {
+  it.each([undefined, "chat"] as const)("offers the explicit control only for an available direct chat without a selected Page (%s)", async mobilePanel => {
+    state.documents = true
+    const view = render(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" mobilePanel={mobilePanel} />)
+    await screen.findByText("Document creation offered")
+    view.rerender(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" mobilePanel={mobilePanel} pageContextSlug="existing-page" />)
+    expect(screen.queryByText("Document creation offered")).toBeNull()
+    view.rerender(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" mobilePanel={mobilePanel} sessionKind="routine" />)
+    expect(screen.queryByText("Document creation offered")).toBeNull()
+  })
+  it("does not offer creation when the service is unavailable", async () => {
+    render(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" />)
+    await screen.findByRole("checkbox")
+    expect(screen.queryByText("Document creation offered")).toBeNull()
   })
 })

@@ -72,6 +72,11 @@ func TestDocumentCreationSendGateAndResume(t *testing.T) {
 		{name: "group literal", enabled: true, trusted: true, visibility: "group", content: "vytvoř dokument o plánu"},
 		{name: "ambiguous visibility", enabled: true, trusted: true, content: "vytvoř dokument o plánu"},
 		{name: "untrusted", enabled: true, visibility: "private", content: "vytvoř dokument o plánu", denied: true},
+		{name: "composer English", enabled: true, trusted: true, visibility: "private", content: "Write a plan. Include sections!", opt: ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer", "drafting": true}}}, want: true},
+		{name: "composer Czech multiline", enabled: true, trusted: true, visibility: "private", content: "Napiš mi plán.\nPřidej části!", opt: ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer", "drafting": true}}}, want: true},
+		{name: "composer selected denied", enabled: true, trusted: true, visibility: "private", selected: true, opt: ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer"}}}, denied: true},
+		{name: "composer group denied", enabled: true, trusted: true, visibility: "group", opt: ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer"}}}, denied: true},
+		{name: "composer untrusted denied", enabled: true, visibility: "private", opt: ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer"}}}, denied: true},
 		{name: "explicit", enabled: true, trusted: true, visibility: "private", opt: ws.ChatMessageOption{Metadata: creationMetadata("explicit")}, want: true},
 		{name: "explicit selected", enabled: true, trusted: true, visibility: "private", selected: true, opt: ws.ChatMessageOption{Metadata: creationMetadata("explicit")}, denied: true},
 		{name: "explicit group", enabled: true, trusted: true, visibility: "group", opt: ws.ChatMessageOption{Metadata: creationMetadata("explicit")}, denied: true},
@@ -324,6 +329,29 @@ func TestDocumentCreationOrdinaryChatRemainsOrdinary(t *testing.T) {
 			messages, err := b.convStore.Read(t.Context(), "creation-chat", 0, 100)
 			if err != nil || len(messages) != 1 || messages[0].Content != tc.content {
 				t.Fatalf("ordinary transcript changed: %+v %v", messages, err)
+			}
+		})
+	}
+}
+
+func TestDocumentCreationComposerPersistsExplicitHumanConsent(t *testing.T) {
+	for _, content := range []string{"Write a garden plan. Include three sections!", "Napiš mi plán zahrady.\nPřidej tři části!"} {
+		t.Run(content, func(t *testing.T) {
+			b, r := documentCreationBridgeFixture(t)
+			opt := ws.ChatMessageOption{Metadata: map[string]any{"document_creation_intent": map[string]any{"submission_id": "composer-submission", "drafting": true}}}
+			err := b.HandleChatMessage(t.Context(), "creation-human", "creation-chat", content, func(ws.ChatEvent) {}, opt)
+			if !errors.Is(err, errDocumentCreationComponentBoundary) || r.runCalls != 1 {
+				t.Fatalf("creation admission calls=%d err=%v", r.runCalls, err)
+			}
+			intent, ok := r.metadata["document_creation_intent"].(*documents.CreationIntent)
+			if !ok || intent == nil || intent.SubmissionID != "composer-submission" || !intent.Drafting {
+				t.Fatal("explicit intent did not reach run admission")
+			}
+			var text, user, submission string
+			var drafting bool
+			err = r.db.QueryRow(`SELECT m.content,c.human_user_id,c.submission_id,c.drafting_allowed FROM document_creation_consents c JOIN conversation_messages m ON m.id=c.message_id`).Scan(&text, &user, &submission, &drafting)
+			if err != nil || text != content || user != "creation-human" || submission != intent.SubmissionID || !drafting {
+				t.Fatalf("original human consent not persisted: %v", err)
 			}
 		})
 	}
