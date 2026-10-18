@@ -30,8 +30,7 @@ Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
 ```
 
 The result identifies the saved document and its link. Opening its chat card
-resolves that saved identity in your current workspace and opens the native
-editor. An unavailable document never falls back to another page or the catalog.
+opens that saved identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
 If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
@@ -98,6 +97,10 @@ object of at most 2 MiB. Keep the same operation ID and contents when retrying
 an operation whose confirmation was lost.
 
 ## `crewship doc read <page-slug>`
+
+For a saved Document identity, `crewship doc read @<page-id>` keeps the original
+object bound to the request. A deleted identity returns 404 even if another
+document reuses its former slug. Current workspace and access checks still apply.
 
 Read the currently confirmed document, content tree, block outline and revision.
 Use the returned opaque `epoch`, `rev` and target block hash when preparing an
