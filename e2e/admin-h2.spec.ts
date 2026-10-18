@@ -46,8 +46,7 @@ test.describe("Admin console", () => {
       await page.setViewportSize({ width, height: 1000 })
       await seed(page, PINNED)
       await page.goto("/admin")
-      // COM-05: on a tablet the panel starts closed; its button opens it.
-      if (width < 1280) await page.getByTestId("secondary-panel-button").click()
+      // v67 (#3605): a list page's panel stays docked on a tablet, no button.
       const panel = page.locator("[data-slot=secondary-panel][data-panel-id=admin]")
       await expect(panel.getByRole("navigation", { name: "Admin sections" })).toBeVisible()
       await expect(panel.locator("[data-slot=admin-panel-head]")).toContainText("Instance admin")

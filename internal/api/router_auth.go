@@ -105,6 +105,7 @@ func (r *Router) registerAuthRoutes() {
 	// own name + change own password (#867.1). Password change revokes
 	// the caller's other active sessions.
 	profileH := NewUserProfileHandler(r.db, r.logger, r.sessionsStore)
+	profileH.streams = r.authMw.streams
 	profileH.SetAvatarRoot(r.storagePath)
 	r.authedSelfMut("PATCH", "/api/v1/users/me", profileH.UpdateProfile)
 	r.authedSelfMut("POST", "/api/v1/users/me/password", profileH.ChangePassword)
@@ -117,6 +118,7 @@ func (r *Router) registerAuthRoutes() {
 
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)
+	cliTokenH.streams = r.authMw.streams
 	r.authedSelfMut("POST", "/api/v1/auth/cli-token", cliTokenH.Create)
 	r.mux.Handle("GET /api/v1/auth/cli-token/validate", authed(http.HandlerFunc(cliTokenH.Validate)))
 	r.mux.Handle("GET /api/v1/auth/cli-tokens", authed(http.HandlerFunc(cliTokenH.List)))

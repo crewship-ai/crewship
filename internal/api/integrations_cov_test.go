@@ -627,10 +627,17 @@ func TestCovIntDeleteCrewIntegration(t *testing.T) {
 	crewID := seedCrewRow(t, db, "crew-del", wsID, "Crew", "crew-del")
 	agentID := seedAgentRow(t, db, "agent-del", wsID, crewID, "Ag", "ag", "AGENT")
 	covIntCrewServer(t, db, "cdel-1", crewID, "gh", "streamable-http", "https://e")
-	// OAuth credential created for this integration → should cascade-delete
+	// OAuth credential created for this integration is retired with its history.
 	credID := covIntCredential(t, db, "cred-oauth", wsID, userID, "gh-oauth", "ACTIVE")
 	if _, err := db.Exec(`UPDATE credentials SET type='OAUTH2' WHERE id=?`, credID); err != nil {
 		t.Fatalf("oauth type: %v", err)
+	}
+	var beforeCipher string
+	if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id=?`, credID).Scan(&beforeCipher); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO credential_audit(id,credential_id,workspace_id,event_type,metadata_json) VALUES('cov-int-history',?,?,'READ','{"retained":true}')`, credID, wsID); err != nil {
+		t.Fatal(err)
 	}
 	covIntBinding(t, db, "bdel-1", agentID, "cdel-1", "crew", credID)
 	h := NewIntegrationHandler(db, newTestLogger())
@@ -668,11 +675,12 @@ func TestCovIntDeleteCrewIntegration(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("binding not deleted")
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id=?`, credID).Scan(&n); err != nil {
-		t.Fatalf("scan cred count: %v", err)
+	var deleted, cipher, metadata string
+	if err := db.QueryRow(`SELECT c.deleted_at,c.encrypted_value,a.metadata_json FROM credentials c JOIN credential_audit a ON a.credential_id=c.id WHERE c.id=? AND a.id='cov-int-history'`, credID).Scan(&deleted, &cipher, &metadata); err != nil {
+		t.Fatal(err)
 	}
-	if n != 0 {
-		t.Fatalf("orphan oauth credential not cascade-deleted")
+	if deleted == "" || cipher != beforeCipher || metadata != `{"retained":true}` {
+		t.Fatal("retirement changed or erased credential history")
 	}
 }
 

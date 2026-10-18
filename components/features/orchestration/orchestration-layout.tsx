@@ -403,7 +403,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   ].filter(Boolean) as string[]
 
   const actions = isMobile ? (
-    <SubBarIconButton icon={Plus} aria-label="New issue" onClick={() => setShowCreateIssue(true)} />
+    <SubBarPrimary icon={Plus} onClick={() => setShowCreateIssue(true)}>New issue</SubBarPrimary>
   ) : selectedProjectId ? (
     <>
       <SubBarPrimary icon={Plus} title="C" aria-keyshortcuts="c" onClick={() => setShowCreateIssue(true)}>New issue</SubBarPrimary>

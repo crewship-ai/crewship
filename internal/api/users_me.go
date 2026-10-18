@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -23,6 +24,7 @@ type UserProfileHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
+	streams  *auth.StreamCredentials
 	// avatarRoot is the storage base for uploaded avatars (the router's
 	// storagePath). Empty when storage isn't configured — avatar upload/serve
 	// then fail closed rather than writing to an unintended location. Set via
@@ -245,6 +247,9 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		tokensRevoked, _ = res.RowsAffected()
+		if h.streams != nil {
+			h.streams.NotifyTokensRevoked(user.ID)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

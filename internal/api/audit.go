@@ -141,6 +141,14 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	args := []interface{}{workspaceID}
 	countArgs := []interface{}{workspaceID}
 
+	// Private artifact audit rows must not become a catalog for other roles.
+	privateFilter := ` AND NOT EXISTS(SELECT 1 FROM pages p WHERE p.id=a.entity_id AND p.workspace_id=a.workspace_id AND p.private_audience=1 AND p.owner_user_id<>? AND NOT EXISTS(SELECT 1 FROM workspace_members am WHERE am.workspace_id=p.workspace_id AND am.user_id=? AND am.role='OWNER'))`
+	actorID := privateAudienceActorID(r.Context())
+	query += privateFilter
+	countQuery += privateFilter
+	args = append(args, actorID, actorID)
+	countArgs = append(countArgs, actorID, actorID)
+
 	if action != "" {
 		query += " AND a.action = ?"
 		countQuery += " AND a.action = ?"

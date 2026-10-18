@@ -201,11 +201,15 @@ func (a *DBChannelAuthorizer) isMemberOfMissionWorkspace(ctx context.Context, us
 }
 
 func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userID, pageID string) (bool, error) {
-	var wsID string
+	var wsID, owner, role string
+	var private bool
 	err := a.db.QueryRowContext(ctx,
-		`SELECT workspace_id FROM pages WHERE id = ?`, pageID).Scan(&wsID)
+		`SELECT p.workspace_id,p.private_audience,COALESCE(p.owner_user_id,''),COALESCE((SELECT m.role FROM workspace_members m WHERE m.workspace_id=p.workspace_id AND m.user_id=?),'') FROM pages p WHERE p.id=?`, userID, pageID).Scan(&wsID, &private, &owner, &role)
 	if err != nil {
 		return existsRow(err)
+	}
+	if private && owner != userID && role != "OWNER" {
+		return false, nil
 	}
 	return a.isMemberOfWorkspace(ctx, userID, wsID)
 }

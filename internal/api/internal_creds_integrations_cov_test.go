@@ -666,7 +666,7 @@ func TestCovICIDeleteCrewIntegration_NotFound(t *testing.T) {
 	}
 }
 
-func TestCovICIDeleteCrewIntegration_CascadesOAuthCredential(t *testing.T) {
+func TestCovICIDeleteCrewIntegration_RetiresOAuthCredential(t *testing.T) {
 	setTestEncryptionKey(t)
 	db, h, wsID, _ := setupIntegrationTest(t)
 	seedCrew(t, db, "crewD", wsID, "Crew", "crew")
@@ -676,6 +676,27 @@ func TestCovICIDeleteCrewIntegration_CascadesOAuthCredential(t *testing.T) {
 
 	// OAuth credential created for this integration's auto-connect flow.
 	covICISeedCredential(t, db, "cred-oauth", wsID, "svc oauth token", "OAUTH2", "NONE", "ACTIVE", "tok")
+	execOrFatal(t, db, `INSERT INTO credential_audit(id,credential_id,workspace_id,event_type,metadata_json) VALUES('covici-history','cred-oauth',?,'READ','{"retained":true}')`, wsID)
+	execOrFatal(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('covici-assignment','agentD','cred-oauth','TOKEN')`)
+	execOrFatal(t, db, `INSERT INTO credential_bindings(id,workspace_id,credential_id,scope,agent_id,slot) VALUES('covici-slot',?,'cred-oauth','AGENT','agentD','TOKEN')`, wsID)
+	execOrFatal(t, db, `INSERT INTO credential_crews(credential_id,crew_id) VALUES('cred-oauth','crewD')`)
+	before, _, err := loadDeliveredCredentials(context.Background(), db, "agentD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := false
+	for _, c := range before {
+		if c.ID == "cred-oauth" {
+			live = true
+		}
+	}
+	if !live {
+		t.Fatal("positive control: OAuth credential was not deliverable")
+	}
+	var beforeCipher string
+	if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id='cred-oauth'`).Scan(&beforeCipher); err != nil {
+		t.Fatal(err)
+	}
 	// Binding referencing both the crew server and the OAuth credential.
 	if _, err := db.Exec(`
 		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, enabled, created_at)
@@ -709,13 +730,28 @@ func TestCovICIDeleteCrewIntegration_CascadesOAuthCredential(t *testing.T) {
 	if bindCount != 0 {
 		t.Errorf("binding should be deleted, count = %d", bindCount)
 	}
-	// OAuth credential cascade-deleted (no remaining bindings reference it).
-	var credCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM credentials WHERE id = 'cred-oauth'").Scan(&credCount); err != nil {
-		t.Fatalf("scan cred count: %v", err)
+	// Retirement preserves the identity, ciphertext and forensic history.
+	var deleted, cipher, metadata string
+	if err := db.QueryRow(`SELECT c.deleted_at,c.encrypted_value,a.metadata_json FROM credentials c JOIN credential_audit a ON a.credential_id=c.id WHERE c.id='cred-oauth' AND a.id='covici-history'`).Scan(&deleted, &cipher, &metadata); err != nil {
+		t.Fatal(err)
 	}
-	if credCount != 0 {
-		t.Errorf("orphan OAuth credential should be cascade-deleted, count = %d", credCount)
+	if deleted == "" || cipher != beforeCipher || metadata != `{"retained":true}` {
+		t.Fatal("retirement changed or erased credential history")
+	}
+	for _, table := range []string{"agent_credentials", "credential_bindings", "credential_crews"} {
+		var n int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE credential_id='cred-oauth'").Scan(&n); err != nil || n != 0 {
+			t.Errorf("live %s claims survived: %d %v", table, n, err)
+		}
+	}
+	after, _, err := loadDeliveredCredentials(context.Background(), db, "agentD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range after {
+		if c.ID == "cred-oauth" {
+			t.Fatal("retired credential still delivered")
+		}
 	}
 }
 
