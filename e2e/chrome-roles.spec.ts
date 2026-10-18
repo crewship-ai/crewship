@@ -55,7 +55,9 @@ for (const who of Object.keys(ROLES) as Who[]) {
         const rail = page.locator("[data-slot=sidebar-container]")
         await expect(rail).toBeVisible()
         const hrefs = await rail.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")))
-        expect(hrefs.filter((h) => h !== "/calendar" && h !== "/admin" && h !== "/settings")).toEqual(CORE_HREFS)
+        // The footer's /admin links (the Admin row, and the version chip an
+        // instance administrator gets) are not destinations in this list.
+        expect(hrefs.filter((h) => h !== "/calendar" && !h!.startsWith("/admin") && h !== "/settings")).toEqual(CORE_HREFS)
         expect(hrefs).toContain("/settings")
         expect(hrefs).not.toContain("/journal")
         if (!ROLES[who].sees.admin) expect(hrefs).not.toContain("/admin")
@@ -97,7 +99,9 @@ for (const who of Object.keys(ROLES) as Who[]) {
         const grid = page.getByRole("list", { name: "Navigation" })
         await expect(grid).toBeVisible()
         const hrefs = await grid.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")))
-        expect(hrefs.filter((h) => h !== "/calendar" && h !== "/admin" && h !== "/settings")).toEqual(CORE_HREFS)
+        // The footer's /admin links (the Admin row, and the version chip an
+        // instance administrator gets) are not destinations in this list.
+        expect(hrefs.filter((h) => h !== "/calendar" && !h!.startsWith("/admin") && h !== "/settings")).toEqual(CORE_HREFS)
         expect(hrefs).not.toContain("/journal")
         if (!ROLES[who].sees.admin) expect(hrefs).not.toContain("/admin")
         await expect(grid.locator('[data-slot="concept-tile"]')).not.toHaveCount(0)
