@@ -100,6 +100,24 @@ describe("ActivityPeek · work", () => {
     expect(p.onChanged).toHaveBeenCalled()
   })
 
+  // RT-07: a routine run in Activity opens the routine run peek: version and
+  // cost included, Open run goes to the page; Activity's own sections stay.
+  it("a routine run opens the routine run peek with version and cost", async () => {
+    mock.records.mockReturnValue({
+      records: records.map((r) => (r.id === "run_418" ? { ...r, pipeline_version: 4, cost_usd: 0.31 } : r)),
+    })
+    const p = props(work())
+    render(<ActivityPeek {...p} />)
+    const peek = await screen.findByTestId("run-peek")
+    expect(within(peek).getByText("Version").nextElementSibling).toHaveTextContent("v4")
+    expect(within(peek).getByText("Cost").nextElementSibling).toHaveTextContent("$0.31")
+    // Activity's own sections and actions live inside the same peek.
+    expect(within(peek).getByRole("heading", { name: "How it connects" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Stop" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
+    expect(p.onOpenFull).toHaveBeenCalledWith(expect.objectContaining({ id: "run_418" }))
+  })
+
   it("hides Stop from a member, whom the server would refuse", async () => {
     render(<ActivityPeek {...props(work(), { role: "MEMBER" })} />)
     await screen.findByTestId("activity-peek-work")
