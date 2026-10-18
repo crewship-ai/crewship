@@ -187,6 +187,24 @@ export function RoutineTriggersTab({
     return at < 0 ? [...base, ...onceRows] : [...base.slice(0, at), ...onceRows, ...base.slice(at)]
   }, [rows, onceRows])
 
+  // Deep links (⌘K schedule hits, the calendar) end in #schedule-<id>: bring
+  // that row into view and focus it once it is listed, as the Plan tab did.
+  const focusedAnchor = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    let target: string
+    try {
+      target = decodeURIComponent(window.location.hash.slice(1))
+    } catch {
+      return
+    }
+    if (!target || focusedAnchor.current === target || !listed.some((r) => r.anchor === target)) return
+    const el = document.getElementById(target)
+    if (!el) return
+    el.scrollIntoView?.({ block: "center" })
+    el.focus({ preventScroll: true })
+    focusedAnchor.current = target
+  }, [listed])
+
   const scheduleOf = (row: TriggerRow) => schedules.find((s) => s.id === row.id) ?? null
   const webhookOf = (row: TriggerRow) => ourWebhooks.find((w) => w.id === row.id) ?? null
 
@@ -279,7 +297,7 @@ export function RoutineTriggersTab({
           const schedule = row.kind === "schedule" ? scheduleOf(row) : null
           const hook = row.kind === "webhook" ? webhookOf(row) : null
           return (
-            <li key={row.key} className="flex flex-wrap items-start gap-3 rounded-lg border border-hairline bg-card px-4 py-3 sm:flex-nowrap" data-kind={row.kind}>
+            <li key={row.key} id={row.anchor} tabIndex={row.anchor ? -1 : undefined} className="flex scroll-mt-4 flex-wrap items-start gap-3 rounded-lg border border-hairline bg-card px-4 py-3 target:ring-1 target:ring-inset target:ring-border sm:flex-nowrap" data-kind={row.kind}>
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05]">
                 <Icon className="h-4 w-4 text-foreground/80" aria-hidden />
               </span>
