@@ -1363,6 +1363,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
+          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="mobile"
           mentionMembers={mentionMembers}
           isStreaming={isStreaming}
@@ -1493,6 +1494,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
+          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="desktop"
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}

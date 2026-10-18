@@ -10,6 +10,10 @@ import (
 
 const CreationMetadataKey = "document_creation"
 
+// ComposerCreationMetadataKey is the explicit human action on a chat send.
+// The older key remains readable for existing clients and stored messages.
+const ComposerCreationMetadataKey = "document_creation_intent"
+
 // CreationIntent is one authenticated human's explicit request to create a
 // private Docs from this chat message. It cannot nominate another identity.
 type CreationIntent struct {
@@ -56,7 +60,14 @@ func (v CreationIntent) Validate() error {
 // CreationIntentFromMetadata accepts only the closed consent shape. Other
 // metadata is handled by its existing consumer, never copied as authority.
 func CreationIntentFromMetadata(metadata map[string]any) (*CreationIntent, error) {
-	raw, present := metadata[CreationMetadataKey]
+	raw, present := metadata[ComposerCreationMetadataKey]
+	legacy, legacyPresent := metadata[CreationMetadataKey]
+	if present && legacyPresent {
+		return nil, errors.New("one document creation intent required")
+	}
+	if !present {
+		raw, present = legacy, legacyPresent
+	}
 	if !present {
 		return nil, nil
 	}
