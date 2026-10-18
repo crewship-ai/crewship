@@ -500,3 +500,49 @@ test.describe("ODCH-ISS-07 project lead can be a person", () => {
     })
   }
 })
+
+test.describe("PAR-040/041/042/043/146 v67 details", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } })
+
+  test("Filter is labelled, List | Board is 28 px, projects carry a progress bar", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    await expect(firstRow(page)).toBeVisible()
+    await expect(panel(page).getByRole("button", { name: /^Filter/ })).toContainText("Filter")
+    const view = page.getByRole("radiogroup", { name: "View" })
+    const box = (await view.boundingBox())!
+    expect(box.height).toBeGreaterThanOrEqual(27)
+    expect(box.height).toBeLessThanOrEqual(30)
+    const projects = panel(page).locator(".group\\/proj")
+    if (await projects.count()) await expect(projects.first().locator(".h-\\[3px\\]")).toBeVisible()
+  })
+
+  test("New issue: crew chip under the title, acceptance checkbox, Create and Create and start", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    await expect(firstRow(page)).toBeVisible()
+    await page.locator("body").press("c")
+    const dialog = page.getByRole("dialog", { name: "New issue" })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Select crew" })).toBeVisible()
+    await expect(dialog.getByRole("checkbox", { name: "Require my acceptance after the Lead review" })).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
+    await expect(dialog.getByRole("button", { name: "Create and start" })).toBeDisabled()
+    await dialog.getByPlaceholder("Issue title").fill("Parity check")
+    await expect(dialog.getByRole("button", { name: "Create and start" })).toBeEnabled()
+  })
+
+  test("phone 390: the New issue footer keeps 44 px targets", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await seed(page, PINNED)
+    await page.goto("/issues?create=1")
+    const dialog = page.getByRole("dialog", { name: "New issue" })
+    await expect(dialog).toBeVisible()
+    for (const name of ["Create", "Create and start"]) {
+      const box = (await dialog.getByRole("button", { name, exact: true }).boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(44)
+    }
+  })
+})
