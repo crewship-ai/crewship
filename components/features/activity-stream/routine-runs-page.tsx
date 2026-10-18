@@ -50,6 +50,7 @@ import {
   slowestRunDuration,
   type DigestRun,
 } from "@/lib/run-digest"
+import { RoutineRunPeek } from "@/components/features/routines/routine-run-peek"
 import type { SidebarRoutine } from "./activity-sidebar"
 
 /** Tone token per headline tone — the four the rest of the page already reads. */
@@ -78,6 +79,9 @@ export function RoutineRunsPage({
   onOpenRun,
 }: RoutineRunsPageProps) {
   const { records, loading, error, legacy, refresh } = usePipelineRunRecords(workspaceId, slug)
+  // A row peeks at the run (RT-07, the same peek as Routines); Open run in the
+  // peek is what leaves for the run page.
+  const [peekId, setPeekId] = React.useState<string | null>(null)
 
   const runs = React.useMemo<DigestRun[]>(
     () =>
@@ -282,7 +286,7 @@ export function RoutineRunsPage({
                       <button
                         key={run.id}
                         type="button"
-                        onClick={() => onOpenRun(run.id)}
+                        onClick={() => setPeekId(run.id)}
                         className="group grid grid-cols-[8px_64px_1fr_56px_16px] items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.03] md:grid-cols-[8px_64px_1fr_56px_72px_16px]"
                       >
                         <span
@@ -326,6 +330,19 @@ export function RoutineRunsPage({
           )}
         </DashboardCard>
       </Appear>
+      {peekId && (
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          runs={records}
+          runId={peekId}
+          onChange={setPeekId}
+          onClose={() => setPeekId(null)}
+          onOpen={(id) => {
+            setPeekId(null)
+            onOpenRun(id)
+          }}
+        />
+      )}
     </div>
   )
 }
