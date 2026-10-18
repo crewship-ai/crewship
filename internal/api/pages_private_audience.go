@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Private artifacts have an explicit audience; role, folder, crew and ordinary
@@ -35,7 +37,7 @@ func (h *PageHandler) auditPrivateOwnerAccess(w http.ResponseWriter, r *http.Req
 		return false
 	}
 	metadata, _ := json.Marshal(map[string]string{"owner_user_id": rec.OwnerUserID})
-	_, err = h.db.ExecContext(r.Context(), `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), WorkspaceIDFromContext(r.Context()), user.ID, "artifact.private_owner_accessed", "page", rec.ID, string(metadata), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = h.db.ExecContext(r.Context(), `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), WorkspaceIDFromContext(r.Context()), user.ID, "artifact.private_owner_accessed", "page", rec.ID, string(metadata), tsformat.Format(time.Now()))
 	if err != nil {
 		replyInternalError(w, h.logger, "audit private artifact access", err)
 		return false
@@ -53,8 +55,10 @@ func privateAudienceActorID(ctx context.Context) string {
 // Whole-workspace bundles contain private bytes. A workspace ADMIN must not
 // obtain those bytes indirectly through backup discovery, download or restore.
 // Existing instance-admin recovery remains its separate audited authority.
-func (h *BackupHandler) canAccessWorkspaceBackups(ctx context.Context) bool {
+func (h *BackupHandler) authorizeWorkspaceBackups(w http.ResponseWriter, r *http.Request) bool {
+	ctx := r.Context()
 	if !canAdministerInstance(ctx) {
+		replyError(w, http.StatusForbidden, "admin role required")
 		return false
 	}
 	if instance, _ := ctx.Value(ctxInstanceAdmin).(bool); instance {
@@ -65,9 +69,18 @@ func (h *BackupHandler) canAccessWorkspaceBackups(ctx context.Context) bool {
 		return true
 	} // the operation returns its existing missing-context error
 	if h.db == nil {
+		replyError(w, http.StatusInternalServerError, "backup authorization unavailable")
 		return false
 	}
 	var denied bool
 	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p WHERE p.workspace_id=? AND p.private_audience=1 AND NOT EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id=p.workspace_id AND m.user_id=? AND m.role='OWNER' AND m.access_mode='trusted'))`, workspace, privateAudienceActorID(ctx)).Scan(&denied)
-	return err == nil && !denied
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize workspace backup", err)
+		return false
+	}
+	if denied {
+		replyError(w, http.StatusForbidden, "workspace owner role required")
+		return false
+	}
+	return true
 }

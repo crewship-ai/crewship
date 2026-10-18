@@ -24,8 +24,7 @@ type backupStatusResponse struct {
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !h.canAccessWorkspaceBackups(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 
@@ -123,8 +122,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !h.canAccessWorkspaceBackups(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	path := r.URL.Query().Get("path")
@@ -162,8 +160,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !h.canAccessWorkspaceBackups(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	if workspaceID == "" {
@@ -219,8 +216,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !h.canAccessWorkspaceBackups(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	path := r.URL.Query().Get("path")
