@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Download, Mail, MessageSquare, Terminal, TriangleAlert, Users, X } from "lucide-react"
+import { ChevronDown, Download, Eye, Mail, MessageSquare, Terminal, TriangleAlert, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -26,7 +26,7 @@ import {
 import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
 import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsKpiStrip, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
 import { PageError } from "@/components/layout/page-state"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
@@ -296,7 +296,7 @@ export function MembersPage() {
             {ALL_CAPABILITIES.filter((c) => c !== Capability.Chat).map((cap) => (
               <SidebarFacetOption key={cap} active={filters.cap === cap} onToggle={() => setFilters({ cap: filters.cap === cap ? "" : cap })}>
                 <span className={cn(HIGH_STAKES_CAPABILITIES.has(cap) && "text-destructive")}>{CAPABILITY_LABELS[cap].en}</span>
-                <span className="ml-auto font-mono text-micro text-muted-foreground">{capsLoading ? "…" : countWith({ cap })}</span>
+                <span className="ml-auto text-micro tabular-nums text-muted-foreground">{capsLoading ? "…" : countWith({ cap })}</span>
               </SidebarFacetOption>
             ))}
           </SidebarFacet>
@@ -412,7 +412,7 @@ export function MembersPage() {
         <button key={t.key} type="button" role="tab" aria-selected={t.on} onClick={t.run}
           className={cn("inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
           {t.tone && <span className={cn("h-1.5 w-1.5 rounded-full", t.tone)} aria-hidden />}
-          {t.label}{t.n != null && <span className="font-mono text-micro text-muted-foreground">{t.n}</span>}
+          {t.label}{t.n != null && <span className="text-micro tabular-nums text-muted-foreground">{t.n}</span>}
         </button>
       ))}
     </div>
@@ -449,23 +449,21 @@ export function MembersPage() {
             </div>
           )}
 
-          <SettingsSummary slot="members-summary">
-            <SummaryItem n={members.length}>{members.length === 1 ? "person" : "people"}</SummaryItem>
-            {isManager && invitations.length > 0 && <SummaryItem n={invitations.length}>invited</SummaryItem>}
-            {chatOnlyCount != null && <SummaryItem n={chatOnlyCount}>chat only</SummaryItem>}
-            {revealers != null && (
-              <button type="button" onClick={() => pick({ flag: filters.flag === "reveal" ? "" : "reveal" })} className="hover:text-foreground">
-                <SummaryItem n={revealers} tone={revealers ? "danger" : undefined}>can reveal secrets</SummaryItem>
-              </button>
-            )}
-            {aboveCount != null && aboveCount > 0 && (
-              <button type="button" onClick={() => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" })} className="hover:text-foreground">
-                <SummaryItem n={aboveCount} tone="warn">above their role</SummaryItem>
-              </button>
-            )}
-            {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
-            {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
-          </SettingsSummary>
+          {/* v67's strip of five figures. The two that ask for a look filter
+              the roster; a read-only role is told once, under it. */}
+          <SettingsKpiStrip slot="members-summary" items={[
+            { icon: Users, label: "People", value: members.length },
+            ...(isManager ? [{ icon: Mail, label: "Invited", value: invitationsQuery.isLoading ? "…" : invitations.length, onClick: () => setFilters({ status: filters.status === "invited" ? "" : "invited" }), pressed: filters.status === "invited" }] : []),
+            ...(chatOnlyCount != null ? [{ icon: MessageSquare, label: "Chat only", value: chatOnlyCount, onClick: () => pick({ area: filters.area === "chat" ? "" : "chat" }), pressed: filters.area === "chat" && !filters.status }] : []),
+            ...(revealers != null ? [{ icon: Eye, label: "Can reveal secrets", value: revealers, onClick: () => pick({ flag: filters.flag === "reveal" ? "" : "reveal" }), pressed: filters.flag === "reveal" && !filters.status }] : []),
+            ...(aboveCount != null ? [{ icon: TriangleAlert, label: "Above their role", value: aboveCount, onClick: () => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" }), pressed: filters.flag === "risky-low-role" && !filters.status }] : []),
+          ]} />
+          {((!filters.status && shown.length !== members.length) || !isAdmin) && (
+            <SettingsSummary slot="members-note">
+              {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
+              {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
+            </SettingsSummary>
+          )}
 
           {roster.error && (
             <PageError className="max-w-none px-0 py-0" title="Couldn’t load the members" description={`${roster.error}.`} onRetry={roster.refresh} />
@@ -600,7 +598,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
         <Button variant="outline" size="sm" className={selectionBarButton}>{label}<ChevronDown className="h-3 w-3" /></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuLabel className="font-mono text-micro uppercase tracking-[0.08em] text-primary-hover">{heading}</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-micro font-semibold text-primary-hover">{heading}</DropdownMenuLabel>
         {items.map((i) => (
           <DropdownMenuItem key={i.key} onSelect={i.run} className={cn("text-xs", i.danger && "text-destructive")}>{i.label}</DropdownMenuItem>
         ))}
@@ -613,7 +611,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
     <motion.div role="toolbar" aria-label="Change the selected people" data-slot="members-bulk"
       initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
       className={cn(selectionBar, "fixed left-1/2 -translate-x-1/2 transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
-      <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{count}</span> selected</span>
+      <span className="px-1 text-xs"><span className="font-semibold tabular-nums">{count}</span> selected</span>
       {menu("Set access", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Preset")}
       {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
       {menu("Revoke", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, run: () => onCap(c, false) })), "Revoke from all selected")}

@@ -502,3 +502,47 @@ export function formatSettingsDate(iso: string | Date, opts: { year?: boolean | 
   const withYear = opts.year === "if-not-current" ? d.getFullYear() !== new Date().getFullYear() : opts.year !== false
   return `${d.getDate()} ${month}${withYear ? ` ${d.getFullYear()}` : ""}`
 }
+
+export interface SettingsKpi {
+  icon: LucideIcon
+  label: string
+  value: ReactNode
+  /** Makes the tile a button (a figure that filters the page). */
+  onClick?: () => void
+  pressed?: boolean
+}
+
+/**
+ * The strip of figures at the head of a page (v67 `.s-strip`): a bordered tile
+ * for each — a 30 px grey icon box, the label in small grey over the figure in
+ * a tabular sans. A tile with `onClick` is a button. They share the row, and
+ * wrap on a phone.
+ */
+export function SettingsKpiStrip({ items, className, slot = "settings-kpis" }: { items: SettingsKpi[]; className?: string; slot?: string }) {
+  const tile = "flex min-w-0 flex-[1_1_9.4rem] items-center gap-2.5 rounded-card border border-border bg-card px-3 py-2.5 text-left"
+  return (
+    <div data-slot={slot} className={cn("flex flex-wrap gap-2", className)}>
+      {items.map(({ icon: Icon, label, value, onClick, pressed }) => {
+        const body = (
+          <>
+            <span aria-hidden className="grid size-[2.0192rem] shrink-0 place-items-center rounded-lg bg-surface-subtle text-muted-foreground">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <small className="block truncate text-micro text-muted-foreground">{label}</small>
+              <b className="block text-default font-semibold leading-tight tabular-nums text-foreground">{value}</b>
+            </span>
+          </>
+        )
+        return onClick ? (
+          <button key={label} type="button" data-slot="settings-kpi" aria-pressed={pressed} onClick={onClick}
+            className={cn(tile, "transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", pressed && "border-primary")}>
+            {body}
+          </button>
+        ) : (
+          <div key={label} data-slot="settings-kpi" className={tile}>{body}</div>
+        )
+      })}
+    </div>
+  )
+}
