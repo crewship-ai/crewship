@@ -154,13 +154,15 @@ export function DrillPage<S extends string = string>({
           </SecondaryPanel>
         )}
         <div className="relative min-h-0 min-w-0 flex-1">
-          <main className={cn("h-full overflow-y-auto pb-20", className)}>
+          {/* A <div>, not a <main>: the shell's SidebarInset is the page's one
+              main landmark (ADM-08). */}
+          <div data-slot="drill-content" className={cn("h-full overflow-y-auto pb-20", className)}>
             {isMobile && mobileNav && (
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
             )}
             {head && <DrillHead icon={Icon} title={title} description={description} note={note} />}
             {children}
-          </main>
+          </div>
           <PageSaveBar />
         </div>
       </div>
