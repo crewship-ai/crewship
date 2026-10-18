@@ -252,8 +252,12 @@ for (const w of PUBLIC_WIDTHS) {
     await expect(page.locator("[data-slot=public-page-meta]")).toContainText("Shared read-only · rendered")
     await expect(page.locator("[data-slot=public-page-footer]")).toContainText("This link stops working")
     expect(await page.locator("[data-slot=public-page-frame] button, [data-slot=public-page-frame] a").count()).toBe(0)
+    // The gutter is the frame's inline padding: the frame itself spans the
+    // viewport below 1200 px, so measure where its content starts.
     const frame = (await page.locator("[data-slot=public-page-frame]").boundingBox())!
-    expect(Math.round(frame.x)).toBe(w.width >= 768 ? 24 : 16)
+    const head = (await page.locator("[data-slot=public-page-header]").boundingBox())!
+    expect(Math.round(frame.x)).toBe(0)
+    expect(Math.round(head.x - frame.x)).toBe(w.width >= 768 ? 24 : 16)
     await noSidewaysScroll(page)
   })
 
