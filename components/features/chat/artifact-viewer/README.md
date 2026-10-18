@@ -51,3 +51,28 @@ Props fixtures verify shell behavior only. Real resolver/Document rendering,
 CLI and browser acceptance remain incomplete until integrated and executed.
 No complete H1, linked-only library, sharing or exact historical-revision pass
 is claimed by this component.
+
+## Current saved Document resolver
+
+`useDocumentViewerRead` in `hooks/use-document-viewer-read.ts` is a separate
+read-only adapter. Supply the current workspace, source chat, current human,
+verified `ViewerTarget`, `enabled: true` and a nonempty `activationKey`. The key
+is a caller-generated auth/open epoch, never a credential. Change it on reopening
+or any authority change, and supply current session identity synchronously.
+The hook does not establish that a Page belongs to the source conversation;
+the caller must obtain that relationship from verified server result links.
+
+It reads current Page metadata and then saved Document content by encoded
+immutable `@PageID`, through `apiFetch` with the current workspace and no-store.
+Only exact Page identity, `has_document: true`, a nonempty title of at most 512
+characters, supported schema 2/3, a safe revision and closed validated Document
+content can produce a ready envelope. Creation result titles and revision 0 do
+not pin a historical body. Only title and validated body metadata are retained;
+engine snapshots, leases, generation and writer authority are not published.
+
+Every identity/activation/target/enable or refresh change masks old data during
+render. Prior requests are aborted and late results ignored. Page updates and
+reconnects trigger a fresh generation. Denial hides all protected data; 503,
+validation failures and other errors also discard old titles/bodies. The hook
+has no shared query cache, writes, editor, Yjs document or layout/store mutation.
+Caller wiring, browser acceptance and H1 remain incomplete until integrated.
