@@ -29,6 +29,7 @@ CREATE TABLE pipelines (
 chat_origin_id TEXT,id TEXT PRIMARY KEY);
 INSERT INTO pipelines (id) VALUES ('pln_a'), ('pln_b');
 CREATE TABLE pipeline_runs (
+    start_phase TEXT,
 invocation_source_run_id TEXT,
 chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
