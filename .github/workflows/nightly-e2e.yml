@@ -565,11 +565,32 @@ jobs:
           # The DB is created and discarded by this job.
           E2E_ALLOW_WRITES: "1"
           CREWSHIP_INSTANCE_ID: nightly-e2e-harbor2
+        # One Playwright run per spec, each with its own globalSetup login.
+        # The access token lives 15 minutes (internal/auth AccessTokenTTL) and
+        # refresh tokens rotate with reuse detection: in one long run the
+        # first context to refresh rotates the shared storageState's token,
+        # the next one presents the old token and the server revokes the
+        # whole session, so every later spec fails at sign-in. A spec on its
+        # own finishes well inside the token's life.
         run: |
-          set -euo pipefail
-          # shellcheck disable=SC2086 # word-splitting the spec list is intended
-          pnpm exec playwright test --config=playwright.nightly.config.ts \
-            --output=harbor2-test-results $HARBOR2_SPECS
+          set -uo pipefail
+          mkdir -p harbor2-reports
+          failed=""
+          for spec in $HARBOR2_SPECS; do
+            name=$(basename "$spec" .spec.ts)
+            echo "::group::$name"
+            pnpm exec playwright test --config=playwright.nightly.config.ts \
+              --output="harbor2-test-results/$name" "$spec"
+            rc=$?
+            echo "::endgroup::"
+            [ -f playwright-nightly-report.json ] && mv playwright-nightly-report.json "harbor2-reports/$name.json"
+            [ -d playwright-report ] && mv playwright-report "harbor2-reports/$name-html"
+            if [ "$rc" -ne 0 ]; then failed="$failed $name"; fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Harbor 2 specs failed:$failed"
+            exit 1
+          fi
 
       - name: Upload Playwright artifacts
         if: always()
@@ -577,8 +598,7 @@ jobs:
         with:
           name: playwright-nightly-harbor2
           path: |
-            playwright-report/
-            playwright-nightly-report.json
+            harbor2-reports/
             harbor2-test-results/
           retention-days: 14
 
