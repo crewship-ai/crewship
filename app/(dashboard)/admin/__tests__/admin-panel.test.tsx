@@ -133,6 +133,14 @@ describe("Admin for someone who is not an instance administrator", () => {
     await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/admin/people"))
   })
 
+  // admin-h2 e2e flaked when the move waited for two round trips first.
+  it("an old ?tab= link moves before the session is known", async () => {
+    h.admin = null
+    window.history.replaceState(null, "", "/admin?tab=posture")
+    render(<AdminPage />)
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/admin/security"))
+  })
+
   it("waits for the session instead of judging it", () => {
     h.admin = null
     render(<AdminPage />)
