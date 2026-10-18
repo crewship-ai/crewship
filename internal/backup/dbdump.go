@@ -1036,6 +1036,8 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
 type RestoreDumpHooks struct {
+	// Bundle source versions only strengthen unsupported-transport refusals.
+	legacySourceVersions []int
 	// RejectNoOp refuses a nonempty dump whose rows all collided, before
 	// PostInsert/PreCommit can publish filesystem or service changes.
 	// The insert transaction rolls back and its statistics remain available.
@@ -1105,6 +1107,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
+	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
+		return stats, err
+	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
 	if err != nil {
 		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
