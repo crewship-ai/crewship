@@ -10,7 +10,7 @@
 // mapped onto it once, and `?view=publish` keeps opening the publish review.
 
 import * as React from "react"
-import { createPortal } from "react-dom"
+import { SubBarActions } from "@/components/layout/sub-bar"
 import { useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
@@ -54,8 +54,8 @@ export interface RoutinePageActionContext {
 export interface RoutinePageProps {
   /** The page actions (Test, Run, ⋯ …), rendered into the top bar. */
   actions?: (ctx: RoutinePageActionContext) => React.ReactNode
-  /** Where the actions go (the layout's top-bar slot); inline without one. */
-  actionsTarget?: HTMLElement | null
+  /** Put the actions in the page's SubBar (SubBarActions); inline without one. */
+  actionsInBar?: boolean
   routine: RoutineDetail
   workspaceId: string
   crewName?: string
@@ -86,7 +86,7 @@ export function RoutinePage(props: RoutinePageProps) {
         <div className="flex-1 overflow-auto pb-24">
           <RoutinePageBody {...props} />
         </div>
-        <PageSaveBar />
+        <PageSaveBar saveLabel="Save as draft" />
       </div>
     </PageSaveProvider>
   )
@@ -147,7 +147,7 @@ function RoutinePageBody({
   onGovernance,
   onDelete,
   actions,
-  actionsTarget,
+  actionsInBar,
 }: RoutinePageProps) {
   const router = useRouter()
   const [tabParam, setTabParam] = useUrlSelection("tab")
@@ -206,8 +206,8 @@ function RoutinePageBody({
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
       {actionNode != null &&
-        (actionsTarget ? (
-          createPortal(actionNode, actionsTarget)
+        (actionsInBar ? (
+          <SubBarActions>{actionNode}</SubBarActions>
         ) : (
           <div className="flex flex-wrap items-center justify-end gap-1.5" data-testid="routine-page-actions">
             {actionNode}

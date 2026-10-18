@@ -136,7 +136,8 @@ interface Props {
   /** Every routine, for the step editor's "Run another routine". */
   routines?: Pipeline[]
   /** The top bar's action slot; the page actions render there. */
-  actionsTarget?: HTMLElement | null
+  /** Put the page actions in the SubBar above (SubBarActions). */
+  actionsInBar?: boolean
   /** Opens another routine (a duplicate saved as a draft). */
   onOpenRoutine?: (slug: string) => void
 }
@@ -151,7 +152,7 @@ export function RoutinesDetailPanel({
   onRunStarted,
   crewName,
   routines,
-  actionsTarget,
+  actionsInBar,
   onOpenRoutine,
 }: Props) {
   const router = useRouter()
@@ -746,7 +747,7 @@ export function RoutinesDetailPanel({
             canManage={permissions.manage}
             canRun={mayRun && !runGuard}
             actions={pageActions}
-            actionsTarget={actionsTarget}
+            actionsInBar={actionsInBar}
             onChanged={() => {
               fetchRoutine()
               onChanged()

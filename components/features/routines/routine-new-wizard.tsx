@@ -575,7 +575,8 @@ export function RoutineNewWizard({ open, onOpenChange, workspaceId, routines, on
         discardDescription="Nothing is saved until the last step. Closing throws this routine away."
         onSubmit={onPrimary}
         ariaLabel="New routine"
-        className="max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:rounded-t-none sm:max-h-[min(90vh,820px)]"
+        phoneHeight="full"
+        className="sm:max-h-[min(90vh,820px)]"
       >
         <CreateSurfaceHeader
           concept="routines"
