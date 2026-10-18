@@ -275,7 +275,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // The step's summary reflects the environment values without an extra step.
     await expect(page.getByRole("button", { name: /Create crew/ })).toBeVisible()
     await expect(page.getByText(name)).toBeVisible()
-    await expect(page.getByText("8 GB")).toBeVisible()
+    // Harbor 2: the sizing chips stay open next to the summary, so "8 GB" is
+    // both a chip and a summary badge — assert the summary's badge.
+    await expect(page.getByRole("dialog").locator('[data-slot="badge"]', { hasText: /^8 GB$/ })).toBeVisible()
     await expect(page.getByText("TTL: 24 h")).toBeVisible()
     await expect(page.getByText("restricted")).toBeVisible()
     await expect(page.getByText("github.com", { exact: true }).last()).toBeVisible()
