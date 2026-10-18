@@ -47,7 +47,7 @@ export function StatusPill({ status, label, tone, live = false, icon, size = "sm
       data-slot="status-pill"
       data-tone={tone ?? meta.tone}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-transparent font-mono font-semibold tracking-[0.02em]",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-transparent font-semibold tabular-nums tracking-[0.01em]",
         size === "sm" ? "h-5 px-2 text-[0.65625rem]" : "h-6 px-2.5 text-micro",
         t.pill,
         className,

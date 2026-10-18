@@ -131,7 +131,7 @@ export function SidebarFacetBlock({
         <span className="text-micro font-semibold text-muted-foreground-soft">Filter</span>
         {activeCount > 0 && (
           <>
-            <span data-testid="facet-block-count" className="font-mono text-micro tabular-nums text-muted-foreground-soft">
+            <span data-testid="facet-block-count" className="text-micro tabular-nums text-muted-foreground-soft">
               {activeCount}
             </span>
             {onClear && (
@@ -303,7 +303,7 @@ function FacetOption({ value, on, onToggle }: { value: SidebarFacetValue; on: bo
       {value.icon}
       <span className="min-w-0 flex-1 truncate">{value.label}</span>
       {value.count != null && (
-        <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground-soft">{value.count}</span>
+        <span className="shrink-0 text-micro tabular-nums text-muted-foreground-soft">{value.count}</span>
       )}
     </button>
   )
@@ -359,7 +359,7 @@ function FacetAll({
                     {v.icon}
                     <span className="min-w-0 flex-1 truncate text-control">{v.label}</span>
                     {v.count != null && (
-                      <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{v.count}</span>
+                      <span className="text-micro tabular-nums text-muted-foreground-soft">{v.count}</span>
                     )}
                   </CommandItem>
                 )

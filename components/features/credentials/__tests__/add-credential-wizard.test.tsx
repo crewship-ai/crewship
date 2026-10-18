@@ -58,6 +58,8 @@ function renderWizard(overrides: { onSuccess?: () => void; onCancel?: () => void
 /** Walk to step 2 with the given shape selected. */
 function pickShape(label: RegExp) {
   fireEvent.click(screen.getByRole("button", { name: label }))
+  // v67: a card selects; Continue goes on.
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
 }
 
 function bodyOf(call: unknown[]): Record<string, unknown> {
@@ -76,7 +78,7 @@ describe("step 1 — the shape decides the form, not the brand", () => {
     renderWizard()
     expect(screen.queryByRole("button", { name: /^provider login/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("group", { name: /choose.*provider/i })).not.toBeInTheDocument()
-    for (const label of ["Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
+    for (const label of ["API key or token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
       // Anchored: "Login" must not also match the "Provider login" tile.
       expect(screen.getByRole("button", { name: new RegExp("^" + label, "i") })).toBeInTheDocument()
     }
@@ -84,7 +86,7 @@ describe("step 1 — the shape decides the form, not the brand", () => {
 
   it("asks a Token for one secret and nothing else", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     expect(screen.getByLabelText(/^token$/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^username$/i)).not.toBeInTheDocument()
   })
@@ -119,9 +121,15 @@ describe("step 1 — the shape decides the form, not the brand", () => {
 // Harbor 2 step 1: "Paste the value, or pick the type". Recognition happens in
 // the browser; nothing is sent until Save. Prefixes followed by filler only.
 describe("paste to start", () => {
-  it("recognises a Stripe-shaped key, fills the name and moves the value to Details", () => {
+  it("recognises a Stripe-shaped key, says so, and fills the name when you Continue", () => {
     renderWizard()
     fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value: "sk_live_" + "x".repeat(24) } })
+    // PAR-149: a banner first (v67), the step moves only on Continue.
+    expect(screen.getByRole("button", { name: /what it is/i })).toHaveAttribute("aria-current", "step")
+    const banner = screen.getByRole("status")
+    expect(banner.textContent).toContain("Looks like a Stripe secret key")
+    expect(banner.textContent).toContain("Name, type and the variable")
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
     expect(document.getElementById("cred-name")).toHaveValue("Stripe secret key")
     expect(document.getElementById("cred-primary")).toHaveValue("sk_live_" + "x".repeat(24))
@@ -133,8 +141,55 @@ describe("paste to start", () => {
     render(<AddCredentialWizard workspaceId="ws1" onSuccess={vi.fn()} onCancel={vi.fn()} onAddProvider={onAddProvider} />)
     fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value: "sk-ant-" + "y".repeat(24) } })
     expect(screen.getByRole("button", { name: /what it is/i })).toHaveAttribute("aria-current", "step")
-    fireEvent.click(screen.getByRole("button", { name: /add as ai provider/i }))
+    fireEvent.click(screen.getAllByRole("button", { name: /add as ai provider/i })[0])
     expect(onAddProvider).toHaveBeenCalled()
+  })
+})
+
+// PAR-149: the rest of v67's step 1.
+describe("step 1 copy and actions (v67)", () => {
+  it("names the six types and describes them as v67 does", () => {
+    renderWizard()
+    const grid = screen.getByTestId("shape-grid")
+    for (const [name, blurb] of [
+      ["API key or token", "One value: a key, token or PAT"],
+      ["Login", "Username and password"],
+      ["Key pair", "Access key id, secret and region (AWS style)"],
+      ["SSH key", "Private key, passphrase, public key"],
+      ["File", "A whole file: kubeconfig, service account JSON, .env"],
+      ["Certificate", "PEM, private key and CA"],
+    ]) {
+      const card = within(grid).getByRole("button", { name: new RegExp("^" + name, "i") })
+      expect(card.textContent).toContain(blurb)
+    }
+  })
+
+  it("preselects API key or token and a card selects without leaving the step", () => {
+    renderWizard()
+    expect(screen.getByRole("button", { name: /^API key or token/ })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: /^Login/ }))
+    expect(screen.getByRole("button", { name: /^Login/ })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /^API key or token/ })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: /what it is/i })).toHaveAttribute("aria-current", "step")
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.getByLabelText(/^username$/i)).toBeInTheDocument()
+  })
+
+  it("keeps the AI provider hint and the connected-apps note on screen", () => {
+    const onAddProvider = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" onSuccess={vi.fn()} onCancel={vi.fn()} onAddProvider={onAddProvider} />)
+    expect(screen.getByText(/Pasting/).textContent).toContain("sk-ant-")
+    expect(screen.getByText(/Pasting/).textContent).toContain("That is an AI provider")
+    fireEvent.click(screen.getByRole("button", { name: /^add as ai provider$/i }))
+    expect(onAddProvider).toHaveBeenCalled()
+    expect(screen.getByText(/Connected apps \(OAuth for Slack, Notion, Google Drive…\)/).textContent).toContain("From integrations")
+  })
+
+  it("has a Continue in the footer that goes on with the selected type", () => {
+    renderWizard()
+    const footer = screen.getByTestId("wizard-footer")
+    fireEvent.click(within(footer).getByRole("button", { name: /^continue$/i }))
+    expect(screen.getByLabelText(/^token$/i)).toBeInTheDocument()
   })
 })
 
@@ -187,7 +242,7 @@ describe("layout on a touch device", () => {
 
   it("docks the actions in a footer the scrolling body cannot carry off-screen", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     const body = screen.getByTestId("wizard-body")
     const footer = screen.getByTestId("wizard-footer")
     expect(body.className).toContain("overflow-y-auto")
@@ -203,7 +258,7 @@ describe("layout on a touch device", () => {
   // one place that number is now decided; this surface used to be 40.5px.
   it("gives the footer buttons a thumb-sized target and the width to share", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     const cont = screen.getByRole("button", { name: /^continue$/i })
     expect(cont.className).toContain("coarse:h-[44px]")
     expect(cont.className).toContain("max-sm:flex-[2]")
@@ -228,7 +283,7 @@ describe("layout on a touch device", () => {
     expect(tile.className).toContain("min-h-20")
     // The blurb is the thing that distinguishes "Key pair" from "Token" for
     // anyone who has not read the PRD; it is not decoration to be dropped.
-    expect(within(tile).getByText("PEM chain for mTLS")).toBeInTheDocument()
+    expect(within(tile).getByText("PEM, private key and CA")).toBeInTheDocument()
   })
 })
 
@@ -237,12 +292,11 @@ describe("layout on a touch device", () => {
 // icon lives on the first step now, next to the shape, and it is still a hint:
 // nothing about it gates the flow.
 describe("the brand icon belongs beside the name", () => {
-  it("starts without a selected type or an unnecessary Continue", () => {
+  it("starts on step 1 with API key or token preselected, as v67 does", () => {
     renderWizard()
     expect(screen.queryByRole("button", {name: /provider: generic secret/i})).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", {name: /^continue$/i})).not.toBeInTheDocument()
-    expect(screen.getByRole("button", {name: /^Token/})).toHaveAttribute("aria-pressed", "false")
-    pickShape(/^token/i)
+    expect(screen.getByRole("button", {name: /^API key or token/})).toHaveAttribute("aria-pressed", "true")
+    pickShape(/^api key or token/i)
     expect(screen.getByRole("button", {name: /provider: generic secret/i})).toBeInTheDocument()
   })
 })
@@ -521,7 +575,7 @@ describe("provider login (#2428)", () => {
 describe("brand detection is a hint", () => {
   it("recognises a pasted GitHub PAT and suggests a variable name", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "github_pat_11ABCDE" } })
     expect(screen.getByText(/looks like github/i)).toBeInTheDocument()
     expect(screen.getByText("GH_TOKEN")).toBeInTheDocument()
@@ -531,7 +585,7 @@ describe("brand detection is a hint", () => {
   // anybody down.
   it("lets an unrecognised value through with no brand and no complaint", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "zzz-some-internal-thing" } })
     expect(screen.queryByText(/looks like/i)).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "internal-thing" } })
@@ -540,7 +594,7 @@ describe("brand detection is a hint", () => {
 
   it("also detects the brand from the name when the value shape says nothing", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "opaque-value" } })
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "gitlab-ci" } })
     expect(screen.getByText(/looks like gitlab/i)).toBeInTheDocument()
@@ -550,7 +604,7 @@ describe("brand detection is a hint", () => {
 describe("secrets are masked by default", () => {
   it("renders the primary secret input masked until the user asks to see it", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     const input = screen.getByLabelText(/^token$/i) as HTMLInputElement
     expect(input.type).toBe("password")
     fireEvent.click(screen.getByRole("button", { name: /^show token$/i }))
@@ -576,7 +630,7 @@ describe("step 2 → 3 gating", () => {
 
   it("will not continue without a name", () => {
     renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
@@ -585,7 +639,7 @@ describe("step 2 → 3 gating", () => {
 
 /** Fill a token credential and land on step 3. */
 function toScopeStep(name = "github-acme", value = "github_pat_11ABCDE") {
-  pickShape(/^token/i)
+  pickShape(/^api key or token/i)
   fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value } })
   fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: name } })
   fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
@@ -701,7 +755,7 @@ describe("saving", () => {
 
   it("sends user-added custom fields with the secrecy the user chose", async () => {
     const { onSuccess } = renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
     fireEvent.click(screen.getByRole("button", { name: /add a field/i }))
     fireEvent.change(screen.getByLabelText(/custom field 1 key/i), { target: { value: "tenant_id" } })
@@ -724,7 +778,7 @@ describe("saving", () => {
   // warning read — the wizard just never offered a control for it.
   it("sends the expiry date as an ISO string when the user sets one", async () => {
     const { onSuccess } = renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "expiring-thing" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
@@ -738,7 +792,7 @@ describe("saving", () => {
 
   it("omits the expiry entirely when the user leaves it blank", async () => {
     const { onSuccess } = renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "no-expiry-thing" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
@@ -754,7 +808,7 @@ describe("saving", () => {
   // without a second visit to the edit dialog.
   it("carries tags typed on the create path", async () => {
     const { onSuccess } = renderWizard()
-    pickShape(/^token/i)
+    pickShape(/^api key or token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
     // "(optional)" moved out of the label and into the kit's hint line
     // under the control, where every other optional field says it.

@@ -150,7 +150,7 @@ const SIDEBAR_MODES: { key: SidebarModeKey; label: string; hint: string; icon: L
  * returning to whichever rail mode was chosen.
  */
 function SidebarModeMenu() {
-  const { sidebarMode, setSidebarMode, togglePinned, setPeekOnHover } = useSidebar()
+  const { sidebarMode, setSidebarMode, togglePinned, setPeekOnHover, state } = useSidebar()
   const current = SIDEBAR_MODES.find((m) => m.key === sidebarMode) ?? SIDEBAR_MODES[1]
   const choose = (key: string) => {
     if (key === "pinned") {
@@ -170,21 +170,31 @@ function SidebarModeMenu() {
             <kbd className="rail-label ml-auto font-mono text-micro text-muted-foreground-soft">⌘B</kbd>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="end" sideOffset={8} className="w-60">
-          <DropdownMenuLabel className="text-micro font-normal text-muted-foreground">Sidebar</DropdownMenuLabel>
+        <DropdownMenuContent
+          side={state === "expanded" ? "top" : "right"}
+          align={state === "expanded" ? "start" : "end"}
+          sideOffset={state === "expanded" ? 6 : 8}
+          className="w-[280px]"
+        >
+          <DropdownMenuLabel className="text-micro font-semibold text-muted-foreground">Sidebar</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={sidebarMode} onValueChange={choose}>
             {SIDEBAR_MODES.map(({ key, label, hint, icon: Icon }) => (
-              <DropdownMenuRadioItem key={key} value={key} className="items-start gap-2">
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="grid leading-tight">
-                  <span>{label}</span>
-                  <span className="text-micro text-muted-foreground">{hint}</span>
+              <DropdownMenuRadioItem key={key} value={key} className="items-center gap-2.5">
+                <span data-slot="mode-tile" className="grid size-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="grid min-w-0 flex-1 leading-tight">
+                  <b className="truncate font-semibold">{label}</b>
+                  <span className="truncate text-micro text-muted-foreground">{hint}</span>
                 </span>
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
-          <p className="px-2 py-1 text-micro text-muted-foreground">⌘B pins and unpins</p>
+          <p className="flex items-center gap-1.5 px-2 py-1 text-micro text-muted-foreground">
+            <kbd className="rounded border border-border bg-card px-1 font-mono text-micro text-muted-foreground-soft">⌘B</kbd>
+            pins and unpins
+          </p>
         </DropdownMenuContent>
       </DropdownMenu>
     </SidebarMenuItem>
