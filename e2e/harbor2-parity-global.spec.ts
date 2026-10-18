@@ -7,6 +7,14 @@ import { test, expect } from "@playwright/test"
 
 test.describe("desktop 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
+  // v67 draws the sidebar pinned; the product default is the hover rail, which
+  // folds the user row's labels away and opens the user menu beside the rail.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("crewship_sidebar_mode", "pinned")
+      localStorage.setItem("crewship-appearance-sync", "0")
+    })
+  })
 
   test("sidebar rows start 8 px from the sidebar edge (PAR-003)", async ({ page }) => {
     await page.goto("/")
