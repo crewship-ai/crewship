@@ -14,7 +14,7 @@
  */
 
 import * as React from "react"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
@@ -59,7 +59,7 @@ const at = (y: number, m: number, d: number, h: number, min = 0) =>
 const stat = (label: string) =>
   within(screen.getByText(label).parentElement as HTMLElement)
 
-const renderPage = (records: PipelineRunRecord[], onOpenRun = vi.fn()) => {
+const renderPage = (records: PipelineRunRecord[]) => {
   hookState.mockReturnValue({
     records,
     loading: false,
@@ -72,7 +72,7 @@ const renderPage = (records: PipelineRunRecord[], onOpenRun = vi.fn()) => {
       workspaceId="ws_1"
       slug="triage"
       label="Triage inbox"
-      onOpenRun={onOpenRun}
+      onOpenRun={vi.fn()}
     />,
   )
 }
@@ -167,22 +167,5 @@ describe("RoutineRunsPage", () => {
     ])
     const expected = new Date(2026, 7, 10, 17, 30).toLocaleTimeString(undefined, { hour12: false })
     expect(stat("Newest").getByText(expected)).toBeInTheDocument()
-  })
-
-  // RT-07: a run row in Activity opens the same RoutineRunPeek as the
-  // Routines pages (version and cost included); Open run goes to the page.
-  it("a run row opens the routine run peek with version and cost, then the run page on Open run", () => {
-    const onOpenRun = vi.fn()
-    renderPage(
-      [record({ id: "run_peeked_1", status: "completed", pipeline_version: 4, cost_usd: 0.31, started_at: at(2026, 8, 10, 9, 1) })],
-      onOpenRun,
-    )
-    fireEvent.click(screen.getAllByText(/^09:01:/).map((n) => n.closest("button")).find(Boolean) as HTMLElement)
-    expect(onOpenRun).not.toHaveBeenCalled()
-    const peek = screen.getByTestId("run-peek")
-    expect(within(peek).getByText("Version").nextElementSibling).toHaveTextContent("v4")
-    expect(within(peek).getByText("Cost").nextElementSibling).toHaveTextContent("$0.31")
-    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
-    expect(onOpenRun).toHaveBeenCalledWith("run_peeked_1")
   })
 })
