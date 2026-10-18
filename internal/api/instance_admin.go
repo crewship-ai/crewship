@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -331,23 +332,11 @@ func auditInstance(ctx context.Context, r *http.Request, tx instanceAuditExecer,
 		}
 		meta = string(b)
 	}
-	nullable := func(s string) any {
-		if s == "" {
-			return nil
-		}
-		return s
-	}
+	nullable := func(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
 	// r is nil for a change the server makes on its own (the bootstrap).
 	ip, ua := "", ""
 	if r != nil {
 		ip, ua = clientIP(r), r.UserAgent()
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO instance_audit_logs (id, user_id, action, entity_type, entity_id, target_workspace_id, metadata, ip_address, user_agent, created_at)
-		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullable(userID), action, entityType, nullable(entityID), nullable(targetWorkspaceID), meta,
-		nullable(ip), nullable(ua), tsformat.Format(time.Now())); err != nil {
-		return fmt.Errorf("instance audit %s: %w", action, err)
-	}
-	return nil
+	return appendInstanceAudit(ctx, tx, journal.InstanceAuditFields{ID: generateCUID(), UserID: nullable(userID), Action: action, EntityType: entityType, EntityID: nullable(entityID), TargetWorkspaceID: nullable(targetWorkspaceID), Metadata: sql.NullString{String: meta, Valid: true}, IPAddress: nullable(ip), UserAgent: nullable(ua), CreatedAt: tsformat.Format(time.Now())})
 }
