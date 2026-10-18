@@ -82,16 +82,23 @@ describe("PAR-087 section list rows", () => {
 })
 
 describe("PAR-088 card header", () => {
-  it("is the 68 px v67 header: 14 px padding, 32 px tile, 13 px title, 12 px subtitle", () => {
+  it("is the 68 px v67 header: 14 px padding, 32 px tile, a 21 px title line over an 18 px subtitle line", () => {
     render(<SettingsCard title="Account" description="Your identity on this instance" icon={Building}><p>row</p></SettingsCard>)
     const header = screen.getByRole("region", { name: "Account" }).querySelector("[data-slot=settings-card-header]")!
     const cls = header.className.split(" ")
-    // 14 px padding (py-4 is 0.92rem, 13.7 px at Small) around the content:
-    // 32 px tile / 20 px title + 16 px subtitle, so 68 px with a subtitle.
-    expect(cls).toContain("py-4")
+    // v67 `.scard header` at Compact (a 14.857 px root): padding 14 px
+    // (0.9423rem; py-4 is 0.92rem, 13.7 px), a 1.5 line-height title (21 px)
+    // and subtitle (18 px): 14 + 21 + 18 + 14 + 1 = 68 px. The old 20 px /
+    // 15 px lines with py-4 came to 62 px in a browser.
+    expect(cls).toContain("py-[0.9423rem]")
     expect(cls.some((c) => c.startsWith("min-h-"))).toBe(false)
-    expect(screen.getByRole("heading", { name: "Account" }).className).toContain("text-control")
-    expect(screen.getByText("Your identity on this instance").className).toContain("text-label")
+    const title = screen.getByRole("heading", { name: "Account" })
+    expect(title.className).toContain("text-control")
+    expect(title.className.split(" ")).toContain("leading-[1.4135rem]")
+    const sub = screen.getByText("Your identity on this instance")
+    expect(sub.className).toContain("text-label")
+    expect(sub.className.split(" ")).toContain("leading-[1.2115rem]")
+    expect(sub.className.split(" ")).not.toContain("mt-0.5")
   })
 })
 

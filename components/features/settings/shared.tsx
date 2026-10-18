@@ -90,6 +90,7 @@ export function SettingsCard({
   bodyClassName,
   footer,
   hideHeader = false,
+  compactHeader = false,
 }: {
   title: string
   description?: string
@@ -100,6 +101,9 @@ export function SettingsCard({
   /** A card the section head already names (Notification sounds): the title
    *  stays only as the region's accessible name. */
   hideHeader?: boolean
+  /** The 50 px one-line v67 dashboard-card header (Admin overview) in place
+   *  of the 68 px settings one. */
+  compactHeader?: boolean
   className?: string
   /** Classes for the body under the header (e.g. flex-1 in a stretched card). */
   bodyClassName?: string
@@ -121,7 +125,7 @@ export function SettingsCard({
       {hideHeader ? (
         <h3 id={titleId} className="sr-only">{title}</h3>
       ) : (
-        <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
+        <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} compact={compactHeader} />
       )}
       <PageSaveLabel label={title}>
         <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
@@ -139,6 +143,7 @@ function SettingsCardHeader({
   icon: Icon,
   tint,
   danger = false,
+  compact = false,
 }: {
   title: string
   titleId?: string
@@ -147,14 +152,23 @@ function SettingsCardHeader({
   icon?: LucideIcon
   tint?: string
   danger?: boolean
+  compact?: boolean
 }) {
   return (
     // The v67 card header (`.scard header`: 14 px padding around a 32 px tile,
-    // a 13 px semibold title over a 12 px subtitle, 68 px with both) at the
+    // a 21 px title line over an 18 px subtitle line, 68 px with both) at the
     // Small text size (a 14.857px root; it scales with Standard and Large).
     // The height is the padding around the content, not a floor: a header with
     // no subtitle is the 60 px v67 draws, and a long description may grow.
-    <div data-slot="settings-card-header" className="flex items-center gap-3 border-b border-border px-4 py-4">
+    // `compact` is the v67 dashboard-card header (`.card-h`, 50 px, one
+    // line) the Admin overview draws its cards with.
+    <div
+      data-slot="settings-card-header"
+      className={cn(
+        "flex items-center gap-3 border-b border-border px-4",
+        compact ? "min-h-[3.3654rem] py-[0.5385rem]" : "py-[0.9423rem]",
+      )}
+    >
       {Icon && (
         <span
           className="icon-tile inline-flex size-[var(--control-md)] shrink-0 items-center justify-center rounded-lg"
@@ -165,11 +179,11 @@ function SettingsCardHeader({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <h3 id={titleId} className={cn("text-control font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
+        <h3 id={titleId} className={cn("text-control font-semibold leading-[1.4135rem] tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
           {title}
         </h3>
         {description && (
-          <p className="mt-0.5 text-label leading-snug text-muted-foreground">{description}</p>
+          <p className="text-label leading-[1.2115rem] text-muted-foreground">{description}</p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}

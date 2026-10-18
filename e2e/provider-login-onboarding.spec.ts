@@ -283,7 +283,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     })
     await page.goto("/credentials")
     await page.getByRole("button", { name: "Add secret", exact: true }).first().click()
+    // v67 Add secret step 1 (70e45768a): a card selects, Continue goes on.
     await page.getByRole("button", { name: /^Login/ }).click()
+    await expect(page.getByRole("button", { name: /^Login/ })).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click()
     await page.getByLabel("Name", { exact: true }).fill("support-login")
     await page.getByLabel("Username", { exact: true }).fill("support-bot")
     await page.getByLabel("Password", { exact: true }).fill("fixture-only-password")
@@ -324,7 +327,11 @@ for (const width of [1280, 390]) {
     })
     await page.goto("/credentials")
     await page.getByRole("button", {name:"Add secret",exact:true}).first().click()
-    await page.getByRole("button", {name:/^File JSON/}).click()
+    // v67 Add secret step 1 (70e45768a): the File card reads "File", and a
+    // card selects; Continue goes on.
+    await page.getByRole("button", {name:/^File A whole file/}).click()
+    await expect(page.getByRole("button", {name:/^File A whole file/})).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("dialog").getByRole("button", {name:"Continue",exact:true}).click()
     await page.getByLabel("Name",{exact:true}).fill("Deployment config")
     const contents = '{\r\n  "fixture": true\r\n}\r\n'
     await page.getByLabel("Choose credential file",{exact:true}).setInputFiles({name:"deployment.json",mimeType:"application/json",buffer:Buffer.from(contents)})

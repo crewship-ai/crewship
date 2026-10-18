@@ -382,6 +382,11 @@ for (const vp of [{ name: "tablet 1024", width: 1024, height: 800 }, { name: "ph
 // PAR-019…023, 144 (#3577): the list toolbar, the Overview typography and the
 // bell popovers match v67. Checked in a real browser at 1440 / 1024 / 390.
 test.describe("v67 parity", () => {
+  const WAITING = inboxRow({
+    id: "e-parity", kind: "escalation", blocking: true, state: "unread", title: "Scout needs a Linear token",
+    sender_type: "agent", sender_name: "scout", payload: { escalation_type: "GENERAL" },
+  })
+
   test.describe("desktop 1440", () => {
     test.use({ viewport: { width: 1440, height: 900 } })
 
@@ -399,6 +404,9 @@ test.describe("v67 parity", () => {
 
     test("Overview: 13 px semibold tile titles, hints not clipped, 28 px card tiles", async ({ page }) => {
       await seed(page)
+      // The Overview needs something to handle; an empty inbox shows its
+      // empty state instead (the nightly seed has none).
+      await serveFeed(page, { inbox: [WAITING] })
       await page.goto("/inbox")
       const overview = page.getByTestId("inbox-overview")
       await expect(overview).toBeVisible()
@@ -421,6 +429,9 @@ test.describe("v67 parity", () => {
 
     test("bells: Inbox lists every kind chip; Activity is a 480 px panel with the fleet line and its chips", async ({ page }) => {
       await seed(page)
+      // The chip strip shows only when there is something to filter
+      // (inbox-bell-chips.test.tsx); the nightly seed has an empty inbox.
+      await serveFeed(page, { inbox: [WAITING] })
       await page.goto("/")
       await page.getByTestId("bell-trigger").click()
       for (const kind of ["all", "decision", "input", "review", "repair"]) await expect(page.getByTestId(`bell-chip-${kind}`)).toBeVisible()

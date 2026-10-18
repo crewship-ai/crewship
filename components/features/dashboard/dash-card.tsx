@@ -50,9 +50,11 @@ export function DashCard({
       className={cn("min-w-0 overflow-hidden rounded-card border border-border bg-card", className)}
       {...rest}
     >
-      <header className="flex min-h-12 items-center gap-2.5 px-4 pb-2 pt-3.5">
+      {/* v67 `.card-h` at Compact (a 14.857 px root): a 50 px floor
+          (3.3654rem) around a 28 px tile (1.8846rem), 8 px above and below. */}
+      <header className="flex min-h-[3.3654rem] items-center gap-2.5 px-4 py-[0.5385rem]">
         {(concept || icon) && (
-          <ConceptIcon concept={concept} icon={icon} accent="blue" variant="chip" className="h-7 w-7 rounded-md" />
+          <ConceptIcon concept={concept} icon={icon} accent="blue" variant="chip" className="size-[1.8846rem] rounded-md" />
         )}
         <h2 className="min-w-0 truncate text-control font-semibold text-foreground">{title}</h2>
         {meta != null && (

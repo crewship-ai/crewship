@@ -83,6 +83,8 @@ test.describe("desktop", () => {
       // 820 px, or the room there is (the panel takes 272 px of a 1024 px page).
       expect(Math.round(column)).toBeLessThanOrEqual(820)
       if (width === 1440) expect(Math.round(column)).toBe(820)
+      // COM-05: on a tablet the panel starts closed; its button opens it.
+      if (width < 1280) await page.getByTestId("secondary-panel-button").click()
       const row = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance" })
       expect(Math.round((await row.boundingBox())!.height)).toBe(34)
       const account = page.getByRole("region", { name: "Account" }).locator("[data-slot=settings-card-header]")
@@ -499,7 +501,12 @@ test.describe("v67 parity", () => {
       test("PAR-110/111/112/113/114 audit log: spaces card, 24-hour times, solid bars, info banner, icon-only refresh", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/audit")
-        const crumb = page.getByRole("banner").getByText(/^Audit\s?log$/).first()
+        // The top bar: its <header> sits inside <main>, so it is not a banner
+        // landmark in the app (it is one only when rendered on its own).
+        // On a phone the bar carries only Back; the page's h1 is the title.
+        const crumb = width < 768
+          ? page.getByRole("heading", { name: "Audit log", level: 1 })
+          : page.locator("header:has([data-slot=page-bar])").getByText(/^Audit\s?log$/).first()
         // The word space survives the heading's tracking (PAR-110).
         await expect(page.getByRole("heading", { name: "Audit log" }).first()).toBeVisible()
         expect(await crumb.evaluate((el) => parseFloat(getComputedStyle(el).letterSpacing) || 0)).toBeGreaterThan(-0.2)
@@ -511,7 +518,11 @@ test.describe("v67 parity", () => {
         await expect(events.getByRole("button", { name: "Refresh audit log" })).toHaveText("")
         const time = events.locator("[data-audit-weight] .tabular-nums").first()
         if (await time.count()) await expect(time).toHaveText(/^\d{2}:\d{2}$|^$/)
-        if (width >= 1024) await expect(page.locator("[data-slot=panel-spaces]").getByRole("tab")).toHaveCount(4)
+        if (width >= 1024) {
+          // COM-05: on a tablet the panel starts closed; its button opens it.
+          if (width < 1280) await page.getByTestId("secondary-panel-button").click()
+          await expect(page.locator("[data-slot=panel-spaces]").getByRole("tab")).toHaveCount(4)
+        }
       })
     })
   }
