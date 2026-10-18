@@ -236,7 +236,7 @@ export function MobileWorkspaceSwitcher({ onNavigate }: { onNavigate?: () => voi
           <button
             type="button"
             aria-label={`Current workspace: ${label}`}
-            className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent"
+            className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent"
           >
             {workspace ? (
               <WorkspaceMark name={label} logoUrl={shown.logo}

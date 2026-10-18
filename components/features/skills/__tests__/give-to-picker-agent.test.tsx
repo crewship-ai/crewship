@@ -68,7 +68,7 @@ describe("GiveToPicker direction agent-to-skills", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("max-sm:bottom-0")
     const row = screen.getByRole("checkbox", { name: "PDF reports" }).closest("label")!
-    expect(row.className).toContain("min-h-11")
+    expect(row.className).toContain("min-h-[44px]")
     expect(dialog.className).toContain("sm:max-w-[480px]")
   })
 })

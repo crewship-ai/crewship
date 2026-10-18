@@ -108,7 +108,7 @@ export function RoutineDecisionFormBuilder({
               <span>After this decision</span>
               <select
                 aria-label={`Outcome of decision ${index + 1}`}
-                className="min-h-10 w-full rounded-md border bg-background px-3 text-sm"
+                className="min-h-[44px] w-full rounded-md border bg-background px-3 text-sm"
                 value={action.approved ? "continue" : "stop"}
                 onChange={(e) => patchAction(index, { approved: e.target.value === "continue" })}
               >

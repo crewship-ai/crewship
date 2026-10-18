@@ -112,7 +112,7 @@ export function AccentPicker({ className, showLabels = false }: { className?: st
               aria-label={label}
               onClick={() => setAccent(id)}
               className={cn(
-                "group flex h-11 items-center gap-2.5 rounded-xl border px-2.5 text-left outline-none transition-colors",
+                "group flex h-[44px] items-center gap-2.5 rounded-xl border px-2.5 text-left outline-none transition-colors",
                 "hover:border-line-strong hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/50",
                 checked ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border",
               )}

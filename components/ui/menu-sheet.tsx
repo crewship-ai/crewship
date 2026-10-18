@@ -95,7 +95,7 @@ export function MenuSheet({
 }
 
 const SHEET_ROW =
-  "flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-accent focus-visible:bg-accent [&_svg]:shrink-0"
+  "flex min-h-[44px] w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-accent focus-visible:bg-accent [&_svg]:shrink-0"
 
 type SelectEvent = { preventDefault: () => void }
 

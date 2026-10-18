@@ -889,7 +889,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               aria-pressed={active}
               onClick={() => setFeatureCategoryFilter(active ? "all" : cat)}
               className={cn(
-                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-12",
+                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-[44px]",
                 active
                   ? "border-primary/40 bg-primary/15 text-primary-hover"
                   : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
@@ -925,7 +925,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                 type="button"
                 onClick={() => toggleFeature(ref)}
                 aria-label={`Remove ${tool}`}
-                className="flex h-7 items-center gap-1.5 rounded-md border border-primary/40 bg-primary/[0.12] pl-2 pr-1.5 text-xs text-primary-hover transition-colors hover:bg-primary/20 coarse:h-10 group-data-[mobile=true]/surface:h-10"
+                className="flex h-7 items-center gap-1.5 rounded-md border border-primary/40 bg-primary/[0.12] pl-2 pr-1.5 text-xs text-primary-hover transition-colors hover:bg-primary/20 coarse:h-[44px] group-data-[mobile=true]/surface:h-[44px]"
               >
                 {BrandIcon && (
                   <BrandIcon className="h-3.5 w-3.5" style={brandColor ? { color: brandColor } : undefined} />
@@ -1192,7 +1192,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               aria-pressed={active}
               onClick={() => setRuntimeCategoryFilter(active ? "all" : cat)}
               className={cn(
-                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-12",
+                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-[44px]",
                 active
                   ? "border-primary/40 bg-primary/15 text-primary-hover"
                   : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",

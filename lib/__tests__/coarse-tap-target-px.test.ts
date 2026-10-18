@@ -24,7 +24,16 @@ const INTERACTIVE = /^(button|a|label|input|select|textarea|summary|Button|Link|
 const INTERACTIVE_ROLE = /role=["'{](?:button|menuitem|menuitemcheckbox|menuitemradio|option|switch|radio|checkbox|tab|link)/
 
 // Reason per entry; a key is "<file> <class>". A stale entry fails the test.
-const FLOOR_ALLOW: Record<string, string> = {}
+const FLOOR_ALLOW: Record<string, string> = {
+  "components/features/activity-stream/feed-row.tsx min-w-12": "timestamp column width in a feed row, not a control",
+  "components/features/calendar/calendar-views.tsx min-h-11": "month-grid day cell; the events inside it are the targets",
+  "components/features/crews/cr-card.tsx min-h-12": "card header band, not a control (its own buttons size themselves)",
+  "components/features/dashboard/dash-card.tsx min-h-12": "card header band, not a control",
+  "components/features/pages/folder-sharing-dialog.tsx min-h-10": "ACL table rows; the selects and buttons inside are the targets",
+  "components/features/skills/skill-page.tsx min-h-12": "read-only list items; inline actions size themselves",
+  "components/features/skills/skills-views.tsx min-h-12": "read-only list items; inline actions size themselves",
+  "components/features/settings/sections/pages-appearance-card.tsx min-h-10": "theme-token row layout; the swatch/colour input is the target and fills its own box",
+}
 const FIXED_ALLOW: Record<string, string> = {}
 
 function lineOf(src: string, idx: number): number {

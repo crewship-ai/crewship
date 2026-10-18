@@ -150,7 +150,7 @@ function PhoneRows({ rows, onOpen }: { rows: SkillRow[]; onOpen: (id: string) =>
         const trust = skillTrust(s)
         return (
           <li key={s.id} className="border-b border-border last:border-0">
-            <button type="button" data-slot="skill-row" onClick={() => onOpen(s.id)} className="row-hover flex min-h-12 w-full items-center gap-3 px-3.5 py-2.5 text-left">
+            <button type="button" data-slot="skill-row" onClick={() => onOpen(s.id)} className="row-hover flex min-h-[44px] w-full items-center gap-3 px-3.5 py-2.5 text-left">
               <SkillSourceMark skill={s} size={28} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-control font-medium">{skillName(s)}</span>

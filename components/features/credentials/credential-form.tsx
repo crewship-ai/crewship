@@ -572,7 +572,7 @@ export function CredentialForm({
         aria-expanded={advancedOpen}
         onClick={() => setAdvancedOpen((o) => !o)}
         aria-controls="credential-access-settings"
-        className="flex min-h-10 w-full items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        className="flex min-h-[44px] w-full items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
         {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <ShieldCheck className="h-3.5 w-3.5" /> Access & security

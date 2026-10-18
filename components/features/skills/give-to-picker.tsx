@@ -231,7 +231,7 @@ function GiveToAgentsPicker({ skills, workspaceId, agents, crews, onClose }: Giv
           const name = crew?.name ?? "No crew"
           return (
             <div key={crew?.id ?? "none"} className="border-b border-border last:border-0" role="group" aria-label={name}>
-              <label className="flex min-h-11 cursor-pointer items-center gap-2.5 px-4 py-2 text-control font-semibold sm:px-5">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 px-4 py-2 text-control font-semibold sm:px-5">
                 <Checkbox
                   checked={state}
                   aria-label={`Give to the whole ${name} crew`}
@@ -251,7 +251,7 @@ function GiveToAgentsPicker({ skills, workspaceId, agents, crews, onClose }: Giv
                 const value = draft.get(a.id) ?? false
                 const missing = list.flatMap((s) => (s.installed_on ?? []).find((h) => h.agent_id === a.id)?.missing_credentials ?? [])
                 return (
-                  <label key={a.id} className="row-hover flex min-h-11 cursor-pointer items-center gap-2.5 py-1.5 pl-10 pr-4 text-control sm:pr-5">
+                  <label key={a.id} className="row-hover flex min-h-[44px] cursor-pointer items-center gap-2.5 py-1.5 pl-10 pr-4 text-control sm:pr-5">
                     <Checkbox checked={value} aria-label={a.name} onCheckedChange={() => set([a.id], value !== true)} />
                     <AgentAvatar
                       seed={a.avatar_seed ?? a.slug}
@@ -401,7 +401,7 @@ function GiveToSkillsPicker({ agent, library, loadFailed, held, write, onApplied
       ) : (
         <div role="group" aria-label="Skills">
           {shown.map((s) => (
-            <label key={s.id} className="row-hover flex min-h-11 cursor-pointer items-center gap-2.5 border-b border-border px-4 py-1.5 text-control last:border-0 sm:px-5">
+            <label key={s.id} className="row-hover flex min-h-[44px] cursor-pointer items-center gap-2.5 border-b border-border px-4 py-1.5 text-control last:border-0 sm:px-5">
               <Checkbox checked={draft.has(s.id)} aria-label={skillLabel(s)} onCheckedChange={() => toggle(s.id)} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{skillLabel(s)}</span>

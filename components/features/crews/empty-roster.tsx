@@ -134,7 +134,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                       type="button"
                       onClick={() => onAgentSelect(a.slug)}
                       className={cn(
-                        "w-full min-h-11 px-4 py-2.5 hover:bg-foreground/[0.03] text-left",
+                        "w-full min-h-[44px] px-4 py-2.5 hover:bg-foreground/[0.03] text-left",
                         "flex items-center gap-3",
                         GRID,
                       )}

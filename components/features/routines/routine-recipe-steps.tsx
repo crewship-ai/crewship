@@ -169,7 +169,7 @@ export function RoutineRecipeSteps({
           {label}
           <select
             aria-label={label}
-            className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+            className="h-[44px] w-full rounded-md border bg-background px-3 text-sm"
             value=""
             onChange={(event) => {
               const source = choices.find((s) => s.value === event.target.value)
@@ -441,7 +441,7 @@ export function RoutineRecipeSteps({
                       Data source
                       <select
                         aria-label="Data source"
-                        className="h-11 w-full rounded-md border bg-background px-3 text-sm"
+                        className="h-[44px] w-full rounded-md border bg-background px-3 text-sm"
                         value={
                           dataSources.some((s) => s.value === object(selected.transform).input)
                             ? String(object(selected.transform).input)
