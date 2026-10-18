@@ -12,6 +12,9 @@ export function IssuesViewToggle({ value, onChange }: { value: IssuesViewMode; o
     <Segmented
       ariaLabel="View"
       size="xs"
+      // v67 `.seg`: 28 px outside, so the segments are the control height less
+      // the 2 px padding and 1 px border either side. Coarse pointers keep 44 px.
+      className="[--control-xs:calc(var(--control-sm)-6px)]"
       value={value}
       onChange={onChange}
       options={[

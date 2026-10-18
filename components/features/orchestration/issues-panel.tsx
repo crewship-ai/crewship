@@ -154,7 +154,7 @@ export function IssuesPanel({
   const n = activeFilterCount(filters)
   const toggleStatus = (s: MissionStatus) =>
     onFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
-  const meta = (k: number | undefined) => <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
+  const meta = (k: number | undefined) => <span className="text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
 
   const isOn = (s: IssuesPanelSelection) => selection !== null && selection.kind === s.kind && selection.id === s.id
 
@@ -324,7 +324,7 @@ export function IssuesPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-surface-subtle" aria-hidden>
+              <div className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-foreground/[0.08]" aria-hidden>
                 <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
               </div>
             </div>

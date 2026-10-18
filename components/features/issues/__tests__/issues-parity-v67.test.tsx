@@ -43,11 +43,11 @@ describe("Issues v67 details", () => {
     render(<IssuesViewToggle value="list" onChange={vi.fn()} />)
     const group = screen.getByRole("radiogroup", { name: "View" })
     expect(group).toHaveAttribute("data-slot", "segmented")
-    for (const radio of within(group).getAllByRole("radio")) {
-      expect(radio.className).toContain("h-[calc(var(--control-sm)-6px)]")
-      // A coarse pointer keeps the 44 px target.
-      expect(radio.className).toContain("coarse:h-[44px]")
-    }
+    // The segments read --control-xs; this group sets it to 6 px under the 28 px control height
+    // (2 px padding + 1 px border on each side), so the whole control is as tall as the buttons beside it.
+    expect(group.className).toContain("[--control-xs:calc(var(--control-sm)-6px)]")
+    // A coarse pointer keeps the 44 px target.
+    for (const radio of within(group).getAllByRole("radio")) expect(radio.className).toContain("coarse:h-[44px]")
     expect(within(group).getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true")
   })
 })

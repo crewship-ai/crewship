@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CircleDot, FolderKanban, Kanban, List, Plus, X } from "lucide-react"
+import { CircleDot, FolderKanban, Plus, X } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "@/lib/toast"
@@ -42,7 +42,7 @@ import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuePeek } from "@/components/features/issues/issue-peek"
 import { IssuesDisplayOptions } from "@/components/features/issues/issues-display-options"
-import { Segmented } from "@/components/ui/segmented"
+import { IssuesViewToggle } from "@/components/features/issues/issues-view-toggle"
 import {
   DEFAULT_ROW_FIELDS,
   PRIORITY_TEXT,
@@ -411,16 +411,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
     </>
   ) : (
     <>
-      <Segmented
-        ariaLabel="View"
-        size="xs"
-        value={viewMode}
-        onChange={setViewMode}
-        options={[
-          { value: "list", label: "List", icon: List },
-          { value: "board", label: "Board", icon: Kanban },
-        ]}
-      />
+      <IssuesViewToggle value={viewMode} onChange={setViewMode} />
       <IssuesDisplayOptions
         open={displayOpen}
         onOpenChange={setDisplayOpen}
