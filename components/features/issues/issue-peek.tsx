@@ -203,7 +203,7 @@ export function IssuePeek({
             <Prop label="Due">
               {due ? <span className={due.late ? "text-destructive" : undefined}>{due.text}</span> : <span className="text-muted-foreground">—</span>}
             </Prop>
-            {issue.estimate != null && <Prop label="Estimate"><span className="font-mono">{issue.estimate}</span></Prop>}
+            {issue.estimate != null && <Prop label="Estimate"><span className="tabular-nums">{issue.estimate}</span></Prop>}
           </dl>
 
           <IssueCheckpointCard issue={issue} workspaceId={workspaceId} compact />

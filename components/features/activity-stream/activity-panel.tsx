@@ -191,7 +191,7 @@ export function ActivityPanel({
                 >
                   <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate">{v.label}</span>
-                  <span className="font-mono text-micro tabular-nums text-muted-foreground">{viewCounts[v.key]}</span>
+                  <span className="text-micro tabular-nums text-muted-foreground">{viewCounts[v.key]}</span>
                 </SidebarRow>
               )
             })}

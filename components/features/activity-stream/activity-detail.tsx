@@ -199,7 +199,7 @@ export function ActivityDetail({
 
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
+              className="rounded border border-foreground/[0.08] px-1.5 py-px text-micro font-semibold"
               style={{ color: `var(${meta.token})` }}
             >
               {meta.label}
@@ -238,7 +238,7 @@ export function ActivityDetail({
                     onClick={() => onSpineClick(l)}
                     className="rounded bg-foreground/[0.05] px-1.5 py-px text-[11px] text-foreground/85 transition-colors hover:bg-foreground/[0.1]"
                   >
-                    <span className="mr-1 font-mono text-[9.5px] uppercase text-muted-foreground-soft">
+                    <span className="mr-1 text-micro capitalize text-muted-foreground-soft">
                       {l.kind}
                     </span>
                     {l.label}

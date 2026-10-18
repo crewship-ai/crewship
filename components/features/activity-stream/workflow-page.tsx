@@ -182,7 +182,7 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
+              className="rounded border border-foreground/[0.08] px-1.5 py-px text-micro font-semibold capitalize"
               style={{ color: `var(${chain.failed ? "--destructive" : "--primary"})` }}
             >
               {chain.failed ? "failed" : "workflow"}
@@ -573,7 +573,7 @@ function TimelineRowView({
         <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: `var(${token})` }} />
         <span
           data-testid="timeline-kind"
-          className="shrink-0 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground-soft"
+          className="shrink-0 text-micro capitalize text-muted-foreground-soft"
         >
           {row.kind}
         </span>
