@@ -76,9 +76,16 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	if chType == "session" || chType == "chat-hints" {
 		return a.isSessionOwner(ctx, userID, chID)
 	}
-	active, err := a.trustedAccountActive(ctx, userID)
-	if err != nil || !active {
-		return false, err
+	// Resource channels combine the live account/restricted ceiling and exact
+	// membership in one snapshot. Protocol/global channels keep their existing
+	// account check, and conversation channels keep the audience snapshot above.
+	switch chType {
+	case "workspace", "keeper", "journal", "crew", "files", "agent", "mission", "page":
+	default:
+		active, err := a.trustedAccountActive(ctx, userID)
+		if err != nil || !active {
+			return false, err
+		}
 	}
 
 	switch chType {
@@ -114,12 +121,11 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 		// default, so live updates appeared to work while fanning every push
 		// out to the whole workspace.
 		//
-		// Membership is the gate, not panel visibility, and deliberately: the
-		// broadcast carries ids only and never a payload, so a subscriber who
-		// may not see a panel learns that something changed and re-reads
-		// through the normal authorised path, which seals what they may not
-		// have. That is what keeps the per-panel filter (§7.1 rule 2) in one
-		// place instead of needing a second copy here.
+		// Shared pages retain the workspace membership gate; panel content is
+		// re-read through the normal authorised HTTP path. Private artifacts
+		// additionally require the current page owner or live workspace OWNER.
+		// Both audiences still require current membership and account eligibility,
+		// checked together for every frame, including after ownership changes.
 		return a.isMemberOfPageWorkspace(ctx, userID, chID)
 	case "user":
 		// user:{userId} — the identity-scoped channel. Only the user
@@ -158,60 +164,38 @@ func existsRow(err error) (bool, error) {
 	return false, err
 }
 
+// Same live-account and global restricted ceiling as trustedAccountActive,
+// evaluated in the selected resource's statement, without caching any allow.
+const trustedChannelMember = ` AND EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.suspended_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=u.id AND restricted.access_mode='restricted'))`
+
 func (a *DBChannelAuthorizer) isMemberOfWorkspace(ctx context.Context, userID, workspaceID string) (bool, error) {
 	var exists int
-	err := a.db.QueryRowContext(ctx,
-		"SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		workspaceID, userID).Scan(&exists)
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?`+trustedChannelMember, workspaceID, userID, userID).Scan(&exists)
 	return existsRow(err)
 }
 
 func (a *DBChannelAuthorizer) isMemberOfCrewWorkspace(ctx context.Context, userID, crewID string) (bool, error) {
-	var wsID string
-	err := a.db.QueryRowContext(ctx,
-		"SELECT workspace_id FROM crews WHERE id = ? AND deleted_at IS NULL", crewID).Scan(&wsID)
-	if err != nil {
-		// No such (live) crew is a definitive deny; anything else is a
-		// failed check.
-		return existsRow(err)
-	}
-	return a.isMemberOfWorkspace(ctx, userID, wsID)
+	var exists int
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM crews c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=? WHERE c.id=? AND c.deleted_at IS NULL`+trustedChannelMember, userID, crewID, userID).Scan(&exists)
+	return existsRow(err)
 }
 
 func (a *DBChannelAuthorizer) isMemberOfAgentWorkspace(ctx context.Context, userID, agentID string) (bool, error) {
-	var wsID string
-	err := a.db.QueryRowContext(ctx,
-		"SELECT workspace_id FROM agents WHERE id = ? AND deleted_at IS NULL", agentID).Scan(&wsID)
-	if err != nil {
-		return existsRow(err)
-	}
-	return a.isMemberOfWorkspace(ctx, userID, wsID)
+	var exists int
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? WHERE a.id=? AND a.deleted_at IS NULL`+trustedChannelMember, userID, agentID, userID).Scan(&exists)
+	return existsRow(err)
 }
 
 func (a *DBChannelAuthorizer) isMemberOfMissionWorkspace(ctx context.Context, userID, missionID string) (bool, error) {
-	var wsID string
-	err := a.db.QueryRowContext(ctx,
-		`SELECT c.workspace_id FROM missions m
-		 JOIN crews c ON c.id = m.crew_id
-		 WHERE m.id = ?`, missionID).Scan(&wsID)
-	if err != nil {
-		return existsRow(err)
-	}
-	return a.isMemberOfWorkspace(ctx, userID, wsID)
+	var exists int
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM missions m JOIN crews c ON c.id=m.crew_id JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=? WHERE m.id=?`+trustedChannelMember, userID, missionID, userID).Scan(&exists)
+	return existsRow(err)
 }
 
 func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userID, pageID string) (bool, error) {
-	var wsID, owner, role string
-	var private bool
-	err := a.db.QueryRowContext(ctx,
-		`SELECT p.workspace_id,p.private_audience,COALESCE(p.owner_user_id,''),COALESCE((SELECT m.role FROM workspace_members m WHERE m.workspace_id=p.workspace_id AND m.user_id=?),'') FROM pages p WHERE p.id=?`, userID, pageID).Scan(&wsID, &private, &owner, &role)
-	if err != nil {
-		return existsRow(err)
-	}
-	if private && owner != userID && role != "OWNER" {
-		return false, nil
-	}
-	return a.isMemberOfWorkspace(ctx, userID, wsID)
+	var exists int
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM pages p JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=? WHERE p.id=? AND (p.private_audience=0 OR p.owner_user_id=? OR wm.role='OWNER')`+trustedChannelMember, userID, pageID, userID, userID).Scan(&exists)
+	return existsRow(err)
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
