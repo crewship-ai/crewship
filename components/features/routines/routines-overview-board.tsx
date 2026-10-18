@@ -10,12 +10,11 @@
 // exist (routines.md ODCH-RT-06/07).
 
 import * as React from "react"
-import Link from "next/link"
 import { CalendarClock, Hand, Play, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { DashCard } from "@/components/features/dashboard/dash-card"
 import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -100,8 +99,8 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
       </ul>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <section aria-label="Needs you" className="lg:col-span-2">
-          <DashboardCard title="Needs you" icon={Hand} hint={needs.length ? String(needs.length) : "nothing"} className="h-full">
+        <DashCard title="Needs you" icon={Hand} meta={needs.length ? String(needs.length) : "nothing"} className="lg:col-span-2">
+          <div className="px-2 pb-3">
             {needs.length === 0 ? (
               <p className="px-2 py-3 text-label text-muted-foreground">No decision is waiting, nothing is up for review and every routine finished its last run.</p>
             ) : (
@@ -150,12 +149,12 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                 ))}
               </ul>
             )}
-          </DashboardCard>
-        </section>
+          </div>
+        </DashCard>
 
         <div className="flex min-w-0 flex-col gap-3">
-          <section aria-label="Running now">
-            <DashboardCard title="Running now" icon={Play} hint={live.length ? `${live.length} running` : "none"}>
+            <DashCard title="Running now" icon={Play} meta={live.length ? `${live.length} running` : "none"}>
+              <div className="px-2 pb-3">
               {live.length === 0 ? (
                 <p className="px-2 py-3 text-label text-muted-foreground">Nothing is running right now.</p>
               ) : (
@@ -188,20 +187,11 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                   {capacityWaits} {capacityWaits === 1 ? "start waits" : "starts wait"} for a free slot (one at a time)
                 </p>
               )}
-            </DashboardCard>
-          </section>
+              </div>
+            </DashCard>
 
-          <section aria-label="Next 24 hours">
-            <DashboardCard
-              title="Next 24 hours"
-              icon={CalendarClock}
-              hint={String(next.length)}
-              action={
-                <Link href="/routines?tab=calendar" className="text-primary-hover hover:underline">
-                  Open calendar
-                </Link>
-              }
-            >
+            <DashCard title="Next 24 hours" icon={CalendarClock} meta={String(next.length)} link={{ label: "Open calendar", href: "/calendar" }}>
+              <div className="px-2 pb-3">
               {next.length === 0 ? (
                 <p className="px-2 py-3 text-label text-muted-foreground">Nothing is planned for the next 24 hours.</p>
               ) : (
@@ -217,8 +207,8 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                   ))}
                 </ul>
               )}
-            </DashboardCard>
-          </section>
+              </div>
+            </DashCard>
         </div>
       </div>
 
@@ -242,7 +232,7 @@ function Kpi({ label, value, note }: { label: string; value: string; note?: stri
   return (
     <li className="flex flex-col gap-0.5 rounded-lg border border-hairline bg-card px-3 py-2">
       <span className="text-label text-muted-foreground">{label}</span>
-      <span className="font-mono text-title font-semibold tabular-nums text-foreground">{value}</span>
+      <span className="text-title font-bold tabular-nums text-foreground">{value}</span>
       {note && <span className="text-label text-muted-foreground-soft">{note}</span>}
     </li>
   )

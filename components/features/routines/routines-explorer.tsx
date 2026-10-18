@@ -231,7 +231,7 @@ function RoutineRunsPanel({ routineName, runs, current, onPeek, onBack }: NonNul
             {RUN_BUCKETS.map((b) => (
               <SidebarRow key={b.id} as="div" selected={bucket === b.id} onSelect={() => setBucket(b.id)}>
                 <span className="min-w-0 flex-1 truncate">{b.label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{count(b.id)}</span>
+                <span className="text-micro tabular-nums text-muted-foreground-soft">{count(b.id)}</span>
               </SidebarRow>
             ))}
           </div>
@@ -503,7 +503,7 @@ function RoutinesList({
                 <SidebarRow key={v.id} as="div" selected={view === v.id} aria-current={view === v.id ? "page" : undefined} onSelect={() => onViewChange(v.id)}>
                   <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate" title={`${v.label} · ${i + 1}`}>{v.label}</span>
-                  {n != null && n > 0 && <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{n}</span>}
+                  {n != null && n > 0 && <span className="text-micro tabular-nums text-muted-foreground-soft">{n}</span>}
                 </SidebarRow>
               )
             })}

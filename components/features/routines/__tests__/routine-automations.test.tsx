@@ -294,6 +294,19 @@ describe("overview", () => {
     expect(screen.getByTestId("routine-run-bars").children).toHaveLength(1)
   })
 
+  it("PAR-128: one run draws one capped tick, not a slab as wide as the card", () => {
+    h.records = [{ id: "run-1", pipeline_id: "pipe-1", pipeline_slug: "daily-triage", status: "completed", mode: "run", started_at: "2026-08-07T09:00:00Z", cost_usd: 0, duration_ms: 10, triggered_via: "schedule" }]
+    renderPage(routine())
+    const tick = screen.getByTestId("routine-run-bars").children[0]
+    expect(tick.className).toMatch(/(^|\s)max-w-\d/)
+  })
+
+  it("PAR-127: Runs and history carries the run count, as in v67 (Runs and history · 5)", () => {
+    renderPage(routine({ invocation_count: 5 } as Partial<RoutineDetail>))
+    const link = screen.getByRole("link", { name: /Runs and history/ })
+    expect(link).toHaveTextContent(/Runs and history\s*·\s*5/)
+  })
+
   it("links credential requirements to accounts without inventing an assigned credential (Settings › Access)", () => {
     renderPage(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "CLI_TOKEN", scope: "github" }, { type: "AI_CLI_TOKEN", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
     tab("Settings")

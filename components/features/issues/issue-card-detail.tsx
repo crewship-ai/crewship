@@ -753,7 +753,7 @@ export function IssueCardDetail({
                   <Fact label="updated" value={relTime(issue.updated_at)} />
                   {issue.created_by && (
                     <div className="min-w-0" data-testid="issue-created-by">
-                      <dt className="font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground-soft">author</dt>
+                      <dt className="text-micro font-semibold text-muted-foreground-soft">Author</dt>
                       <dd className="truncate text-foreground/85">
                         Created by {issue.created_by.name || issue.created_by.id}
                         {issue.created_by.type === "agent" && (
@@ -824,7 +824,7 @@ function RunSourceBreakdown({ sources }: { sources: RunSource[] }) {
   if (sources.length === 0) return null
   return (
     <div data-testid="issue-routine-provenance" className="space-y-1 pt-1">
-      <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
+      <p className="text-micro font-semibold text-muted-foreground-soft">
         Recent runs started by
       </p>
       <ul className="space-y-1">
@@ -1055,7 +1055,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</dt>
+      <dt className="text-micro font-semibold text-muted-foreground-soft">{label}</dt>
       <dd className={cn("truncate text-foreground/85", mono && "font-mono text-[10px]")}>{value}</dd>
     </div>
   )

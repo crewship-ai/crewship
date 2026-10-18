@@ -194,3 +194,13 @@ it("How routines work in the top bar opens the intro as ?view=intro (RT-09)", ()
   fireEvent.keyDown(window, { key: "1" })
   expect(window.location.search).toBe("")
 })
+
+it("PAR-051: New routine carries the C shortcut chip, hidden from assistive names and touch screens", () => {
+  render(<RoutinesLayout workspaceId="workspace" />)
+  const button = screen.getByRole("button", { name: "New routine" })
+  const chip = button.querySelector("kbd")
+  expect(chip).not.toBeNull()
+  expect(chip).toHaveTextContent("C")
+  expect(chip).toHaveAttribute("aria-hidden", "true")
+  expect(chip!.className).toMatch(/coarse:hidden/)
+})

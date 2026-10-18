@@ -242,7 +242,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
               {groups.map((g) => (
                 <React.Fragment key={g.category ?? "results"}>
                   {g.category && (
-                    <h4 className="type-meta col-span-full px-2 pb-0.5 pt-2 uppercase tracking-wide text-muted-foreground-soft first:pt-0">
+                    <h4 className="type-meta col-span-full px-2 pb-0.5 pt-2 font-semibold text-muted-foreground first:pt-0">
                       {g.category}
                     </h4>
                   )}

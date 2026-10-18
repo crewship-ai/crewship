@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, X, ChevronsUpDown, AlertTriangle, Bot, Building, Gauge, User, Users } from "lucide-react"
+import { Check, X, ChevronDown, AlertTriangle, Bot, Building, Gauge, User, Users } from "lucide-react"
 import { toast } from "@/lib/toast"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -21,7 +21,8 @@ import { PagesAppearanceCard } from "./pages-appearance-card"
 import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
-import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
+import { reportBackfill } from "@/components/features/crews/avatar-backfill-button"
+import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 
 interface GeneralSectionProps {
   workspaceId: string
@@ -37,6 +38,30 @@ interface GeneralSectionProps {
   onUpdated: (org: { name: string; slug: string; preferred_language: string | null }) => void
   onLogoChange?: (logoUrl: string | null) => void
   onDelete: () => void
+}
+
+/**
+ * "Fill in missing avatars" (v67 wording): the explicit backfill for agents
+ * that have no stored avatar render (#2876), under the name the wireframe
+ * gives it. Same request and same result toast as Crews' own backfill button.
+ */
+function FillAvatarsButton({ workspaceId }: { workspaceId: string }) {
+  const [busy, setBusy] = useState(false)
+  async function run() {
+    setBusy(true)
+    try {
+      reportBackfill(await backfillAgentAvatars(workspaceId, {}))
+    } catch (err) {
+      toast.error(`Could not fill in avatars: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run()}>
+      {busy ? "Filling in avatars…" : "Fill in missing avatars"}
+    </Button>
+  )
 }
 
 export function GeneralSection({
@@ -110,10 +135,6 @@ export function GeneralSection({
 
   const draftLanguage = form.draft.language
   const selectedLang = draftLanguage ? LANGUAGES.find((l) => l.name === draftLanguage) : null
-  // Read-only path renders the saved value, not the draft — there is no control
-  // that could have moved it. Looked up only for the flag; an unrecognised
-  // language still prints its own name rather than vanishing.
-  const readOnlyLang = preferredLanguage ? LANGUAGES.find((l) => l.name === preferredLanguage) : null
 
   function pickLanguage(name: string | null) {
     form.set("language", name)
@@ -143,7 +164,7 @@ export function GeneralSection({
               <span className="text-control text-foreground truncate">{orgName}</span>
             </SettingsRow>
             <SettingsRow label="Slug" description="Used in URLs and CLI commands" lock="Admins and owners">
-              <span className="text-control font-mono text-foreground truncate">{orgSlug}</span>
+              <span className="text-control text-foreground truncate">{orgSlug}</span>
             </SettingsRow>
             <SettingsRow
               label="Agent language"
@@ -152,11 +173,9 @@ export function GeneralSection({
               border={false}
             >
               {preferredLanguage ? (
-                <span className="text-xs text-foreground truncate">
-                  {readOnlyLang ? `${readOnlyLang.flag} ` : ""}{preferredLanguage}
-                </span>
+                <span className="text-control text-foreground truncate">{preferredLanguage}</span>
               ) : (
-                <span className="text-xs text-muted-foreground">Not set</span>
+                <span className="text-control text-muted-foreground">Not set</span>
               )}
             </SettingsRow>
           </>
@@ -168,7 +187,7 @@ export function GeneralSection({
                 onChange={(e) => form.set("name", e.target.value)}
                 placeholder="My Company"
                 aria-label="Workspace name"
-                className={settingsControl}
+                className={cn(settingsControl, "text-right")}
               />
             </SettingsRow>
             <SettingsRow label="Slug" description="Used in URLs and CLI commands">
@@ -177,22 +196,23 @@ export function GeneralSection({
                 onChange={(e) => form.set("slug", e.target.value)}
                 placeholder="my-company"
                 aria-label="Slug"
-                className={cn(settingsControl, "font-mono")}
+                className={cn(settingsControl, "text-right")}
               />
             </SettingsRow>
             <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
               <Popover open={langOpen} onOpenChange={setLangOpen}>
                 <PopoverTrigger asChild>
                   <button
-                    className={settingsPickerButton}
+                    // v67 `.field.inline`: the value alone, right-aligned, one chevron.
+                    className={cn(settingsPickerButton, "justify-end")}
                     disabled={form.status === "saving"}
                   >
                     {selectedLang ? (
-                      <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
+                      <span className="truncate">{selectedLang.name}</span>
                     ) : (
                       <span className="text-muted-foreground">Select language…</span>
                     )}
-                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-0" align="end">
@@ -249,7 +269,7 @@ export function GeneralSection({
         />
         {canEdit && agentCount > 0 && (
           <SettingsRow label="Agent avatars" description="For agents created before avatars existed">
-            <AvatarBackfillButton workspaceId={workspaceId} />
+            <FillAvatarsButton workspaceId={workspaceId} />
           </SettingsRow>
         )}
       </SettingsCard>

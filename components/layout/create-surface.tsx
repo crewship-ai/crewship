@@ -667,8 +667,8 @@ export function CreateSurfaceHeader({
   const titleProps = inDialog ? { asChild: true as const } : {}
 
   return (
-    <div className="shrink-0 border-b border-hairline px-4 py-2.5 sm:px-5 sm:py-3">
-      <div className="flex items-center gap-2">
+    <div className="shrink-0 border-b border-hairline px-4 py-3 sm:px-5 sm:py-3.5">
+      <div className="flex items-start gap-3">
         {onBack && (
           <Button
             variant="ghost"
@@ -681,48 +681,60 @@ export function CreateSurfaceHeader({
           </Button>
         )}
 
+        {/* v67: a 32 px tile, a 15 px bold title and one line under it. */}
         {(concept || icon) && (
-          <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="sm" />
+          <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="md" />
         )}
 
-        {/* One title element spanning the whole path. Two headings side by side
-            would make the accessible name "IssuesNew issue". */}
-        <Title {...titleProps}>
-          <Heading className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
-            {context != null && (
-              <>
-                <span
-                  className={cn(
-                    "truncate font-normal text-muted-foreground",
-                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
-                  )}
-                >
-                  {context}
-                </span>
-                <ChevronRight
-                  aria-hidden
-                  className={cn(
-                    "h-3 w-3 shrink-0 text-muted-foreground-soft",
-                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
-                  )}
-                />
-                {/* A real text node, or the accessible name concatenates.
-                 *
-                 * The comment above says one <h2> exists so the name is not
-                 * "IssuesNew issue" — and then the separator was an icon,
-                 * which contributes nothing, so the computed name was exactly
-                 * that: "SMONew issue". Measured in the browser, not guessed.
-                 * sub-bar.tsx already solved this with a literal " / "; this is
-                 * the same fix, hidden from sight because the chevron is the
-                 * visible separator. */}
-                <span className="sr-only"> › </span>
-              </>
-            )}
-            <span className="truncate text-foreground">{title}</span>
-          </Heading>
-        </Title>
+        <div className="min-w-0 flex-1">
+          {/* One title element spanning the whole path. Two headings side by
+              side would make the accessible name "IssuesNew issue". A plain
+              context is no longer drawn (v67 has no breadcrumb) but stays in
+              the name for assistive technology; an interactive one (New
+              issue's crew picker) is still shown. */}
+          <Title {...titleProps}>
+            <Heading className="flex min-w-0 items-center gap-1.5">
+              {context != null && (
+                <>
+                  <span
+                    className={cn(
+                      "truncate font-normal text-muted-foreground",
+                      keepContext ? "" : "sr-only",
+                    )}
+                  >
+                    {context}
+                  </span>
+                  <ChevronRight
+                    aria-hidden
+                    className={cn("h-3 w-3 shrink-0 text-muted-foreground-soft", !keepContext && "hidden")}
+                  />
+                  {/* A real text node, or the accessible name concatenates:
+                   * the chevron is an icon and contributes nothing, so
+                   * without this the computed name was "SMONew issue". */}
+                  <span className="sr-only"> › </span>
+                </>
+              )}
+              <span className="type-dialog-title truncate text-foreground">{title}</span>
+            </Heading>
+          </Title>
 
-        <div className="flex-1" />
+          {/* No description means NO node.
+           *
+           * This used to render `<DialogDescription className="sr-only">{title}`
+           * to silence Radix's missing-description warning. The cost was a
+           * screen reader reading "New project. New project." and
+           * `getByText(title)` matching twice. The warning is silenced
+           * properly instead — `CreateSurface` passes
+           * `aria-describedby={undefined}` to DialogContent. */}
+          {description != null &&
+            (inDialog ? (
+              <DialogDescription className="mt-0.5 truncate text-label text-muted-foreground">
+                {description}
+              </DialogDescription>
+            ) : (
+              <p className="mt-0.5 truncate text-label text-muted-foreground">{description}</p>
+            ))}
+        </div>
 
         {meta && (
           <div className="flex shrink-0 items-center gap-2 text-xs tabular-nums text-muted-foreground">
@@ -742,25 +754,6 @@ export function CreateSurfaceHeader({
           </Button>
         )}
       </div>
-
-      {/* No description means NO node.
-       *
-       * This used to render `<DialogDescription className="sr-only">{title}`
-       * to silence Radix's missing-description warning. The cost was not
-       * obvious until eleven surfaces migrated at once: a screen reader read
-       * "New project. New project.", and `getByText(title)` matched twice, so
-       * two agents had to rewrite existing assertions that were not wrong.
-       * The warning is silenced properly instead — `CreateSurface` passes
-       * `aria-describedby={undefined}` to DialogContent, which is Radix's own
-       * opt-out. */}
-      {description != null &&
-        (inDialog ? (
-          <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            {description}
-          </DialogDescription>
-        ) : (
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
-        ))}
     </div>
   )
 }
@@ -955,7 +948,7 @@ export function CreateSurfaceSection({
       {title != null && (
         <div className="flex items-center gap-1.5">
           {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/75">{title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground/75">{title}</h3>
           {/* A hint that truncates to "— a template fills the persona, model and t…"
               is worse than no hint. The section title survives; this does not. */}
           {hint != null && (
@@ -1022,7 +1015,7 @@ export function CreateSurfaceField({
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <label
         htmlFor={htmlFor}
-        className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+        className="flex items-center gap-1 text-[12px] font-semibold text-muted-foreground"
       >
         {label}
         {required && (
@@ -1923,6 +1916,9 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
   primaryIcon?: SurfaceIconComponent
 }
 
+/** A key in a footer hint, as a chip (v67 .kbd). */
+const KEY_CHIP = "rounded border border-border bg-card px-1 font-mono text-micro text-muted-foreground"
+
 export function CreateSurfaceFooter({
   hint: hintProp,
   aside,
@@ -1948,10 +1944,10 @@ export function CreateSurfaceFooter({
       hintProp
     ) : (
       <>
-        <kbd className="font-mono">⌘↵</kbd> to confirm
+        <kbd className={KEY_CHIP}>⌘↵</kbd> to confirm
         {footerInDialog && (
           <>
-            {" "}· <kbd className="font-mono">Esc</kbd> to cancel
+            {" "}· <kbd className={KEY_CHIP}>Esc</kbd> to cancel
           </>
         )}
       </>

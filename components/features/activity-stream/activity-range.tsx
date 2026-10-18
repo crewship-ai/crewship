@@ -94,7 +94,7 @@ export function ActivityRange({
     <span
       role="group"
       aria-label="Time range"
-      className="inline-flex h-[var(--control-md)] items-stretch overflow-hidden rounded-lg border border-border bg-card shadow-xs"
+      className="inline-flex h-[var(--control-sm)] items-stretch overflow-hidden rounded-lg border border-border bg-card shadow-xs"
     >
       <button
         type="button"

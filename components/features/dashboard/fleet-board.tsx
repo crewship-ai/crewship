@@ -80,8 +80,8 @@ const CHIP_TONE = {
   mut: "text-muted-foreground",
 } as const
 
-/** How many crews the grid shows; the rest are one click away in Crews. */
-const GRID_LIMIT = 8
+/** How many crews the grid shows (v67 lists six); the header link opens the rest. */
+const GRID_LIMIT = 6
 
 export function FleetBoard({ cards: unordered }: { cards: FleetCard[] }) {
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
@@ -92,7 +92,6 @@ export function FleetBoard({ cards: unordered }: { cards: FleetCard[] }) {
   const foldToolGaps = toolGaps.length > 1
   if (cards.length === 0) return null
   const shown = cards.slice(0, GRID_LIMIT)
-  const rest = cards.length - shown.length
   return (
     <DashCard title="Your crews" concept="crews" link={{ label: "Crews", href: "/crews" }} data-testid="dashboard-fleet-board">
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border">
@@ -128,7 +127,6 @@ export function FleetBoard({ cards: unordered }: { cards: FleetCard[] }) {
           <span className="text-chip-warn-fg">{toolGaps.length} crews need a tool</span> · {toolGaps.join(", ")}
         </DashNote>
       )}
-      {rest > 0 && <DashNote>+{rest} more in Crews</DashNote>}
     </DashCard>
   )
 }

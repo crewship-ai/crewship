@@ -65,7 +65,7 @@ export function CalendarPanel({
     >
       <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="min-w-0 flex-1 truncate">{CALENDAR_SCOPE_LABELS[scope]}</span>
-      <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{scope === "mine" ? counts.mine : counts.workspace}</span>
+      <span className="text-micro tabular-nums text-muted-foreground-soft">{scope === "mine" ? counts.mine : counts.workspace}</span>
     </SidebarRow>
   )
   return (
@@ -116,7 +116,7 @@ export function CalendarPanel({
             >
               <Users className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{c.name}</span>
-              <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{counts.crews.get(c.id) ?? 0}</span>
+              <span className="text-micro tabular-nums text-muted-foreground-soft">{counts.crews.get(c.id) ?? 0}</span>
             </SidebarRow>
           ))}
         </SidebarSection>

@@ -131,10 +131,19 @@ describe("<RoutineNewWizard> step 1 · Basics", () => {
     const crews = await screen.findByRole("radiogroup", { name: "Crew" })
     for (const radio of within(crews).getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false")
     expect(primary("Continue")).toBeDisabled()
-    // A crew with no agent cannot run a step.
-    expect(within(crews).getByRole("radio", { name: /^Empty/ })).toBeDisabled()
+    // PAR-147: only crews with an agent are offered, as inline chips; one that
+    // cannot run a step is not a choice, and a line says why it is missing.
+    expect(within(crews).queryByRole("radio", { name: /Empty/ })).toBeNull()
+    expect(within(crews).getAllByRole("radio")).toHaveLength(2)
+    expect(within(crews).getAllByRole("radio")[0].className).toMatch(/rounded-full/)
+    expect(screen.getByText(/1 crew has no agent yet/)).toBeInTheDocument()
     fireEvent.click(within(crews).getByRole("radio", { name: /^Research/ }))
     expect(primary("Continue")).toBeEnabled()
+  })
+
+  it("PAR-147: the ID field shows the ID the name would give, before anything is typed", async () => {
+    renderWizard()
+    expect(screen.getByLabelText("ID")).toHaveAttribute("placeholder", "competitor-price-watch")
   })
 
   it("Describe it hands the person's words to the crew lead's chat", async () => {

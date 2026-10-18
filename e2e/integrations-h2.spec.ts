@@ -335,6 +335,43 @@ test.describe("desktop", () => {
   })
 })
 
+test.describe("PAR-084 / PAR-139 parity", () => {
+  for (const width of [1440, 1024, 390]) {
+    test(`the breadcrumb space is a chooser at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await seed(page)
+      await page.goto("/integrations")
+      const crumb = page.locator("[data-slot=space-crumb]").first()
+      if (width >= 768) {
+        await expect(crumb).toBeVisible()
+        await crumb.click()
+        await expect(page.getByRole("menuitemradio")).toHaveText(["Tools", "Triggers", "Channels", "Webhooks"])
+        await page.getByRole("menuitemradio", { name: "Webhooks" }).click()
+        await expect(h1(page)).toHaveText("Webhooks")
+      }
+      // No horizontal scroll at any width.
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+    })
+  }
+
+  test("Triggers has no Artifacts card; artifact webhooks are table rows", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=triggers")
+    await expect(h1(page)).toHaveText(/Triggers/)
+    await expect(page.getByText("webhooks are kept per artifact")).toHaveCount(0)
+  })
+
+  test("Tools with no Composio key shows one empty state and one key action", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=tools")
+    const empty = page.getByRole("heading", { name: "Nothing connected" })
+    if (await empty.count()) {
+      await expect(page.getByText("Add a Composio API key to connect apps")).toHaveCount(0)
+      expect(await page.getByRole("button", { name: /Add (Composio )?key/ }).count()).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 } })
   test("spaces are a segment above the content", async ({ page }) => {

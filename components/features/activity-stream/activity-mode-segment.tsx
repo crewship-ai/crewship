@@ -27,7 +27,7 @@ export function ActivityModeSegment({ mode }: { mode: "work" | "spend" }) {
             href={item.href}
             aria-current={on ? "page" : undefined}
             className={cn(
-              "kit-tap inline-flex h-[var(--control-xs)] items-center rounded-sm px-2.5 text-label",
+              "kit-tap inline-flex h-[calc(var(--control-sm)-6px)] items-center rounded-sm px-2.5 text-label",
               on ? "bg-card font-semibold text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
             )}
           >

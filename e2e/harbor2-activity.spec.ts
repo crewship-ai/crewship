@@ -332,3 +332,28 @@ test.describe("finish (#3486) facets", () => {
     await expect(block).toBeHidden()
   })
 })
+
+test.describe("PAR-061/062 v67 sizes", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("the Activity | Spend segment and the range control are 28 px, row titles 13 px semibold", async ({ page }) => {
+    await seed(page)
+    await page.goto("/activity")
+    const range = page.getByRole("group", { name: "Time range" })
+    await expect(range).toBeVisible()
+    expect(Math.round((await range.boundingBox())!.height)).toBeGreaterThanOrEqual(27)
+    expect(Math.round((await range.boundingBox())!.height)).toBeLessThanOrEqual(29)
+    const segment = page.getByRole("navigation", { name: "Activity or spend" })
+    if (await segment.count()) {
+      const h = (await segment.boundingBox())!.height
+      expect(h).toBeGreaterThanOrEqual(27)
+      expect(h).toBeLessThanOrEqual(30)
+    }
+    const title = page.locator("[data-row-id] b").first()
+    await expect(title).toBeVisible()
+    expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe("13px")
+    expect(Number(await title.evaluate((el) => getComputedStyle(el).fontWeight))).toBeGreaterThanOrEqual(600)
+    // PAR-059: the Filter button shows its word.
+    await expect(page.locator("[data-slot=secondary-panel][data-panel-id=activity]").getByRole("button", { name: /^Filter/ })).toContainText("Filter")
+  })
+})

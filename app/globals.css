@@ -707,8 +707,9 @@ body {
     background-image: var(--page-glow);
     background-attachment: fixed;
   }
+  /* v67: -0.005em. The old -0.02em pulled word spaces shut ("Auditlog"). */
   h1, h2, h3 {
-    letter-spacing: -0.02em;
+    letter-spacing: -0.005em;
     text-wrap: balance;
   }
 
@@ -770,7 +771,7 @@ body {
 
        .type-title    24px  page heading
        .type-row      14px  list rows, field values, prose
-       .type-section  13px  UPPERCASE card + section headers, labels
+       .type-section  13px  sentence-case card + section headers, labels
        .type-meta     12px  timestamps, ids, stat captions, badges
 
      Weight, tracking and casing ride along, because "12px" was never
@@ -791,21 +792,34 @@ body {
     font-size: 1.5rem;
     line-height: 2rem;
     font-weight: 600;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.015em;
     text-wrap: balance;
   }
   .type-row {
     font-size: 0.875rem;
     line-height: 1.3rem;
   }
-  /* Harbor eyebrow shape: mono, wide-tracked. Colour stays with the caller. */
+  /* Harbor 2 section / card / panel-group header: sentence-case sans, semibold
+     (v67 card-h). The mono-caps eyebrow is retired. Colour stays with the caller. */
   .type-section {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     line-height: 1.2rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  /* A dialog's title (v67 .dlg-ht b): 15 px bold. */
+  .type-dialog-title {
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
+  /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
+  .type-group-head {
+    font-size: max(11.5px, 0.72rem);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
   }
   .type-meta {
     font-size: 0.75rem;
@@ -1035,14 +1049,13 @@ body {
   /* ── Harbor recipes ──────────────────────────────────────────────
      The marketing site's shapes, as utilities the components compose. */
 
-  /* Eyebrow: section labels, table heads, card kickers. */
+  /* Eyebrow: section labels, table heads, card kickers. Sentence-case sans
+     (v67); the name stays so call sites do not churn. */
   .eyebrow {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     line-height: 1rem;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0;
     color: var(--primary-hover);
   }
 
@@ -1106,7 +1119,9 @@ body {
      40 px wide in the 56 px rail and 224 px open, the icon column never moves.
      Sizes are px: the rail must not grow with the user's text size. */
   .rail-inset {
-    padding-inline: 8px !important;
+    /* The sidebar's own p-2 is the 8 px inset (v67 rail padding 8, icon at
+       x = 18); a second 8 px here pushed everything 7 px right. */
+    padding-inline: 0 !important;
   }
   .rail-row {
     height: 30px !important;
@@ -1216,7 +1231,7 @@ body {
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--muted-foreground-soft);
-    font-size: var(--typo-label);
+    font-size: 12.5px;
   }
   .rail-search:hover { border-color: var(--line-strong); color: var(--muted-foreground); }
   .rail-search > svg { width: 14px; height: 14px; flex-shrink: 0; }

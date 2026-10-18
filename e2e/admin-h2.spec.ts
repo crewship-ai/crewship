@@ -60,6 +60,15 @@ test.describe("Admin console", () => {
       await expect(region.locator("[data-slot=settings-page-head]")).toHaveCount(0)
       // Cards in a 10 px radius, no shadow.
       await expect(region.getByRole("region", { name: "Platform" })).toHaveCSS("border-top-left-radius", "10px")
+      // PAR-093: the figures load (no error card); PAR-094/095: one-line headers, compact rows.
+      await expect(region.getByText("Couldn’t load the instance figures")).toHaveCount(0)
+      for (const card of ["Platform", "Integrity", "License"]) {
+        const c = region.getByRole("region", { name: card })
+        expect(await c.locator("[data-slot=settings-card-header]").evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(56)
+        const row = c.locator("[data-slot=admin-row]").first()
+        await expect(row).toHaveCSS("flex-direction", "row")
+        expect(await row.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(44)
+      }
     })
   }
 

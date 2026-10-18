@@ -235,7 +235,7 @@ function RoutinePageBody({
         onTest={() => void runTestDraft()}
         onPublish={openPublish}
       />
-      <RoutineTabRow slug={routine.slug} tab={tab} depth={depth} triggers={draftOnly ? undefined : triggers.length} onTab={setTab} onDepth={setDepth} />
+      <RoutineTabRow slug={routine.slug} tab={tab} depth={depth} triggers={draftOnly ? undefined : triggers.length} runs={draftOnly ? undefined : routine.invocation_count} onTab={setTab} onDepth={setDepth} />
 
       <div role="tabpanel" aria-label={tab} className="min-w-0">
         {tab === "overview" && (

@@ -172,6 +172,7 @@ export function RoutineTabRow({
   tab,
   depth,
   triggers,
+  runs,
   onTab,
   onDepth,
 }: {
@@ -179,6 +180,8 @@ export function RoutineTabRow({
   tab: RoutineTab
   depth: DetailDepth
   triggers?: number
+  /** The routine's run count, shown beside "Runs and history" (v67). */
+  runs?: number
   onTab: (tab: RoutineTab) => void
   onDepth: (depth: DetailDepth) => void
 }) {
@@ -209,6 +212,7 @@ export function RoutineTabRow({
           <Link href={routineActivityHref(slug)} title="Every run and change of this routine, in Activity">
             <Activity className="h-3.5 w-3.5" aria-hidden />
             Runs and history
+            {runs != null && runs > 0 && <span className="tabular-nums text-muted-foreground">· {runs}</span>}
             <ChevronRight className="h-3 w-3" aria-hidden />
           </Link>
         </Button>

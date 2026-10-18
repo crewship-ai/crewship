@@ -63,7 +63,13 @@ export default function AdminPage() {
 
 function AdminConsole() {
   const router = useRouter()
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { workspaceId: rememberedWorkspaceId, loading: wsLoading, workspaceUnavailable } = useWorkspace()
+  // PAR-093: the console is instance-wide. A remembered workspace that is not
+  // one of this person's own (an instance admin who belongs to none, or whose
+  // last choice was removed) is fenced by the client and every request that
+  // names it fails with "workspace unavailable". Such a person reads the
+  // instance's figures with no workspace, like one who has none.
+  const workspaceId = workspaceUnavailable ? null : rememberedWorkspaceId
   // The console belongs to instance administrators (instance_admin.go on the
   // server): it retunes the whole server, so a workspace OWNER or ADMIN role
   // does not open it. null while the session loads — wait, judge nothing.
@@ -119,7 +125,7 @@ function AdminConsole() {
   const [stats, setStats] = useState<Stats | null>(null)
   // The Overview's reads, each landing on its own (hooks/use-admin-overview):
   // the slow journal walk no longer holds the whole page on a skeleton.
-  const overview = useAdminOverview(workspaceId, isAdmin && tab === "overview")
+  const overview = useAdminOverview(workspaceId, isAdmin && !wsLoading && tab === "overview")
   // A 403/500/network failure on the primary fetches must be visible, not a
   // silently empty table (#868). Populated by fetchData; cleared on success.
   const [fetchError, setFetchError] = useState<{ title: string; detail?: string } | null>(null)
@@ -185,7 +191,9 @@ function AdminConsole() {
   const fetchGeneration = useRef(0)
   const fetchData = useCallback(async () => {
     // An instance admin with no workspace gets the instance's figures.
-    if (!isAdmin) return
+    // While the workspace directory loads the client fence refuses every
+    // workspace-scoped request; the read is made once it has answered.
+    if (!isAdmin || wsLoading) return
     const generation = ++fetchGeneration.current
     const isStale = () => generation !== fetchGeneration.current
     try {
@@ -202,7 +210,7 @@ function AdminConsole() {
     } catch (e) {
       if (!isStale()) setFetchError({ title: "Couldn’t load the instance figures", detail: e instanceof Error ? e.message : "Network error loading admin data." })
     }
-  }, [workspaceId, isAdmin])
+  }, [workspaceId, isAdmin, wsLoading])
 
   useEffect(() => {
     void fetchData()
@@ -220,12 +228,12 @@ function AdminConsole() {
   }, [workspaceId])
 
   useEffect(() => {
-    if (isAdmin) checkRuntime()
-  }, [isAdmin, checkRuntime])
+    if (isAdmin && !wsLoading) checkRuntime()
+  }, [isAdmin, wsLoading, checkRuntime])
 
   useEffect(() => {
-    if (isAdmin && tab === "overview") fetchKeeperData()
-  }, [isAdmin, tab, fetchKeeperData])
+    if (isAdmin && !wsLoading && tab === "overview") fetchKeeperData()
+  }, [isAdmin, wsLoading, tab, fetchKeeperData])
 
   // KIT-03: a person who is not an instance administrator is told so, on the
   // page they opened, instead of being sent home without a word. Nothing of

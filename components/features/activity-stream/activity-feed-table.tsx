@@ -200,7 +200,7 @@ export function WorkRow({
     >
       <StatusGlyph status={item.status} />
       <span className="min-w-0">
-        <b className="block truncate font-medium text-foreground">
+        <b className="block truncate text-control font-semibold text-foreground">
           {item.title}
           {item.runs && (
             <span className="ml-1.5 inline-block rounded-sm bg-muted px-1.5 align-[1px] text-micro font-semibold text-muted-foreground ring-1 ring-border">
@@ -249,7 +249,7 @@ export function ChangeRow({
     >
       <KindGlyph kind={item.kind} />
       <span className="min-w-0">
-        <b className="block truncate font-medium text-foreground">{item.object}</b>
+        <b className="block truncate text-control font-semibold text-foreground">{item.object}</b>
         <small className="block truncate text-label text-muted-foreground">
           {item.action} · {item.who}
         </small>
@@ -288,7 +288,7 @@ export function StoryRow({
     >
       <KindGlyph kind={item.objectKind} />
       <span className="min-w-0">
-        <b className="block truncate font-medium text-foreground">
+        <b className="block truncate text-control font-semibold text-foreground">
           {item.title}
           <span className="ml-1.5 inline-block rounded-sm bg-muted px-1.5 align-[1px] text-micro font-semibold text-muted-foreground ring-1 ring-border">
             {item.items.length} updates

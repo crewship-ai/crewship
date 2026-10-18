@@ -688,7 +688,7 @@ function KpiCard({
 }) {
   return (
     <div className="rounded-xl border border-foreground/10 bg-card p-4">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className="mt-1.5 text-2xl font-semibold text-foreground">{value}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div>
     </div>

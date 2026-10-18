@@ -96,7 +96,7 @@ export function MemberDetail({
         <p className="flex flex-wrap items-center gap-1.5" data-slot="member-profile">
           <RolePill role={member.role} />
           <RestrictedPill mode={member.access_mode} />
-          <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 font-mono text-micro text-muted-foreground">joined {joinedDate(member.created_at)}</span>
+          <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 text-micro tabular-nums text-muted-foreground">joined {joinedDate(member.created_at)}</span>
         </p>
       ) : (
       <div className="flex items-start gap-3.5 pr-8" data-slot="member-profile">
@@ -106,11 +106,11 @@ export function MemberDetail({
             <span className="truncate">{label}</span>
             {isSelf && <span className="text-xs font-normal text-muted-foreground">you</span>}
           </p>
-          {member.user.full_name?.trim() && <p className="truncate font-mono text-micro text-muted-foreground">{member.user.email}</p>}
+          {member.user.full_name?.trim() && <p className="truncate text-micro text-muted-foreground">{member.user.email}</p>}
           <p className="mt-2 flex flex-wrap items-center gap-1.5">
             <RolePill role={member.role} />
             <RestrictedPill mode={member.access_mode} />
-            <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 font-mono text-micro text-muted-foreground">joined {joinedDate(member.created_at)}</span>
+            <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 text-micro tabular-nums text-muted-foreground">joined {joinedDate(member.created_at)}</span>
           </p>
         </div>
       </div>
@@ -165,7 +165,7 @@ export function MemberDetail({
                 })}
               </div>
               {diff > 0 && (
-                <span className="ml-auto font-mono text-micro text-warn" data-slot="member-exceptions" title="What differs from the preset">
+                <span className="ml-auto text-micro text-warn" data-slot="member-exceptions" title="What differs from the preset">
                   {[...profile.added.map((c) => `+${CAPABILITY_SHORT[c] ?? c}`), ...profile.removed.map((c) => `−${CAPABILITY_SHORT[c] ?? c}`)].join(" ")}
                 </span>
               )}
@@ -176,10 +176,10 @@ export function MemberDetail({
             const held = a.caps.filter((c) => granted.includes(c.cap)).length
             return (
               <div key={a.key} role="group" aria-label={a.label}>
-                <p className={cn("flex items-center gap-1.5 border-b border-border/60 px-4 py-1.5 font-mono text-micro uppercase tracking-[0.08em]",
+                <p className={cn("flex items-center gap-1.5 border-b border-border/60 px-4 py-1.5 text-micro font-semibold",
                   a.danger ? "bg-destructive/[0.06] text-destructive" : "bg-surface-subtle text-muted-foreground")}>
                   <AreaIcon className="h-3 w-3" aria-hidden />{a.label}
-                  <span className="ml-auto normal-case tracking-normal">{held} of {a.caps.length}</span>
+                  <span className="ml-auto font-normal tabular-nums">{held} of {a.caps.length}</span>
                 </p>
                 {a.key === "secrets" && revealEnabled !== null && (
                   <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-label text-muted-foreground" data-slot="member-reveal-policy">
@@ -206,7 +206,7 @@ export function MemberDetail({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5 text-control">
                           {CAPABILITY_LABELS[cap].en}
-                          {unsaved && <span className="font-mono text-micro text-[var(--save-bar-fg)]">unsaved</span>}
+                          {unsaved && <span className="text-micro text-[var(--save-bar-fg)]">unsaved</span>}
                         </span>
                         <span className="block text-label text-muted-foreground">{CAPABILITY_HINT[cap]}</span>
                       </span>
@@ -372,7 +372,7 @@ function RemoveMember({ member, label, onConfirm }: { member: Member; label: str
           <UserAvatar name={member.user.full_name} email={member.user.email} src={member.user.avatar_url} className="h-8 w-8" textClassName="text-micro" />
           <span className="w-0 min-w-0 flex-1">
             <span className="block truncate text-control">{label}</span>
-            <span className="block truncate font-mono text-micro text-muted-foreground">{member.user.email}</span>
+            <span className="block truncate text-micro text-muted-foreground">{member.user.email}</span>
           </span>
           <RolePill role={member.role} />
         </div>

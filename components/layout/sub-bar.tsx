@@ -4,7 +4,7 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Slot } from "radix-ui"
 import { createPortal } from "react-dom"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -233,6 +233,45 @@ export function SubBar<T extends string = string>({
     )
   }
 
+  // v67 phone: ONE header row — area tile, title, the page's primary action
+  // as an icon button, search, bell — and no second row for the breadcrumb or
+  // the page's buttons. The leading control and the actions join the top bar's
+  // slot; what stays under it is the page's views and filters, as chips.
+  if (slot && isMobile) {
+    const showIdentity = !identityHidden
+    return (
+      <div className={cn("shrink-0", className)}>
+        {createPortal(
+          <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" aria-label={ariaLabel}>
+            {leading && <div className="flex shrink-0 items-center">{leading}</div>}
+            <div className="flex-1" />
+            <ActionsSlot>{actions}</ActionsSlot>
+          </div>,
+          slot,
+        )}
+        {/* A title that only repeats the area stays the page's heading for
+            assistive technology; one that names something else (a section, a
+            sub-page) is drawn as the chip row's lead, not as a bar. */}
+        {!showIdentity && heading && <h1 className="sr-only">{title}</h1>}
+        {showIdentity && (
+          <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} aria-label={ariaLabel}>
+            <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
+              <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.005em] text-foreground"}>{title}</span>
+              {section != null && (
+                <>
+                  <span className="text-muted-foreground-soft whitespace-pre"> / </span>
+                  <span className="font-medium text-foreground">{section}</span>
+                </>
+              )}
+            </Heading>
+            {meta}
+          </div>
+        )}
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+      </div>
+    )
+  }
+
   return (
     <div className={cn("shrink-0", className)}>
       {/* A row with nothing displayed in it is not drawn (an empty 36 px
@@ -353,7 +392,7 @@ function SubBarTabButton<T extends string>({
       {tab.label}
       {tab.badge != null && <span className="text-micro text-muted-foreground/70">{tab.badge}</span>}
       {tab.locked && (
-        <span className="text-micro uppercase tracking-wider text-warn/70 font-mono">
+        <span className="text-micro text-warn/70">
           {tab.lockedLabel ?? "soon"}
         </span>
       )}
@@ -371,21 +410,47 @@ type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 
 /** Primary CTA — soft/tinted. At most one per page. */
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
+  // On a phone (v67) the primary action is an icon button — the blue "+" — and
+  // its label stays for assistive technology. A create action with no icon of
+  // its own gets the plus; any other label stays text.
+  const creates = typeof children === "string" && /^(new|add|create|invite)\b/i.test(children)
+  const phoneIcon = !Icon && creates
   return (
     // Harbor: the page's one primary action is the solid brand button.
-    <Button asChild={asChild} variant="default" size="sm" className={cn("gap-1.5 px-3", className)} {...props}>
+    <Button
+      asChild={asChild}
+      variant="default"
+      size="sm"
+      className={cn("gap-1.5 px-3", (Icon || phoneIcon) && "max-md:min-w-8 max-md:px-2 coarse:max-md:min-w-[44px]", className)}
+      {...props}
+    >
       {Icon && <Icon className="h-3 w-3" />}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
+      {phoneIcon && <Plus className="h-3 w-3 md:hidden" aria-hidden />}
+      {asChild ? (
+        <Slot.Slottable>{children}</Slot.Slottable>
+      ) : Icon || phoneIcon ? (
+        <span className="max-md:sr-only">{children}</span>
+      ) : (
+        children
+      )}
     </Button>
   )
 }
 
 /** Secondary / neutral action (Import, secondary create). */
 export function SubBarSecondary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
+  // On a phone a secondary action is an icon, or — with no icon — is left for
+  // the page's own menus: v67's phone bar carries the primary action only.
   return (
-    <Button asChild={asChild} variant="ghost" size="sm" className={cn("gap-1.5", className)} {...props}>
+    <Button
+      asChild={asChild}
+      variant="ghost"
+      size="sm"
+      className={cn("gap-1.5", Icon ? "max-md:min-w-8 max-md:px-2" : "max-md:hidden", className)}
+      {...props}
+    >
       {Icon && <Icon className="h-3 w-3" />}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
+      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : Icon ? <span className="max-md:sr-only">{children}</span> : children}
     </Button>
   )
 }

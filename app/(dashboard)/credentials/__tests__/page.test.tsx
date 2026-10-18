@@ -638,3 +638,46 @@ describe("the panel is the shared SecondaryPanel", () => {
     expect(query().get("space")).toBe("providers")
   })
 })
+
+// Harbor 2 v67 header (PAR-075, PAR-079): "Vault > Secrets v" where the second
+// crumb is the space chooser, and the CLI button is the ">_" glyph.
+describe("the header (v67)", () => {
+  it("PAR-075 makes the space in the breadcrumb a chooser", async () => {
+    routeApi({ credentials: [makeCredential()] })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    const crumb = screen.getByTestId("vault-space-crumb")
+    expect(crumb).toHaveAttribute("aria-haspopup", "menu")
+    expect(crumb.textContent).toBe("Secrets")
+    fireEvent.keyDown(crumb, { key: "Enter" })
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /AI providers/ }))
+    expect(await screen.findByRole("heading", { level: 1, name: "AI providers" })).toBeInTheDocument()
+    expect(screen.getByTestId("vault-space-crumb").textContent).toBe("AI providers")
+  })
+
+  it("PAR-075 keeps the chooser on a phone (390 px), next to the Secrets/AI providers switch", async () => {
+    h.mobile = true
+    routeApi({ credentials: [makeCredential()] })
+    renderPage()
+    await screen.findByRole("table", { name: "Secrets" })
+    expect(screen.getByTestId("vault-space-crumb")).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Vault space" })).toBeInTheDocument()
+  })
+
+  it("PAR-075 offers no chooser to a member, who has one space", async () => {
+    h.role = "MEMBER"
+    routeApi({ credentials: [makeCredential()] })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    expect(screen.queryByTestId("vault-space-crumb")).not.toBeInTheDocument()
+  })
+
+  it("PAR-079 draws the CLI button as the >_ glyph", async () => {
+    routeApi({ credentials: [makeCredential()] })
+    renderPage()
+    await findRow("STRIPE_API_KEY")
+    const btn = screen.getByRole("button", { name: "Command line" })
+    expect(btn.querySelector("svg.lucide-terminal")).not.toBeNull()
+    expect(btn.querySelector("svg.lucide-square-terminal")).toBeNull()
+  })
+})

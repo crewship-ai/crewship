@@ -116,12 +116,12 @@ function FilterMenu<T extends string>({ label, value, options, onChange, any = "
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel className="font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground">{label}</DropdownMenuLabel>
+        <DropdownMenuLabel className=" text-micro text-muted-foreground">{label}</DropdownMenuLabel>
         {options.map((o) => (
           <DropdownMenuItem key={o.key} onSelect={() => onChange(o.key)} className="gap-2 text-xs">
             <Check className={cn("h-3.5 w-3.5", o.key === value ? "opacity-100" : "opacity-0")} />
             <span className="flex-1">{o.label}</span>
-            {o.count !== undefined && <span className="font-mono text-micro text-muted-foreground">{o.count}</span>}
+            {o.count !== undefined && <span className="text-micro tabular-nums text-muted-foreground">{o.count}</span>}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -292,7 +292,7 @@ export function BackupsPage() {
             className={cn("flex h-7 min-w-0 items-center justify-center rounded-md px-1 text-label font-medium transition-colors",
               segView === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
             <span className="truncate">{v.label}</span>
-            {v.key === "overview" && attention > 0 && <span className="ml-1 font-mono text-micro text-destructive">{attention}</span>}
+            {v.key === "overview" && attention > 0 && <span className="ml-1 text-micro tabular-nums text-destructive">{attention}</span>}
           </button>
         ))}
       </div>

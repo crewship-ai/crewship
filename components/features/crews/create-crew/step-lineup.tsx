@@ -163,7 +163,7 @@ export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
       </div>
 
       <div className="flex items-center gap-2 pt-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
+        <span className="text-label font-medium text-muted-foreground-soft">
           Or start from a template
         </span>
         <span className="h-px flex-1 bg-hairline" aria-hidden="true" />

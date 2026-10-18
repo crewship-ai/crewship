@@ -81,7 +81,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} />)
     expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument()
     expect(screen.getByPlaceholderText("What should be done, what does a good result look like, and which files or constraints matter?")).toBeInTheDocument()
-    expect(screen.getByText("Create issue")).toBeInTheDocument()
+    expect(screen.getByText("Create")).toBeInTheDocument()
   })
 
   it("does not render content when closed", () => {
@@ -109,7 +109,7 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText("Todo")).toBeInTheDocument()
     expect(screen.queryByText("Backlog")).toBeNull()
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "From a group" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
     await waitFor(() => {
       const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
       expect(post).toBeDefined()
@@ -123,7 +123,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} initialStatus="REVIEW" />)
     expect(screen.getByText("Backlog")).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Plain" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
     await waitFor(() => {
       const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
       expect(post).toBeDefined()
@@ -137,7 +137,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} initialProjectId="proj-1" />)
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "In a project" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
     await waitFor(() => {
       const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
       expect(post).toBeDefined()
@@ -162,7 +162,7 @@ describe("CreateIssueModal", () => {
 
   it("disables Create button when title is empty", () => {
     render(<CreateIssueModal {...defaultProps} />)
-    const button = screen.getByText("Create issue")
+    const button = screen.getByText("Create")
     expect(button).toBeDisabled()
   })
 
@@ -170,7 +170,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} />)
     const titleInput = screen.getByPlaceholderText("Issue title")
     fireEvent.change(titleInput, { target: { value: "Test issue" } })
-    const button = screen.getByText("Create issue")
+    const button = screen.getByText("Create")
     expect(button).not.toBeDisabled()
   })
 
@@ -193,7 +193,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(descInput, { target: { value: "Test description" } })
 
     // Submit
-    const button = screen.getByText("Create issue")
+    const button = screen.getByText("Create")
     fireEvent.click(button)
 
     await waitFor(() => {
@@ -229,7 +229,7 @@ describe("CreateIssueModal", () => {
     )
 
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Test" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => {
       expect(onCreated).toHaveBeenCalled()
@@ -250,7 +250,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Test" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("Server error", { duration: Infinity })
@@ -272,15 +272,12 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText("Create more")).toBeInTheDocument()
   })
 
-  it("shows crew selector in header breadcrumb", () => {
+  it("shows the crew selector as the chip under the header title", () => {
     render(<CreateIssueModal {...defaultProps} />)
-    // CreateSurfaceHeader renders `context › Title` as ONE heading (two
-    // headings would make the accessible name "ENGNew issue"), and adds an
-    // sr-only DialogDescription echoing the title when the surface passes no
-    // description — so a bare getByText("New issue") now matches twice.
-    const heading = screen.getByRole("heading", { level: 2 })
-    expect(heading.textContent).toContain("ENG")
-    expect(heading.textContent).toContain("New issue")
+    // v67 (PAR-146): the heading is the plain title; the crew is the chip in the
+    // description line under it ("ENG creates ENG- issues").
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("New issue")
+    expect(screen.getByRole("button", { name: "Select crew" })).toHaveTextContent("ENG")
   })
 
   // ── The shared shell ────────────────────────────────────────────────────
@@ -325,7 +322,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("What should be done, what does a good result look like, and which files or constraints matter?"), {
       target: { value: "Body text" },
     })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => {
       const createCall = mockFetch.mock.calls.find(
@@ -378,7 +375,7 @@ describe("CreateIssueModal", () => {
     // the ref to reach the <button> for the popover to anchor and open.
     fireEvent.click(screen.getByText("No priority"))
     fireEvent.click(await screen.findByText("Urgent"))
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => {
       const createCall = mockFetch.mock.calls.find(
@@ -401,7 +398,7 @@ describe("CreateIssueModal", () => {
     render(<CreateIssueModal {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Dup" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("Title is already taken", { duration: Infinity })
@@ -523,7 +520,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     // The header names where the issue will land, so the choice is visible
     // and still overridable — it is not made behind the user's back.
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("DES")
+      expect(screen.getByRole("button", { name: "Select crew" })).toHaveTextContent("DES")
     })
 
     fireEvent.click(screen.getByText("Assignee"))
@@ -679,7 +676,7 @@ describe("CreateIssueModal — the fields the API takes", () => {
     render(<CreateIssueModal {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Bare" } })
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
     const body = postBody(fetchMock)
@@ -697,7 +694,7 @@ describe("CreateIssueModal — the fields the API takes", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Pointed" } })
     fireEvent.click(screen.getByText("Estimate"))
     fireEvent.click(await screen.findByText("5 points"))
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => expect(postBody(fetchMock)?.estimate).toBe(5))
     // A string would be accepted by JSON and rejected by `Estimate *int`.
@@ -728,7 +725,7 @@ describe("CreateIssueModal — the fields the API takes", () => {
     // The pill going back to "Estimate" is the clear having landed.
     await screen.findByText("Estimate")
 
-    fireEvent.click(screen.getByText("Create issue"))
+    fireEvent.click(screen.getByText("Create"))
 
     await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
     // 0 is a legitimate estimate; "cleared" must not become it.
@@ -921,5 +918,87 @@ describe("CreateIssueModal — making a label from the picker", () => {
       target: { value: "Infra" },
     })
     expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull()
+  })
+
+  // PAR-146 — the v67 D-NEWISSUE header, acceptance checkbox and Create and start.
+  describe("v67 dialog (PAR-146)", () => {
+    const stub = (calls: { url: string; init?: RequestInit }[]) => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init })
+        if (init?.method === "POST" && /\/issues\?/.test(url)) {
+          return { ok: true, status: 201, json: async () => ({ id: "m1", identifier: "ENG-7" }) }
+        }
+        if (!init?.method && /\/issues\/ENG-7\?/.test(url)) {
+          return { ok: true, status: 200, json: async () => ({ identifier: "ENG-7", work_revision: 4 }) }
+        }
+        return { ok: true, status: 200, json: async () => [] }
+      })
+      global.fetch = fetchMock as unknown as typeof fetch
+    }
+
+    it("says which crew files the issue under the title, with the crew picker as the chip", async () => {
+      render(<CreateIssueModal {...defaultProps} />)
+      const chip = await screen.findByRole("button", { name: "Select crew" })
+      expect(chip).toHaveTextContent("ENG")
+      expect(screen.getByText(/creates ENG- issues/)).toBeInTheDocument()
+      // One plain title, no breadcrumb in front of it.
+      expect(screen.getByRole("heading", { name: "New issue" })).toBeInTheDocument()
+    })
+
+    it("offers Create, a blue Create and start, and Create more in the footer", () => {
+      render(<CreateIssueModal {...defaultProps} />)
+      expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Create and start" })).toBeInTheDocument()
+      expect(screen.getByRole("switch", { name: /Create more/ })).toBeInTheDocument()
+      expect(screen.queryByText("Create issue")).toBeNull()
+    })
+
+    it("Create and start creates the issue, then starts it", async () => {
+      const calls: { url: string; init?: RequestInit }[] = []
+      stub(calls)
+      render(<CreateIssueModal {...defaultProps} />)
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Ship it" } })
+      fireEvent.click(screen.getByRole("button", { name: "Create and start" }))
+      await waitFor(() => {
+        const start = calls.find((c) => c.init?.method === "POST" && /\/issues\/ENG-7\/start/.test(c.url))
+        expect(start).toBeDefined()
+      })
+      const order = calls.filter((c) => c.init?.method === "POST").map((c) => (/start/.test(c.url) ? "start" : "create"))
+      expect(order).toEqual(["create", "start"])
+    })
+
+    it("Create alone never starts the issue", async () => {
+      const calls: { url: string; init?: RequestInit }[] = []
+      stub(calls)
+      render(<CreateIssueModal {...defaultProps} />)
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Just file it" } })
+      fireEvent.click(screen.getByRole("button", { name: "Create" }))
+      await waitFor(() => expect(defaultProps.onCreated).toHaveBeenCalled())
+      expect(calls.some((c) => /\/start/.test(c.url))).toBe(false)
+    })
+
+    it("Require my acceptance after the Lead review sets the review policy on the new issue", async () => {
+      const calls: { url: string; init?: RequestInit }[] = []
+      stub(calls)
+      render(<CreateIssueModal {...defaultProps} />)
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Needs sign-off" } })
+      fireEvent.click(screen.getByRole("checkbox", { name: "Require my acceptance after the Lead review" }))
+      fireEvent.click(screen.getByRole("button", { name: "Create" }))
+      await waitFor(() => {
+        const put = calls.find((c) => c.init?.method === "PUT" && /\/issues\/ENG-7\/review-policy/.test(c.url))
+        expect(put).toBeDefined()
+        expect(JSON.parse(put!.init!.body as string)).toEqual({ revision: 4, client_review_required: true })
+      })
+    })
+
+    it("without the checkbox it never touches the review policy", async () => {
+      const calls: { url: string; init?: RequestInit }[] = []
+      stub(calls)
+      render(<CreateIssueModal {...defaultProps} />)
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Plain" } })
+      fireEvent.click(screen.getByRole("button", { name: "Create" }))
+      await waitFor(() => expect(defaultProps.onCreated).toHaveBeenCalled())
+      expect(calls.some((c) => /review-policy/.test(c.url))).toBe(false)
+    })
   })
 })

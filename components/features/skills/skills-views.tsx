@@ -86,8 +86,8 @@ export function ProposedView({
             <header className="flex flex-wrap items-center gap-2.5 px-4 pt-3">
               <SkillTile category={p.category} size="sm" />
               <h3 className="text-control font-semibold">{p.name}</h3>
-              <StatusPill tone="purple" label="Proposed" />
-              {p.description_quality && p.description_quality !== "OK" && <StatusPill tone="warn" label="Weak trigger" />}
+              <StatusPill className="font-sans tracking-normal" tone="purple" label="Proposed" />
+              {p.description_quality && p.description_quality !== "OK" && <StatusPill className="font-sans tracking-normal" tone="warn" label="Weak trigger" />}
             </header>
             <div className="flex flex-col gap-2 px-4 py-2.5">
               <p className="text-control text-foreground/85">{p.description}</p>

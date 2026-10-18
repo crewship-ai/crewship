@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsRow, settingsControl } from "../shared"
+import { SettingsCard, SettingsRow, formatSettingsDate, settingsControl } from "../shared"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { ChangePasswordDialog } from "./change-password-dialog"
@@ -286,7 +286,7 @@ export function ProfileSection({
       <SettingsCard icon={Building2} title="Workspace" description="Your current organization and role">
         <SettingsRow label="Role">
           {role ? (
-            <StatusPill tone={ROLE_TONE[role] ?? "muted"} label={formatStatus(role).label} />
+            <StatusPill tone={ROLE_TONE[role] ?? "muted"} label={formatStatus(role).label} className="font-sans tracking-normal" />
           ) : (
             <span className="text-control text-muted-foreground">Not assigned</span>
           )}
@@ -298,8 +298,9 @@ export function ProfileSection({
         )}
         {joinedAt && (
           <SettingsRow label="Joined">
-            <span className="text-control text-foreground font-mono tabular-nums">
-              {new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            <span className="text-control text-foreground tabular-nums">
+              {/* v67: "12 Oct 2026". */}
+              {formatSettingsDate(joinedAt)}
             </span>
           </SettingsRow>
         )}

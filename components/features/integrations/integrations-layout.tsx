@@ -4,6 +4,7 @@ import * as React from "react"
 import { Plug, Plus, Terminal } from "lucide-react"
 import { toast } from "@/lib/toast"
 
+import { SpaceCrumb } from "./space-crumb"
 import { SubBar, SubBarIconButton, SubBarPrimary } from "@/components/layout/sub-bar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
@@ -456,7 +457,12 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       <SubBar
         icon={Plug}
         title="Integrations"
-        section={objectName ? `${meta.label} › ${objectName}` : meta.label}
+        section={
+          <>
+            <SpaceCrumb area="Integrations" value={route.space} options={SPACES.map((k) => ({ key: k, label: SPACE_META[k].label }))} onChange={goSpace} />
+            {objectName && <span className="font-semibold"> › {objectName}</span>}
+          </>
+        }
         heading={false}
         ariaLabel="Integrations"
         actions={

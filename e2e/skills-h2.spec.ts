@@ -62,8 +62,11 @@ test.describe("Skills desktop", () => {
     await expect(page.locator("[data-slot=skills-table]")).toBeVisible()
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Library")
     await expect(page.getByRole("button", { name: "Cards" })).toHaveCount(0)
+    // v67 (PAR-073): the facets sit behind the toolbar's Filter button.
+    await expect(panel(page).getByText("Domain", { exact: true })).toHaveCount(0)
+    await panel(page).getByRole("button", { name: /^Filter/ }).click()
     const text = (await panel(page).innerText()).replace(/\s+/g, " ")
-    expect(text.indexOf("Views")).toBeLessThan(text.indexOf("Filter"))
+    expect(text.indexOf("Views")).toBeLessThan(text.indexOf("Source"))
     for (const facet of ["Source", "Domain", "Trust", "Status", "Used by crew"]) expect(text).toContain(facet)
     expect(text).not.toContain("Crews & agents")
     const toolbar = await panel(page).locator(".secondary-panel-toolbar").boundingBox()
@@ -156,6 +159,7 @@ test.describe("Skills desktop", () => {
     const { crews } = await api(page)
     test.skip(crews.length === 0, "no crews")
     await page.goto(`/skills?crew=${crews[0].id}&domain=CODING`)
+    // Closed, the picks show as chips (v67).
     await expect(panel(page).getByRole("button", { name: `Remove filter Used by ${crews[0].name}` })).toBeVisible()
     await expect(panel(page).getByRole("button", { name: "Remove filter Coding" })).toBeVisible()
   })
@@ -268,5 +272,28 @@ test.describe("Skills phone", () => {
     await expect(page.locator("[data-slot=skills-table]")).toHaveCount(0)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow).toBeLessThanOrEqual(0)
+  })
+})
+
+test.describe("Skills v67 parity", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } })
+
+  test("PAR-072 trust pills are sans and the toolbar has a Filter button (PAR-073)", async ({ page }) => {
+    await seed(page)
+    await page.goto("/skills")
+    await expect(rows(page).first()).toBeVisible()
+    await expect(rows(page).first().locator("[data-slot=status-pill]")).not.toHaveCSS("font-family", /mono/i)
+    await expect(panel(page).getByRole("button", { name: /^Filter/ })).toHaveAttribute("aria-expanded", "false")
+  })
+
+  test("PAR-124 skill page header: sans trust pill, slug only when it differs from the title", async ({ page }) => {
+    await seed(page)
+    const { skills } = await api(page)
+    await page.goto(`/skills?skill=${skills[0].id}`)
+    const head = page.locator("[data-slot=skill-head]")
+    await expect(head.locator("[data-slot=status-pill]")).not.toHaveCSS("font-family", /mono/i)
+    const title = (await head.getByRole("heading", { level: 1 }).innerText()).trim()
+    const slugLine = head.locator("p.font-mono")
+    if (title === String(skills[0].slug)) await expect(slugLine).toHaveCount(0)
   })
 })

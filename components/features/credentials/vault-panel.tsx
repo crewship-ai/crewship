@@ -59,7 +59,7 @@ const VIEW_ICON: Record<string, LucideIcon> = {
 const CLASS_LABEL: Record<string, string> = { STANDARD: "Standard", RESTRICTED: "Restricted", SEALED: "Sealed" }
 
 const meta = (n: number | undefined) => (
-  <span className="ml-auto font-mono text-label tabular-nums text-muted-foreground-soft">{n ?? 0}</span>
+  <span className="ml-auto text-label tabular-nums text-muted-foreground-soft">{n ?? 0}</span>
 )
 
 /** The space switch, shared by both spaces' panels. */

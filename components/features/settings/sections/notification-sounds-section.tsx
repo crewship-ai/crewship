@@ -106,7 +106,7 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
             value={Math.round(preferences.volume * 100)}
             onChange={(event) => update({ volume: Number(event.target.value) / 100 })}
           />
-          <span className="w-9 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{Math.round(preferences.volume * 100)}%</span>
+          <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{Math.round(preferences.volume * 100)}%</span>
         </div>
       </SettingsRow>
       {(["chat", "inbox"] as const).map((kind) => {

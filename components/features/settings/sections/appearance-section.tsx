@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Check, Contrast, Palette, Shapes, SlidersHorizontal, Users } from "lucide-react"
+import { useEffect, useState, type CSSProperties } from "react"
+import { Contrast, Palette, Shapes, SlidersHorizontal } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
@@ -56,22 +56,38 @@ const MOTION_OPTIONS: { value: MotionChoice; label: string }[] = [
   { value: "off", label: "Off" },
 ]
 
-// The preview tiles have to show the OTHER palette too — a Light tile drawn
-// in the dark theme's tokens would just be another dark tile — so they carry
-// literal colours instead of the app tokens. Rough stand-ins for the two
-// Harbor grounds; the accent bar is the live brand colour.
+// v67 `.s-tp`: a wireframe card, not a screenshot — a sidebar of three bars
+// (the first in the accent), a top bar and a card with an accent bar. The tile
+// has to show the OTHER palette too (a Light tile drawn in the dark theme's
+// tokens would just be another dark tile), so it carries literal colours;
+// System is the one card split down the middle, light then dark.
 const PREVIEW = {
-  dark: { ground: "#0B1220", rail: "#111A2C", card: "#16213A", line: "#2A3653" },
-  light: { ground: "#F7F8FA", rail: "#FFFFFF", card: "#FFFFFF", line: "#E3E7EE" },
+  dark: { ground: "linear-gradient(135deg,#0B1220,#151B2E)", bar: "#1A2234", block: "#2A3550", card: "#121A2B", topbar: "#1A2234" },
+  light: { ground: "linear-gradient(135deg,#EAF1FF,#F7F9FC)", bar: "#FFFFFF", block: "#DCE4F2", card: "#FFFFFF", topbar: "#FFFFFF" },
+  system: { ground: "linear-gradient(115deg,#EAF1FF 0 50%,#0B1220 50% 100%)", bar: "#FFFFFF", block: "#DCE4F2", card: "#121A2B", topbar: "linear-gradient(90deg,#fff 0 40%,#1A2234 40%)" },
 } as const
 
-function ThemePreview({ palette }: { palette: (typeof PREVIEW)[keyof typeof PREVIEW] }) {
+function ThemePreview({ variant }: { variant: keyof typeof PREVIEW }) {
+  const p = PREVIEW[variant]
+  const system = variant === "system"
   return (
-    <div className="flex h-full w-full" style={{ background: palette.ground }}>
-      <div className="w-1/4" style={{ background: palette.rail }} />
-      <div className="flex flex-1 flex-col gap-1.5 p-2">
-        <div className="h-1.5 w-1/2 rounded-full bg-[var(--brand)]" />
-        <div className="flex-1 rounded-md" style={{ background: palette.card, boxShadow: `inset 0 0 0 1px ${palette.line}` }} />
+    <div
+      data-slot="theme-preview"
+      data-variant={variant}
+      aria-hidden
+      className="grid h-[5.116rem] grid-cols-[26%_1fr] grid-rows-[0.8077rem_1fr] gap-1.5 overflow-hidden rounded-lg p-1.5"
+      style={{ background: p.ground }}
+    >
+      <div data-slot="theme-preview-sidebar" className="row-span-2 grid content-start gap-1 rounded-md p-1" style={{ background: p.bar }}>
+        <b className="block h-1 w-[70%] rounded-sm bg-[var(--brand)]" />
+        <b className="block h-1 rounded-sm" style={{ background: p.block }} />
+        <b className="block h-1 rounded-sm" style={{ background: p.block }} />
+      </div>
+      <div data-slot="theme-preview-topbar" className="rounded" style={{ background: p.topbar }} />
+      <div data-slot="theme-preview-cards" className="grid grid-cols-2 gap-1 rounded-md p-1" style={{ background: p.card }}>
+        <b className="col-span-full block h-2 w-[45%] rounded-sm bg-[var(--brand)]" />
+        <b className="block rounded-sm" style={{ background: system ? "#2A3550" : p.block }} />
+        <b className="block rounded-sm" style={{ background: system ? "#2A3550" : p.block }} />
       </div>
     </div>
   )
@@ -84,7 +100,7 @@ function ThemeTiles({ value, onChange, allowed }: { value: ThemeChoice | undefin
   useEffect(() => setMounted(true), [])
 
   return (
-    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-3 p-4">
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-2.5 px-4 pb-4 pt-3.5">
       {THEME_OPTIONS.map(({ value: option, label, icon: Icon }) => {
         const checked = mounted && value === option
         const disabled = !allowed.includes(option)
@@ -98,24 +114,14 @@ function ThemeTiles({ value, onChange, allowed }: { value: ThemeChoice | undefin
             disabled={disabled}
             onClick={() => onChange(option)}
             className={cn(
-              "group flex flex-col gap-2 rounded-xl border p-1.5 text-left outline-none transition-colors",
+              "group grid gap-2 rounded-xl border bg-card p-2 text-left outline-none transition-colors",
               "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
               "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border",
-              checked ? "border-primary ring-1 ring-primary" : "border-border",
+              checked ? "border-primary ring-[3px] ring-primary/20" : "border-border",
             )}
           >
-            <div aria-hidden className="h-16 overflow-hidden rounded-lg border border-border/60">
-              {option === "system" ? (
-                // System is whichever the OS picks: half of each.
-                <div className="flex h-full">
-                  <div className="w-1/2"><ThemePreview palette={PREVIEW.dark} /></div>
-                  <div className="w-1/2"><ThemePreview palette={PREVIEW.light} /></div>
-                </div>
-              ) : (
-                <ThemePreview palette={PREVIEW[option]} />
-              )}
-            </div>
-            <span className={cn("flex items-center gap-1.5 px-1 pb-0.5 text-control", checked ? "text-foreground" : "text-muted-foreground")}>
+            <ThemePreview variant={option} />
+            <span className="flex items-center gap-1.5 text-control font-semibold text-foreground">
               <Icon className="h-3.5 w-3.5" aria-hidden />
               {label}
             </span>
@@ -129,35 +135,33 @@ function ThemeTiles({ value, onChange, allowed }: { value: ThemeChoice | undefin
 // The three light rails, as the wireframe drew them: rail colour, the white
 // section panel beside it, and the page ground.
 /**
- * The accent as it will actually look, drawn with the live app tokens and
- * real components — a swatch alone does not show that the button is the
- * deeper "strong" shade or what a link or a chip turns into.
+ * The accent as it will actually look (v67 `.s-prev`): the primary button, a
+ * link, a selected row and a focused field, drawn with the live app tokens —
+ * a swatch alone does not show the deeper "strong" shade of the button or
+ * what a link turns into.
  */
 function AccentPreview() {
-  const [on, setOn] = useState(true)
   return (
-    <div aria-label="Accent preview" role="group" className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-border/60 bg-surface-subtle/60 px-4 py-3">
-      <Button size="sm" tabIndex={-1}>Primary action</Button>
-      <Button size="sm" variant="outline" tabIndex={-1}>Secondary</Button>
+    <div aria-label="Accent preview" role="group" className="flex flex-wrap items-center gap-3 border-t border-border bg-surface-subtle px-4 py-3">
+      <Button size="sm" tabIndex={-1}>Primary</Button>
       <span className="text-control text-primary-hover underline-offset-2 hover:underline">A link</span>
-      <span className="rounded-full bg-chip-info-bg px-2 py-0.5 text-label font-medium text-chip-info-fg">Chip</span>
-      <Switch checked={on} onCheckedChange={setOn} aria-label="Preview switch" />
-      <span className="flex h-7 items-center rounded-md border border-input bg-card px-2.5 text-label text-muted-foreground ring-2 ring-ring/50">Focused field</span>
+      <span className="rounded-lg bg-chip-info-bg px-2.5 py-1 text-label text-chip-info-fg">Selected row</span>
+      <span className="flex h-[var(--control-sm)] items-center rounded-md border border-primary bg-card px-2.5 text-control text-foreground ring-[3px] ring-primary/20">Focused field</span>
     </div>
   )
 }
 
 /**
- * The presets as one row of large swatches, in spectrum order (blues, then
- * purples and pink, then the grey), the name under each. A 40px circle is a
- * real target and the colour reads at a glance; the pressed one carries a
- * check and an offset ring. The team colour is not a ninth circle: it is a
+ * The presets as one row of small round swatches (v67 `.swatches`), in
+ * spectrum order, named only by their tooltip and their accessible name: a
+ * 22 px circle is enough to read the colour, and the pressed one carries an
+ * offset ring in its own colour. The team colour is not a ninth circle: it is a
  * different KIND of choice (someone else's colour, set elsewhere), so it gets
  * its own row below — see TeamColourRow.
  */
-function AccentCircles({ value, onChange }: { value: AccentChoice; onChange: (id: AccentChoice) => void }) {
+function AccentSwatches({ value, onChange }: { value: AccentChoice; onChange: (id: AccentChoice) => void }) {
   return (
-    <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap gap-x-2 gap-y-4 px-4 pb-2 pt-5">
+    <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap gap-2">
       {ACCENTS.map(({ id, label, swatch }) => {
         const checked = value === id
         return (
@@ -167,22 +171,15 @@ function AccentCircles({ value, onChange }: { value: AccentChoice; onChange: (id
             role="radio"
             aria-checked={checked}
             aria-label={label}
+            title={label}
             onClick={() => onChange(id)}
-            className="group flex w-16 flex-col items-center gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "grid h-10 w-10 place-items-center rounded-full transition-transform group-hover:scale-105",
-                "shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.2),0_1px_3px_rgb(0_0_0_/_0.25)]",
-                checked && "ring-2 ring-foreground/80 ring-offset-2 ring-offset-card",
-              )}
-              style={{ background: swatch }}
-            >
-              {checked && <Check className="h-4 w-4 text-white drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.5)]" strokeWidth={3} />}
-            </span>
-            <span className={cn("text-label", checked ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
-          </button>
+            className={cn(
+              "kit-tap size-[1.4808rem] shrink-0 rounded-full outline-none transition-shadow",
+              "shadow-[inset_0_0_0_1px_rgb(0_0_0_/_0.12)] focus-visible:ring-2 focus-visible:ring-ring/50",
+              checked && "shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--sw)]",
+            )}
+            style={{ background: swatch, "--sw": swatch } as CSSProperties}
+          />
         )
       })}
     </div>
@@ -192,45 +189,39 @@ function AccentCircles({ value, onChange }: { value: AccentChoice; onChange: (id
 /**
  * The workspace's brand colour as the accent — or, when no admin has set
  * one, a note saying where it would come from. Selecting it is a radio in
- * the same group as the circles above (it is the same choice).
+ * the same group as the swatches above (it is the same choice).
  */
 function TeamColourRow({ hex, value, onChange }: { hex: string | null | undefined; value: AccentChoice; onChange: (id: AccentChoice) => void }) {
   const checked = value === WORKSPACE_ACCENT
   return (
-    <div className="px-4 pb-4 pt-2">
-      <div className={cn("flex items-center gap-3 rounded-xl border px-3 py-2.5", checked ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-dashed border-border")} data-testid="workspace-accent-hint">
-        <span
-          aria-hidden
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.2)]"
-          style={{ background: hex ?? "var(--muted)" }}
+    <SettingsRow
+      data-testid="workspace-accent-hint"
+      label="Team colour"
+      description={hex
+        ? "The workspace brand colour from General › Pages appearance"
+        : checked
+          ? "This workspace has no brand colour yet, so Blue shows. An admin can set one in General › Pages appearance."
+          : "An admin can set a brand colour in General › Pages appearance."}
+    >
+      <span
+        aria-hidden
+        className="grid size-[1.4808rem] shrink-0 place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0_/_0.12)]"
+        style={{ background: hex ?? "conic-gradient(#E5484D,#F5A524,#30A46C,#0091FF,#8E4EC6,#E5484D)" }}
+      />
+      {(hex || checked) && (
+        <Button
+          size="sm"
+          variant={checked ? "secondary" : "outline"}
+          role="radio"
+          aria-checked={checked}
+          aria-label="Team colour"
+          onClick={() => onChange(WORKSPACE_ACCENT)}
+          disabled={checked}
         >
-          {hex ? (checked && <Check className="h-3.5 w-3.5 text-white drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.5)]" strokeWidth={3} />) : <Users className="h-3.5 w-3.5 text-muted-foreground" />}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-control font-medium">Team colour</span>
-          <span className="block text-label text-muted-foreground">
-            {hex
-              ? "Your workspace's brand colour, adjusted where needed so text on it stays readable."
-              : checked
-                ? "This workspace has no brand colour yet, so Blue shows. An admin can set one in General › Pages appearance."
-                : "An admin can set a brand colour in General › Pages appearance."}
-          </span>
-        </span>
-        {(hex || checked) && (
-          <Button
-            size="sm"
-            variant={checked ? "secondary" : "outline"}
-            role="radio"
-            aria-checked={checked}
-            aria-label="Team colour"
-            onClick={() => onChange(WORKSPACE_ACCENT)}
-            disabled={checked}
-          >
-            {checked ? "In use" : "Use"}
-          </Button>
-        )}
-      </div>
-    </div>
+          {checked ? "In use" : "Use"}
+        </Button>
+      )}
+    </SettingsRow>
   )
 }
 
@@ -291,7 +282,9 @@ export function AppearanceSection() {
       </SettingsCard>
 
       <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus">
-        <AccentCircles value={accent} onChange={setAccent} />
+        <SettingsRow label="Colour">
+          <AccentSwatches value={accent} onChange={setAccent} />
+        </SettingsRow>
         <TeamColourRow hex={workspaceHex} value={accent} onChange={setAccent} />
         <AccentPreview />
       </SettingsCard>

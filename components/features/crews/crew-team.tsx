@@ -54,8 +54,8 @@ export interface CrewTeamProps {
   onExtend?: (agent: AgentSummary) => void
   /**
    * Cost over 30 days per agent id (GET /paymaster/spend/by-agent/{crewId}).
-   * Null or absent = unknown or not for this reader: the column is left out
-   * rather than showing zeros.
+   * Null or absent = unknown or not for this reader: the column stays (as in
+   * the design) and shows a dash rather than zeros.
    */
   costByAgent?: ReadonlyMap<string, number> | null
   busyAgentId?: string | null
@@ -108,8 +108,8 @@ export function CrewTeam({
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium max-md:hidden">Skills</th>
                   <th className="px-3 py-2 font-medium max-md:hidden">Credentials</th>
-                  <th className={cn("py-2 text-right font-medium max-sm:hidden", costByAgent ? "px-3" : "px-4")}>Runs · 30 d</th>
-                  {costByAgent && <th className="px-4 py-2 text-right font-medium max-md:hidden">Cost · 30 d</th>}
+                  <th className="px-3 py-2 text-right font-medium max-sm:hidden">Runs · 30 d</th>
+                  <th className="px-4 py-2 text-right font-medium max-md:hidden">Cost · 30 d</th>
                 </tr>
               </thead>
               <tbody>
@@ -137,13 +137,13 @@ export function CrewTeam({
                         {a.llm_model && <span className="block text-label text-muted-foreground">{getModelLabel(a.llm_model)}</span>}
                       </td>
                       <td className="px-3 py-2 max-lg:hidden">{a.tool_profile ? TOOL_ACCESS_LABEL[a.tool_profile]?.label ?? a.tool_profile : "—"}</td>
-                      <td className="px-3 py-2"><StatusPill status={st} live={st === "RUNNING"} /></td>
-                      <td className="px-3 py-2 font-mono tabular-nums max-md:hidden">{a._count?.skills ?? "—"}</td>
+                      <td className="px-3 py-2"><StatusPill className="font-sans" status={st} live={st === "RUNNING"} /></td>
+                      <td className="px-3 py-2 tabular-nums max-md:hidden">{a._count?.skills ?? "—"}</td>
                       <td className="px-3 py-2 max-md:hidden">
-                        {creds == null ? "—" : creds === 0 ? <span className="text-chip-warn-fg">none</span> : <span className="font-mono tabular-nums">{creds}</span>}
+                        {creds == null ? "—" : creds === 0 ? <span className="text-chip-warn-fg">none</span> : <span className="tabular-nums">{creds}</span>}
                       </td>
-                      <td className={cn("py-2 text-right font-mono tabular-nums max-sm:hidden", costByAgent ? "px-3" : "px-4")}>{runsByAgent ? runsByAgent.get(a.id) ?? 0 : "—"}</td>
-                      {costByAgent && <td className="px-4 py-2 text-right font-mono tabular-nums max-md:hidden">{formatSpend(costByAgent.get(a.id) ?? 0)}</td>}
+                      <td className="px-3 py-2 text-right tabular-nums max-sm:hidden">{runsByAgent ? runsByAgent.get(a.id) ?? 0 : "—"}</td>
+                      <td className="px-4 py-2 text-right tabular-nums max-md:hidden">{costByAgent ? formatSpend(costByAgent.get(a.id) ?? 0) : "—"}</td>
                     </tr>
                   )
                 })}

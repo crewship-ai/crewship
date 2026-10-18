@@ -13,7 +13,7 @@ import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { useWorkspacePagesTheme, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier } from "@/lib/permissions/tiers"
-import { normalizePageTheme, PAGE_THEME_PRESETS, colorContrast, pageThemePreset, pageThemeVars, type PageTheme } from "@/lib/pages/theme"
+import { normalizePageTheme, PAGE_THEME_PRESETS, colorContrast, pageThemePreset, type PageTheme } from "@/lib/pages/theme"
 import { PagesThemePreviewPanel } from "./pages-theme-preview"
 import { cn } from "@/lib/utils"
 
@@ -30,8 +30,8 @@ const LABELS: Record<keyof PageTheme, string> = {
 }
 const ORDER: (keyof PageTheme)[] = ["accent", "background", "surface", "border", "text", "muted"]
 
-function Swatch({ color, size = "h-7 w-7" }: { color: string; size?: string }) {
-  return <span aria-hidden className={cn("block shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.25),0_0_0_1px_rgb(0_0_0_/_0.08)]", size)} style={{ background: color }} />
+function Swatch({ color, size = "h-7 w-7", square = false }: { color: string; size?: string; square?: boolean }) {
+  return <span aria-hidden className={cn("block shrink-0 shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.25),0_0_0_1px_rgb(0_0_0_/_0.08)]", size, square ? "rounded-lg" : "rounded-full")} style={{ background: color }} />
 }
 
 /** One AA badge for a text colour: the worse of its contrast on background
@@ -124,44 +124,6 @@ function ThemeTiles({ draft, editing, onPick, onCustom }: { draft: PageTheme; ed
   )
 }
 
-/** A Page drawn in the palette: top bar, three figures, a card with an accent
- *  button and link. Literal colours throughout — it is a Page, not the app. */
-function MiniPage({ theme }: { theme: PageTheme }) {
-  const onAccent = pageThemeVars(theme)["--crewship-page-on-accent"]
-  const card = { background: theme.surface, border: `1px solid ${theme.border}` }
-  return (
-    <div
-      data-testid="pages-mini-preview"
-      aria-label="Sample Page in this palette"
-      role="img"
-      className="overflow-hidden rounded-xl"
-      style={{ background: theme.background, color: theme.text, boxShadow: `inset 0 0 0 1px ${theme.border}` }}
-    >
-      <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: `1px solid ${theme.border}` }}>
-        <span className="h-2 w-2 rounded-full" style={{ background: theme.accent }} />
-        <span className="text-label font-semibold">Team dashboard</span>
-        <span className="ml-auto truncate text-label" style={{ color: theme.muted }}>Overview · Reports</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2 p-3">
-        {[["Open", "24"], ["Overdue", "3"], ["Paid", "$8.2k"]].map(([label, value]) => (
-          <div key={label} className="min-w-0 rounded-lg p-2" style={card}>
-            <div className="truncate text-micro" style={{ color: theme.muted }}>{label}</div>
-            <div className="text-[1.05rem] font-semibold leading-tight tabular-nums">{value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mx-3 mb-3 rounded-lg p-3" style={card}>
-        <p className="text-control font-semibold leading-tight">Your team’s next Page</p>
-        <p className="mt-1 text-label leading-snug" style={{ color: theme.muted }}>A shared palette. A custom application.</p>
-        <div className="mt-2.5 flex flex-wrap items-center gap-3">
-          <span className="rounded-md px-2.5 py-1 text-label font-semibold" style={{ background: theme.accent, color: onAccent }}>Get started</span>
-          <span className="text-label underline underline-offset-2" style={{ color: theme.accent }}>Learn more</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string; role: string | null }) {
   const sharedTheme = useWorkspacePagesTheme(workspaceId)
   const theme = normalizePageTheme(sharedTheme)
@@ -175,9 +137,13 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
   const shown = editable ? normalizePageTheme({ ...theme, ...Object.fromEntries(Object.entries(form.draft).filter(([, v]) => HEX.test(v))) }) : theme
   const contrast = Math.min(colorContrast(shown.text, shown.background), colorContrast(shown.text, shown.surface))
   const [previewOpen, setPreviewOpen] = useState(false)
+  // The six colours are shown as they are (v67); the hex editor lives under
+  // Custom…, which is open whenever the colours match no preset.
+  const [customOpen, setCustomOpen] = useState(false)
   const [resetting, setResetting] = useState(false)
   const applyPreset = (preset: PageTheme) => { for (const key of ORDER) form.set(key, preset[key]) }
   const preset = pageThemePreset(shown)
+  const showEditor = editable && (customOpen || !preset)
   const status = followsDefault && !form.isDirty ? "Crewship default" : preset ? preset.label : "Custom"
 
   async function resetToDefault() {
@@ -209,44 +175,48 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
       <Button variant="ghost" size="sm" className="gap-1.5" aria-pressed={previewOpen} onClick={() => setPreviewOpen((v) => !v)}><Eye className="h-3.5 w-3.5" />Preview</Button>
     </span>}
     description="Colours your agents use when they build Page apps. Until you pick something else, Pages wear the Crewship palette.">
-    {editable && <div className="border-b border-border p-4">
-      <div className="mb-2.5 text-label font-medium uppercase tracking-wide text-muted-foreground">Theme</div>
-      <ThemeTiles draft={shown} editing={false} onPick={applyPreset} onCustom={() => document.getElementById("pages-color-accent")?.focus()} />
+    {editable && <div className="px-4 py-3">
+      <ThemeTiles draft={shown} editing={customOpen} onPick={(t) => { setCustomOpen(false); applyPreset(t) }} onCustom={() => { setCustomOpen(true); window.setTimeout(() => document.getElementById("pages-color-accent")?.focus(), 0) }} />
     </div>}
-    <div className="grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-      <div role="group" aria-label="Page colors" className="min-w-0 px-4 py-3 lg:border-r lg:border-border">
-        <div className="mb-1 flex items-baseline justify-between gap-2">
-          <span className="text-label font-medium uppercase tracking-wide text-muted-foreground">Colours</span>
-          {editable && <span className="hidden text-label text-muted-foreground-soft sm:inline">Click a swatch to edit</span>}
-        </div>
-        {ORDER.map((key) => {
+    <div role="group" aria-label="Page colors" className="min-w-0 px-4 pb-3.5">
+      {showEditor ? (
+        ORDER.map((key) => {
           const label = LABELS[key]
           const isText = key === "text" || key === "muted"
           return (
             <div key={key} className="flex min-h-10 items-center gap-2.5 py-1">
-              {editable ? (
-                <span className="relative shrink-0 rounded-full focus-within:ring-2 focus-within:ring-ring/50 focus-within:ring-offset-2 focus-within:ring-offset-card">
-                  <Swatch color={shown[key]} />
-                  <input aria-label={`${label} picker`} type="color" className="absolute inset-0 h-full w-full cursor-pointer rounded-full opacity-0" value={shown[key]} onChange={e => form.set(key, e.target.value)} />
-                </span>
-              ) : <Swatch color={theme[key]} />}
+              <span className="relative shrink-0 rounded-full focus-within:ring-2 focus-within:ring-ring/50 focus-within:ring-offset-2 focus-within:ring-offset-card">
+                <Swatch color={shown[key]} />
+                <input aria-label={`${label} picker`} type="color" className="absolute inset-0 h-full w-full cursor-pointer rounded-full opacity-0" value={shown[key]} onChange={e => form.set(key, e.target.value)} />
+              </span>
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-control">
                 <span className="truncate">{label}</span>
                 {isText && <ContrastBadge fg={shown[key]} theme={shown} />}
               </span>
-              {editable
-                ? <Input id={`pages-color-${key}`} aria-label={label} className={cn(controlHeight, "w-24 shrink-0 font-mono text-xs")} value={form.draft[key]} maxLength={7} spellCheck={false} onChange={e => form.set(key, e.target.value)} />
-                : <span className="w-24 shrink-0 text-right font-mono text-xs text-muted-foreground">{theme[key]}</span>}
+              <Input id={`pages-color-${key}`} aria-label={label} className={cn(controlHeight, "w-24 shrink-0 font-mono text-xs")} value={form.draft[key]} maxLength={7} spellCheck={false} onChange={e => form.set(key, e.target.value)} />
             </div>
           )
-        })}
-        {editable && <p className="mt-1.5 text-label text-muted-foreground-soft">Editing a colour makes the theme Custom. The accent is also everyone&apos;s Team colour in Appearance.</p>}
-      </div>
-      <div className="min-w-0 border-t border-border p-4 lg:border-t-0">
-        <div className="mb-2.5 text-label font-medium uppercase tracking-wide text-muted-foreground">Live sample</div>
-        <MiniPage theme={shown} />
-        {contrast < 4.5 && <p role="status" className="mt-3 text-label text-warn">Text contrast is below 4.5:1. Adjust the text or background colors for readability.</p>}
-      </div>
+        })
+      ) : (
+        // v67 `.s-colors`: the six colours, read-only, three across.
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-slot="pages-colors">
+          {ORDER.map((key) => {
+            const isText = key === "text" || key === "muted"
+            return (
+              <div key={key} className="flex min-w-0 items-center gap-2">
+                <Swatch color={theme[key]} size="size-[1.75rem]" square />
+                <span className="min-w-0">
+                  <b className="block truncate text-label font-semibold">{LABELS[key]}</b>
+                  <span className="block font-mono text-micro text-muted-foreground">{theme[key]}</span>
+                </span>
+                {isText && <ContrastBadge fg={theme[key]} theme={theme} />}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {showEditor && <p className="mt-1.5 text-label text-muted-foreground-soft">Editing a colour makes the theme Custom. The accent is also everyone&apos;s Team colour in Appearance.</p>}
+      {contrast < 4.5 && <p role="status" className="mt-3 text-label text-warn">Text contrast is below 4.5:1. Adjust the text or background colors for readability.</p>}
     </div>
     {editable && !followsDefault && !form.isDirty && (
       <SettingsCardFooter>

@@ -6,7 +6,6 @@ import {
   Link2, Activity, Shield, KeyRound, ChevronRight,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { cn } from "@/lib/utils"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -16,6 +15,7 @@ import {
   SidebarRow,
 } from "@/components/layout/sidebar-kit"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface NavItem {
@@ -173,21 +173,6 @@ interface SettingsNavProps {
   phoneInline?: boolean
 }
 
-/** The 24 px tile a section row's icon sits in; the open section's is in the accent. */
-function NavTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "grid h-6 w-6 shrink-0 place-items-center rounded-md border",
-        active ? "icon-tile" : "border-border bg-surface-subtle text-muted-foreground",
-      )}
-    >
-      <Icon className="h-3.5 w-3.5" />
-    </span>
-  )
-}
-
 export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false }: SettingsNavProps) {
   const router = useRouter()
   // Switching section unmounts the cards; with edits pending, ask first.
@@ -246,15 +231,18 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phone
                   selected={isActive}
                   onSelect={() => guard(() => (item.href ? router.push(item.href) : onTabChange(item.key)))}
                   aria-label={item.label}
+                  // v67 `.pr.set`: a 34 px row (2.2885rem at the 14.857 px root of
+                  // the Small text size) with a 24 px tile and a 13 px label.
+                  className="h-[2.2885rem] py-0"
                 >
-                  <NavTile icon={item.icon} active={isActive} />
-                  <span className="truncate flex-1">{item.label}</span>
+                  <SidebarRowTile icon={item.icon} active={isActive} />
+                  <span className="flex-1 truncate text-control">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/40">P2</span>
+                    <span className="ml-auto shrink-0 text-micro tabular-nums text-sidebar-foreground/40">P2</span>
                   )}
                   {item.href && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/60">Owner</span>
+                    <span className="ml-auto shrink-0 text-micro text-sidebar-foreground/60">Owner</span>
                   )}
                 </SidebarRow>
               )

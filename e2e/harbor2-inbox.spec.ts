@@ -379,6 +379,88 @@ for (const vp of [{ name: "tablet 1024", width: 1024, height: 800 }, { name: "ph
   })
 }
 
+// PAR-019…023, 144 (#3577): the list toolbar, the Overview typography and the
+// bell popovers match v67. Checked in a real browser at 1440 / 1024 / 390.
+test.describe("v67 parity", () => {
+  test.describe("desktop 1440", () => {
+    test.use({ viewport: { width: 1440, height: 900 } })
+
+    test("toolbar: search with the / hint, Filter, select, collapse — and no Sort button", async ({ page }) => {
+      await seed(page)
+      await page.goto("/inbox")
+      await expect(panel(page)).toBeVisible()
+      await expect(panel(page).locator("[data-inbox-search] kbd")).toHaveText("/")
+      await expect(panel(page).getByRole("button", { name: "Filter" })).toBeVisible()
+      await expect(panel(page).getByRole("button", { name: "Select several" })).toBeVisible()
+      await expect(panel(page).getByRole("button", { name: "View: sort" })).toHaveCount(0)
+      await panel(page).getByRole("button", { name: "Filter" }).click()
+      await expect(panel(page).getByRole("group", { name: "Filter inbox" }).getByRole("button", { name: /^Sort/ })).toBeVisible()
+    })
+
+    test("Overview: 13 px semibold tile titles, hints not clipped, 28 px card tiles", async ({ page }) => {
+      await seed(page)
+      await page.goto("/inbox")
+      const overview = page.getByTestId("inbox-overview")
+      await expect(overview).toBeVisible()
+      const tile = overview.getByRole("button", { name: /^Decision: / })
+      const title = await tile.locator("b").evaluate((el) => getComputedStyle(el).fontSize + "/" + getComputedStyle(el).fontWeight)
+      expect(title).toBe("13px/600")
+      const clipped = await tile.locator("small").evaluate((el) => el.scrollWidth > el.clientWidth)
+      expect(clipped).toBe(false)
+      expect(Math.round((await overview.locator("section .icon-tile").first().boundingBox())!.width)).toBe(28)
+    })
+
+    test("counts in the space switcher are sans tabular", async ({ page }) => {
+      await seed(page)
+      await page.goto("/inbox")
+      const count = panel(page).getByRole("tab", { name: /To handle/ }).locator("span").last()
+      const font = await count.evaluate((el) => getComputedStyle(el).fontFamily + "|" + getComputedStyle(el).fontVariantNumeric)
+      expect(font).not.toMatch(/mono/i)
+      expect(font).toContain("tabular-nums")
+    })
+
+    test("bells: Inbox lists every kind chip; Activity is a 480 px panel with the fleet line and its chips", async ({ page }) => {
+      await seed(page)
+      await page.goto("/")
+      await page.getByTestId("bell-trigger").click()
+      for (const kind of ["all", "decision", "input", "review", "repair"]) await expect(page.getByTestId(`bell-chip-${kind}`)).toBeVisible()
+      await page.keyboard.press("Escape")
+      await page.getByTestId("activity-trigger").click()
+      const pop = page.getByTestId("activity-popover")
+      expect(Math.round((await pop.boundingBox())!.width)).toBe(480)
+      await expect(page.getByRole("link", { name: /Open Activity/ })).toBeVisible()
+    })
+  })
+
+  test.describe("tablet 1024", () => {
+    test.use({ viewport: { width: 1024, height: 900 } })
+
+    test("the Activity popover stays 480 px wide and inside the viewport", async ({ page }) => {
+      await seed(page)
+      await page.goto("/")
+      await page.getByTestId("activity-trigger").click()
+      const box = (await page.getByTestId("activity-popover").boundingBox())!
+      expect(Math.round(box.width)).toBe(480)
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(1024)
+    })
+  })
+
+  test.describe("phone 390", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+    test("the Activity popover is a sheet between the viewport's edges", async ({ page }) => {
+      await seed(page)
+      await page.goto("/")
+      await page.getByTestId("activity-trigger").click()
+      const box = (await page.getByTestId("activity-popover").boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(390)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    })
+  })
+})
+
 // ODCH-I03 / I04: a typed answer, a credential value and a trigger activation
 // from the Inbox. The feed is served through page.route (the seed has none of
 // these rows); the three write endpoints are intercepted so nothing is changed.

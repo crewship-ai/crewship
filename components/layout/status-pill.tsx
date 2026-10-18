@@ -294,7 +294,7 @@ const TONE_DOT: Record<StatusTone, string> = {
  * agent is broken — names it, so "1 agent error" is one click from the agent
  * rather than a hunt through every crew.
  */
-function SystemStatusPanel({
+export function SystemStatusPanel({
   description,
   engineStatus,
   wsStatus,
@@ -340,7 +340,7 @@ function SystemStatusPanel({
           <StatusRow
             label="Agents"
             value={
-              <span className="font-mono text-micro font-normal tabular-nums">
+              <span className="text-micro font-normal tabular-nums">
                 {crews.total} total · {crews.running} running · {crews.idle} idle
                 {crews.queued > 0 ? ` · ${crews.queued} queued` : ""}
               </span>

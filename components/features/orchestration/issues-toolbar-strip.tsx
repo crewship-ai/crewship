@@ -82,7 +82,7 @@ export function IssuesToolbarStrip({
         <button type="button" onClick={onOpenFilters} className={cn(CHIP, activeFilters > 0 ? ON : IDLE)}>
           <Filter className="size-3.5" aria-hidden />
           Filters
-          {activeFilters > 0 && <span className="font-mono tabular-nums">{activeFilters}</span>}
+          {activeFilters > 0 && <span className="tabular-nums">{activeFilters}</span>}
         </button>
       )}
       <div role="group" aria-label="Filter issues by status" className="flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">

@@ -54,8 +54,7 @@
   "components/features/routines/routine-flow-diagram.tsx": 4,
   "components/features/routines/routine-mini-trace.tsx": 3,
   "components/features/routines/routine-readable-summary.tsx": 2,
-  "components/features/routines/routine-touches.tsx": 4,
-  "components/features/settings/sections/general-section.tsx": 1
+  "components/features/routines/routine-touches.tsx": 4
  },
  "raw-radius": {
   "app/(dashboard)/admin/tabs/admin-kit.tsx": 2,
@@ -329,9 +328,8 @@
   "components/features/routines/routines-layout.tsx": 1,
   "components/features/routines/routines-overview.tsx": 22,
   "components/features/routines/routines-tab.tsx": 5,
-  "components/features/settings/hooks/hook-editor.tsx": 5,
-  "components/features/settings/hooks/hooks-page.tsx": 9,
-  "components/features/settings/sections/pages-appearance-card.tsx": 1,
+  "components/features/settings/hooks/hook-editor.tsx": 4,
+  "components/features/settings/hooks/hooks-page.tsx": 8,
   "components/features/timeline/checkpoint-marker.tsx": 2,
   "components/features/timeline/fork-dialog.tsx": 2,
   "components/features/timeline/mission-timeline.tsx": 2,
