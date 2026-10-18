@@ -80,6 +80,9 @@ interface Props {
   view: InboxV2View
   onView: (view: InboxV2View) => void
   viewCounts: Record<InboxV2View, number>
+  /** History is counted by the server and only its newest part is loaded:
+   *  "Showing the latest N of M" under the list, so the gap is stated. */
+  historyNote?: string | null
   /** The whole feed for this view — facet counts are computed over it. */
   entries: InboxV2Entry[]
   /** Filtered and sorted; what actually renders. */
@@ -107,7 +110,7 @@ interface Props {
 }
 
 export function InboxV2Explorer({
-  view, onView, viewCounts, entries, visible, filters, onFilters, attention, onClearAttention,
+  view, onView, viewCounts, historyNote, entries, visible, filters, onFilters, attention, onClearAttention,
   selectedKey, onOpen, overviewSelected = false, onOverview, sort = "urgency", onSort,
   lookup = EMPTY_INBOX_LOOKUP, loading = false, picking = false, picked, onTogglePicking, onPick,
 }: Props) {
@@ -380,6 +383,9 @@ export function InboxV2Explorer({
                 ))}
               </div>
             ))}
+            {view === "history" && historyNote && visible.length > 0 && (
+              <p className="px-3 py-2 text-label text-muted-foreground" data-testid="inbox-history-note">{historyNote}</p>
+            )}
             {visible.length === 0 && (
               <div className="p-2">
                 <ExplorerEmpty

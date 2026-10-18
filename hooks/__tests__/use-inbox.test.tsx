@@ -3,7 +3,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderHook, waitFor, act } from "@testing-library/react"
 
-import { useInbox, useInboxUnreadCount, inboxKeys, type InboxItem } from "@/hooks/use-inbox"
+import { useInbox, useInboxCounts, useInboxUnreadCount, inboxKeys, type InboxItem } from "@/hooks/use-inbox"
 import * as realtime from "@/hooks/use-realtime"
 
 // Replace the realtime layer with an in-test event bus: useRealtimeEvent
@@ -159,6 +159,7 @@ describe("useInbox", () => {
     let releaseSecond: (r: Response) => void = () => {}
     mockFetch
       .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 2, has_more: true }))
+      .mockResolvedValueOnce(errJSON(404, {})) // no counts route: walk everything
       .mockReturnValueOnce(new Promise<Response>((resolve) => { releaseSecond = resolve }))
 
     const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), {
@@ -177,6 +178,7 @@ describe("useInbox", () => {
   it("stops paging when a page claims more but returns no rows", async () => {
     mockFetch
       .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
+      .mockResolvedValueOnce(errJSON(404, {})) // no counts route: walk everything
     // Bounded so a regression fails the assertion instead of hanging the runner.
     for (let i = 0; i < 20; i++) {
       mockFetch.mockResolvedValueOnce(okJSON({ rows: [], count: 0, unread_count: 1, has_more: true }))
@@ -188,11 +190,12 @@ describe("useInbox", () => {
     })
     await waitFor(() => expect(result.current.items).toHaveLength(1))
     await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
-    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(3)
   })
 
   it("stops paging when a page only repeats rows already loaded", async () => {
     mockFetch.mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
+    mockFetch.mockResolvedValueOnce(errJSON(404, {})) // no counts route: walk everything
     for (let i = 0; i < 20; i++) {
       mockFetch.mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true }))
     }
@@ -203,8 +206,79 @@ describe("useInbox", () => {
     })
     await waitFor(() => expect(result.current.items).toHaveLength(1))
     await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
-    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(3)
     expect(result.current.items.map((row) => row.id)).toEqual(["i1"])
+  })
+
+  describe("server counts", () => {
+    const counts = {
+      total: 4, unread: 1,
+      spaces: { action: 1, updates: 1, history: 2 },
+      by_kind: { waitpoint: { action: 1, updates: 0, history: 0 } },
+    }
+
+    it("walks only the active items when the server can count history", async () => {
+      const resolvedRow = item({ id: "r1", state: "resolved" })
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.startsWith("/api/v1/inbox/counts")) return okJSON(counts)
+        if (url === "/api/v1/inbox?workspace_id=ws-1&limit=100&offset=0") {
+          return okJSON({ rows: [item({ id: "a1" }), resolvedRow], count: 2, unread_count: 1, has_more: true })
+        }
+        if (url === "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=0&state=active") {
+          return okJSON({ rows: [item({ id: "a1" }), item({ id: "a2" })], count: 2, unread_count: 1, has_more: false })
+        }
+        return errJSON(404, {})
+      })
+
+      const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), { wrapper: makeWrapper(qc) })
+      await waitFor(() => expect(result.current.items.map((row) => row.id).sort()).toEqual(["a1", "a2", "r1"]))
+      await waitFor(() => expect(result.current.loadingMore).toBe(false))
+
+      const urls = mockFetch.mock.calls.map((call) => call[0] as string)
+      // No offset walk of the full list: the older history is the count's job.
+      expect(urls.filter((u) => u.startsWith("/api/v1/inbox?") && !u.includes("state=active"))).toEqual([
+        "/api/v1/inbox?workspace_id=ws-1&limit=100&offset=0",
+      ])
+      expect(urls.some((u) => u.includes("state=active"))).toBe(true)
+      expect(urls.filter((u) => u.startsWith("/api/v1/inbox/counts"))).toEqual(["/api/v1/inbox/counts?workspace_id=ws-1"])
+    })
+
+    it("keeps walking the whole list when the server has no counts route", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.startsWith("/api/v1/inbox/counts")) return errJSON(404, {})
+        if (url === "/api/v1/inbox?workspace_id=ws-1&limit=100&offset=0") {
+          return okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 1, has_more: true })
+        }
+        if (url === "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=1") {
+          return okJSON({ rows: [item({ id: "i2", state: "resolved" })], count: 1, unread_count: 1, has_more: false })
+        }
+        return errJSON(500, {})
+      })
+
+      const { result } = renderHook(() => useInbox("ws-1", "all", { loadAll: true }), { wrapper: makeWrapper(qc) })
+      await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1", "i2"]))
+      // The probe happened, got a 404, and the second page was the plain offset walk.
+      expect(mockFetch.mock.calls.map((c) => c[0])).toContain("/api/v1/inbox/counts?workspace_id=ws-1")
+    })
+
+    it("useInboxCounts returns the counts, or null for an older server", async () => {
+      mockFetch.mockResolvedValueOnce(okJSON(counts))
+      const ok = renderHook(() => useInboxCounts("ws-1"), { wrapper: makeWrapper(qc) })
+      await waitFor(() => expect(ok.result.current.data).toEqual(counts))
+      expect(mockFetch.mock.calls[0][0]).toBe("/api/v1/inbox/counts?workspace_id=ws-1")
+
+      const qc2 = newQueryClient()
+      mockFetch.mockResolvedValueOnce(errJSON(404, {}))
+      const old = renderHook(() => useInboxCounts("ws-1"), { wrapper: makeWrapper(qc2) })
+      await waitFor(() => expect(old.result.current.isSuccess).toBe(true))
+      expect(old.result.current.data).toBeNull()
+
+      const qc3 = newQueryClient()
+      mockFetch.mockResolvedValueOnce(okJSON({ total: "many" }))
+      const bad = renderHook(() => useInboxCounts("ws-1"), { wrapper: makeWrapper(qc3) })
+      await waitFor(() => expect(bad.result.current.isSuccess).toBe(true))
+      expect(bad.result.current.data).toBeNull()
+    })
   })
 
   it("surfaces a non-ok list response as the same `inbox: <status>` error string", async () => {
