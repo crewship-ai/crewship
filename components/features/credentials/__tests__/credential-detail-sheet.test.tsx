@@ -770,6 +770,17 @@ describe("settings tab save bar saves name/tags/tier", () => {
     expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ tags: ["production"] })
   })
 
+  it("the save bar stays in view: it sticks to the pane, not to the end of a long Settings tab", async () => {
+    // page-save-bar.tsx: "The bar is always in view". Absolutely positioned
+    // inside the Settings column it sat below the Danger zone, off screen.
+    h.role = "OWNER"
+    render(<Harness workspaceId="ws1" credential={credential as never} open tab="settings" onOpenChange={() => {}} onRefresh={() => {}} onRotate={() => {}} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } })
+    const bar = await screen.findByRole("region", { name: /unsaved changes/i })
+    expect(bar.className.split(/\s+/)).toContain("sticky")
+    expect(bar.className.split(/\s+/)).not.toContain("absolute")
+  })
+
   it("sets the Keeper tier from Access with a PATCH of security_level alone", async () => {
     h.role = "OWNER"
     const onRefresh = vi.fn()
