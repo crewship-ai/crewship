@@ -102,10 +102,12 @@ const (
 // and populated for JWT auth — handlers that need to revoke or rotate the
 // caller's session (signOut, refresh) read it from here.
 type AuthUser struct {
-	ID        string
-	Email     string
-	Name      string
-	SessionID string
+	ID                  string
+	Email               string
+	Name                string
+	SessionID           string
+	TokenID             string
+	CredentialExpiresAt time.Time
 }
 
 // UserFromContext returns the authenticated user stored in the request context, or nil if not set.
@@ -248,19 +250,21 @@ type AuthMiddleware struct {
 	sessions  sessions.Store
 	db        *sql.DB
 	logger    *slog.Logger
+	streams   *auth.StreamCredentials
 }
 
 // NewAuthMiddleware creates an AuthMiddleware. sessionsStore must back
 // the user_sessions table (migration v63); pass *sessions.DBStore in
 // production.
 func NewAuthMiddleware(validator *auth.JWTValidator, sessionsStore sessions.Store, db *sql.DB, logger *slog.Logger) *AuthMiddleware {
-	return &AuthMiddleware{validator: validator, sessions: sessionsStore, db: db, logger: logger}
+	return &AuthMiddleware{validator: validator, sessions: sessionsStore, db: db, logger: logger, streams: &auth.StreamCredentials{}}
 }
 
 // RequireAuth returns middleware that validates the request's Bearer token or CLI token
 // and stores the authenticated user in the request context.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		epoch := m.streams.Epoch() // Capture BEFORE authoritative credential validation.
 		token := extractToken(r)
 		if token == "" {
 			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
@@ -309,7 +313,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				replyInternalError(w, m.logger, "CLI token validation failed (not an invalid-token case)", err)
 				return
 			}
-			user = &AuthUser{ID: res.UserID, Email: res.Email, Name: res.Name}
+			user = &AuthUser{ID: res.UserID, Email: res.Email, Name: res.Name, TokenID: res.TokenID, CredentialExpiresAt: res.ExpiresAt}
 			if res.Scopes != nil {
 				// Stash the scope set; later RequireAuth ctx mutation
 				// merges it with the user context. Storing as the
@@ -387,10 +391,18 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				Email:     claims.Email,
 				Name:      claims.Name,
 				SessionID: claims.Sid,
+				// ValidateAccess accepts integer Unix seconds through Exp+5 inclusive.
+				CredentialExpiresAt: earlierExpiry(sess.ExpiresAt, time.Unix(claims.Exp+6, 0)),
 			}
 		}
 
-		ctx := context.WithValue(r.Context(), ctxUser, user)
+		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt)
+		defer release()
+		if !auth.StreamCredentialCurrent(tracked) {
+			replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
+			return
+		}
+		ctx := context.WithValue(tracked, ctxUser, user)
 		ctx = context.WithValue(ctx, ctxAuthKind, authKind)
 		r = r.WithContext(ctx)
 		if !m.restrictedRequest(w, r, user.ID) {

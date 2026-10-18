@@ -948,11 +948,8 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 // enforce server-side revocation (close 4401 if the session gets
 // revoked while the WS is up).
 //
-// For CLI auth: ticket is issued without a session id. The WS hub's
-// validator allows empty sid for kind=ws because CLI tokens have their
-// own revocation table (cli_tokens) that the hub does not consult mid-
-// stream — the trade-off is that revoking a CLI token does not kick
-// already-open WS connections; users should disconnect them manually.
+// CLI tickets carry the original CLI-token row ID and its expiry. Both kinds
+// are revalidated on upgrade and revoked through the shared stream registry.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -973,7 +970,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
+	jweToken, err := h.validator.IssueCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, user.CredentialExpiresAt)
 	if err != nil {
 		replyInternalError(w, h.logger, "issue ws ticket", err)
 		return

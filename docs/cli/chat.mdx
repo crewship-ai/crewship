@@ -15,6 +15,8 @@ crewship chat <chat-id> [flags]
 crewship chat <subcommand> ...
 ```
 
+Open WebSocket and NDJSON streams stop after revocation or expiry of their originating session or CLI token. Reconnect with a valid credential; disconnecting does not itself stop an already started run.
+
 Auth: commands require an authenticated session (`crewship login`) except `chat share read`, which uses a dedicated share token. Authenticated commands also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
 
 ## Subcommands
