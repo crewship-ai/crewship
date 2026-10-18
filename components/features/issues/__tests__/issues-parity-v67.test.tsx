@@ -25,19 +25,19 @@ describe("Issues v67 details", () => {
   })
 
   it("PAR-041: the project row carries a progress bar with a track you can see", () => {
-    const projects = [{ id: "p1", name: "Launch v2", icon: "rocket", color: "violet", health: "on_track", issue_count: 6, progress: 40 } as Project]
+    const projects = [{ id: "p1", name: "Launch v2", icon: "rocket", color: "violet", health: "on_track", issue_count: 5, done_count: 2, progress: 40 } as Project]
     const props: IssuesPanelProps = {
-      issues: [], quickCounts: { mine: 0, all: 0 }, projects, savedViews: [], crews: [], search: "", onSearchChange: vi.fn(),
+      issues: [], quickCounts: { mine: 0, reply: 0, working: 0, review: 0, blocked: 0, all: 0 }, projects, savedViews: [], crews: [], search: "", onSearchChange: vi.fn(),
       filters: NO_FILTERS, onFilters: vi.fn(), onClearFilters: vi.fn(), selection: null, onSelect: vi.fn(), onNewProject: vi.fn(),
     }
     const { container } = render(<IssuesPanel {...props} />)
-    const track = container.querySelector(".group\\/proj [aria-hidden].h-\\[3px\\]") as HTMLElement
+    const track = container.querySelector(".group\\/proj [role=progressbar].h-\\[3px\\]") as HTMLElement
     expect(track).not.toBeNull()
     // The track is a foreground tint: the old surface-subtle track equals the panel ground.
     expect(track.className).toContain("bg-foreground/[0.08]")
     expect((track.firstElementChild as HTMLElement).style.width).toBe("40%")
     // Counts in the panel are sans tabular too.
-    expect(screen.getByText("6").className).not.toContain("font-mono")
+    expect(screen.getByText("5").className).not.toContain("font-mono")
   })
 
   it("PAR-042: List | Board is one 28 px segmented control (inner = control height - 6 px)", () => {
@@ -54,7 +54,7 @@ describe("Issues v67 details", () => {
 
   it("PAR-040: inside the secondary panel the Filter button shows its word next to the funnel", () => {
     const props: IssuesPanelProps = {
-      issues: [], quickCounts: { mine: 0, all: 0 }, projects: [], savedViews: [], crews: [], search: "", onSearchChange: vi.fn(),
+      issues: [], quickCounts: { mine: 0, reply: 0, working: 0, review: 0, blocked: 0, all: 0 }, projects: [], savedViews: [], crews: [], search: "", onSearchChange: vi.fn(),
       filters: NO_FILTERS, onFilters: vi.fn(), onClearFilters: vi.fn(), selection: null, onSelect: vi.fn(), onNewProject: vi.fn(),
     }
     render(

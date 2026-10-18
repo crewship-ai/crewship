@@ -83,7 +83,11 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Quick views: owner, delegate, work mode, mine, working, needs, blocked.
 	var viewErr string
-	where, args, viewErr = applyIssueViewFilters(r, where, args)
+	vq := r.URL.Query()
+	where, args, viewErr = applyIssueViewFilters(r, issueViewParams{
+		OwnerID: vq.Get("owner_id"), DelegateID: vq.Get("delegate_id"), WorkMode: vq.Get("work_mode"),
+		Mine: vq.Get("mine"), Working: vq.Get("working"), Needs: vq.Get("needs"), Blocked: vq.Get("blocked"),
+	}, where, args)
 	if viewErr != "" {
 		writeProblem(w, r, http.StatusBadRequest, viewErr)
 		return

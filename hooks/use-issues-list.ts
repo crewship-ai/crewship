@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { quickViewQuery, type QuickView } from "@/components/features/issues/issues-view-model"
 import type { Mission } from "@/lib/types/mission"
 
 // useIssuesList — the /api/v1/issues fetch behind the issues board.
@@ -111,11 +112,13 @@ export interface UseIssuesListOptions {
   /** Server-side search (`?q=`, title and identifier). A change re-fetches
    *  page 1 — the board's search box used to filter only the rows it had. */
   search?: string
+  /** A quick view (My work, Needs my reply, ...), asked of the server. */
+  quick?: QuickView
 }
 
 export function useIssuesList(
   workspaceId: string | null | undefined,
-  { search = "", crewId, assigneeId, missionType = "issue" }: UseIssuesListOptions = {},
+  { search = "", crewId, assigneeId, missionType = "issue", quick = "all" }: UseIssuesListOptions = {},
 ): UseIssuesListResult {
   const [issues, setIssues] = useState<Mission[]>([])
   const [loading, setLoading] = useState(false)
@@ -148,7 +151,7 @@ export function useIssuesList(
       try {
         const res = await apiFetch(
           `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=${ISSUES_PAGE_LIMIT}&offset=${nextOffset}${
-            (search ? `&q=${encodeURIComponent(search)}` : "") + (crewId ? `&crew_id=${encodeURIComponent(crewId)}` : "") + (assigneeId ? `&assignee_id=${encodeURIComponent(assigneeId)}` : "") + (missionType === "mission" ? "&mission_type=mission" : "")
+            (search ? `&q=${encodeURIComponent(search)}` : "") + (crewId ? `&crew_id=${encodeURIComponent(crewId)}` : "") + (assigneeId ? `&assignee_id=${encodeURIComponent(assigneeId)}` : "") + (missionType === "mission" ? "&mission_type=mission" : "") + (quickViewQuery(quick) ? `&${quickViewQuery(quick)}` : "")
           }`,
         )
         if (seq !== requestSeq.current) return false
@@ -187,7 +190,7 @@ export function useIssuesList(
         }
       }
     },
-    [workspaceId, search, crewId, assigneeId, missionType],
+    [workspaceId, search, crewId, assigneeId, missionType, quick],
   )
 
   const refetch = useCallback(async () => {
@@ -221,7 +224,7 @@ export function useIssuesList(
     // changes exactly when workspaceId or search does) — those two are the
     // real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, search, crewId, assigneeId, missionType])
+  }, [workspaceId, search, crewId, assigneeId, missionType, quick])
 
   const hasMore = total !== null && issues.length < total
 

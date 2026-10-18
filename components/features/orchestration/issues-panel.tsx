@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Bot, Copy, ExternalLink, Inbox, Layers, MoreHorizontal, Plus, Repeat, Star, User, UserRound } from "lucide-react"
+import { AlertTriangle, Bot, CheckCircle2, Copy, ExternalLink, Inbox, Layers, MessageSquare, MoreHorizontal, Plus, Repeat, Star, User, UserRound } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { cn } from "@/lib/utils"
@@ -41,7 +41,7 @@ export type IssuesPanelSelection =
 
 const STATUS_FACET: MissionStatus[] = ["IN_PROGRESS", "REVIEW", "TODO", "BACKLOG", "DONE", "FAILED", "CANCELLED"]
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
-const QUICK_ICON = { mine: User, all: Layers } as const
+const QUICK_ICON = { mine: User, reply: MessageSquare, working: Bot, review: CheckCircle2, blocked: AlertTriangle, all: Layers } as const
 
 const HEALTH_DOT: Record<string, string> = {
   on_track: "bg-success",
@@ -70,7 +70,8 @@ function count<T>(items: Mission[], key: (i: Mission) => T | null | undefined): 
 export interface IssuesPanelProps {
   /** The loaded issues (before the facets), for the options and their counts. */
   issues: Mission[]
-  quickCounts: Record<QuickView, number>
+  /** Exact totals from the server; null while unknown or when a request failed. */
+  quickCounts: Record<QuickView, number | null>
   projects: Project[]
   savedViews: SavedView[]
   crews: CrewSummary[]
@@ -156,7 +157,7 @@ export function IssuesPanel({
   const n = activeFilterCount(filters)
   const toggleStatus = (s: MissionStatus) =>
     onFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
-  const meta = (k: number | undefined) => <span className="text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
+  const meta = (k: number | null | undefined) => <span className="text-label tabular-nums text-muted-foreground-soft">{k ?? ""}</span>
 
   const isOn = (s: IssuesPanelSelection) => selection !== null && selection.kind === s.kind && selection.id === s.id
 
@@ -289,7 +290,10 @@ export function IssuesPanel({
           const s: IssuesPanelSelection = { kind: "project", id: p.id }
           const Icon = getCrewIconDef(p.icon || "folder").icon
           const color = iconColorProps(p.color)
-          const progress = Math.max(0, Math.min(100, Math.round(p.progress || 0)))
+          // done over total, as v67's bar; a project with no issues has nothing to measure, so no bar.
+          const total = p.issue_count || 0
+          const done = Math.min(total, p.done_count || 0)
+          const progress = total === 0 ? 0 : done === 0 ? 0 : Math.max(3, Math.min(100, (done / total) * 100))
           return (
             <div key={p.id} className="group/proj">
               <div className="flex items-center">
@@ -326,9 +330,19 @@ export function IssuesPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-foreground/[0.08]" aria-hidden>
-                <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
-              </div>
+              {total > 0 && (
+                <div
+                  data-testid={`project-progress-${p.id}`}
+                  role="progressbar"
+                  aria-label={`${p.name}: ${done} of ${total} issues done`}
+                  aria-valuemin={0}
+                  aria-valuemax={total}
+                  aria-valuenow={done}
+                  className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-foreground/[0.08]"
+                >
+                  <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
+                </div>
+              )}
             </div>
           )
         })}

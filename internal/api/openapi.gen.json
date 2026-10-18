@@ -101495,6 +101495,14 @@
           },
           {
             "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "counts",
             "required": false,
             "schema": {
@@ -101504,6 +101512,14 @@
           {
             "in": "query",
             "name": "crew_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delegate_id",
             "required": false,
             "schema": {
               "type": "string"
@@ -101527,7 +101543,23 @@
           },
           {
             "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "mission_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needs",
             "required": false,
             "schema": {
               "type": "string"
@@ -101539,6 +101571,14 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -101584,6 +101624,22 @@
           {
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_mode",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "working",
             "required": false,
             "schema": {
               "type": "string"

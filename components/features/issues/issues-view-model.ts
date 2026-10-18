@@ -160,32 +160,48 @@ export function groupIssues(issues: Mission[], groupBy: GroupBy): IssueGroup[] {
 
 /* ----------------------------------------------------------- quick views */
 
-export type QuickView = "mine" | "all"
+export type QuickView = "mine" | "reply" | "working" | "review" | "blocked" | "all"
 
 /**
- * The Views section. Needs my reply, Agents working, Waiting for my review
- * and Blocked need the list endpoint to report session state and relations;
- * until it does they are not offered, because a filter over the loaded page
- * would quietly leave issues out.
+ * The Views section, in v67's order. Every view is a server filter on
+ * GET /issues (internal/api/issue_list_views.go): a filter over the loaded
+ * page (at most 100) would quietly leave issues out, and a count taken from
+ * it would lie.
+ *
+ *  - My work: open issues I own, or hold as the worker
+ *  - Needs my reply: an agent session on an issue I own is awaiting my input
+ *  - Agents working: an agent holds the issue and its session is active
+ *  - Waiting for my review: in review, and I own it
+ *  - Blocked: an open issue blocks it
  */
 export const QUICK_VIEWS: { id: QuickView; label: string }[] = [
   { id: "mine", label: "My work" },
+  { id: "reply", label: "Needs my reply" },
+  { id: "working", label: "Agents working" },
+  { id: "review", label: "Waiting for my review" },
+  { id: "blocked", label: "Blocked" },
   { id: "all", label: "All issues" },
 ]
 
+const QUICK_QUERY: Record<QuickView, string> = {
+  mine: "mine=1",
+  reply: "needs=reply",
+  working: "working=1",
+  review: "needs=review",
+  blocked: "blocked=1",
+  all: "",
+}
+
+/** The GET /issues query string that selects this view ("" for All issues). */
+export function quickViewQuery(view: QuickView): string {
+  return QUICK_QUERY[view]
+}
+
+export function isQuickView(v: string | null | undefined): v is QuickView {
+  return !!v && v in QUICK_QUERY
+}
+
 const CLOSED = new Set(["DONE", "COMPLETED", "CANCELLED", "DUPLICATE"])
-
-/** My work: open issues I own, or that I hold (a person working it, or the legacy assignee). */
-export function isMyWork(i: Mission, me: string | null | undefined): boolean {
-  if (!me || CLOSED.has(i.status)) return false
-  if (i.owner?.id === me) return true
-  if (i.work_mode === "human" && i.worker_user_id === me) return true
-  return i.assignee_type === "user" && i.assignee_id === me
-}
-
-export function applyQuickView(issues: Mission[], view: QuickView, me: string | null | undefined): Mission[] {
-  return view === "mine" ? issues.filter((i) => isMyWork(i, me)) : issues
-}
 
 /* ------------------------------------------------------------ small bits */
 

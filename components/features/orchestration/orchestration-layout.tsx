@@ -29,11 +29,11 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useIssuesList } from "@/hooks/use-issues-list"
+import { useQuickViewCounts } from "@/hooks/use-quick-view-counts"
 import { useIssueBoardRealtime } from "@/hooks/use-issue-board-realtime"
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import { useIssueFilters, activeFilterCount, filtersFromSavedView, savedViewPayload, NO_FILTERS } from "@/hooks/use-issue-filters"
 import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
-import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { usePipelines } from "@/hooks/use-pipelines"
@@ -48,7 +48,6 @@ import {
   PRIORITY_TEXT,
   QUICK_VIEWS,
   STATUS_TEXT,
-  applyQuickView,
   groupIssues,
   orderIssues,
   type GroupBy,
@@ -95,7 +94,6 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   const openPanelSheet = useAppStore((s) => s.setSecondaryPanelOpen)
   const params = useSearchParams()
   const missionType = params.get("mission_type") ?? "issue"
-  const me = useSessionSafe().data?.user.id ?? null
   // DELETE /projects/{id} is ADMIN+ (roleManage); others never see the button.
   const canDeleteProject = isAdminTier(useWorkspace().role)
 
@@ -128,7 +126,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
     loadingMore,
     refetch: fetchIssues,
     loadMore,
-  } = useIssuesList(workspaceId, { search: committedSearch, crewId: filters.crewId, assigneeId: filters.agentId, missionType })
+  } = useIssuesList(workspaceId, { search: committedSearch, crewId: filters.crewId, assigneeId: filters.agentId, missionType, quick })
 
   // Agents create and advance issues live; every issue.* event (and a
   // reconnect) refetches the list, debounced.
@@ -230,11 +228,9 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
     filterHolder: filters.holder,
     filterLabel: filters.label,
   })
-  const visible = useMemo(() => orderIssues(applyQuickView(facetVisible, quick, me), orderBy), [facetVisible, quick, me, orderBy])
-  const quickCounts = useMemo(
-    () => Object.fromEntries(QUICK_VIEWS.map((v) => [v.id, applyQuickView(issues, v.id, me).length])) as Record<QuickView, number>,
-    [issues, me],
-  )
+  // The server already applied the quick view; the facets narrow it further.
+  const visible = useMemo(() => orderIssues(facetVisible, orderBy), [facetVisible, orderBy])
+  const quickCounts = useQuickViewCounts(workspaceId, { crewId: filters.crewId, missionType, refreshKey: issues })
   // J / K follow what is on screen, group by group.
   const sequence = useMemo(
     () => groupIssues(visible, viewMode === "board" ? "status" : groupBy).flatMap((g) => g.issues),
@@ -387,10 +383,10 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   const nFilters = activeFilterCount(filters)
   const filteredAway = issues.length > 0 && visible.length === 0
   const nothingYet =
-    !issuesLoading && !issuesError && issues.length === 0 && nFilters === 0 && !committedSearch && (issuesTotal ?? 0) === 0
+    !issuesLoading && !issuesError && issues.length === 0 && nFilters === 0 && !committedSearch && quick === "all" && (issuesTotal ?? 0) === 0
 
   const filterWords = [
-    quick === "mine" && "View: My work",
+    quick !== "all" && `View: ${QUICK_VIEWS.find((v) => v.id === quick)?.label ?? quick}`,
     filters.statuses.length > 0 && `Status: ${filters.statuses.map((s) => STATUS_TEXT[s] ?? s).join(", ")}`,
     filters.priority && `Priority: ${PRIORITY_TEXT[filters.priority]}`,
     filters.crewId && `Crew: ${crews.find((c) => c.id === filters.crewId)?.name ?? "one crew"}`,

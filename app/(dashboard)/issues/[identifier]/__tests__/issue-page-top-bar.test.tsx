@@ -122,12 +122,12 @@ describe("/issues/<id> — the top bar (ISS-01)", () => {
     expect(push).toHaveBeenCalledWith("/issues")
   })
 
-  it("⋯ offers Copy link, Move to project, Cancel issue and Delete issue", async () => {
+  it("⋯ offers Copy link, Duplicate issue, Move to project, Cancel issue and Delete issue", async () => {
     await ready()
     fireEvent.keyDown(screen.getByRole("button", { name: "Issue options" }), { key: "Enter" })
     const menu = await screen.findByRole("menu")
     const items = within(menu).getAllByRole("menuitem").map((m) => m.textContent?.trim())
-    expect(items).toEqual(["Copy link", "Move to project…", "Cancel issue…", "Delete issue…"])
+    expect(items).toEqual(["Copy link", "Duplicate issue", "Move to project…", "Cancel issue…", "Delete issue…"])
   })
 
   it("Move to project PATCHes the project and reloads the issue", async () => {

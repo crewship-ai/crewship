@@ -29,10 +29,16 @@ import (
 
 const issueClosedStatuses = `('DONE','COMPLETED','CANCELLED','DUPLICATE')`
 
-// applyIssueViewFilters appends the quick-view conditions to where/args. ok is
-// false, with a message, when a parameter value is not one of the vocabulary.
-func applyIssueViewFilters(r *http.Request, where string, args []interface{}) (string, []interface{}, string) {
-	q := r.URL.Query()
+// issueViewParams are the raw quick-view query values. List reads them
+// itself (so the OpenAPI generator, which scans the handler body, sees the
+// parameters) and hands them over.
+type issueViewParams struct {
+	OwnerID, DelegateID, WorkMode, Mine, Working, Needs, Blocked string
+}
+
+// applyIssueViewFilters appends the quick-view conditions to where/args. The
+// last result is a message, empty when every value is in the vocabulary.
+func applyIssueViewFilters(r *http.Request, p issueViewParams, where string, args []interface{}) (string, []interface{}, string) {
 	me := ""
 	if u := UserFromContext(r.Context()); u != nil {
 		me = u.ID
@@ -48,7 +54,7 @@ func applyIssueViewFilters(r *http.Request, where string, args []interface{}) (s
 		args = append(args, me)
 	}
 
-	if v := strings.TrimSpace(q.Get("owner_id")); v != "" {
+	if v := strings.TrimSpace(p.OwnerID); v != "" {
 		if v == "me" {
 			personal("m.owner_user_id = ?")
 		} else {
@@ -56,18 +62,18 @@ func applyIssueViewFilters(r *http.Request, where string, args []interface{}) (s
 			args = append(args, v)
 		}
 	}
-	if v := strings.TrimSpace(q.Get("delegate_id")); v != "" {
+	if v := strings.TrimSpace(p.DelegateID); v != "" {
 		where += " AND m.delegate_agent_id = ?"
 		args = append(args, v)
 	}
-	if v := strings.TrimSpace(q.Get("work_mode")); v != "" {
+	if v := strings.TrimSpace(p.WorkMode); v != "" {
 		if v != "agent" && v != "human" {
 			return where, args, "work_mode must be agent or human"
 		}
 		where += " AND COALESCE(iw.mode, 'agent') = ?"
 		args = append(args, v)
 	}
-	if q.Get("mine") == "1" {
+	if p.Mine == "1" {
 		if me == "" {
 			where += " AND 1 = 0"
 		} else {
@@ -76,12 +82,12 @@ func applyIssueViewFilters(r *http.Request, where string, args []interface{}) (s
 			args = append(args, me, me)
 		}
 	}
-	if q.Get("working") == "1" {
+	if p.Working == "1" {
 		where += " AND m.status NOT IN " + issueClosedStatuses +
 			" AND COALESCE(iw.mode, 'agent') = 'agent'" +
 			" AND EXISTS (SELECT 1 FROM issue_agent_sessions s WHERE s.mission_id = m.id AND s.state = 'active')"
 	}
-	switch v := strings.TrimSpace(q.Get("needs")); v {
+	switch v := strings.TrimSpace(p.Needs); v {
 	case "":
 	case "reply":
 		personal("m.status NOT IN " + issueClosedStatuses + " AND m.owner_user_id = ?" +
@@ -91,7 +97,7 @@ func applyIssueViewFilters(r *http.Request, where string, args []interface{}) (s
 	default:
 		return where, args, "needs must be reply or review"
 	}
-	if q.Get("blocked") == "1" {
+	if p.Blocked == "1" {
 		where += " AND m.status NOT IN " + issueClosedStatuses +
 			" AND EXISTS (SELECT 1 FROM mission_relations rel JOIN missions b ON b.id = rel.source_id" +
 			" WHERE rel.target_id = m.id AND rel.relation_type = 'blocks' AND b.status NOT IN " + issueClosedStatuses + ")"

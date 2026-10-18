@@ -12,7 +12,7 @@ import { parseSavedViews, issueViews } from "@/lib/saved-views"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { NO_FILTERS, type IssueFilters } from "@/hooks/use-issue-filters"
 import { useIssuesList } from "@/hooks/use-issues-list"
-import { QUICK_VIEWS, applyQuickView, type QuickView } from "@/components/features/issues/issues-view-model"
+import { useQuickViewCounts } from "@/hooks/use-quick-view-counts"
 import type { Mission, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 import { IssuesPanel } from "./issues-panel"
@@ -54,19 +54,16 @@ export function useIssuePageLists(workspaceId: string | null | undefined): Issue
 
 export function IssuePagePanel({
   lists,
-  me,
+  workspaceId,
   navigate,
 }: {
   lists: IssuePageLists
-  me: string | null
+  workspaceId: string | null | undefined
   /** Leaves the page (the host asks first while edits wait). */
   navigate: (href: string) => void
 }) {
   const [search, setSearch] = useState("")
-  const quickCounts = useMemo(
-    () => Object.fromEntries(QUICK_VIEWS.map((v) => [v.id, applyQuickView(lists.issues, v.id, me).length])) as Record<QuickView, number>,
-    [lists.issues, me],
-  )
+  const quickCounts = useQuickViewCounts(workspaceId, { refreshKey: lists.issues })
   const onFilters = useCallback((patch: Partial<IssueFilters>) => navigate(filtersHref({ ...NO_FILTERS, ...patch })), [navigate])
 
   return (
