@@ -39,6 +39,11 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "integrations" })).toBe("/integrations")
   })
 
+  it("opens spend on the Journal's Spend tab, not the retired /paymaster (#3618)", () => {
+    expect(entityHref({ kind: "spend" })).toBe("/journal?tab=spend")
+    expect(entityHref({ kind: "spend", crewId: "crw_1" })).toBe("/journal?tab=spend&crew_id=crw_1")
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
     expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/journal?mission_id=m%2F1")

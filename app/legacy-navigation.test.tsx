@@ -16,6 +16,7 @@ import OrchestrationPage from "./(dashboard)/orchestration/page"
 import WorkPage from "./(dashboard)/work/page"
 import InboxPage from "./(dashboard)/inbox-v2/page"
 import RunsPage from "./(dashboard)/runs/page"
+import PaymasterPage from "./(dashboard)/paymaster/page"
 
 beforeEach(() => { navigation.router.replace.mockClear(); navigation.redirect.mockClear(); window.history.replaceState({}, "", "/") })
 afterEach(() => { cleanup(); window.history.replaceState({}, "", "/") })
@@ -74,5 +75,9 @@ describe("bookmarks after navigation migration", () => {
  it("redirects retired runs to the journal preset before rendering", () => {
   expect(() => RunsPage()).toThrow("REDIRECT /journal?tab=runs")
   expect(navigation.redirect).toHaveBeenCalledWith("/journal?tab=runs")
+ })
+ it("sends a /paymaster bookmark to the Journal's Spend tab (#3618)", () => {
+  expect(() => PaymasterPage()).toThrow("REDIRECT /journal?tab=spend")
+  expect(navigation.redirect).toHaveBeenCalledWith("/journal?tab=spend")
  })
 })

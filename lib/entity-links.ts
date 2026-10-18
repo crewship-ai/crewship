@@ -67,7 +67,7 @@ export function entityHref(ref: EntityRef): string {
     case "inbox":
       return withQuery("/inbox", { item: ref.itemId, kind: ref.itemKind, agent: ref.agentSlug, attention: ref.attention })
     case "spend":
-      return withQuery("/paymaster", { crew: ref.crewId })
+      return withQuery("/journal", { tab: "spend", crew_id: ref.crewId })
     case "integrations":
       return withQuery("/integrations", { tab: ref.tab, section: ref.section, server: ref.server })
     case "skill":
