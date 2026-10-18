@@ -61,7 +61,6 @@ import { waitpointDecide } from "@/lib/api/waitpoints"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { relTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import { RoutineRunPeek } from "@/components/features/routines/routine-run-peek"
 import { LaneAxis, TIME_WINDOW_MS, WindowToggle, type TimeWindow } from "./time-window"
 
 type Window = TimeWindow
@@ -89,8 +88,6 @@ const HEAD_TONE = {
 
 export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssue }: ActivityHomeProps) {
   const [win, setWin] = React.useState<Window>("24h")
-  // A run row peeks at the run (RT-07, the Routines peek); Open run leaves.
-  const [peekId, setPeekId] = React.useState<string | null>(null)
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
@@ -134,9 +131,6 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
   const latest = [...rows].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 6)
   const next = upNext(scope ? calendar.filter((e) => scopedSlugs.has(e.slug)) : calendar, now, 3)
   const problems = activeProblems(failureGroups, rows)
-
-  // J / K walk the rows as listed: Right now, then Latest runs.
-  const peekRuns = [...active.slice(0, 4), ...latest] as React.ComponentProps<typeof RoutineRunPeek>["runs"]
 
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
@@ -189,7 +183,7 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
               {active.length === 0 && <li className="py-1 text-xs text-muted-foreground">Nothing is running.</li>}
               {active.slice(0, 4).map((r) => (
                 <li key={r.id}>
-                  <RunRow run={r} onOpen={setPeekId} compact />
+                  <RunRow run={r} onOpen={onOpenRun} compact />
                 </li>
               ))}
             </ul>
@@ -384,27 +378,13 @@ export function ActivityHome({ workspaceId, chains, scope, onOpenRun, onOpenIssu
             <ul className="flex flex-col">
               {latest.map((r) => (
                 <li key={r.id}>
-                  <RunRow run={r} onOpen={setPeekId} />
+                  <RunRow run={r} onOpen={onOpenRun} />
                 </li>
               ))}
             </ul>
           )}
         </DashboardCard>
       </Appear>
-      {peekId && (
-        <RoutineRunPeek
-          workspaceId={workspaceId}
-          runs={peekRuns}
-          runId={peekId}
-          routineName={(r) => r.pipeline_name || r.pipeline_slug}
-          onChange={setPeekId}
-          onClose={() => setPeekId(null)}
-          onOpen={(id) => {
-            setPeekId(null)
-            onOpenRun(id)
-          }}
-        />
-      )}
     </div>
   )
 }
