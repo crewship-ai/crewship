@@ -193,3 +193,16 @@ describe("phone tab bar", () => {
     expect(css).toMatch(/--mobile-tab-bar-h:\s*calc\(62px \+ env\(safe-area-inset-bottom\)\)/)
   })
 })
+
+// v67 core.js:331-333: a phone detail has ONE bar — the back chevron first,
+// then the item's own name — so the area's name gives way to it.
+describe("phone detail header", () => {
+  it("puts the way back first and names the item, not the area", () => {
+    const src = readFileSync(path.resolve(__dirname, "../sub-bar.tsx"), "utf8")
+    const toolbar = readFileSync(path.resolve(__dirname, "../app-toolbar.tsx"), "utf8")
+    const css = readFileSync(path.resolve(__dirname, "../../../app/globals.css"), "utf8")
+    expect(src).toMatch(/data-phone-back/)
+    expect(toolbar).toMatch(/data-slot="area-crumb"/)
+    expect(css).toMatch(/header:has\(\[data-phone-back\]\) \[data-slot="area-crumb"\]\s*\{\s*display:\s*none/)
+  })
+})
