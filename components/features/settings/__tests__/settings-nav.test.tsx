@@ -222,17 +222,19 @@ vi.mock("../sections/crew-audit-section", () => ({
 describe("SettingsLayout deep-link into a hidden section", () => {
   beforeEach(() => cleanup())
 
-  it("falls back to Profile when a MEMBER opens ?tab=audit", async () => {
+  // ODCH-SET-10: the Audit log page judges the role itself (it shows "You can't
+  // open Audit log"), so a MEMBER's old ?tab=audit link is forwarded to it
+  // rather than silently opening Profile.
+  it("forwards a MEMBER's ?tab=audit to the Audit log page, which shows no access", async () => {
     h.role = "MEMBER"
+    h.replace.mockClear()
     window.history.replaceState(null, "", "/settings?tab=audit")
     const { SettingsLayout } = await import("../settings-layout")
     render(<SettingsLayout />)
 
-    // Not a blank pane, and not the audit pane either.
-    await waitFor(() => expect(screen.getByTestId("profile-section")).toBeTruthy())
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/settings/audit"))
     expect(screen.queryByTestId("audit-section")).toBeNull()
-    // The sub-bar names the section you actually landed on.
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Profile")
+    expect(screen.queryByTestId("profile-section")).toBeNull()
   })
 
   // The Audit log is a nested page now (/settings/audit); an old ?tab=audit
