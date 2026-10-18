@@ -184,12 +184,9 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
 
   return (
     <>
-      {/* The card-action button, the same one Refresh / Export CSV / Check
-          again use across Settings and Admin. This was a filled primary,
-          which put it at a different visual weight from every other action
-          sitting in the same slot — and a filled button is for a page's
-          single main CTA, not for one of several equal actions on a card. */}
-      <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+      {/* v67 PAR-101: Add member is the Members page's one blue primary
+          action, in the sub-bar. */}
+      <Button size="sm" className="h-7 px-2.5 text-xs" aria-haspopup="dialog" onClick={() => setOpen(true)}>
         <UserPlus className="mr-1.5 h-3 w-3" />
         Add member
       </Button>

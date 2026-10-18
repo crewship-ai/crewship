@@ -274,7 +274,7 @@ test("RT-04 the overview opens with four figures, Needs you, Running now and Nex
   await expect(figures).toBeVisible({ timeout: TIMEOUT })
   await expect(figures.getByRole("listitem")).toHaveText([/^Needs you/, /^Running now/, /^Runs · 7 days/, /^Spend · /])
   for (const name of ["Needs you", "Running now", "Next 24 hours"]) await expect(page.getByRole("region", { name })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/routines?tab=calendar")
+  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/calendar")
 })
 
 test("RT-05 Run opens one dialog: Run now · Test run · Later, limits in the footer", async ({ page }) => {
@@ -444,3 +444,56 @@ test.describe("RT-07 phone 390", () => {
   })
 })
 
+
+test("PAR-046/047/048/051 overview has no tab strip, sentence-case cards, sans KPI numerals and a C chip", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/routines")
+  const figures = page.getByRole("list", { name: "Routine figures" })
+  await expect(figures).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("navigation", { name: "Routines views" })).toHaveCount(0)
+  // Card titles are sentence case, 13 px class, not mono caps.
+  const title = page.getByRole("region", { name: "Needs you" }).getByRole("heading", { name: /^Needs you/ })
+  expect(await title.evaluate((el) => getComputedStyle(el).textTransform)).toBe("none")
+  expect(await title.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i)
+  // KPI numerals: sans, tabular, bold.
+  const value = figures.getByRole("listitem").first().locator("span").nth(1)
+  expect(await value.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i)
+  expect(await value.evaluate((el) => getComputedStyle(el).fontVariantNumeric)).toContain("tabular-nums")
+  // New routine carries the C chip, still named "New routine".
+  const create = page.getByRole("button", { name: "New routine", exact: true }).first()
+  await expect(create.locator("kbd")).toHaveText("C")
+})
+
+test("PAR-046 phone: the overview still has no tab strip and no horizontal scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/routines")
+  await expect(page.getByRole("list", { name: "Routine figures" })).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("navigation", { name: "Routines views" })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+// Gap UI (RT-06, RT-07, RT-24): the Health card on the overview and the
+// Checkup on a routine page fit 390, 1024 and 1440 without sideways scroll;
+// the wizard offers the artifact panel step.
+for (const width of [390, 1024, 1440]) {
+  test.describe(`RT-06/07 Health and Checkup at ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 768, isMobile: width < 768 })
+    test("the Health card lists routines and nothing scrolls sideways", async ({ page }) => {
+      await page.goto("/routines")
+      const card = page.getByTestId("routines-health")
+      await expect(card).toBeVisible({ timeout: TIMEOUT })
+      await expect(card).not.toContainText(/30 ?d/)
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+    test("a routine page shows the Checkup with n/m", async ({ page }) => {
+      await page.goto("/routines")
+      await expect(page.getByTestId("routines-health")).toBeVisible({ timeout: TIMEOUT })
+      await page.getByTestId("routines-health").getByRole("button").first().click()
+      await expect(page.getByTestId("checkup")).toBeVisible({ timeout: TIMEOUT })
+      await expect(page.getByTestId("checkup-circle")).toHaveText(/^\d+\/\d+$/)
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+  })
+}

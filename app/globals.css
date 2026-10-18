@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
 @import "./styles/accents.css";
+@import "./styles/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -244,6 +245,10 @@
      dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
+  /* The rail and list rows (7 px): the sixth corner token, scaled with the
+     five in @theme below. A plain property here, not in @theme, so it exists
+     whether or not a utility uses it. */
+  --radius-row: calc(7px * var(--radius-k, 1));
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
   --surface-subtle: #F8F9FA;
@@ -621,13 +626,16 @@
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* The six corner tokens all scale by --radius-k (1 unless a style or the
+     Corners knob sets it, app/styles/styles.css), so the knob moves them
+     together and keeps their proportions. */
+  --radius-sm: calc((var(--radius) - 4px) * var(--radius-k, 1));
+  --radius-md: calc((var(--radius) - 2px) * var(--radius-k, 1));
+  --radius-lg: calc(var(--radius) * var(--radius-k, 1));
+  --radius-xl: calc((var(--radius) + 4px) * var(--radius-k, 1));
   /* rounded-card: every card, panel and dialog surface. In px: a radius is
      drawn, not read, so it stays 10 px at every text size. */
-  --radius-card: 10px;
+  --radius-card: calc(10px * var(--radius-k, 1));
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -669,8 +677,10 @@
   /* Every form control (Input, Textarea, SelectTrigger, native selects):
      the size of the row label beside it, so a field never reads bigger or
      smaller than its label. Touch devices still get 16px (the coarse-pointer
-     floor above), which is what keeps iOS from zooming. */
-  --text-control: 0.8125rem;
+     floor above), which is what keeps iOS from zooming. 13 px at Compact
+     (v67 form fields, row and card titles), the body size: 0.875rem of the
+     14.857 px Compact root, 14 px at Standard. */
+  --text-control: var(--typo-body);
   --text-control--line-height: 1.25rem;
   --text-body: var(--typo-body);
   --text-body--line-height: var(--typo-body-lh);
@@ -699,8 +709,9 @@ body {
     background-image: var(--page-glow);
     background-attachment: fixed;
   }
+  /* v67: -0.005em. The old -0.02em pulled word spaces shut ("Auditlog"). */
   h1, h2, h3 {
-    letter-spacing: -0.02em;
+    letter-spacing: -0.005em;
     text-wrap: balance;
   }
 
@@ -762,7 +773,7 @@ body {
 
        .type-title    24px  page heading
        .type-row      14px  list rows, field values, prose
-       .type-section  13px  UPPERCASE card + section headers, labels
+       .type-section  13px  sentence-case card + section headers, labels
        .type-meta     12px  timestamps, ids, stat captions, badges
 
      Weight, tracking and casing ride along, because "12px" was never
@@ -783,21 +794,34 @@ body {
     font-size: 1.5rem;
     line-height: 2rem;
     font-weight: 600;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.015em;
     text-wrap: balance;
   }
   .type-row {
     font-size: 0.875rem;
     line-height: 1.3rem;
   }
-  /* Harbor eyebrow shape: mono, wide-tracked. Colour stays with the caller. */
+  /* Harbor 2 section / card / panel-group header: sentence-case sans, semibold
+     (v67 card-h). The mono-caps eyebrow is retired. Colour stays with the caller. */
   .type-section {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     line-height: 1.2rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  /* A dialog's title (v67 .dlg-ht b): 15 px bold. */
+  .type-dialog-title {
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
+  /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
+  .type-group-head {
+    font-size: max(11.5px, 0.72rem);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
   }
   .type-meta {
     font-size: 0.75rem;
@@ -814,7 +838,7 @@ body {
      and the portrait finds it faster than the name does. Sized down so the
      row belongs to the face rather than competing with it.
 
-       .type-nav      13px  crew and agent names in a rail
+       .type-nav      13px  crew and agent names in a rail (at Compact)
        .type-nav-sub  11px  the role line, counts, status words
 
      Written here rather than typed into crews-explorer.tsx on purpose. The
@@ -822,7 +846,8 @@ body {
      system, and the next surface copies the number instead of the reason —
      which is how 12 different ways to write "small text" happened. */
   .type-nav {
-    font-size: 0.8125rem;
+    /* 13 px at Compact (v67 nav item and user row), 14 px at Standard. */
+    font-size: 0.875rem;
     line-height: 1.15rem;
   }
   .type-nav-sub {
@@ -1027,14 +1052,13 @@ body {
   /* ── Harbor recipes ──────────────────────────────────────────────
      The marketing site's shapes, as utilities the components compose. */
 
-  /* Eyebrow: section labels, table heads, card kickers. */
+  /* Eyebrow: section labels, table heads, card kickers. Sentence-case sans
+     (v67); the name stays so call sites do not churn. */
   .eyebrow {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     line-height: 1rem;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0;
     color: var(--primary-hover);
   }
 
@@ -1098,13 +1122,15 @@ body {
      40 px wide in the 56 px rail and 224 px open, the icon column never moves.
      Sizes are px: the rail must not grow with the user's text size. */
   .rail-inset {
-    padding-inline: 8px !important;
+    /* The sidebar's own p-2 is the 8 px inset (v67 rail padding 8, icon at
+       x = 18); a second 8 px here pushed everything 7 px right. */
+    padding-inline: 0 !important;
   }
   .rail-row {
     height: 30px !important;
     padding: 0 10px !important;
     gap: 10px !important;
-    border-radius: 7px !important;
+    border-radius: var(--radius-row) !important;
     justify-content: flex-start !important;
     overflow: visible !important;
     color: var(--muted-foreground);
@@ -1204,11 +1230,11 @@ body {
     width: 100%;
     height: 30px;
     padding: 0 9px;
-    border-radius: 7px;
+    border-radius: var(--radius-row);
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--muted-foreground-soft);
-    font-size: var(--typo-label);
+    font-size: 12.5px;
   }
   .rail-search:hover { border-color: var(--line-strong); color: var(--muted-foreground); }
   .rail-search > svg { width: 14px; height: 14px; flex-shrink: 0; }

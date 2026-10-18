@@ -105,12 +105,16 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
 
   it("is the dashboard, not a second copy of the sidebar's list, with runs living in Activity", () => {
     renderPane()
-    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true")
+    // PAR-046: v67 has no Overview | Calendar strip; Calendar is a sidebar destination.
+    expect(screen.queryByRole("navigation", { name: "Routines views" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Overview" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Calendar" })).toBeNull()
     expect(screen.getByTestId("routines-dashboard")).toBeInTheDocument()
     // No catalog rows and no third tab: the explorer owns the list, Activity the runs.
     expect(screen.queryByText("Summarize service health")).toBeNull()
     expect(screen.queryByRole("button", { name: /Recent runs/ })).toBeNull()
-    expect(screen.getByRole("link", { name: /Runs in Activity/ })).toHaveAttribute("href", "/activity?lens=routines")
+    // The Latest results card links to every run in Activity.
+    expect(screen.getByRole("link", { name: /All runs/ })).toHaveAttribute("href", "/activity?lens=routines")
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 

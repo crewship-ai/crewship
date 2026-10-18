@@ -4,9 +4,9 @@
 // tabs — Overview, Tree, Issues, Files, Settings.
 //
 // Hidden until the backend has them (each would be a control that does
-// nothing): Updates and Write update, Budget and Spend, a lead agent next to
-// the owner (a project has one lead today), Archive, and the Outputs and
-// Artifacts sources under Files.
+// nothing): Updates and Write update, Budget and Spend, a second lead next
+// to the first (a project has one lead, a person or an agent), Archive, and
+// the Outputs and Artifacts sources under Files (#3464).
 
 import * as React from "react"
 import { ChevronRight, Download, FileText, Folder, FolderKanban, MoreHorizontal, Plus, Trash2, Upload, Users } from "lucide-react"
@@ -29,6 +29,7 @@ import {
   ProjectDatesPicker,
   ProjectHealthPicker,
   ProjectIconEditor,
+  LeadAvatar,
   ProjectLeadPicker,
   ProjectNameEditor,
   ProjectPriorityPicker,
@@ -171,8 +172,8 @@ function ProjectHero({
           />
           <StatusPill size="md" tone={projectHealthTone(project.health)} label={projectHealthLabel(project.health)} />
           {project.lead_name && (
-            <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
-              <AgentAvatar seed={project.lead_id ?? project.lead_name} className="size-5 rounded-full" alt="" />
+            <span data-lead-kind={project.lead_type === "user" ? "user" : "agent"} className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
+              <LeadAvatar type={project.lead_type} id={project.lead_id} name={project.lead_name} className="size-5" />
               <span className="font-medium text-foreground">{project.lead_name}</span>
               <span className="text-muted-foreground-soft">lead</span>
             </span>
@@ -277,7 +278,7 @@ function ProjectOverview({
               <div className="flex items-center gap-2.5">
                 {project.lead_name ? (
                   <>
-                    <AgentAvatar seed={project.lead_id ?? project.lead_name} className="size-7 rounded-full" alt="" />
+                    <LeadAvatar type={project.lead_type} id={project.lead_id} name={project.lead_name} className="size-7" />
                     <div>
                       <b className="block text-body font-semibold">{project.lead_name}</b>
                       <small className="text-label text-muted-foreground">Lead</small>

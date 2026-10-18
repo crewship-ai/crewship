@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import { Bot, Copy, ExternalLink, Layers, MoreHorizontal, Plus, Star, User, UserRound } from "lucide-react"
+import { Bot, Copy, ExternalLink, Inbox, Layers, MoreHorizontal, Plus, Repeat, Star, User, UserRound } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 import { cn } from "@/lib/utils"
 import { toast } from "@/lib/toast"
@@ -107,6 +108,7 @@ export function IssuesPanel({
   onNewProject,
   onSaveView,
 }: IssuesPanelProps) {
+  const router = useRouter()
   const facets = useSidebarFacets()
 
   const facets_ = useMemo(() => {
@@ -154,7 +156,7 @@ export function IssuesPanel({
   const n = activeFilterCount(filters)
   const toggleStatus = (s: MissionStatus) =>
     onFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
-  const meta = (k: number | undefined) => <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
+  const meta = (k: number | undefined) => <span className="text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
 
   const isOn = (s: IssuesPanelSelection) => selection !== null && selection.kind === s.kind && selection.id === s.id
 
@@ -324,7 +326,7 @@ export function IssuesPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-surface-subtle" aria-hidden>
+              <div className="mb-1.5 ml-[2.6rem] mr-3 h-[3px] overflow-hidden rounded-sm bg-foreground/[0.08]" aria-hidden>
                 <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
               </div>
             </div>
@@ -355,6 +357,18 @@ export function IssuesPanel({
             </SidebarRow>
           )
         })}
+
+        {/* v67 issues.js: the panel ends with Intake — triage rules and
+            recurring issues, both on /issues/intake. */}
+        <SidebarSection label="Intake" />
+        <SidebarRow onSelect={() => router.push("/issues/intake")} as="div">
+          <Inbox className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">Triage</span>
+        </SidebarRow>
+        <SidebarRow onSelect={() => router.push("/issues/intake?tab=recurring")} as="div">
+          <Repeat className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">Recurring issues</span>
+        </SidebarRow>
       </div>
     </div>
   )

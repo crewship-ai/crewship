@@ -167,7 +167,7 @@ function subtitleFor(step: TraceStep): ReactNode {
             <span className="text-muted-foreground/60">prompt</span>
           )}
           {model && (
-            <span className="ml-1.5 shrink-0 rounded border border-border/60 px-1 py-0 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+            <span className="ml-1.5 shrink-0 rounded border border-border/60 px-1 py-0 font-mono text-micro text-muted-foreground">
               {model}
             </span>
           )}

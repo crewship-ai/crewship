@@ -289,7 +289,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
           </PopoverTrigger>
           <PopoverContent className="w-[360px] p-0" align="end">
             <div className="border-b border-hairline px-3 py-2">
-              <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">
+              <span className="type-meta font-medium text-muted-foreground-soft">
                 {provider ? `${getBrand(provider).label} seats in scope` : "Seats in scope"}
               </span>
             </div>

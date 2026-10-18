@@ -80,7 +80,7 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByRole("dialog").getByRole("button").first().click()
     await page.getByRole("option", { name: seeded?.name ?? "", exact: true }).click()
     await page.getByPlaceholder("Issue title").fill(title)
-    const createIssue = page.getByRole("button", { name: "Create issue", exact: true })
+    const createIssue = page.getByRole("button", { name: "Create", exact: true })
     await expect(createIssue).toBeEnabled({ timeout: 15_000 })
     const createResponse = page.waitForResponse(
       (response) => response.request().method() === "POST" && /\/issues(?:\?|$)/.test(response.url()),
@@ -274,13 +274,14 @@ test.describe("PR browser contract subset — phone", () => {
     await expect(sheet).toBeVisible()
     for (const label of [
       "Dashboard", "Inbox", "Chat", "Activity",
-      "Issues", "Routines", "Pages", "Calendar",
+      "Issues", "Routines", "Artifacts", "Calendar",
       "Crews", "Skills", "Vault", "Integrations",
       "Settings",
     ]) {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
     await expect(sheet.getByText("Journal", { exact: true })).toHaveCount(0)
+    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", "/pages")
 
     // Back closes it in place rather than leaving the page underneath.
     const before = new URL(page.url()).pathname

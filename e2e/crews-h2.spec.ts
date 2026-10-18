@@ -411,3 +411,135 @@ test.describe("phone", () => {
     if (await row.count()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   })
 })
+
+// Functions the backend already had (ODCH-CR-05/08/10/11, #3454 #3451 #3462 #3475).
+// Run after deploy, as an owner or admin (the demo seed login).
+for (const vp of [{ name: "1440", width: 1440, height: 1000 }, { name: "1024", width: 1024, height: 900 }, { name: "390", width: 390, height: 844 }]) {
+  test.describe(`gap UI at ${vp.name}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height } })
+    test.beforeEach(async ({ page }) => seed(page))
+
+    test(`CR-08 Settings › View as YAML shows the crew as crewship.yaml`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=settings`)
+      await page.getByRole("button", { name: "View as YAML" }).click()
+      const dialog = page.getByRole("dialog", { name: new RegExp(`${crew}\\.yaml`) })
+      await expect(dialog).toBeVisible()
+      const text = await dialog.getByTestId("crew-yaml").textContent()
+      expect(text).toContain("apiVersion: crewship/v1")
+      expect(text).toContain(`slug: ${crew}`)
+      expect(text).not.toMatch(/sk-[A-Za-z0-9]{12,}/)
+      await expect(dialog.getByRole("button", { name: "Download" })).toBeVisible()
+      const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(over).toBeLessThanOrEqual(1)
+    })
+
+    test(`CR-08 Settings › Download saves <crew>.yaml`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=settings`)
+      const download = page.waitForEvent("download")
+      await page.getByRole("button", { name: "Download" }).click()
+      expect((await download).suggestedFilename()).toBe(`${crew}.yaml`)
+    })
+
+    test(`CR-11 Health shows Spend · 30 d; Team has a Cost · 30 d column from md up`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=overview`)
+      await expect(page.getByTestId("crew-health").getByText("Spend · 30 d")).toBeVisible()
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      const head = page.getByTestId("crew-team").locator("table").first().getByRole("columnheader", { name: "Cost · 30 d" })
+      if (vp.width >= 768) await expect(head).toBeVisible()
+      else await expect(head).toBeHidden()
+    })
+
+    test(`CR-05 Team never offers Release now; a live hire offers Extend`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      await expect(page.getByTestId("crew-temporary-hires")).toBeVisible()
+      await expect(page.getByRole("button", { name: /Release now/ })).toHaveCount(0)
+      await expect(page.getByText("Planned", { exact: true })).toHaveCount(0)
+      const live = page.locator('[data-hire-state="active"]').first()
+      test.skip(!(await live.count()), "no live temporary hire in the seed")
+      const extend = live.getByRole("button", { name: "Extend" })
+      await expect(extend).toBeVisible()
+      await extend.click()
+      const dialog = page.getByRole("dialog", { name: /^Extend / })
+      await expect(dialog.getByRole("button", { name: "Extend" })).toBeVisible()
+    })
+
+    test(`CR-10 Memory: no Waiting for review error; if proposals wait they can be decided`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=memory`)
+      await expect(page.getByRole("region", { name: "CREW.md · how this crew works" })).toBeVisible()
+      await expect(page.getByText("Memory proposals could not be loaded.")).toHaveCount(0)
+      const card = page.getByTestId("crew-memory-review")
+      if (await card.count()) {
+        await expect(card.getByRole("button", { name: "View changes" }).first()).toBeVisible()
+      }
+    })
+  })
+}
+
+// v67 parity (PAR-064/065/067/069/120/121/122/123): sizes, order and styles of
+// the crew and agent pages at 1440, 1024 and 390.
+for (const vp of [{ width: 1440, height: 1000 }, { width: 1024, height: 900 }, { width: 390, height: 844 }]) {
+  test.describe(`v67 parity ${vp.width}`, () => {
+    test.use({ viewport: vp })
+    test.beforeEach(async ({ page }) => seed(page))
+
+    test("PAR-065 the crew head is a 48 px solid tile; PAR-069 panel rows are 30 px with 20 px tiles", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}`)
+      const tile = page.getByTestId("crew-header").locator("[data-slot=crew-tile]")
+      const box = await tile.boundingBox()
+      expect(Math.round(box!.width)).toBe(48)
+      if (vp.width >= 1024) {
+        // COM-05: on a tablet the panel starts closed; its button opens it.
+        if (vp.width < 1280) await page.getByTestId("secondary-panel-button").click()
+        const row = page.locator(`[data-crew-row="${crew}"] [role=button], [data-crew-row="${crew}"] > div`).first()
+        expect(Math.round((await row.boundingBox())!.height)).toBeGreaterThanOrEqual(30)
+        const small = await page.locator(`[data-crew-row="${crew}"] [data-slot=crew-tile]`).boundingBox()
+        expect(Math.round(small!.width)).toBe(20)
+      }
+    })
+
+    test("PAR-067 Works on shows chips or one compact line, never two Open rows", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=overview`)
+      const works = page.getByTestId("crew-works-on")
+      await expect(works).toBeVisible()
+      await expect(works.getByText("Recurring work this crew runs")).toHaveCount(0)
+    })
+
+    test("PAR-120 Tools and access is one card per kind with checkbox cells; the info note comes last", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=tools`)
+      await expect(page.getByRole("region", { name: "Skills" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Credentials" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Tools and access" })).toHaveCount(0)
+      const note = page.getByText("Credentials never reach an agent as text")
+      const lastCard = page.getByRole("region", { name: "Credentials" })
+      expect((await note.boundingBox())!.y).toBeGreaterThan((await lastCard.boundingBox())!.y)
+    })
+
+    test("PAR-122/123 the agent overview has Now, Holds, Talks with and Last 30 days; the head is a 52 px tile", async ({ page }) => {
+      const crew = await firstCrew(page)
+      const agent = await firstAgentOf(page, crew)
+      await page.goto(`/crews?agent=${agent}`)
+      for (const name of ["Now", "Holds", "Talks with", "Last 30 days"]) await expect(page.getByRole("region", { name })).toBeVisible()
+      await expect(page.getByText("Run outcomes")).toHaveCount(0)
+      const tile = await page.getByTestId("agent-header").locator("[data-slot=agent-head-tile]").boundingBox()
+      expect(Math.round(tile!.width)).toBe(52)
+      expect(Math.round(tile!.height)).toBe(52)
+      await expect(page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
+    })
+
+    test("PAR-121 Team has Cost · 30 d from md up", async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      const head = page.getByTestId("crew-team").locator("table").first().getByRole("columnheader", { name: "Cost · 30 d" })
+      if (vp.width >= 768) await expect(head).toBeVisible()
+      else await expect(head).toBeHidden()
+    })
+  })
+}

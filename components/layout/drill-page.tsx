@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarToolbar } from "@/components/layout/sidebar-kit"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
 import { SecondaryPanel, useCloseSecondaryPanelSheet, useIsTabletPanel } from "@/components/layout/secondary-panel"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
@@ -153,13 +154,15 @@ export function DrillPage<S extends string = string>({
           </SecondaryPanel>
         )}
         <div className="relative min-h-0 min-w-0 flex-1">
-          <main className={cn("h-full overflow-y-auto pb-20", className)}>
+          {/* A <div>, not a <main>: the shell's SidebarInset is the page's one
+              main landmark (ADM-08). */}
+          <div data-slot="drill-content" className={cn("h-full overflow-y-auto pb-20", className)}>
             {isMobile && mobileNav && (
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
             )}
             {head && <DrillHead icon={Icon} title={title} description={description} note={note} />}
             {children}
-          </main>
+          </div>
           <PageSaveBar />
         </div>
       </div>
@@ -182,7 +185,7 @@ function DrillHead({ icon: Icon, title, description, note }: { icon: LucideIcon;
   )
 }
 
-/** The bordered "← <parent>" control; the arrow alone when `compact`. */
+/** The plain "← <parent>" row (v67); the arrow alone when `compact`. */
 function DrillBack({ parent, compact = false }: { parent: { href: string; label: string; icon?: LucideIcon }; compact?: boolean }) {
   const BackIcon = parent.icon
   return (
@@ -191,7 +194,7 @@ function DrillBack({ parent, compact = false }: { parent: { href: string; label:
       data-slot="drill-back"
       aria-label={`Back to ${parent.label}`}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background text-xs font-medium text-foreground/85 shadow-xs transition-colors hover:bg-accent hover:text-foreground",
+        "inline-flex h-7 items-center gap-1.5 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
         compact ? "w-7 justify-center" : "pl-1.5 pr-2.5",
       )}
     >
@@ -256,7 +259,7 @@ export function DrillNavSection({
       {count != null && <span className="ml-auto tabular-nums">{count}</span>}
     </>
   )
-  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft"
+  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 type-group-head text-muted-foreground-soft"
   return (
     <div className="px-1.5 pt-2.5" data-slot="drill-section">
       {collapsible ? (
@@ -294,6 +297,7 @@ export function DrillNavItem({
   selected,
   onSelect,
   icon,
+  tile,
   label,
   sub,
   meta,
@@ -305,6 +309,8 @@ export function DrillNavItem({
   selected?: boolean
   onSelect: () => void
   icon?: React.ReactNode
+  /** An icon on the kit's 24 px row tile (v67); `icon` is for anything else. */
+  tile?: LucideIcon
   label: React.ReactNode
   /** A second, quieter line. */
   sub?: React.ReactNode
@@ -329,17 +335,17 @@ export function DrillNavItem({
       className={cn(
         // kit-tap: 44px under a coarse pointer (globals.css), desktop density
         // untouched — these rows are the panel's whole navigation on a phone.
-        "kit-tap drill-row-in row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
+        "kit-tap drill-row-in row-interactive row-hover min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]",
         selected && "row-selected font-medium",
         muted && !selected && "text-muted-foreground",
       )}
     >
-      {icon}
+      {tile ? <SidebarRowTile icon={tile} active={selected} /> : icon}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub != null && <span className="block truncate text-[11px] font-normal text-muted-foreground">{sub}</span>}
       </span>
-      {meta != null && <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
+      {meta != null && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
     </button>
   )
 }

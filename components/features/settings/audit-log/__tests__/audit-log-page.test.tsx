@@ -45,7 +45,7 @@ describe("Audit log page", () => {
     await waitFor(() => expect(auditCalls().length).toBeGreaterThan(0))
     await pickRange("Last 30 days")
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("30d"))
-    fireEvent.click(screen.getByRole("button", { name: /^Keeper/ }))
+    fireEvent.click(screen.getByRole("tab", { name: /^Keeper/ }))
     await waitFor(() => expect(auditCalls().at(-1)).toContain("source=keeper"))
     expect(auditCalls().at(-1)).toContain("date_from=")
     const q = new URLSearchParams(window.location.search)
@@ -114,7 +114,9 @@ describe("Audit log page", () => {
   it("lays the chart over the picked range", async () => {
     window.history.replaceState(null, "", "/settings/audit?audit_range=24h")
     render(<AuditLogPage />)
-    expect(await screen.findByText(/stacked by severity/i)).toBeInTheDocument()
+    // v67's chart: solid bars, the axis captioned under them (PAR-112).
+    expect(await screen.findByText("Drag to pick a slice of time")).toBeInTheDocument()
+    expect(document.querySelectorAll("[data-slot=audit-histogram] [data-bar]").length).toBeGreaterThan(10)
   })
 
   // The numbers next to each value are what picking it would show, read from
@@ -240,7 +242,7 @@ describe("Audit log — range, display, detail and paging", () => {
     fireEvent.click(screen.getByRole("button", { name: /Next/ }))
     await waitFor(() => expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("page=2"))
     expect(await screen.findByText(/51–100 of 120 events/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /^Keeper/ }))
+    fireEvent.click(screen.getByRole("tab", { name: /^Keeper/ }))
     await waitFor(() => expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("source=keeper"))
     expect(auditCalls().filter((u) => u.includes("limit=50")).at(-1)).toContain("page=1")
   })

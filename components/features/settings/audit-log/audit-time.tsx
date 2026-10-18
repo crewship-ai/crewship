@@ -62,23 +62,23 @@ export function AuditRangeBar({ filters, onChange, bounds, tally, now }: {
         options={AUDIT_RANGES.map((r) => ({
           value: r.value,
           ariaLabel: r.label,
-          label: <span className="font-mono text-micro tabular-nums">{SHORT[r.value] ?? r.label}</span>,
+          label: <span className="text-micro tabular-nums">{SHORT[r.value] ?? r.label}</span>,
         }))}
       />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant={custom ? "outline" : "ghost"} size={label ? "sm" : "icon-sm"} aria-label="Custom range" aria-pressed={custom}
-            title={custom ? rangeLabel(filters) : "Custom range"} className={cn(label && "gap-1.5 px-2 font-mono text-micro")}>
+            title={custom ? rangeLabel(filters) : "Custom range"} className={cn(label && "gap-1.5 px-2 text-micro")}>
             <CalendarDays className="h-3.5 w-3.5" aria-hidden />
             {label}
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 p-3">
           <div className="space-y-2" data-slot="audit-custom-range">
-            <div className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">Custom range</div>
+            <div className="text-micro font-semibold text-muted-foreground">Custom range</div>
             <AuditCalendar filters={filters} bounds={bounds} tally={tally} onChange={(next) => onChange({ ...next, sliceFrom: "", sliceTo: "" })} now={now} />
             <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-              <span className="truncate font-mono text-micro text-foreground/85">{custom ? rangeLabel(filters) : "Pick a day"}</span>
+              <span className="truncate text-micro tabular-nums text-foreground/85">{custom ? rangeLabel(filters) : "Pick a day"}</span>
               <span className="flex gap-1.5">
                 {custom && (
                   <Button variant="ghost" size="sm" className="px-2.5 text-xs" onClick={() => { pick(DEFAULT_AUDIT_FILTERS.range); setOpen(false) }}>Clear</Button>
@@ -117,14 +117,14 @@ export function AuditTimePicker({ filters, onChange, bounds, tally, now }: {
       value={filters.range as TimeRange}
       presets={PICKER_PRESETS}
       customLabel={customLabel}
-      triggerClassName="h-8 gap-1.5 px-2.5 font-mono text-xs [&>svg]:opacity-60 coarse:h-[44px]"
+      triggerClassName="h-8 gap-1.5 px-2.5 text-xs tabular-nums [&>svg]:opacity-60 coarse:h-[44px]"
       onChange={(v) => { if (v !== "custom") onChange({ range: v as AuditFilters["range"], from: "", to: "", sliceFrom: "", sliceTo: "" }) }}
       renderCustom={(close) => (
         <div className="space-y-2" data-slot="audit-custom-range">
-          <div className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">Custom range</div>
+          <div className="text-micro font-semibold text-muted-foreground">Custom range</div>
           <AuditCalendar filters={filters} bounds={bounds} tally={tally} onChange={(next) => onChange({ ...next, sliceFrom: "", sliceTo: "" })} now={now} />
           <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-            <span className="truncate font-mono text-micro text-foreground/85">{custom ? rangeLabel(filters) : "Pick a day"}</span>
+            <span className="truncate text-micro tabular-nums text-foreground/85">{custom ? rangeLabel(filters) : "Pick a day"}</span>
             <span className="flex gap-1.5">
               {custom && (
                 <Button variant="ghost" size="sm" className="px-2.5 text-xs" onClick={() => { onChange({ range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "", sliceFrom: "", sliceTo: "" }); close() }}>Clear</Button>
@@ -188,7 +188,7 @@ export function AuditCalendar({
       </div>
       <div className="grid grid-cols-7 gap-0.5">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <span key={i} className="pb-0.5 text-center font-mono text-micro text-muted-foreground-soft" aria-hidden>{d}</span>
+          <span key={i} className="pb-0.5 text-center text-micro text-muted-foreground-soft" aria-hidden>{d}</span>
         ))}
         {cells.map((day, i) => {
           if (!day) return <span key={`b${i}`} />
@@ -209,7 +209,7 @@ export function AuditCalendar({
               aria-label={`${formatDay(day)}: ${count} event${count === 1 ? "" : "s"}`}
               title={`${formatDay(day)} · ${count} event${count === 1 ? "" : "s"}`}
               className={cn(
-                "relative grid h-7 place-items-center font-mono text-micro tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+                "relative grid h-7 place-items-center text-micro tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
                 inRange ? "bg-primary/[0.13] text-foreground" : "rounded-md",
                 inRange && !prevIn && "rounded-l-md",
                 inRange && !nextIn && "rounded-r-md",

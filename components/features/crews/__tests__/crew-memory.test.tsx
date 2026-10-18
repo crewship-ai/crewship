@@ -10,6 +10,7 @@ const doc = (name: string, content: string, scope = "crew") => ({ id: `${scope}:
 function stub(documents: unknown[], versions: unknown[] = []) {
   return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
     const url = String(input)
+    if (url.includes("/api/v1/inbox")) return new Response(JSON.stringify({ rows: [] }))
     if (url.includes("/memory/versions")) return new Response(JSON.stringify({ entries: versions }))
     if (url.includes("/crews/c1/memory")) return new Response(JSON.stringify({ documents, scopes: { crew: "available" } }))
     return new Response("{}", { status: 404 })
@@ -38,7 +39,7 @@ describe("Crew Memory cards (C-MEM)", () => {
     expect(await within(card).findByText(/pavel/)).toBeInTheDocument()
   })
 
-  it("has no Waiting for review card: the server has no list of memory proposals", async () => {
+  it("has no Waiting for review card while no memory proposal waits", async () => {
     stub([doc("CREW.md", "x")])
     render(<CrewMemoryCards workspaceId="ws1" crewId="c1" agents={agents} onOpenAgent={vi.fn()} />)
     await screen.findByRole("region", { name: "CREW.md · how this crew works" })

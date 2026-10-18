@@ -55,12 +55,15 @@ vi.mock("../app-toolbar-provisioning", () => ({ ProvisioningBadge: () => null })
 vi.mock("@/components/ui/wifi", () => ({ WifiIcon: () => null }))
 
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { AppToolbar } from "../app-toolbar"
+// The toolbar's own avatar is gone (v67: the phone bar is title, action, search,
+// bell; the account is a row in the More sheet), so the menu is rendered by
+// itself, as the sidebar and that sheet do.
+import { UserMenu } from "../user-menu"
 
 function openUserMenu() {
   render(
     <TooltipProvider>
-      <AppToolbar />
+      <UserMenu />
     </TooltipProvider>,
   )
   // Radix DropdownMenu opens on pointerdown (primary button), not click.
@@ -68,7 +71,7 @@ function openUserMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
 }
 
-describe("AppToolbar — user menu", () => {
+describe("UserMenu — the toolbar menu", () => {
   beforeEach(() => {
     cleanup()
     menuAccess.mode = "trusted"

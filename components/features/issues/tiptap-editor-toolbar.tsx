@@ -193,7 +193,7 @@ function CodeBlockView({ node, updateAttributes }: any) {
         />
       </div>
       {lang && (
-        <div className="absolute right-2 top-2 text-[10px] font-mono text-muted-foreground/30 uppercase group-hover:opacity-0 transition-opacity pointer-events-none">
+        <div className="absolute right-2 top-2 text-micro font-mono text-muted-foreground/30 group-hover:opacity-0 transition-opacity pointer-events-none">
           {LANGUAGES.find((l) => l.value === lang)?.label || lang}
         </div>
       )}

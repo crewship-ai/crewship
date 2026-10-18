@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { SkillPage, type SkillPageProps } from "@/components/features/skills/skill-page"
 import type { SkillDetail } from "@/components/features/skills/skills-model"
 
@@ -47,6 +47,34 @@ describe("skill overview", () => {
     expect(screen.queryByRole("button", { name: /^Update/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Give to agents" }))
     expect(p.onGive).toHaveBeenCalled()
+  })
+
+  // PAR-124: v67's header says "Published v2" in a sans chip for a skill made
+  // here, shows no second line under a title that is the slug, and draws the
+  // trust pill in sans.
+  it("PAR-124 labels a made-here version Published and keeps it sans", () => {
+    renderPage({}, { source: "CUSTOM", homepage: null, vendor: null, version: "2" })
+    const chips = document.querySelector("[data-slot=skill-chips]")!
+    const v = [...chips.querySelectorAll("span")].find((e) => e.textContent === "Published v2")
+    expect(v).toBeTruthy()
+    expect(v!.className).not.toContain("font-mono")
+    const pill = chips.querySelector("[data-slot=status-pill]")!
+    expect(pill.className).toContain("font-sans")
+  })
+
+  it("PAR-124 shows the slug under the title only when it is not the title", () => {
+    renderPage({}, { display_name: null, name: "seo-patterns", slug: "seo-patterns" })
+    expect(document.querySelector("[data-slot=skill-head] p.font-mono")).toBeNull()
+    cleanup()
+    renderPage({}, { display_name: "Code Reviewer", name: "Code Reviewer", slug: "code-reviewer" })
+    expect(document.querySelector("[data-slot=skill-head] p.font-mono")?.textContent).toBe("code-reviewer")
+  })
+
+  it("PAR-153 draws the Last 7 days numerals sans and tabular", () => {
+    renderPage()
+    const uses = screen.getByText("Uses").nextElementSibling ?? screen.getByText("Uses").parentElement!.lastElementChild!
+    expect(uses.innerHTML).toContain("tabular-nums")
+    expect(uses.innerHTML).not.toContain("font-mono")
   })
 
   it("shows the v67 tabs and the Overview cards, without the SKILL.md breakdown", () => {

@@ -61,7 +61,7 @@ function UsedBy({ c }: { c: VaultSecret }) {
       {names.slice(0, 3).map((n, i) => (
         <AgentAvatar key={`${ids[i] ?? n}-${i}`} seed={ids[i] ?? n} alt="" className="size-5 shrink-0 rounded-full" />
       ))}
-      {names.length > 3 && <span className="font-mono text-micro text-muted-foreground">+{names.length - 3}</span>}
+      {names.length > 3 && <span className="text-micro tabular-nums text-muted-foreground">+{names.length - 3}</span>}
     </span>
   )
 }
@@ -125,7 +125,7 @@ function Row({
         </span>
       </td>
       <td className="whitespace-nowrap py-2 pl-1 pr-3 text-right align-middle md:text-left">
-        <StatusPill tone={state.tone} label={state.label} />
+        <StatusPill className="font-sans tracking-normal" tone={state.tone} label={state.label} />
       </td>
     </tr>
   )
@@ -289,7 +289,7 @@ function GroupCard({
   return (
     <section aria-label={`${label} · ${items.length}`} className="flex flex-col gap-1.5">
       <h3 className="px-1 text-label font-semibold text-foreground">
-        {label} <span className="font-mono font-normal text-muted-foreground">· {items.length}</span>
+        {label} <span className="font-normal tabular-nums text-muted-foreground">· {items.length}</span>
       </h3>
       <Table rows={shown} caption={label} {...shared} />
       {items.length > 5 && !open && (

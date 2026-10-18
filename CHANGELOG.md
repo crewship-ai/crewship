@@ -58,6 +58,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 - **Harbor 2 shell.** A 240 px sidebar (a 56 px rail on tablets) with the workspace, Search ⌘K, the sections, Settings, Admin and your profile at the bottom; one 48 px top bar with the area's breadcrumb, the page's title and its one primary action, and the Activity and Inbox bells; each page's header now sits in that top bar instead of a separate strip, with view tabs kept on the page. Phones get a bottom tab bar with More. ⚠️ **Behaviour change:** the profile menu moved from the top bar to the bottom of the sidebar (in More on a phone).
 - **Harbor 2 kit, filters and panels.** Filters open inside a page's side panel, under its Filter button, with at most six values per facet and "All N…" for the rest; on a tablet the side panel starts closed and opens over the page from the top bar. Wizards show every step done when finished, and confirmation lists name what is lost, kept or at risk in words for screen readers. ⚠️ **Behaviour change:** at 768–1279 px the side panel no longer takes a column; open it with the panel button in the top bar.
+- **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
+
+- **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
+
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 
 - Refuse unsupported run-admission payloads in raw dump restore before opening the write transaction or invoking callbacks.
@@ -121,6 +125,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
+- **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 
 - **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.

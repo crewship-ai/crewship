@@ -135,7 +135,7 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
   return (
     <SettingsCard icon={items.length ? AlertTriangle : ShieldCheck} tint={bad ? "var(--destructive)" : items.length ? "var(--warn)" : "var(--success)"}
       title="Needs attention" description={items.length ? "What to fix first, most pressing on top" : "Nothing needs attention"}
-      actions={<span className="font-mono text-xs tabular-nums text-muted-foreground">{items.length}</span>}>
+      actions={<span className="text-xs tabular-nums text-muted-foreground">{items.length}</span>}>
       {items.length === 0 ? (
         <p className="px-4 py-3 text-xs text-success">Nothing needs attention.</p>
       ) : items.map((it) => (
@@ -249,7 +249,7 @@ export function SpaceCard({ space }: { space: SpaceInfo }) {
   const used = Math.max(0, space.total_bytes - space.free_bytes)
   const backups = pct(space.backups_bytes)
   const other = Math.max(0, pct(used) - backups)
-  const fig = "font-mono text-control tabular-nums"
+  const fig = "text-control tabular-nums"
   return (
     <SettingsCard icon={HardDrive} tint="var(--purple)" title="Space"
       description={space.min_free_percent != null ? `A run that would leave less than ${space.min_free_percent} % free does not start` : "This server"}>

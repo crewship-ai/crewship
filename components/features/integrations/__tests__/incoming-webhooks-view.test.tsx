@@ -16,6 +16,8 @@ import type { IncomingData } from "../use-incoming-endpoints"
 import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
 import { apiFetch } from "@/lib/api-fetch"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "incoming-test-human" } }, status: "authenticated" }) }))
+
 vi.mock("@/lib/api-fetch", async (original) => ({
   ...(await original<typeof import("@/lib/api-fetch")>()),
   apiFetch: vi.fn(),

@@ -161,7 +161,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
             <div className="flex items-center gap-2 px-0.5 pb-1 pt-0.5">
               <StatusIcon status={col.status} className="size-3.5 shrink-0" />
               <b className="truncate text-label font-semibold text-foreground">{STATUS_TEXT[col.status]}</b>
-              <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{col.all.length}</span>
+              <span className="text-label tabular-nums text-muted-foreground-soft">{col.all.length}</span>
               <span className="flex-1" />
               {onCreateClick && isCreatableStatus(col.status) && (
                 <Button variant="ghost" size="icon-xs" aria-label={`New issue in ${STATUS_TEXT[col.status]}`} onClick={() => onCreateClick(col.status)}>
@@ -200,7 +200,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
               <button
                 type="button"
                 onClick={() => toggleOpen(col.status)}
-                className="w-full rounded-lg py-2 text-center font-mono text-label text-primary-hover hover:bg-[var(--row-hover-bg)]"
+                className="w-full rounded-lg py-2 text-center text-label text-primary-hover hover:bg-[var(--row-hover-bg)]"
                 data-testid={`board-fold-${col.status}`}
               >
                 {col.hidden > 0 ? `${col.hidden} more · Show all` : "Show fewer"}

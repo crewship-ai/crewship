@@ -151,6 +151,7 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <StatusPill
+            className="font-sans"
             size="md"
             tone={VERDICT_TONE[verdict]}
             label={VERDICT_LABEL[verdict]}

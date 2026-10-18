@@ -23,7 +23,7 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8")
 describe("crews rail type register", () => {
   it("defines the register in globals.css, with both steps", () => {
     const css = read("app/globals.css")
-    expect(css).toMatch(/\.type-nav\s*\{[^}]*font-size:\s*0\.8125rem/)
+    expect(css).toMatch(/\.type-nav\s*\{[^}]*font-size:\s*0\.875rem/)
     expect(css).toMatch(/\.type-nav-sub\s*\{[^}]*font-size:\s*0\.6875rem/)
   })
 
@@ -38,7 +38,8 @@ describe("crews rail type register", () => {
     // The Harbor 2 panel row is one line: the crew's tile at 20 px, and under the
     // open crew its agents at 18 px with the lead's star and the hire's time.
     const rail = read("components/features/crews/crews-panel.tsx")
-    expect(rail).toContain("size-5 rounded-md")
+    expect(rail).toContain("<CrewTile")
+    expect(rail).toContain("size={20}")
     expect(rail).toContain("size-[18px] rounded-md")
   })
 })

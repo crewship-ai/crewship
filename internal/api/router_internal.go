@@ -43,6 +43,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		internal.SetComposioDefaultConnector(r.composioConfig.DefaultConnector, r.composioConfig.BaseURL)
 	}
 	internal.SetJournal(r.Journal())
+	internal.documentCreationEnabled = r.pages != nil && r.pages.documentCall != nil
 	// Derive approval_mode from the crew autonomy policy in the resolve
 	// response so the request-builder can revive the harbormaster HITL gate
 	// on every dispatch path (#810). Shares the Router's cached resolver.
@@ -66,6 +67,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.

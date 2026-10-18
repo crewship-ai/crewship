@@ -19,8 +19,7 @@ func TestCustodyCredentialChangesDuringBodyRead(t *testing.T) {
 			seedInstanceUser(t, f.db, "departing", "departing@example.invalid", "ws-old", "MEMBER")
 			seedInstanceUser(t, f.db, "reader", "reader@example.invalid", "ws-old", "MEMBER")
 			wmSeedPage(t, f.db, "ws-old", "private-output", "private-output", "Private output", "departing", "")
-			mustExec(t, f.db, `CREATE TABLE documents(page_id TEXT PRIMARY KEY REFERENCES pages(id))`)
-			mustExec(t, f.db, `INSERT INTO documents VALUES('private-output')`)
+			seedOwnershipOutput(t, f.db, "ws-old", "private-output", "documents")
 			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('private-output','user','reader','read','departing')`)
 			body := `{"expected_owner_user_id":"departing","successor_user_id":"reader"}`
 			request := httptest.NewRequest("POST", "/api/v1/workspaces/ws-old/page-ownership/private-output", nil)

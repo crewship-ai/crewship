@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 
+vi.mock("@/components/features/crews/memory-workspace", () => ({ useWorkspaceResource: (url: string) => ({ key: url, error: "offline" }) }))
 vi.mock("@/components/features/crews/crew-activity-feed", () => ({ CrewActivityFeed: () => <p>recent activity</p> }))
 
 import { CrewOverview, miseTools } from "@/components/features/crews/crew-overview"
@@ -74,11 +75,10 @@ describe("CrewOverview", () => {
     expect(p.onTab).toHaveBeenCalledWith("env")
   })
 
-  it("works-on links carry the crew", () => {
+  // The chips themselves are pinned in parity-crew-works-on.test.tsx.
+  it("works-on is a card of its own that never leaves the page blank", () => {
     renderOverview()
-    const works = screen.getByTestId("crew-works-on")
-    const links = within(works).getAllByRole("link").map((a) => a.getAttribute("href"))
-    expect(links).toEqual(["/routines?crew=ops", "/issues?crew_id=c1"])
+    expect(screen.getByTestId("crew-works-on")).toBeInTheDocument()
   })
 
   it("the doing card opens a running agent", () => {

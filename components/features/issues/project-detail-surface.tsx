@@ -13,6 +13,7 @@ import { ResourceShareDialog } from "@/components/features/settings/resource-sha
 
 import { ProjectMilestonesCard } from "./project-milestones-card"
 import { apiFetch } from "@/lib/api-fetch"
+import { useIssuePeople } from "@/hooks/use-issue-people"
 import { toast } from "@/lib/toast"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { ProjectTab } from "@/hooks/use-project-detail"
@@ -89,6 +90,7 @@ function ProjectDetailDraft({
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [stats, setStats] = React.useState<ProjectStats | null>(null)
   const [agents, setAgents] = React.useState<PickableAgent[]>([])
+  const { people } = useIssuePeople(workspaceId, editable)
   const [busy, setBusy] = React.useState(false)
   // What was picked and not yet saved, keyed by the PATCH field.
   const [draft, setDraft] = React.useState<Record<string, unknown>>({})
@@ -183,18 +185,20 @@ function ProjectDetailDraft({
       const id = over.lead_id as string
       const agent = agents.find((a) => a.id === id)
       next.lead_id = id || null
-      next.lead_type = id ? ("agent" as Project["lead_type"]) : null
-      next.lead_name = id ? (agent?.name ?? project.lead_name) : undefined
+      const type = (over.lead_type as string | undefined) === "user" ? "user" : "agent"
+      next.lead_type = id ? (type as Project["lead_type"]) : null
+      const person = people.find((p) => p.id === id)
+      next.lead_name = id ? ((type === "user" ? person?.name : agent?.name) ?? project.lead_name) : undefined
     }
     for (const key of ["start_date", "target_date"] as const) {
       if (key in over) next[key] = (over[key] as string) || null
     }
     return next
-  }, [project, draft, applied, agents])
+  }, [project, draft, applied, agents, people])
 
   const edit: ProjectCardEdit | undefined = React.useMemo(
-    () => (editable ? { agents, patch: stage, busy } : undefined),
-    [editable, agents, stage, busy],
+    () => (editable ? { agents, people: people.length ? people : undefined, patch: stage, busy } : undefined),
+    [editable, agents, people, stage, busy],
   )
 
   const projectIssues = React.useMemo(

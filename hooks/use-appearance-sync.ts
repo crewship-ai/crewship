@@ -10,7 +10,7 @@ import {
   STYLE_PREFERENCE_KEY,
   parseStyleState,
   readStyleState,
-  renderedStyle,
+  applyStyleAttributes,
   serializeStyleState,
   writeStyleState,
 } from "@/lib/theme/appearance-style"
@@ -139,7 +139,7 @@ export function useAppearanceSync(enabled: boolean): void {
   // or one without a palette for the current scheme), sync on or off.
   useEffect(() => {
     const scheme = resolvedTheme === "light" ? "light" : "dark"
-    document.documentElement.dataset.style = renderedStyle(style ? parseStyleState(JSON.parse(style)) : null, scheme)
+    applyStyleAttributes(document.documentElement, style ? parseStyleState(JSON.parse(style)) : null, scheme)
   }, [style, resolvedTheme])
 
   // Pull once per activation (mount, sign-in, or the switch turned on).

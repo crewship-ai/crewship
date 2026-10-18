@@ -309,6 +309,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           title={canCreate ? "New routine (C)" : undefined}
         >
           New routine
+          {/* v67: the C chip. Decorative: the button's name stays "New routine". */}
+          <kbd aria-hidden className="ml-1.5 hidden rounded border border-current px-1 font-sans text-micro leading-[1.3] opacity-70 sm:inline coarse:hidden">C</kbd>
         </SubBarPrimary>
       </span>
     </>

@@ -185,7 +185,7 @@ export function IssuesListView({
             {g.status && <StatusIcon status={g.status} className="size-3.5 shrink-0" />}
             {g.priority && <PriorityIcon priority={g.priority} className="size-3.5 shrink-0" />}
             <b className="truncate text-label font-semibold text-foreground">{g.label}</b>
-            <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{g.issues.length}</span>
+            <span className="text-label tabular-nums text-muted-foreground-soft">{g.issues.length}</span>
             <span className="flex-1" />
             {onCreate && (!g.status || isCreatableStatus(g.status)) && (
               <Button

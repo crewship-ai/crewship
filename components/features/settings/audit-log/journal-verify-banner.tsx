@@ -51,22 +51,26 @@ export function JournalVerifyBanner({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  // The wireframe's 24-hour clock.
+  const time = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
   const warn = state.kind === "broken" || state.kind === "error"
   const Icon = state.kind === "ok" ? ShieldCheck : warn ? ShieldAlert : ShieldQuestion
+  const how = <>Every workspace event is mirrored into a hash-chained journal (HMAC-SHA256). <span className="font-mono">crewship journal verify</span></>
 
   return (
     <div
       data-slot="journal-verify"
       data-state={state.kind}
       role={state.kind === "broken" ? "alert" : "status"}
-      className={cn("page-banner border border-border", warn ? "page-banner-warn" : state.kind === "ok" ? "bg-chip-ok-bg" : "bg-card")}
+      className={cn("page-banner border border-border", warn ? "page-banner-warn" : "page-banner-info")}
     >
-      <Icon className={cn("size-4 shrink-0", state.kind === "ok" ? "text-chip-ok-fg" : !warn && "text-muted-foreground")} aria-hidden />
+      <span data-slot="journal-verify-tile" aria-hidden className={cn("grid size-7 shrink-0 place-items-center rounded-lg", warn ? "bg-card text-chip-warn-fg" : "icon-tile")}>
+        <Icon className="size-4" />
+      </span>
       <span className="min-w-0 flex-1">
-        {state.kind === "idle" && <><b className="font-semibold">Journal chain</b> <span className="text-muted-foreground">· Check that no recorded event was changed or removed.</span></>}
-        {state.kind === "running" && <><b className="font-semibold">Verifying the journal chain…</b> <span className="text-muted-foreground">Every entry is checked.</span></>}
-        {state.kind === "ok" && <><b className="font-semibold">Journal chain verified {time(state.at)}</b> <span className="text-muted-foreground">· {state.count.toLocaleString("en-US")} entries, none changed</span></>}
+        {state.kind === "idle" && <><b className="block font-semibold">Journal chain</b><small className="block text-label text-muted-foreground">{how}</small></>}
+        {state.kind === "running" && <><b className="block font-semibold">Verifying the journal chain…</b><small className="block text-label text-muted-foreground">Every entry is checked.</small></>}
+        {state.kind === "ok" && <><b className="block font-semibold">Journal chain verified {time(state.at)}</b><small className="block text-label text-muted-foreground">{state.count.toLocaleString("en-US")} entries, none changed. {how}</small></>}
         {state.kind === "broken" && <><b className="font-semibold">Journal chain broken{state.seq ? ` at entry ${state.seq}` : ""}</b>{state.reason ? <> · {state.reason}</> : null}<span className="block text-label">Checked {time(state.at)}. Entries after it are still checked; see <span className="font-mono">crewship journal verify</span> for every break.</span></>}
         {state.kind === "error" && <><b className="font-semibold">Couldn’t verify the journal chain</b> · {state.message}</>}
       </span>

@@ -148,7 +148,7 @@ export function GiveToAgentsDialog({ workspaceId, credential, open, onOpenChange
               {who === "AGENT" ? (
                 groups.length === 0 ? <p className="text-label text-muted-foreground">No agents found.</p> : groups.map((g) => (
                   <fieldset key={g.crewId ?? "none"} className="space-y-0.5">
-                    <legend className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">{g.name}</legend>
+                    <legend className="px-1 text-micro font-semibold text-muted-foreground">{g.name}</legend>
                     {g.agents.map((a) => {
                       const key = `AGENT:${a.id}`
                       const already = has.has(key)

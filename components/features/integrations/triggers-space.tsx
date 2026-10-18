@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, ArrowDownToLine, Circle, Copy, FileText, Globe, Link2, Play, Repeat, RotateCw, Shield, Terminal, Trash2 } from "lucide-react"
+import { AlertTriangle, ArrowDownToLine, Circle, Copy, Globe, Link2, Play, Repeat, RotateCw, Shield, Terminal, Trash2 } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
@@ -25,10 +25,11 @@ import { Banner, CellMain, CliLines, FlowSteps, GlyphTile, HealthStrip, InfoCard
 /**
  * Triggers (Harbor 2, I-TRIG / I-EP): what starts work from outside.
  *
- * Not drawn, because the server has none: App events (Composio has no
- * receiver yet), Email in, replaying a call, "Kept for replay", testing a
- * mapping or sending a test call from here (the secret is shown only once),
- * and pointing a trigger at an agent (PATCH takes another routine only).
+ * Replay and "Kept for replay" are drawn for an agent's Calls (work item
+ * replay route, INT-08). Not drawn, because the server has none: App events
+ * (Composio has no receiver yet), Email in, testing a mapping or sending a
+ * test call from here (the secret is shown only once; #3478), and pointing a
+ * trigger at an agent (PATCH takes another routine only).
  */
 
 export const KIND_LABEL: Record<IncomingKind, { one: string; many: string }> = {
@@ -98,9 +99,9 @@ export function TriggersList({
   else
     body = (
       <>
-        {rows.length > 0 && (
+        {(rows.length > 0 || showPages) && (
           <>
-            <p className="text-label text-muted-foreground">{rows.length} {rows.length === 1 ? "trigger" : "triggers"}</p>
+            <p className="text-label text-muted-foreground">{rows.length + (showPages ? pages.length : 0)} {rows.length + (showPages ? pages.length : 0) === 1 ? "trigger" : "triggers"}</p>
             <ResponsiveList
               caption="Triggers"
               columns={[
@@ -110,40 +111,50 @@ export function TriggersList({
                 { key: "l", label: "Last call" },
                 { key: "x", label: "State" },
               ]}
-              items={rows.map((r) => ({
-                id: r.id,
-                label: `Open ${r.name}`,
-                lead: <GlyphTile icon={ArrowDownToLine} size={30} />,
-                title: r.name,
-                sub: `→ ${KIND_LABEL[r.kind].one} · ${r.target.name}`,
-                meta: <><Shield className="size-3" aria-hidden />{r.checks}</>,
-                state: <TriggerState row={r} />,
-                cells: [
-                  <CellMain key="t" lead={<GlyphTile icon={ArrowDownToLine} size={28} />} title={r.name} mono sub={r.calls !== null ? `${r.calls} calls` : "calls not counted"} />,
-                  <CellMain key="s" lead={<IncomingTargetAvatar target={r.target} />} title={r.target.name} sub={KIND_LABEL[r.kind].one} />,
-                  <span key="c" className="text-label text-muted-foreground">{r.checks}</span>,
-                  <span key="l" className="font-mono text-label text-muted-foreground">{r.last ? formatRelativeShort(r.last) : "—"}</span>,
-                  <TriggerState key="x" row={r} />,
-                ],
-              }))}
-              onOpen={onOpen}
+              items={[
+                ...rows.map((r) => ({
+                  id: r.id,
+                  label: `Open ${r.name}`,
+                  lead: <GlyphTile icon={ArrowDownToLine} size={30} />,
+                  title: r.name,
+                  sub: `→ ${KIND_LABEL[r.kind].one} · ${r.target.name}`,
+                  meta: <><Shield className="size-3" aria-hidden />{r.checks}</>,
+                  state: <TriggerState row={r} />,
+                  cells: [
+                    <CellMain key="t" lead={<GlyphTile icon={ArrowDownToLine} size={28} />} title={r.name} mono sub={r.calls !== null ? `${r.calls} calls` : "calls not counted"} />,
+                    <CellMain key="s" lead={<IncomingTargetAvatar target={r.target} />} title={r.target.name} sub={KIND_LABEL[r.kind].one} />,
+                    <span key="c" className="text-label text-muted-foreground">{r.checks}</span>,
+                    <span key="l" className="text-label tabular-nums text-muted-foreground">{r.last ? formatRelativeShort(r.last) : "—"}</span>,
+                    <TriggerState key="x" row={r} />,
+                  ],
+                })),
+                // An artifact keeps its webhooks per page (the token is read
+                // there), so it is one row that opens them, in the same table
+                // as v67 draws it, not a card of its own.
+                ...(showPages ? pages : []).map((p) => ({
+                  id: `page:${p.id}`,
+                  label: `Open webhooks of ${p.name}`,
+                  lead: <GlyphTile icon={ArrowDownToLine} size={30} />,
+                  title: p.name,
+                  sub: `→ ${KIND_LABEL.page.one} · webhooks kept on the page`,
+                  meta: <><Shield className="size-3" aria-hidden />Token in the URL</>,
+                  state: <span className="text-label text-muted-foreground">Per page</span>,
+                  cells: [
+                    <CellMain key="t" lead={<GlyphTile icon={ArrowDownToLine} size={28} />} title={p.name} sub="webhooks kept on the page" />,
+                    <CellMain key="s" lead={<IncomingTargetAvatar target={p} />} title={p.name} sub={KIND_LABEL.page.one} />,
+                    <span key="c" className="text-label text-muted-foreground">Token in the URL</span>,
+                    <span key="l" className="text-label text-muted-foreground">—</span>,
+                    <span key="x" className="text-label text-muted-foreground">Per page</span>,
+                  ],
+                })),
+              ]}
+              onOpen={(id) => {
+                const page = id.startsWith("page:") ? pages.find((p) => `page:${p.id}` === id) : undefined
+                if (page) onOpenTarget(page)
+                else onOpen(id)
+              }}
             />
           </>
-        )}
-        {showPages && (
-          <InfoCard title="Artifacts · webhooks are kept per artifact" icon={FileText}>
-            <ul className="divide-y divide-border">
-              {pages.map((p) => (
-                <li key={p.id}>
-                  <button type="button" onClick={() => onOpenTarget(p)} className="kit-tap flex w-full min-w-0 items-center gap-2.5 px-4 py-2 text-left hover:bg-[var(--row-hover-bg)]" aria-label={`Open webhooks of ${p.name}`}>
-                    <IncomingTargetAvatar target={p} />
-                    <span className="min-w-0 flex-1 truncate text-body text-foreground">{p.name}</span>
-                    <span className="text-label text-muted-foreground">Token in the URL</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </InfoCard>
         )}
       </>
     )

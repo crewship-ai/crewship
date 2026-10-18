@@ -106,7 +106,7 @@ export function SidePanelHeader({
         <div className="min-w-0 flex-1">
           {title && <div className="truncate text-sm font-medium">{title}</div>}
           {subtitle && (
-            <div className="truncate text-[10px] uppercase tracking-wider text-muted-foreground/60">
+            <div className="truncate text-micro text-muted-foreground/60">
               {subtitle}
             </div>
           )}

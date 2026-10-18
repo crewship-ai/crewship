@@ -243,7 +243,7 @@ function GiveToAgentsPicker({ skills, workspaceId, agents, crews, onClose }: Giv
                   <Users className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 )}
                 {name}
-                <span className="ml-auto font-mono text-micro font-normal tabular-nums text-muted-foreground-soft">
+                <span className="ml-auto text-micro font-normal tabular-nums text-muted-foreground-soft">
                   {on}/{members.length}
                 </span>
               </label>

@@ -96,12 +96,12 @@ function TableRow({ s, checked, selectable, onCheck, onOpen }: RowProps) {
       <td className="whitespace-nowrap px-3.5 py-2 text-label text-muted-foreground">{src.label}</td>
       <td className="whitespace-nowrap px-3.5 py-2 text-muted-foreground">{domainMeta(s.category).label}</td>
       <td className="whitespace-nowrap px-3.5 py-2">
-        <StatusPill tone={trust.tone} label={trust.label} />
+        <StatusPill className="font-sans tracking-normal" tone={trust.tone} label={trust.label} />
       </td>
       <td className="whitespace-nowrap px-3.5 py-2 text-label">
         <UsedBy s={s} />
       </td>
-      <td className="whitespace-nowrap px-3.5 py-2 text-right font-mono tabular-nums">{s.usage?.uses_7d || "—"}</td>
+      <td className="whitespace-nowrap px-3.5 py-2 text-right tabular-nums">{s.usage?.uses_7d || "—"}</td>
     </tr>
   )
 }
@@ -158,7 +158,7 @@ function PhoneRows({ rows, onOpen }: { rows: SkillRow[]; onOpen: (id: string) =>
                   {(s.installed_on?.length ?? 0) > 0 ? `${s.installed_on!.length} ${s.installed_on!.length === 1 ? "agent" : "agents"}` : "Not on any agent"} · {skillSource(s).label}
                 </span>
               </span>
-              <StatusPill tone={trust.tone} label={trust.label} />
+              <StatusPill className="font-sans tracking-normal" tone={trust.tone} label={trust.label} />
               <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
             </button>
           </li>

@@ -90,6 +90,7 @@ export function SettingsCard({
   bodyClassName,
   footer,
   hideHeader = false,
+  compactHeader = false,
 }: {
   title: string
   description?: string
@@ -100,6 +101,9 @@ export function SettingsCard({
   /** A card the section head already names (Notification sounds): the title
    *  stays only as the region's accessible name. */
   hideHeader?: boolean
+  /** The 50 px one-line v67 dashboard-card header (Admin overview) in place
+   *  of the 68 px settings one. */
+  compactHeader?: boolean
   className?: string
   /** Classes for the body under the header (e.g. flex-1 in a stretched card). */
   bodyClassName?: string
@@ -121,7 +125,7 @@ export function SettingsCard({
       {hideHeader ? (
         <h3 id={titleId} className="sr-only">{title}</h3>
       ) : (
-        <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
+        <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} compact={compactHeader} />
       )}
       <PageSaveLabel label={title}>
         <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
@@ -139,6 +143,7 @@ function SettingsCardHeader({
   icon: Icon,
   tint,
   danger = false,
+  compact = false,
 }: {
   title: string
   titleId?: string
@@ -147,12 +152,23 @@ function SettingsCardHeader({
   icon?: LucideIcon
   tint?: string
   danger?: boolean
+  compact?: boolean
 }) {
   return (
-    // The 50 px header of the card anatomy at the Small text size (a 14.857px
-    // root; it scales with Standard and Large): a floor, so a header with a
-    // description line may grow, around the 32 px tile (--control-md).
-    <div data-slot="settings-card-header" className="flex min-h-[3.3654rem] items-center gap-3 border-b border-border px-4 py-2">
+    // The v67 card header (`.scard header`: 14 px padding around a 32 px tile,
+    // a 21 px title line over an 18 px subtitle line, 68 px with both) at the
+    // Small text size (a 14.857px root; it scales with Standard and Large).
+    // The height is the padding around the content, not a floor: a header with
+    // no subtitle is the 60 px v67 draws, and a long description may grow.
+    // `compact` is the v67 dashboard-card header (`.card-h`, 50 px, one
+    // line) the Admin overview draws its cards with.
+    <div
+      data-slot="settings-card-header"
+      className={cn(
+        "flex items-center gap-3 border-b border-border px-4",
+        compact ? "min-h-[3.3654rem] py-[0.5385rem]" : "py-[0.9423rem]",
+      )}
+    >
       {Icon && (
         <span
           className="icon-tile inline-flex size-[var(--control-md)] shrink-0 items-center justify-center rounded-lg"
@@ -163,11 +179,11 @@ function SettingsCardHeader({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <h3 id={titleId} className={cn("text-sm font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
+        <h3 id={titleId} className={cn("text-control font-semibold leading-[1.4135rem] tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
           {title}
         </h3>
         {description && (
-          <p className="mt-0.5 text-label leading-snug text-muted-foreground">{description}</p>
+          <p className="text-label leading-[1.2115rem] text-muted-foreground">{description}</p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
@@ -195,12 +211,14 @@ export function SettingsRow({
   lead,
   lock,
   lockTitle,
+  "data-testid": testId,
 }: {
   label: ReactNode
   description?: ReactNode
   children: ReactNode
   border?: boolean
   className?: string
+  "data-testid"?: string
   /** Icon for the small grey tile before the label. */
   lead?: LucideIcon
   /** Who may change this row: a lock and this word beside the label. */
@@ -211,6 +229,7 @@ export function SettingsRow({
   return (
     <div
       data-slot="settings-row"
+      data-testid={testId}
       className={cn(
         // Wraps rather than squeezes. The label side is at least 11rem; when
         // it and the control do not fit side by side (a phone), the control
@@ -406,12 +425,12 @@ export function SettingsSummary({ children, className, slot = "settings-summary"
 
 const SUMMARY_DOT = { success: "bg-success", warn: "bg-warn", danger: "bg-destructive", info: "bg-primary" } as const
 
-/** One statement in a SettingsSummary; `n` is set in the mono figure face. */
+/** One statement in a SettingsSummary; `n` is a tabular sans figure. */
 export function SummaryItem({ n, children, tone }: { n?: ReactNode; children?: ReactNode; tone?: keyof typeof SUMMARY_DOT }) {
   return (
     <span className="inline-flex items-center">
       {tone && <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", SUMMARY_DOT[tone])} aria-hidden />}
-      {n != null && <span className="font-mono tabular-nums text-foreground">{n}</span>}
+      {n != null && <span className="tabular-nums text-foreground">{n}</span>}
       {n != null && children != null && "\u00a0"}
       {children}
     </span>
@@ -426,7 +445,8 @@ export function SettingsSegmented<T extends string | number>({ label, options, v
     <div className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label={label}>
       {options.map((o) => (
         <button key={String(o.value)} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onChange(o.value)}
-          className={cn("h-7 rounded-md px-2.5 text-xs transition-colors disabled:opacity-50",
+          // v67 `.seg button`: 28 px high (--control-sm) with a 13 px label.
+          className={cn("h-[var(--control-sm)] rounded-md px-2.5 text-control transition-colors disabled:opacity-50",
             value === o.value ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
           {o.label}
         </button>
@@ -466,7 +486,7 @@ export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canS
     // Green like the page's own save bar (--save-bar-*), which this stands in for.
     <div role="region" aria-label="Unsaved changes" data-slot="settings-save-bar"
       className="save-bar-glow sticky bottom-4 z-10 mx-auto flex w-fit items-center gap-3 rounded-xl border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] py-1.5 pl-4 pr-1.5 text-xs font-medium text-[var(--save-bar-fg)]">
-      <span><span className="font-mono tabular-nums">{count}</span> unsaved change{count === 1 ? "" : "s"}</span>
+      <span><span className="tabular-nums">{count}</span> unsaved change{count === 1 ? "" : "s"}</span>
       <button type="button" onClick={onDiscard} disabled={saving}
         className="h-7 rounded-md px-2.5 opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:opacity-100 disabled:opacity-50">Discard</button>
       <button type="button" disabled={saving || !canSave}
@@ -480,4 +500,63 @@ export function SettingsSaveBar({ count, onSave, onDiscard, saving = false, canS
 export function firstSentence(text: string): string {
   const m = /^(.+?[.!?])(\s|$)/.exec(text.trim())
   return m ? m[1] : text.trim()
+}
+
+/**
+ * v67 dates: day, short month, and the year ("12 Oct 2026"), or with
+ * `year: "if-not-current"` only when it is not this year ("3 Mar"). Always English
+ * month names in the day-first order the wireframe uses, whatever the browser
+ * locale (a locale that writes "Oct 12" or "12. 10." is how two pages ended up
+ * with two formats).
+ */
+export function formatSettingsDate(iso: string | Date, opts: { year?: boolean | "if-not-current" } = {}): string {
+  const d = iso instanceof Date ? iso : new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  const month = d.toLocaleDateString("en-US", { month: "short" })
+  const withYear = opts.year === "if-not-current" ? d.getFullYear() !== new Date().getFullYear() : opts.year !== false
+  return `${d.getDate()} ${month}${withYear ? ` ${d.getFullYear()}` : ""}`
+}
+
+export interface SettingsKpi {
+  icon: LucideIcon
+  label: string
+  value: ReactNode
+  /** Makes the tile a button (a figure that filters the page). */
+  onClick?: () => void
+  pressed?: boolean
+}
+
+/**
+ * The strip of figures at the head of a page (v67 `.s-strip`): a bordered tile
+ * for each — a 30 px grey icon box, the label in small grey over the figure in
+ * a tabular sans. A tile with `onClick` is a button. They share the row, and
+ * wrap on a phone.
+ */
+export function SettingsKpiStrip({ items, className, slot = "settings-kpis" }: { items: SettingsKpi[]; className?: string; slot?: string }) {
+  const tile = "flex min-w-0 flex-[1_1_9.4rem] items-center gap-2.5 rounded-card border border-border bg-card px-3 py-2.5 text-left"
+  return (
+    <div data-slot={slot} className={cn("flex flex-wrap gap-2", className)}>
+      {items.map(({ icon: Icon, label, value, onClick, pressed }) => {
+        const body = (
+          <>
+            <span aria-hidden className="grid size-[2.0192rem] shrink-0 place-items-center rounded-lg bg-surface-subtle text-muted-foreground">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <small className="block truncate text-micro text-muted-foreground">{label}</small>
+              <b className="block text-default font-semibold leading-tight tabular-nums text-foreground">{value}</b>
+            </span>
+          </>
+        )
+        return onClick ? (
+          <button key={label} type="button" data-slot="settings-kpi" aria-pressed={pressed} onClick={onClick}
+            className={cn(tile, "transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", pressed && "border-primary")}>
+            {body}
+          </button>
+        ) : (
+          <div key={label} data-slot="settings-kpi" className={tile}>{body}</div>
+        )
+      })}
+    </div>
+  )
 }

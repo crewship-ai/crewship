@@ -18,6 +18,7 @@ import { formatRoutineTime } from "@/lib/routine-time"
 import { lastRunBars, routineActivityHref, runBarTone, type DetailDepth, type RunBarTone, type TriggerRow } from "@/lib/routine-page"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
+import { RoutineCheckupCard } from "./routine-checkup-card"
 import { RoutineApprovalBanner } from "./routine-approval-banner"
 import { InOneLookCard, lastRunReason } from "./routine-card-detail"
 import { nameLookup } from "@/lib/routine-steps-layout"
@@ -64,7 +65,7 @@ export function RoutineOverviewTab({
   canRun: boolean
   onRun: () => void
   onOpenRun: (runId: string) => void
-  onTab: (tab: "steps" | "triggers" | "settings") => void
+  onTab: (tab: "overview" | "steps" | "triggers" | "settings" | "versions") => void
   /** Banners the panel owns: a proposal to approve, live runs. */
   top?: React.ReactNode
 }) {
@@ -126,6 +127,7 @@ export function RoutineOverviewTab({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          <RoutineCheckupCard routine={routine} runs={records} onTab={onTab} />
           <DetailCard
             title="Steps"
             icon={ListOrdered}
@@ -179,7 +181,7 @@ export function RoutineOverviewTab({
                       title={b.label}
                       aria-label={`Run ${b.id.slice(0, 8)} · ${b.label}`}
                       onClick={() => onOpenRun(b.id)}
-                      className={cn("min-w-1.5 flex-1 rounded-sm transition-opacity hover:opacity-80", BAR[b.tone], b.tone === "mut" ? "h-1/3" : "h-full")}
+                      className={cn("min-w-1.5 max-w-6 flex-1 rounded-sm transition-opacity hover:opacity-80", BAR[b.tone], b.tone === "mut" ? "h-1/3" : "h-full")}
                     />
                   ))}
                 </div>

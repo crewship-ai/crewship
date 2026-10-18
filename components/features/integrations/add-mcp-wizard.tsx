@@ -440,17 +440,17 @@ function ConfigureFields(p: {
     <div className="space-y-3 pt-2">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Name</label>
+          <label className="block text-label text-muted-foreground font-medium mb-1.5">Name</label>
           <input value={p.name} onChange={(e) => p.setName(e.target.value)} placeholder="github" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
         </div>
         <div>
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Display name</label>
+          <label className="block text-label text-muted-foreground font-medium mb-1.5">Display name</label>
           <input value={p.displayName} onChange={(e) => p.setDisplayName(e.target.value)} placeholder="GitHub" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary" />
         </div>
       </div>
 
       <div>
-        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Transport</label>
+        <label className="block text-label text-muted-foreground font-medium mb-1.5">Transport</label>
         <div className="grid grid-cols-2 gap-2">
           {(["stdio", "streamable-http"] as const).map((t) => (
             <button key={t} type="button" onClick={() => p.setTransport(t)}
@@ -474,17 +474,17 @@ function ConfigureFields(p: {
       {p.transport === "stdio" ? (
         <>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Command</label>
+            <label className="block text-label text-muted-foreground font-medium mb-1.5">Command</label>
             <input value={p.command} onChange={(e) => p.setCommand(e.target.value)} placeholder="npx" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Args</label>
+            <label className="block text-label text-muted-foreground font-medium mb-1.5">Args</label>
             <input value={p.args} onChange={(e) => p.setArgs(e.target.value)} placeholder="-y @modelcontextprotocol/server-github" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
           </div>
         </>
       ) : (
         <div>
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Endpoint</label>
+          <label className="block text-label text-muted-foreground font-medium mb-1.5">Endpoint</label>
           <input value={p.endpoint} onChange={(e) => p.setEndpoint(e.target.value)} placeholder="https://example.com/mcp" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
         </div>
       )}
@@ -501,11 +501,11 @@ function ConfigureFields(p: {
       {p.advancedOpen && (
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="space-y-2 pl-4 border-l border-foreground/10">
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">OAuth client ID</label>
+            <label className="block text-label text-muted-foreground font-medium mb-1">OAuth client ID</label>
             <input value={p.oauthClientId} onChange={(e) => p.setOauthClientId(e.target.value)} placeholder="(if you bring your own OAuth app)" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">OAuth client secret</label>
+            <label className="block text-label text-muted-foreground font-medium mb-1">OAuth client secret</label>
             <input type="password" value={p.oauthClientSecret} onChange={(e) => p.setOauthClientSecret(e.target.value)} className="w-full bg-background border border-foreground/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
           </div>
         </motion.div>
@@ -539,7 +539,7 @@ function AuthStep({ credentials, credentialId, setCredentialId, skipAuth, setSki
 
       {credentials.length > 0 && (
         <div className="space-y-1.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Pick a credential</div>
+          <div className="text-label text-muted-foreground font-medium">Pick a credential</div>
           {credentials.map((c) => (
             <button
               key={c.id}
@@ -573,7 +573,7 @@ function AssignStep({ crews, pickedCrewId, setPickedCrewId }: {
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Crew</label>
+        <label className="block text-label text-muted-foreground font-medium mb-1.5">Crew</label>
         <div className="grid gap-1.5">
           {crews.length === 0 ? (
             <div className="text-xs text-muted-foreground">No crews yet. Create a crew first.</div>

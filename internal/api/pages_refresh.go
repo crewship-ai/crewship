@@ -215,3 +215,23 @@ func (h *PageHandler) emitPageSpecChanged(ctx context.Context, wsID string, rec 
 			"page", rec.Slug, "error", err)
 	}
 }
+
+// Empty human-owned Pages stage private documents. Their workspace
+// audit keeps the event and opaque matcher ID without disclosing the slug or
+// arrangement fingerprint to members who cannot read the Page.
+func (h *PageHandler) emitEmptyPageCreated(ctx context.Context, wsID string, rec *pageRecord, userID string) {
+	if h.journal == nil {
+		return
+	}
+	if _, err := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: wsID,
+		Type:        journal.EntryPageSpecChanged,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorUser,
+		ActorID:     userID,
+		Summary:     "Page created",
+		Payload:     map[string]any{"page_id": rec.ID, "created": true},
+	}); err != nil && h.logger != nil {
+		h.logger.Warn("pages: empty page creation audit failed", "page_id", rec.ID, "error", err)
+	}
+}

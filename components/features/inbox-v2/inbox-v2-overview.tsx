@@ -100,11 +100,11 @@ export function InboxOverview({ action, updates, history, lookup, onOpen, onAtte
             aria-label={`${a.label}: ${byAttention[a.key]}`}
             className="kit-tap group flex min-w-0 items-center gap-3 rounded-card border border-border bg-card px-3.5 py-3 text-left text-muted-foreground transition-colors hover:border-line-strong"
           >
-            <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg text-heading font-semibold tabular-nums", TILE_TONE[a.key])}>
+            <span className={cn("grid h-[34px] w-[34px] shrink-0 place-items-center rounded-lg text-heading font-semibold tabular-nums", TILE_TONE[a.key])}>
               {byAttention[a.key]}
             </span>
             <span className="min-w-0 flex-1">
-              <b className="block truncate font-medium text-foreground">{a.label}</b>
+              <b className="block truncate text-control font-semibold text-foreground">{a.label}</b>
               <small className="block truncate text-label">{a.hint}</small>
             </span>
             <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden />
@@ -154,7 +154,7 @@ export function InboxOverview({ action, updates, history, lookup, onOpen, onAtte
               right={<span className="inline-flex items-center gap-1 whitespace-nowrap text-label font-semibold text-warn"><Clock3 className="h-3.5 w-3.5" aria-hidden />{mins > 0 ? `in ${remainingLabel(mins)}` : "expired"}</span>}
             />
           )
-        }) : <p className="px-4 py-3 text-body text-muted-foreground">{incomplete ? "Some sources could not be read — check the notice above." : "Nothing expires soon."}</p>}
+        }) : <p className="px-4 py-3 text-control text-muted-foreground">{incomplete ? "Some sources could not be read — check the notice above." : "Nothing expires soon."}</p>}
       </OverviewCard>
 
       <OverviewCard icon={Archive} title="Recent history">
@@ -167,7 +167,7 @@ export function InboxOverview({ action, updates, history, lookup, onOpen, onAtte
             sub={ageLabel(entry.createdAt)}
             right={<StatusPill status={outcomeStatus(entry.outcome) || "RESOLVED"} />}
           />
-        )) : <p className="px-4 py-3 text-body text-muted-foreground">Nothing has been decided yet. Decisions and archived notices stay here as the record.</p>}
+        )) : <p className="px-4 py-3 text-control text-muted-foreground">Nothing has been decided yet. Decisions and archived notices stay here as the record.</p>}
       </OverviewCard>
     </div>
   )
@@ -176,13 +176,13 @@ export function InboxOverview({ action, updates, history, lookup, onOpen, onAtte
 function OverviewCard({ icon: Icon, title, right, testId, children }: { icon: LucideIcon; title: string; right?: React.ReactNode; testId?: string; children: React.ReactNode }) {
   return (
     <section className="overflow-hidden rounded-card border border-border bg-card" data-testid={testId} aria-label={title}>
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <span className="icon-tile grid h-[22px] w-[22px] place-items-center rounded-md"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
-        <h2 className="text-body font-semibold">{title}</h2>
+      <header className="flex items-center gap-2.5 px-4.5 pb-2 pt-3.5">
+        <span className="icon-tile grid size-[28px] place-items-center rounded-md"><Icon className="h-4 w-4" aria-hidden /></span>
+        <h2 className="text-control font-semibold tracking-normal">{title}</h2>
         <span className="flex-1" />
         {right}
       </header>
-      <div className="divide-y divide-border">{children}</div>
+      <div className="divide-y divide-border border-t border-border">{children}</div>
     </section>
   )
 }

@@ -47,12 +47,14 @@ test("mobile agent page: Chat is the only action, content fits", async ({ page }
   const agent = (await row.getAttribute("data-agent-row"))!
   await page.goto(`/crews?agent=${agent}&crew=${crew}`)
   await expect(page.getByTestId("agent-header")).toBeVisible()
-  // The phone's top-bar row (SubBar row 1): Chat is in it, the desktop's
-  // ghost Activity action is not. Scoped to the row because the agent's
-  // Overview legitimately links "Activity ↗" from Recent outcomes (ACT-05,
-  // ecbf15e54 renamed it from "Journal ↗"), and a page-wide substring match
-  // read that content link as a top-bar action.
-  const topRow = page.locator("[data-slot=sub-bar-row]")
+  // The phone's top bar (v67: one header row, 9bd25cc1f — the page's
+  // actions join the bar's SubBar group, there is no second row): Chat is in
+  // it, the desktop's ghost Activity action is not. Scoped to the bar because
+  // the agent's Overview legitimately links "Activity ↗" from its content
+  // (ACT-05), and a page-wide substring match read that content link as a
+  // top-bar action.
+  const topRow = page.locator("header [data-slot=sub-bar]")
+  await expect(topRow).toHaveCount(1)
   await expect(topRow.getByRole("link", { name: /^Chat with / })).toBeVisible()
   await expect(topRow.getByRole("link", { name: /Activity/ })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Activity", exact: true })).toHaveCount(0)

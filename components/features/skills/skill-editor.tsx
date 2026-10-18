@@ -353,7 +353,7 @@ export function SkillEditor({
             </div>
 
             <aside className="flex min-w-0 flex-col gap-3 max-lg:hidden" aria-label="Preview">
-              <h4 className="eyebrow">In the catalog</h4>
+              <h4 className="text-label font-semibold text-foreground">In the catalog</h4>
               <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-3" data-testid="skill-editor-preview">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <SkillTile category={draft.category} icon={draft.icon} size="sm" />
@@ -361,7 +361,7 @@ export function SkillEditor({
                     <div className="truncate text-control font-semibold">{draft.name.trim() || "New skill"}</div>
                     <div className="truncate font-mono text-micro text-muted-foreground-soft">{slug || "slug"}</div>
                   </div>
-                  <StatusPill tone="warn" label="Not scanned" />
+                  <StatusPill className="font-sans tracking-normal" tone="warn" label="Not scanned" />
                 </div>
                 <p className="line-clamp-2 min-h-9 text-label text-muted-foreground">
                   {(draft.method === "write" ? draft.description : draft.prompt).trim() || "What it does shows here."}
@@ -378,7 +378,7 @@ export function SkillEditor({
               </div>
               {draft.method === "write" ? (
                 <>
-                  <h4 className="eyebrow mt-1">SKILL.md</h4>
+                  <h4 className="mt-1 text-label font-semibold text-foreground">SKILL.md</h4>
                   <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-card p-3 font-mono text-micro leading-relaxed text-foreground/85">
                     {preview}
                   </pre>
@@ -387,7 +387,7 @@ export function SkillEditor({
                 <ol className="flex flex-col gap-2 text-label text-muted-foreground">
                   {["Claude writes the SKILL.md from your text.", "The import scan checks it for unsafe instructions.", "It lands in the catalog with this icon and domain.", "You pick the agents that get it."].map((t, i) => (
                     <li key={t} className="flex gap-2">
-                      <span className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-md bg-foreground/[0.06] font-mono text-micro text-foreground">{i + 1}</span>
+                      <span className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-md bg-foreground/[0.06] text-micro tabular-nums text-foreground">{i + 1}</span>
                       {t}
                     </li>
                   ))}

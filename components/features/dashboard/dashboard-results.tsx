@@ -222,7 +222,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
                   <DashLine
                     key={`routine-done-${run.id}`}
                     lead={<Lead><ConceptIcon concept="routines" variant="chip" className="h-7 w-7 rounded-md" /></Lead>}
-                    title={<>{run.pipeline_name || run.pipeline_slug}{count > 1 && <span className="ml-1.5 font-mono text-label font-normal tabular-nums text-muted-foreground" title={`${count} completed runs`}>×{count}</span>}</>}
+                    title={<>{run.pipeline_name || run.pipeline_slug}{count > 1 && <span className="ml-1.5 text-label font-normal tabular-nums text-muted-foreground" title={`${count} completed runs`}>×{count}</span>}</>}
                     sub={["Routine", count > 1 ? `last ${when}` : when].join(" · ")}
                     href={href}
                     right={<><StatusPill tone="success" label="Done" /><RowAction href={href} label="Open result" variant="ghost" /></>}

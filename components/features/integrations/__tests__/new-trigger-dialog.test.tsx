@@ -3,6 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+// usePage reads only for a signed-in human since main's #3572 (the query key
+// carries the human, so private Page metadata cannot cross sessions).
+vi.mock("@/hooks/use-auth", async (original) => ({
+  ...(await original<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "trigger-test-human" } }, status: "authenticated" }),
+}))
 vi.mock("@/lib/api-fetch", async (original) => ({
   ...(await original<typeof import("@/lib/api-fetch")>()),
   apiFetch: vi.fn(),

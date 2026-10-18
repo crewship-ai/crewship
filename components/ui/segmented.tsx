@@ -122,7 +122,7 @@ export function Segmented<T extends string>({
             {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
             {o.label}
             {o.count != null && (
-              <span data-slot="segmented-count" aria-hidden className="font-mono text-micro tabular-nums text-muted-foreground-soft">
+              <span data-slot="segmented-count" aria-hidden className="text-micro tabular-nums text-muted-foreground-soft">
                 {o.count}
               </span>
             )}

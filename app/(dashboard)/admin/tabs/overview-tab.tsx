@@ -13,7 +13,7 @@ import { StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppearStack } from "@/components/ui/detail"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard } from "@/components/features/settings/shared"
 import { runtimeBrand } from "@/components/icons/runtime-icons"
 import type {
   Stats, AdminHealth, LicenseInfo, TelemetryInfo, VersionInfo, SecurityPosture, JournalIntegrity,
@@ -322,8 +322,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           <div className="min-w-0 md:col-span-2">
             {posture ? (
               <SettingsCard icon={AlertTriangle} tint={warnings.length ? "var(--warn)" : "var(--success)"}
-                title="Needs attention"
-                description={warnings.length === 0 ? "The instance's own read of its security posture" : `${warnings.length} finding${warnings.length === 1 ? "" : "s"} from the instance's own read of its security posture`}>
+                title="Needs attention">
                 {warnings.length === 0 ? (
                   <div className="flex items-center gap-2 px-4 py-4 text-label text-muted-foreground">
                     <Check className="size-3.5 text-success" />
@@ -341,7 +340,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </div>
 
           {/* ── The week's runs, as figures. */}
-          <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week" description="Agent and routine runs, last 7 days">
+          <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week">
             {runs === null && noWorkspace ? (
               <p className="px-4 py-4 text-label text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
             ) : runs === null ? (
@@ -349,16 +348,16 @@ export const OverviewTab = React.memo(function OverviewTab({
             ) : (
               <div data-slot="admin-runs">
                 <Row icon={Play} label="Runs" description="runs in the last 7 days">
-                  <span className="font-mono tabular-nums text-foreground">{(runTotal ?? 0).toLocaleString()}</span>
+                  <span className="tabular-nums text-foreground">{(runTotal ?? 0).toLocaleString()}</span>
                 </Row>
                 {busiest && busiest.value > 0 && (
                   <Row icon={CalendarDays} label="Busiest day">
-                    <span className="font-mono tabular-nums">{WEEKDAY[new Date(busiest.ts).getUTCDay()]} · {busiest.value}</span>
+                    <span className="tabular-nums">{WEEKDAY[new Date(busiest.ts).getUTCDay()]} · {busiest.value}</span>
                   </Row>
                 )}
                 {cost && (
                   <Row icon={CircleDollarSign} label="Cost (7 d)">
-                    <span className="font-mono tabular-nums text-foreground">{formatUsd(cost.reduce((a, p) => a + p.value, 0))}</span>
+                    <span className="tabular-nums text-foreground">{formatUsd(cost.reduce((a, p) => a + p.value, 0))}</span>
                   </Row>
                 )}
               </div>
@@ -366,21 +365,21 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Platform: what is running, and what it is running on. */}
-          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" description="What is running, and what it is running on">
+          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" compactHeader>
             <Row icon={Cpu} label="Engine" description={health?.log_level?.level ? `Log level ${health.log_level.level}${health.log_level.expires_at ? " (temporary)" : ""}` : undefined}>
-              {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
+              {health ? <><StatusDot status="COMPLETED" className="mr-1.5" />Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
             </Row>
             <Row icon={Database} label="Database" description="SQLite">
-              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} />
+              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} className="mr-1.5" />
               {checks[0].state === "bad" && health?.db?.error ? `Unreachable (${health.db.error})` : checks[0].detail}
             </Row>
             <Row icon={Container} label="Container runtime" description={runtimeInfo?.socket}>
-              <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} /> {runtimeLabel}
+              <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} className="mr-1.5" />{runtimeLabel}
             </Row>
             <Row icon={Plug} label="Host daemon" description="How agents reach the host">
-              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
+              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} className="mr-1.5" />{daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
             </Row>
-            <SettingsRow lead={HardDrive} label="Disk" description={health?.disk?.path}>
+            <Row icon={HardDrive} label="Disk" description={health?.disk?.path}>
               {/* The data volume is the one that fills in practice. A missing
                   measurement stays missing: "0 B free" would invent an emergency. */}
               {!health?.disk ? (
@@ -388,45 +387,47 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : health.disk.error ? (
                 <span className="text-label text-muted-foreground">Unavailable — {health.disk.error}</span>
               ) : (
-                <span className="flex flex-wrap items-center justify-end gap-x-2 text-label text-muted-foreground">
-                  <span className="font-mono tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
-                  <span>{formatBytes(health.disk.free_bytes ?? 0)} free of {formatBytes(health.disk.total_bytes ?? 0)}</span>
+                <span className="text-label text-muted-foreground" title={`${formatBytes(health.disk.free_bytes ?? 0)} free of ${formatBytes(health.disk.total_bytes ?? 0)}`}>
+                  <span className="tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
+                  {` · ${formatBytes(health.disk.free_bytes ?? 0)} free`}
                 </span>
               )}
-            </SettingsRow>
+            </Row>
           </SettingsCard>
 
           {/* ── Integrity: the instance's tamper-evidence and key custody. */}
-          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" description="Tamper-evidence, key custody and the credential judge">
+          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" compactHeader>
             <Row icon={ScrollText} label="Journal chain" description={journal?.checkpoints ? `${journal.checkpoints} checkpoints` : undefined}>
               {journalPending ? (
                 <><Loader2 className="h-3 w-3 animate-spin" /> Verifying…</>
               ) : journal === null ? (
                 "Not checked"
               ) : journalOK === false || journal.error ? (
-                <span className="text-destructive"><StatusDot status="FAILED" /> {journal.error ?? "Verification failed"}</span>
+                <span className="text-destructive"><StatusDot status="FAILED" className="mr-1.5" />{journal.error ?? "Verification failed"}</span>
               ) : (
-                <><StatusDot status="COMPLETED" /> {(journalEntries ?? 0).toLocaleString()} entries verified</>
+                <><StatusDot status="COMPLETED" className="mr-1.5" />{(journalEntries ?? 0).toLocaleString()} verified</>
               )}
             </Row>
-            <Row icon={KeyRound} label="Encryption key" description={keySourceNote(health?.encryption_key_source)}>
-              <StatusDot status={health?.encryption_key_source === "generated" ? "BLOCKED" : health?.encryption_key_source ? "COMPLETED" : "PENDING"} />
+            <Row icon={KeyRound} label="Encryption key" description={health?.encryption_key_source === "generated" ? undefined : keySourceNote(health?.encryption_key_source)}>
+              <StatusDot status={health?.encryption_key_source === "generated" ? "BLOCKED" : health?.encryption_key_source ? "COMPLETED" : "PENDING"} className="mr-1.5" />
               <span className={cn("whitespace-nowrap", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
+              {/* A weakness, not a detail: it stays on the page, not in a hover hint. */}
+              {health?.encryption_key_source === "generated" && <span className="block whitespace-normal text-micro text-warn">{keySourceNote("generated")}</span>}
             </Row>
             <Row icon={Archive} label="Backups" description={noBackup ? "Nothing to restore from yet" : undefined}>
-              {posture === null ? "Checking…" : noBackup ? <><StatusDot status="BLOCKED" /><span className="text-warn">None recorded</span></> : <><StatusDot status="COMPLETED" /> Recorded</>}
+              {posture === null ? "Checking…" : noBackup ? <><StatusDot status="BLOCKED" className="mr-1.5" /><span className="text-warn">None recorded</span></> : <><StatusDot status="COMPLETED" className="mr-1.5" />Recorded</>}
             </Row>
             <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : "Judges every credential read"}>
-              {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
+              {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" className="mr-1.5" />On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" className="mr-1.5" />Off</>}
             </Row>
             <Row icon={Radio} label="Telemetry" description="crewship telemetry on|off">
-              <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
+              <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} className="mr-1.5" />
               {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
             </Row>
           </SettingsCard>
 
           {/* ── Licence ── */}
-          <SettingsCard icon={BadgeCheck} title="License" description="Current edition and resource capacity">
+          <SettingsCard icon={BadgeCheck} title="License" compactHeader>
             {license ? (
               <>
                 <Row icon={BadgeCheck} label="Edition" description={license.licensee_org || undefined}>
@@ -434,18 +435,14 @@ export const OverviewTab = React.memo(function OverviewTab({
                 </Row>
                 <Row icon={Boxes} label="Crews"><Limit used={stats?.crews} limit={license.max_crews} /></Row>
                 <Row icon={Users} label="Members"><Limit used={stats?.users} limit={license.max_members} /></Row>
-                <Row icon={Bot} label="Agents per crew"><span className="font-mono">{license.max_agents_per_crew > 0 ? `up to ${license.max_agents_per_crew}` : "Unlimited"}</span></Row>
-                <SettingsRow lead={Sparkles} label="Features">
+                <Row icon={Bot} label="Agents per crew"><span className="tabular-nums">{license.max_agents_per_crew > 0 ? `up to ${license.max_agents_per_crew}` : "Unlimited"}</span></Row>
+                <Row icon={Sparkles} label="Features">
                   {license.features?.length ? (
-                    <span className="flex flex-wrap justify-end gap-1">
-                      {license.features.map((f) => (
-                        <span key={f} className="rounded border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">{f}</span>
-                      ))}
-                    </span>
+                    <span className="font-mono text-micro text-muted-foreground" title={license.features.join(", ")}>{license.features.join(", ")}</span>
                   ) : (
                     <span className="text-label text-muted-foreground">All open-source features</span>
                   )}
-                </SettingsRow>
+                </Row>
                 {license.max_crews === 0 && license.max_members === 0 && license.max_agents_per_crew === 0 && (
                   <p className="border-t border-border px-4 py-3 text-label text-muted-foreground">
                     Crews, members and agents are currently unlimited under the open-source edition. Resource licensing may change in future releases.
@@ -460,7 +457,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           {/* ── AI helpers: the models behind the judge, the curator and the
               monitors, and whether each one answers. Not in the v67 drawing;
               kept as a product card. */}
-          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers" description="The models behind the judge, reviews and monitors">
+          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers">
             {aux === null ? (
               <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>
             ) : aux.subsystems.length === 0 ? (
@@ -485,11 +482,19 @@ export const OverviewTab = React.memo(function OverviewTab({
 
 // ── pieces ───────────────────────────────────────────────────────────────
 
-function Row({ icon, label, description, children }: { icon: LucideIcon; label: string; description?: string; children: React.ReactNode }) {
+/** One compact line (v67): the label with its icon, the value beside it. What
+ *  the row used to spell out under the label is its hover hint. */
+function Row({ icon: Icon, label, description, children }: { icon: LucideIcon; label: string; description?: string; children: React.ReactNode }) {
   return (
-    <SettingsRow lead={icon} label={label} description={description}>
-      <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">{children}</span>
-    </SettingsRow>
+    <div data-slot="admin-row" title={description} className="flex min-h-9 flex-row items-center gap-3 px-4 py-1.5">
+      <span className="flex w-36 shrink-0 items-center gap-2 text-control text-muted-foreground">
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{label}</span>
+      </span>
+      {/* One line, like v67: the dot stays beside its text and a long value
+          ends in an ellipsis instead of wrapping the row taller. */}
+      <span data-slot="admin-row-value" className="min-w-0 flex-1 truncate text-label text-foreground [&>*]:align-middle">{children}</span>
+    </div>
   )
 }
 
@@ -509,10 +514,10 @@ function Bar({ pct, className }: { pct: number; className?: string }) {
 }
 
 function Limit({ used, limit }: { used?: number; limit?: number }) {
-  if (limit === 0) return <span className="font-mono text-micro text-foreground/85">Unlimited</span>
+  if (limit === 0) return <span className="text-micro text-foreground/85">Unlimited</span>
   if (used === undefined) return <Skeleton className="h-3 w-16" />
   return (
-    <span className={cn("flex items-center gap-2 font-mono text-micro tabular-nums", overLimit(used, limit) ? "text-destructive" : "text-foreground/85")}>
+    <span className={cn("flex items-center gap-2 text-micro tabular-nums", overLimit(used, limit) ? "text-destructive" : "text-foreground/85")}>
       {limit ? <Bar pct={(used / limit) * 100} className="w-20" /> : null}
       {against(used, limit)}
     </span>
@@ -536,7 +541,7 @@ function Kpi({ icon: Icon, label, used, limit, note, tone, testId }: {
         <Skeleton className="mt-1 h-7 w-16" />
       ) : (
         <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
-          <b className={cn("font-mono text-display font-semibold tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
+          <b className={cn("text-display font-semibold tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
             {against(used, limit)}
           </b>
           {text && <em className={cn("truncate text-label not-italic", over ? "text-destructive" : "text-muted-foreground")} title={text}>{text}</em>}

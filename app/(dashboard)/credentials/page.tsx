@@ -22,7 +22,7 @@
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQueries } from "@tanstack/react-query"
-import { Key, Plus, ShieldCheck, Sparkles, TerminalSquare, Trash2, X } from "lucide-react"
+import { Key, Plus, ShieldCheck, Sparkles, Terminal, Trash2, X } from "lucide-react"
 
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,7 @@ import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
-import { AccountsList, ProviderHead, ProviderHealth, providerLabel } from "@/components/features/credentials/provider-accounts"
+import { AccountsList, type AccountTokenUsage, ProviderHead, ProviderHealth, providerLabel } from "@/components/features/credentials/provider-accounts"
 import { PROVIDER_VIEW_LABEL, ProvidersPanel } from "@/components/features/credentials/providers-panel"
 import { AccountGroupPage } from "@/components/features/credentials/account-group-page"
 import { NewAccountGroupDialog } from "@/components/features/credentials/new-account-group-dialog"
@@ -41,6 +41,7 @@ import { SecretsTable, type VaultSecret } from "@/components/features/credential
 import { VaultHealth, buildVaultHealth } from "@/components/features/credentials/vault-health"
 import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
 import { BulkDeleteDialog, BulkTierDialog } from "@/components/features/credentials/bulk-actions"
+import { VaultSpaceCrumb } from "@/components/features/credentials/vault-space-crumb"
 import { VaultCliDialog } from "@/components/features/credentials/vault-cli-dialog"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
 import {
@@ -63,6 +64,7 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useSubscriptionUsage } from "@/hooks/use-paymaster"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import {
@@ -401,6 +403,16 @@ export default function CredentialsPage() {
 
   // Account groups: the panel's list, and their members for the Group column.
   const inProviders = space === "providers" && canBind && Boolean(workspaceId)
+  const subUsage = useSubscriptionUsage("30d", 0, inProviders)
+  const accountUsage = React.useMemo(() => {
+    const m: Record<string, AccountTokenUsage> = {}
+    for (const r of subUsage.data?.rows ?? []) {
+      if (!r.credential_id) continue
+      const cur = m[r.credential_id] ?? { tokens: 0, calls: 0 }
+      m[r.credential_id] = { tokens: cur.tokens + r.input_tokens + r.output_tokens, calls: cur.calls + r.call_count }
+    }
+    return m
+  }, [subUsage.data])
   const poolsApi = useProviderPools(workspaceId ?? "", inProviders)
   const poolItems: ProviderPool[] | undefined = poolsApi.pools?.items
   const poolDetails = useQueries({
@@ -550,7 +562,7 @@ export default function CredentialsPage() {
     : loginFilters.status !== "all" ? PROVIDER_VIEW_LABEL[loginFilters.status] ?? "AI providers" : "AI providers"
   const headerActions = (
     <>
-      <SubBarIconButton icon={TerminalSquare} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
+      <SubBarIconButton icon={Terminal} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
       {space === "providers" ? (
         <>
           {canManage && (
@@ -577,13 +589,19 @@ export default function CredentialsPage() {
     </>
   )
 
+  // v67: "Vault › Secrets ▾ › <view or secret>": the space is the chooser.
+  const crumbRest = detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : space === "providers" && (providerPage || loginFilters.status !== "all") ? providersTitle : undefined
   const subBar = (
     <SubBar
       icon={Key}
-      title={space === "providers" ? "AI providers" : "Secrets"}
-      section={detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : space === "providers" && (providerPage || loginFilters.status !== "all") ? providersTitle : undefined}
+      title="Vault"
+      section={
+        <>
+          <VaultSpaceCrumb space={space} onSpace={changeSpace} chooser={canBind} />
+          {crumbRest != null && <span className="font-normal text-muted-foreground"> › {crumbRest}</span>}
+        </>
+      }
       ariaLabel="Vault"
-      description={space === "providers" ? `${providerLogins.length} accounts` : `${secrets.length} secrets`}
       actions={headerActions}
       // The list and the secret page carry their own visible h1.
       heading={false}
@@ -736,6 +754,7 @@ export default function CredentialsPage() {
                 onAdd={canBind ? () => openAddProvider(providerPage ?? undefined) : undefined}
                 poolOf={poolOf}
                 isPhone={isMobile}
+                usage={accountUsage}
               />
             )}
             <p className="mt-4 text-label text-muted-foreground">

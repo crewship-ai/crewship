@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
 import { Brain, CalendarClock, ChevronLeft, Clock, Lock, RotateCcw, Trash2 } from "lucide-react"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
-import { AgentRingAvatar } from "./agent-ring-avatar"
+import { AgentHeadTile } from "./agent-ring-avatar"
 import { getModelLabel } from "@/lib/cli-adapters"
 import { adapterLabel } from "@/lib/credentials/provider-logins"
 import { Button } from "@/components/ui/button"
@@ -38,7 +38,8 @@ import { AgentMemoryCards } from "./agent-memory"
 import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
-import { CrCard, CrLine, HeadChip, LeadMark, LeadStar } from "./cr-card"
+import { CrCard, CrLine, HeadChip, LeadMark } from "./cr-card"
+import { useCrewSpend } from "./crew-spend"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
 import { AGENT_TABS, type AgentTab } from "./crews-tabs"
 import type {
@@ -111,6 +112,8 @@ export function AgentCanvas({
   // Persona PUT/DELETE are roleCreate (MANAGER+), like creating an agent.
   const canEditPersona = abilities.can("create", "Agent")
   const [personaRev, setPersonaRev] = useState(0)
+  // Activity › Spend is for owners and admins (#3476); nothing is asked for anyone else.
+  const spend = useCrewSpend(workspaceId, agent?.crew_id ?? undefined, isAdmin)
   const [revision, setRevision] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
@@ -329,18 +332,14 @@ export function AgentCanvas({
         )}
         <header className="flex items-start gap-4" data-testid="agent-header">
           <button type="button" onClick={() => setAvatarPickerOpen(true)} className="group shrink-0" title="Change avatar" aria-label="Change avatar">
-            <span className="relative block">
-              <AgentRingAvatar
-                seed={agent.avatar_seed || agent.name}
-                style={agent.avatar_style || agent.crew?.avatar_style}
-                avatarUrl={agent.avatar_url}
-                crewColor={agent.crew?.color}
-                engine={agent.llm_provider}
-                size="lg"
-                className="transition-transform group-hover:scale-[1.04]"
-              />
-              {agent.agent_role === "LEAD" && <LeadStar className="-right-0.5 -top-0.5 size-4" />}
-            </span>
+            <AgentHeadTile
+              seed={agent.avatar_seed || agent.name}
+              style={agent.avatar_style || agent.crew?.avatar_style}
+              avatarUrl={agent.avatar_url}
+              crewColor={agent.crew?.color}
+              status={agent.status}
+              lead={agent.agent_role === "LEAD"}
+            />
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="type-title flex items-center gap-2">{agent.name}{agent.agent_role === "LEAD" && <LeadMark />}</h1>
@@ -350,7 +349,7 @@ export function AgentCanvas({
               {agent.llm_model && <> · {getModelLabel(agent.llm_model)}</>}
             </p>
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              <StatusPill status={statusKey} live={isRunning} size="md" />
+              <StatusPill className="font-sans" status={statusKey} live={isRunning} size="md" />
               {agent.ephemeral && (
                 <HeadChip icon={<Clock className="size-3.5" aria-hidden />} tone={ghost ? undefined : "warn"}>
                   {ghost ? "Temporary · expired" : isPendingHire ? "Temporary · waiting for approval" : `Temporary${ttl ? ` · ${ttl}` : ""}`}
@@ -396,7 +395,7 @@ export function AgentCanvas({
                   <CrLine title="Its runs and notes stay." sub="Rehire it to bring it back with its notes." right={<Button variant="outline" size="sm" onClick={() => void handleRehire()}><RotateCcw className="size-3.5" aria-hidden /> Rehire</Button>} />
                 </CrCard>
               )}
-              <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => onTabChange("tools")} revision={revision} />
+              <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onStop={isRunning ? handleStop : undefined} cost30d={spend?.byAgent.get(agent.id) ?? null} revision={revision} />
               <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}

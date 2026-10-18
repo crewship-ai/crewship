@@ -38,6 +38,8 @@ import {
   type WirePage,
 } from "@/hooks/use-pages"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const NOW = new Date("2026-08-12T12:00:00Z")
 
 function wirePage(over: Partial<WirePage> = {}): WirePage {
@@ -546,4 +548,12 @@ describe("groupPagesByFolder", () => {
     expect(groupPagesByFolder(pages.filter((p) => p.folder), [ops]).map((g) => g.key)).toEqual(["folder/ops", "folder/zed"])
     expect(groupPagesByFolder([], [])).toEqual([])
   })
+})
+
+
+it("preserves a true native descriptor independently of stable identity availability", () => {
+  expect(toPageView({id:"native",slug:"doc",has_document:true}).hasDocument).toBe(true)
+  expect(toPageView({slug:"doc",has_document:true}).hasDocument).toBe(true)
+  expect(toPageView({id:"legacy",slug:"page"}).hasDocument).toBe(false)
+  expect(toPageView({id:"legacy",slug:"page",has_document:"true" as unknown as boolean}).hasDocument).toBe(false)
 })

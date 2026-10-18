@@ -378,3 +378,162 @@ for (const vp of [{ name: "tablet 1024", width: 1024, height: 800 }, { name: "ph
     })
   })
 }
+
+// PAR-019…023, 144 (#3577): the list toolbar, the Overview typography and the
+// bell popovers match v67. Checked in a real browser at 1440 / 1024 / 390.
+test.describe("v67 parity", () => {
+  const WAITING = inboxRow({
+    id: "e-parity", kind: "escalation", blocking: true, state: "unread", title: "Scout needs a Linear token",
+    sender_type: "agent", sender_name: "scout", payload: { escalation_type: "GENERAL" },
+  })
+
+  test.describe("desktop 1440", () => {
+    test.use({ viewport: { width: 1440, height: 900 } })
+
+    test("toolbar: search with the / hint, Filter, select, collapse — and no Sort button", async ({ page }) => {
+      await seed(page)
+      await page.goto("/inbox")
+      await expect(panel(page)).toBeVisible()
+      await expect(panel(page).locator("[data-inbox-search] kbd")).toHaveText("/")
+      await expect(panel(page).getByRole("button", { name: "Filter" })).toBeVisible()
+      await expect(panel(page).getByRole("button", { name: "Select several" })).toBeVisible()
+      await expect(panel(page).getByRole("button", { name: "View: sort" })).toHaveCount(0)
+      await panel(page).getByRole("button", { name: "Filter" }).click()
+      await expect(panel(page).getByRole("group", { name: "Filter inbox" }).getByRole("button", { name: /^Sort/ })).toBeVisible()
+    })
+
+    test("Overview: 13 px semibold tile titles, hints not clipped, 28 px card tiles", async ({ page }) => {
+      await seed(page)
+      // The Overview needs something to handle; an empty inbox shows its
+      // empty state instead (the nightly seed has none).
+      await serveFeed(page, { inbox: [WAITING] })
+      await page.goto("/inbox")
+      const overview = page.getByTestId("inbox-overview")
+      await expect(overview).toBeVisible()
+      const tile = overview.getByRole("button", { name: /^Decision: / })
+      const title = await tile.locator("b").evaluate((el) => getComputedStyle(el).fontSize + "/" + getComputedStyle(el).fontWeight)
+      expect(title).toBe("13px/600")
+      const clipped = await tile.locator("small").evaluate((el) => el.scrollWidth > el.clientWidth)
+      expect(clipped).toBe(false)
+      expect(Math.round((await overview.locator("section .icon-tile").first().boundingBox())!.width)).toBe(28)
+    })
+
+    test("counts in the space switcher are sans tabular", async ({ page }) => {
+      await seed(page)
+      await page.goto("/inbox")
+      const count = panel(page).getByRole("tab", { name: /To handle/ }).locator("span").last()
+      const font = await count.evaluate((el) => getComputedStyle(el).fontFamily + "|" + getComputedStyle(el).fontVariantNumeric)
+      expect(font).not.toMatch(/mono/i)
+      expect(font).toContain("tabular-nums")
+    })
+
+    test("bells: Inbox lists every kind chip; Activity is a 480 px panel with the fleet line and its chips", async ({ page }) => {
+      await seed(page)
+      // The chip strip shows only when there is something to filter
+      // (inbox-bell-chips.test.tsx); the nightly seed has an empty inbox.
+      await serveFeed(page, { inbox: [WAITING] })
+      await page.goto("/")
+      await page.getByTestId("bell-trigger").click()
+      for (const kind of ["all", "decision", "input", "review", "repair"]) await expect(page.getByTestId(`bell-chip-${kind}`)).toBeVisible()
+      await page.keyboard.press("Escape")
+      await page.getByTestId("activity-trigger").click()
+      const pop = page.getByTestId("activity-popover")
+      // Measured after the open animation; its first frame is ~479 px.
+      await expect.poll(async () => Math.round((await pop.boundingBox())!.width)).toBe(480)
+      await expect(page.getByRole("link", { name: /Open Activity/ })).toBeVisible()
+    })
+  })
+
+  test.describe("tablet 1024", () => {
+    test.use({ viewport: { width: 1024, height: 900 } })
+
+    test("the Activity popover stays 480 px wide and inside the viewport", async ({ page }) => {
+      await seed(page)
+      await page.goto("/")
+      await page.getByTestId("activity-trigger").click()
+      const box = (await page.getByTestId("activity-popover").boundingBox())!
+      expect(Math.round(box.width)).toBe(480)
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(1024)
+    })
+  })
+
+  test.describe("phone 390", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+    test("the Activity popover is a sheet between the viewport's edges", async ({ page }) => {
+      await seed(page)
+      await page.goto("/")
+      await page.getByTestId("activity-trigger").click()
+      const box = (await page.getByTestId("activity-popover").boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(390)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    })
+  })
+})
+
+// ODCH-I03 / I04: a typed answer, a credential value and a trigger activation
+// from the Inbox. The feed is served through page.route (the seed has none of
+// these rows); the three write endpoints are intercepted so nothing is changed.
+const ASK = {
+  question: inboxRow({ id: "ib_e2e_q", kind: "escalation", state: "unread", source_id: "esc_e2e_q", title: "Merge now or fix lint first?", blocking: true, target_role: "MANAGER", payload: { escalation_type: "TEXT" } }),
+  cred: inboxRow({ id: "ib_e2e_c", kind: "escalation", state: "unread", source_id: "esc_e2e_c", title: "Credential requested: Notion API key", blocking: true, target_role: "ADMIN", payload: { escalation_type: "CREDENTIAL", needs_credential_value: true } }),
+  trigger: inboxRow({ id: "ib_e2e_t", kind: "escalation", state: "unread", source_id: "trg_e2e", title: "Routine trigger ready: competitor-change", blocking: true, target_role: "MANAGER", payload: { kind: "routine_trigger_activation", schedule_id: "sch_e2e", slug: "competitor-scan" } }),
+  held: inboxRow({ id: "ib_e2e_h", kind: "escalation", state: "unread", source_id: "held_e2e", title: "Artifact creation held for approval: Q4 board", blocking: true, target_role: "MANAGER", payload: { kind: "page_create_held", requested_name: "Q4 board" } }),
+}
+
+for (const vp of [{ n: "1440", width: 1440, height: 900 }, { n: "1024", width: 1024, height: 800 }, { n: "390", width: 390, height: 844, mobile: true }]) {
+  test.describe(`typed answers and activation at ${vp.n}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, ...(vp.mobile ? { hasTouch: true, isMobile: true } : {}) })
+
+    test("a question takes a written answer", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let sent: unknown = null
+      await page.route(/\/api\/v1\/escalations\/esc_e2e_q\/resolve/, async (route) => { sent = route.request().postDataJSON(); await route.fulfill({ json: {} }) })
+      await page.goto("/inbox?item=ib_e2e_q")
+      const answer = page.getByRole("textbox", { name: "Your answer" })
+      await answer.fill("Fix lint first")
+      await page.getByRole("button", { name: "Send answer" }).click()
+      await expect.poll(() => sent).toMatchObject({ action: "approve", resolution: "Fix lint first" })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+    })
+
+    test("a credential request takes the value in a masked field and empties it", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let sent: { value?: string } | null = null
+      await page.route(/\/api\/v1\/escalations\/esc_e2e_c\/supply/, async (route) => { sent = route.request().postDataJSON(); await route.fulfill({ json: { credential: null } }) })
+      await page.goto("/inbox?item=ib_e2e_c")
+      const field = page.getByLabel("Value")
+      await expect(field).toHaveAttribute("type", "password")
+      await field.fill("secret_e2e_value")
+      await page.getByRole("button", { name: "Supply credential" }).click()
+      await expect.poll(() => sent?.value).toBe("secret_e2e_value")
+      await expect(field).toHaveValue("")
+      await expect(page.locator("body")).not.toContainText("secret_e2e_value")
+    })
+
+    test("a routine trigger is activated by a manager and has no Dismiss", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let hit = false
+      await page.route(/\/pipeline-schedules\/sch_e2e\/activate/, async (route) => { hit = true; await route.fulfill({ json: {} }) })
+      await page.goto("/inbox?item=ib_e2e_t")
+      await expect(page.getByRole("button", { name: /Dismiss|Keep off/ })).toHaveCount(0)
+      const activate = page.getByRole("button", { name: "Activate trigger" })
+      if (vp.mobile) expect((await activate.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await activate.click()
+      await expect.poll(() => hit).toBe(true)
+    })
+
+    test("Artifact creation held has no buttons", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      await page.goto("/inbox?item=ib_e2e_h")
+      await expect(page.getByRole("main", { name: "Inbox detail" })).toContainText("Artifact creation held")
+      await expect(page.getByTestId("decision-dock").getByRole("button")).toHaveCount(0)
+    })
+  })
+}
