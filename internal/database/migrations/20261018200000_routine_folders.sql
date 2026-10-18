@@ -28,3 +28,4 @@ CREATE TABLE routine_folder_members (
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_routine_folder_members_folder ON routine_folder_members(folder_id);
+CREATE INDEX idx_routine_folder_members_workspace ON routine_folder_members(workspace_id);
