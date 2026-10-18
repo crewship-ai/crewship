@@ -65,7 +65,7 @@ describe("restore checks › older image", () => {
     const row = await screen.findByTestId("image-age-check")
     await waitFor(() => expect(row).toHaveTextContent("2 of 3 crews run an older image"))
     expect(row).toHaveTextContent(/this server now/i)
-    expect(h.api.mock.calls.map(([u]) => String(u))).toContain("/api/v1/crews/c1/image-status?workspace_id=ws-a")
+    expect(h.api.mock.calls.map(([u]) => String(u))).toContain("/api/v1/crews/c1/image-status?workspace_id=ws-b")
   })
 
   it("says all are current only when every crew answered", async () => {
