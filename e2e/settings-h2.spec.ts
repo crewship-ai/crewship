@@ -83,8 +83,7 @@ test.describe("desktop", () => {
       // 820 px, or the room there is (the panel takes 272 px of a 1024 px page).
       expect(Math.round(column)).toBeLessThanOrEqual(820)
       if (width === 1440) expect(Math.round(column)).toBe(820)
-      // COM-05: on a tablet the panel starts closed; its button opens it.
-      if (width < 1280) await page.getByTestId("secondary-panel-button").click()
+      // v67 (#3605): a list page's panel stays docked on a tablet, no button.
       const row = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance" })
       expect(Math.round((await row.boundingBox())!.height)).toBe(34)
       const account = page.getByRole("region", { name: "Account" }).locator("[data-slot=settings-card-header]")
@@ -519,8 +518,7 @@ test.describe("v67 parity", () => {
         const time = events.locator("[data-audit-weight] .tabular-nums").first()
         if (await time.count()) await expect(time).toHaveText(/^\d{2}:\d{2}$|^$/)
         if (width >= 1024) {
-          // COM-05: on a tablet the panel starts closed; its button opens it.
-          if (width < 1280) await page.getByTestId("secondary-panel-button").click()
+          // v67 (#3605): the settings panel stays docked on a tablet.
           await expect(page.locator("[data-slot=panel-spaces]").getByRole("tab")).toHaveCount(4)
         }
       })

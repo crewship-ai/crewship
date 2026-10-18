@@ -134,11 +134,14 @@ test.describe("tablet 1024", () => {
     await page.goto("/inbox")
     await expect(page.getByRole("main", { name: "Inbox detail" })).toBeVisible()
     await expect(page.getByTestId("inbox-rail")).toBeHidden()
-    // COM-05: at tablet width the panel starts closed and the top bar's panel
-    // button floats it over the detail.
-    await expect(panel(page)).toHaveCount(0)
-    await page.getByTestId("secondary-panel-button").click()
+    // v67 (#3605): on a tablet the queue stays docked beside the detail, with
+    // no panel button in the top bar.
     await expect(panel(page)).toBeVisible()
+    await expect(panel(page)).not.toHaveAttribute("data-float", "true")
+    await expect(page.getByTestId("secondary-panel-button")).toHaveCount(0)
+    const queue = (await panel(page).boundingBox())!
+    const detail = (await page.getByRole("main", { name: "Inbox detail" }).boundingBox())!
+    expect(queue.x + queue.width).toBeLessThanOrEqual(detail.x + 1)
   })
 })
 
