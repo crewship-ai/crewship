@@ -386,7 +386,7 @@ export function ChatComposer({
       aria-pressed={createDocument}
       title="Create document / Vytvořit dokument"
       disabled={isStreaming || !canSend}
-      className="coarse:min-h-12"
+      className="coarse:min-h-[44px]"
       onClick={() => {
         setCreationSelection(createDocument ? null : creationScope)
         creationPacket.current = null
