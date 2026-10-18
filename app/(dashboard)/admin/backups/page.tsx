@@ -1,12 +1,12 @@
 "use client"
 
+import { AdminRouteGate } from "@/components/features/admin/admin-route-gate"
 import { BackupsPage } from "@/components/features/admin/backups/backups-page"
-import { InstanceAdminGate } from "@/components/features/admin/instance-admin-gate"
 
 export default function AdminBackupsPage() {
   return (
-    <InstanceAdminGate area="Backups">
+    <AdminRouteGate title="Backups">
       <BackupsPage />
-    </InstanceAdminGate>
+    </AdminRouteGate>
   )
 }

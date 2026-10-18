@@ -1,12 +1,12 @@
 "use client"
 
+import { AdminRouteGate } from "@/components/features/admin/admin-route-gate"
 import { PeoplePage } from "@/components/features/admin/people/people-page"
-import { InstanceAdminGate } from "@/components/features/admin/instance-admin-gate"
 
 export default function AdminPeoplePage() {
   return (
-    <InstanceAdminGate area="People & workspaces">
+    <AdminRouteGate title="People">
       <PeoplePage />
-    </InstanceAdminGate>
+    </AdminRouteGate>
   )
 }
