@@ -190,7 +190,7 @@ func (h *PagePublicHandler) resolvePublicToken(ctx context.Context, token string
 		       t.show_provenance, t.last_seen_at
 		FROM page_public_tokens t
 		JOIN pages p ON p.id = t.page_id
-		WHERE t.token_hash = ? AND t.revoked_at IS NULL`,
+		WHERE t.token_hash = ? AND t.revoked_at IS NULL AND p.private_audience=0`,
 		hashPagePublicToken(token)).Scan(&t.ID, &t.PageID, &t.WorkspaceID,
 		&passwordHash, &expiresAt, &showProvenance, &lastSeen)
 	if err != nil {

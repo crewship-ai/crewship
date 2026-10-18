@@ -178,7 +178,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(ctx)
 	role := backupActorRole(ctx)
 
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -408,7 +408,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	role := backupActorRole(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

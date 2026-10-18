@@ -313,6 +313,9 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 			paths = pageAccessCrewPaths(rec, subjectID, label, panelsByPage[rec.ID],
 				folderCrewReachSlug(rec, folders, folderACL, subjectID), grantsByPage[rec.ID])
 		default:
+			if rec.PrivateAudience {
+				continue
+			}
 			paths = pageAccessAgentPaths(subjectID, grantsByPage[rec.ID])
 		}
 		if len(paths) == 0 {
@@ -356,6 +359,9 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 // user or one of their crews follow in the level vocabulary's order.
 func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord,
 	viewer *pageViewer, folderSlug string, grants []pageGrantRecord) []string {
+	if rec.PrivateAudience {
+		return h.pageReach(rec, ownerCrewSlug, panels, viewer, "", false)
+	}
 	paths := h.pageReach(rec, ownerCrewSlug, panels, viewer, folderSlug, false)
 	return append(paths, pageAccessGrantPaths(grants, pageViewerGrantMatch(viewer))...)
 }
@@ -367,6 +373,9 @@ func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string,
 // the crew is named, never at which level — the same rendering a user's row
 // gets — so a view-only entry and a can-edit entry read alike here.
 func pageAccessCrewPaths(rec *pageRecord, crewID, slug string, panels []*panelRecord, folderSlug string, grants []pageGrantRecord) []string {
+	if rec.PrivateAudience {
+		return nil
+	}
 	var paths []string
 	if rec.OwnerCrewID != "" && rec.OwnerCrewID == crewID {
 		paths = append(paths, pageReachOwner)
@@ -587,6 +596,9 @@ func (h *PageHandler) pageAccessSubjects(rec *pageRecord, ws *pageAccessWorkspac
 		return agents[i].id < agents[j].id
 	})
 	for _, a := range agents {
+		if rec.PrivateAudience {
+			continue
+		}
 		paths := pageAccessAgentPaths(a.id, grants)
 		if len(paths) == 0 {
 			continue
@@ -689,7 +701,7 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 	// the `folder:<slug>` arm is silently empty and a subject who reaches a
 	// page only through its folder's ACL is missing from the report.
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''), COALESCE(folder_id, '')
+		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''), COALESCE(folder_id, ''), private_audience
 		FROM pages WHERE workspace_id = ? ORDER BY slug ASC`, wsID)
 	if err != nil {
 		return nil, nil, err
@@ -699,7 +711,7 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 	var order []string
 	for rows.Next() {
 		var p pageRecord
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID, &p.FolderID); err != nil {
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PrivateAudience); err != nil {
 			return nil, nil, err
 		}
 		byID[p.ID] = &p

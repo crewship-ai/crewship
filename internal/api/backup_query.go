@@ -24,7 +24,7 @@ type backupStatusResponse struct {
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -123,7 +123,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -162,7 +162,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -219,7 +219,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
+	if !h.canAccessWorkspaceBackups(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

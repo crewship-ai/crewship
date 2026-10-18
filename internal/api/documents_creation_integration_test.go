@@ -47,6 +47,8 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		t.Fatal(err)
 	}
 	h, workspace, owner := f.pages, f.a.WorkspaceID, f.a.HumanUserID
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, owner)
+	execOrFatal(t, h.db, `UPDATE workspaces SET slug='managed-private-cli' WHERE id=?`, workspace)
 	h.artifactMasterToken = "synthetic-managed-create-master"
 	dir, err := os.MkdirTemp("", "doc-create-")
 	if err != nil {
@@ -232,6 +234,62 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	human, err := validator.IssueAccessToken(owner, session.ID, "Synthetic owner", "owned-create@example.test")
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The private document was created through the actual agent CLI for a
+	// MEMBER. Separate authenticated identities exercise production routing,
+	// the real Node service, catalogs and access reports through a real binary.
+	for _, role := range []string{"OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"} {
+		id := "managed-private-" + role
+		pagesSeedUser(t, h, workspace, id, strings.ToLower(role)+"@private.example", role)
+		login, err := sessions.NewDBStore(h.db).Create(t.Context(), id, "synthetic", "127.0.0.1", auth.RefreshTokenTTL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bearer, err := validator.IssueAccessToken(id, login.ID, role, strings.ToLower(role)+"@private.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := filepath.Join(dir, "human-"+role+".yaml")
+		if err := os.WriteFile(cfg, []byte("server: "+host.URL+"\nworkspace: managed-private-cli\ntoken: "+bearer+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		invoke := func(args ...string) ([]byte, error) {
+			cmd := exec.CommandContext(t.Context(), binary, append(args, "--format", "json")...)
+			for _, entry := range os.Environ() {
+				if !strings.HasPrefix(entry, "CREWSHIP_") {
+					cmd.Env = append(cmd.Env, entry)
+				}
+			}
+			cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1")
+			return cmd.CombinedOutput()
+		}
+		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}} {
+			out, err := invoke(args...)
+			if role == "OWNER" {
+				if err != nil {
+					t.Fatalf("OWNER actual CLI %v: %v %s", args, err, out)
+				}
+			} else if err == nil || !bytes.Contains(out, []byte("404")) || bytes.Contains(out, []byte("Launch plan")) {
+				t.Fatalf("%s disclosed private document via actual CLI %v: %v %s", role, args, err, out)
+			}
+		}
+		out, err := invoke("page", "list")
+		if err != nil {
+			t.Fatalf("actual CLI catalog: %v %s", err, out)
+		}
+		if bytes.Contains(out, []byte(created.Slug)) != (role == "OWNER") {
+			t.Fatalf("%s catalog audience: %s", role, out)
+		}
+		if role == "OWNER" {
+			out, err := invoke("page", "access", created.Slug)
+			if err != nil || bytes.Contains(out, []byte("admin@private.example")) {
+				t.Fatalf("actual access report: %v %s", err, out)
+			}
+		}
+	}
+	var ownerAccessCount int
+	if err := h.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE entity_id=? AND action='artifact.private_owner_accessed' AND user_id='managed-private-OWNER'`, created.PageID).Scan(&ownerAccessCount); err != nil || ownerAccessCount < 2 {
+		t.Fatalf("real CLI OWNER reads not audited: %d %v", ownerAccessCount, err)
 	}
 	raw, status, err := request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
 	var saved DocumentStateResponse
