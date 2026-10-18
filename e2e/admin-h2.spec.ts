@@ -218,3 +218,16 @@ test.describe("Z19…Z24 moved admin tabs", () => {
     expect(url.searchParams.get("run")).toBe("run-123")
   })
 })
+
+// Gap UI (ADM-08): the restore checks show "Crew images" when the server can
+// read them. Needs an encrypted backup and its key, so it only checks the
+// recovery page holds at each width.
+for (const width of [390, 1024, 1440]) {
+  test(`ADM-08 recovery fits ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/admin/backups?section=recovery")
+    await expect(page.locator("main")).toBeVisible()
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+}

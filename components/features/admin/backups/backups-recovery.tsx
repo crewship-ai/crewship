@@ -17,6 +17,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 type StatusTone = NonNullable<React.ComponentProps<typeof StatusPill>["tone"]>
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Gate, Unavailable } from "./backups-kit"
+import { ImageAgeCheck } from "./backups-image-age"
 import {
   formatSize, formatSourceDate, formatWhen, proofLabel, runPlanLabel, shortDate,
   type BackupRun, type RestoreChecks, type RestoreRecord, type RestoreTarget,
@@ -322,7 +323,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 4 && !cliOnly && (
         <>
-          <ChecksCard checks={checks} />
+          <ChecksCard checks={checks} workspaceId={ctx.demo ? null : (restoreWs ?? ctx.currentWorkspaceId)} />
           {!report && <div><Button size="sm" className="h-7 text-xs" onClick={dryRun} disabled={busy}>{busy ? "Running…" : "Run the dry run"}</Button></div>}
           {report && (
             <>
@@ -345,7 +346,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 5 && cliOnly && !held && (
         <>
-          <ChecksCard checks={checks} />
+          <ChecksCard checks={checks} workspaceId={ctx.demo ? null : (restoreWs ?? ctx.currentWorkspaceId)} />
           <OfflineCard target={target as RestoreTarget} bundle={path} onNext={() => setHeld(true)} />
         </>
       )}
@@ -524,7 +525,7 @@ function Check({ ok }: { ok: boolean }) {
   return <StatusPill tone={ok ? "success" : "danger"} label={ok ? "ok" : "no"} />
 }
 
-function ChecksCard({ checks }: { checks: RestoreChecks | "unavailable" | null }) {
+function ChecksCard({ checks, workspaceId }: { checks: RestoreChecks | "unavailable" | null; workspaceId?: string | null }) {
   if (checks === "unavailable" || checks === null) return <Unavailable what="checks before a restore" />
   return (
     <SettingsCard icon={ListChecks} title="Before anything changes">
@@ -535,6 +536,7 @@ function ChecksCard({ checks }: { checks: RestoreChecks | "unavailable" | null }
         <SettingsRow label="Not carried over for safety" description={checks.unsafe.join(" · ")}><StatusPill tone="warn" label="off" /></SettingsRow>
       )}
       <SettingsRow label="Conflicts" description={checks.conflicts.detail}>{checks.conflicts.ok ? <Check ok /> : <StatusPill tone="warn" label="review" />}</SettingsRow>
+      {workspaceId && <ImageAgeCheck workspaceId={workspaceId} />}
     </SettingsCard>
   )
 }

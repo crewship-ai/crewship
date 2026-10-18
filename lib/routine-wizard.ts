@@ -45,7 +45,7 @@ export interface WizardTrigger {
   fireAt: string
 }
 
-export type StepKind = "agent" | "ask" | "notify" | "wait" | "issue" | "http" | "sub" | "other"
+export type StepKind = "agent" | "ask" | "notify" | "wait" | "issue" | "panel" | "http" | "sub" | "other"
 export type Effort = "trivial" | "fast" | "moderate" | "smart"
 
 export interface WizardStep {
@@ -77,6 +77,11 @@ export interface WizardStep {
   title?: string
   identifier?: string
   body?: string
+  // crewship · page.write (an artifact panel)
+  pageSlug?: string
+  panelId?: string
+  /** The panel payload as typed: a JSON object. */
+  panelData?: string
   // http
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
   url?: string
@@ -114,6 +119,7 @@ export const STEP_KINDS: { kind: Exclude<StepKind, "other">; label: string; dsl:
   { kind: "notify", label: "Notify people", dsl: "notify", hint: "An Inbox item for a role or the whole workspace" },
   { kind: "wait", label: "Wait", dsl: "wait · datetime / event", hint: "Pause until a time or an event" },
   { kind: "issue", label: "Create or comment on an issue", dsl: "crewship · issue.*", hint: "Open an issue or comment on one" },
+  { kind: "panel", label: "Update an artifact panel", dsl: "crewship · page.write", hint: "Push fresh data into a panel of a page this routine produces" },
   { kind: "http", label: "Call a web API", dsl: "http", hint: "A request to an outside URL · needs a Manager review" },
   { kind: "sub", label: "Run another routine", dsl: "call_pipeline", hint: "Reuse a routine as one step" },
 ]
@@ -124,6 +130,7 @@ const KIND_PREFIX: Record<StepKind, string> = {
   notify: "notify",
   wait: "wait",
   issue: "issue",
+  panel: "panel",
   http: "call",
   sub: "sub",
   other: "step",
@@ -135,6 +142,7 @@ const DEFAULT_NAME: Record<StepKind, string> = {
   notify: "Notify people",
   wait: "Wait",
   issue: "Create an issue",
+  panel: "Update a panel",
   http: "Call a web API",
   sub: "Run another routine",
   other: "Step",
@@ -156,6 +164,8 @@ export function newStep(kind: StepKind, existing: WizardStep[]): WizardStep {
       return { ...base, waitKind: "datetime", until: "", eventType: "" }
     case "issue":
       return { ...base, issueAction: "issue.create", title: "", body: "", identifier: "" }
+    case "panel":
+      return { ...base, pageSlug: "", panelId: "", panelData: "{}" }
     case "http":
       return { ...base, method: "POST", url: "", credentialType: "" }
     case "sub":
@@ -191,6 +201,11 @@ export function stepProblems(step: WizardStep): string[] {
         if (blank(step.body)) out.push("Write the comment")
       } else if (blank(step.title)) out.push("Write the title")
       break
+    case "panel":
+      if (blank(step.pageSlug)) out.push("Name the page")
+      if (blank(step.panelId)) out.push("Name the panel")
+      if (!parseObject(step.panelData)) out.push("Write the panel data as a JSON object")
+      break
     case "http":
       if (blank(step.url)) out.push("Enter the URL")
       break
@@ -199,6 +214,16 @@ export function stepProblems(step: WizardStep): string[] {
       break
   }
   return out
+}
+
+/** A JSON object from text, or null (arrays, scalars and bad JSON). */
+function parseObject(text: string | undefined): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(text ?? "")
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
 }
 
 function parsePairs(text: string | undefined): Record<string, string> | undefined {
@@ -275,6 +300,13 @@ export function stepToDsl(step: WizardStep): Record<string, unknown> {
           step.issueAction === "issue.comment"
             ? { identifier: step.identifier ?? "", body: step.body ?? "" }
             : { title: step.title ?? "", ...(step.body?.trim() ? { description: step.body } : {}) },
+      }
+    case "panel":
+      return {
+        ...head,
+        type: "crewship",
+        action: "page.write",
+        args: { page: step.pageSlug ?? "", panel: step.panelId ?? "", data: parseObject(step.panelData) ?? {} },
       }
     case "http":
       return {
@@ -361,6 +393,8 @@ export function stepFromDsl(raw: Record<string, unknown>, _key: string): WizardS
         return { ...base, kind: "issue", issueAction: "issue.create", title: str(args.title), body: str(args.description), identifier: "" }
       if (raw.action === "issue.comment" && Object.keys(args).every((k) => ["identifier", "body"].includes(k)))
         return { ...base, kind: "issue", issueAction: "issue.comment", identifier: str(args.identifier), body: str(args.body), title: "" }
+      if (raw.action === "page.write" && Object.keys(args).every((k) => ["page", "panel", "data"].includes(k)) && args.data && typeof args.data === "object" && !Array.isArray(args.data))
+        return { ...base, kind: "panel", pageSlug: str(args.page), panelId: str(args.panel), panelData: JSON.stringify(args.data, null, 2) }
       break
     }
     case "http": {
