@@ -58,16 +58,33 @@ describe("DrillPage header", () => {
     expect(back[0]).toHaveTextContent("Settings")
   })
 
-  it("names the page once, with its description on the sub-bar", () => {
+  // SET-07 kit request 1: the top bar is the path, the page owns the head.
+  it("names the place in the top bar as a path, 'Settings / Crew links'", () => {
     renderPage()
-    expect(screen.getAllByText("Crew links")).toHaveLength(1)
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Crew links")
-    expect(screen.getAllByText("Who hands work to whom")).toHaveLength(1)
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Crew links")
   })
 
-  it("keeps the back button on a phone as an arrow on the sub-bar", () => {
+  it("draws the section head once: icon tile, title, and the sentence once", () => {
+    renderPage({ note: "Managers and up change links" })
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")!
+    expect(head).not.toBeNull()
+    expect(within(head).getByRole("heading", { level: 2, name: "Crew links" })).toBeInTheDocument()
+    expect(head.querySelector(".page-tile")).not.toBeNull()
+    expect(screen.getAllByText("Who hands work to whom")).toHaveLength(1)
+    expect(within(head).getByText("Managers and up change links")).toHaveAttribute("data-slot", "drill-head-note")
+  })
+
+  it("leaves the head out for a page that shows only a no-access state", () => {
+    renderPage({ head: false })
+    expect(document.querySelector("[data-slot=drill-head]")).toBeNull()
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Crew links")
+  })
+
+  it("on a phone the top bar names the page, with the arrow back before it (390 px)", () => {
     mobile = true
     renderPage()
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^Crew links$/)
+    expect(document.querySelector("[data-slot=drill-head]")).not.toBeNull()
     const back = screen.getByRole("link", { name: "Back to Settings" })
     expect(back).not.toHaveTextContent("Settings")
   })
@@ -86,9 +103,56 @@ describe("DrillPage panel", () => {
     const aside = panel()!
     expect(aside).toHaveAttribute("data-panel-id", "drill-crew-links")
     expect(aside).toHaveAccessibleName("Crew links navigation")
+    const back = within(aside).getByRole("link", { name: "Back to Settings" })
+    expect(aside.querySelector("[data-slot=drill-back-row]")).toContainElement(back)
+  })
+
+  // SET-07 kit request 3 (v67 pk-back): the back row is above the toolbar.
+  it("puts the back row above the panel toolbar, outside the sections nav", () => {
+    renderPage({ toolbar: <input aria-label="Search crews" /> })
+    const aside = panel()!
+    const back = aside.querySelector("[data-slot=drill-back-row]")!
+    const search = within(aside).getByLabelText("Search crews")
+    expect(back.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(aside).getByRole("navigation", { name: "Crew links sections" })).not.toContainElement(back as HTMLElement)
+  })
+
+  // SET-07 kit request 2: a slot directly under the toolbar for the facets.
+  it("has a facets slot right under the toolbar, before the sections", () => {
+    renderPage({ toolbar: <input aria-label="Search crews" />, facets: <div data-testid="facets">facets</div> })
+    const aside = panel()!
+    const search = within(aside).getByLabelText("Search crews")
+    const facets = within(aside).getByTestId("facets")
     const nav = within(aside).getByRole("navigation", { name: "Crew links sections" })
-    const back = within(nav).getByRole("link", { name: "Back to Settings" })
-    expect(nav.firstElementChild).toContainElement(back)
+    expect(search.compareDocumentPosition(facets) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(facets.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(nav).not.toContainElement(facets)
+  })
+
+  // SET-07 kit request 4: spaces on keys 1 to 9.
+  it("lists spaces under the facets and switches them on the number keys", () => {
+    const onChange = vi.fn()
+    renderPage({
+      spaces: {
+        items: [{ key: "crew", label: "By crew", icon: Link2 }, { key: "all", label: "All links", icon: Link2, count: 4 }],
+        value: "crew",
+        onChange,
+      },
+    })
+    const tabs = within(panel()!).getAllByRole("tab")
+    expect(tabs.map((t) => t.getAttribute("aria-keyshortcuts"))).toEqual(["1", "2"])
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(window, { key: "2" })
+    expect(onChange).toHaveBeenCalledWith("all")
+  })
+
+  it("on a phone the spaces are in the panel sheet and are 44 px rows (390 px)", () => {
+    mobile = true
+    renderPage({ spaces: { items: [{ key: "crew", label: "By crew", icon: Link2 }, { key: "all", label: "All links", icon: Link2 }], value: "crew", onChange: () => {} } })
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    const sheet = screen.getByRole("dialog", { name: "Crew links navigation" })
+    const tab = within(sheet).getByRole("tab", { name: /All links/ })
+    expect(tab.className).toMatch(/kit-tap/)
   })
 
   it("collapses through the panel and remembers it per user", () => {
