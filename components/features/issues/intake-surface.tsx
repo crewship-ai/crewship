@@ -8,13 +8,12 @@ import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { TabBar } from "@/components/ui/tab-bar"
 import { nativeSelect } from "@/components/features/settings/shared"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { PRIORITY_TEXT } from "./issues-view-model"
 
 /**
@@ -163,11 +162,9 @@ function LoadError({ what, onRetry }: { what: string; onRetry: () => void }) {
 
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <CreateSurfaceField label={label} htmlFor={id} hint={hint}>
       {children}
-      {hint && <p className="text-label text-muted-foreground">{hint}</p>}
-    </div>
+    </CreateSurfaceField>
   )
 }
 
@@ -292,8 +289,7 @@ function NewRuleDialog({ workspaceId, crews, onClose, onCreated }: { workspaceId
   const [err, setErr] = React.useState<string | null>(null)
   const ready = name.trim() !== "" && pattern.trim() !== ""
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = async () => {
     if (!ready || busy) return
     setBusy(true)
     setErr(null)
@@ -315,14 +311,10 @@ function NewRuleDialog({ workspaceId, crews, onClose, onCreated }: { workspaceId
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <form onSubmit={submit} className="grid gap-4">
-          <DialogHeader>
-            <DialogTitle>New triage rule</DialogTitle>
-            <DialogDescription>Match new issues by title, then say where they go.</DialogDescription>
-          </DialogHeader>
-          <Field id="tr-name" label="Name">
+    <CreateSurface open onOpenChange={(o) => !o && onClose()} size="sm" restoreOpenerFocus onSubmit={() => void submit()}>
+      <CreateSurfaceHeader title="New triage rule" description="Match new issues by title, then say where they go." onClose={onClose} />
+      <CreateSurfaceBody className="grid gap-4">
+        <Field id="tr-name" label="Name">
             <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -359,22 +351,14 @@ function NewRuleDialog({ workspaceId, crews, onClose, onCreated }: { workspaceId
               </select>
             </Field>
           </div>
-          {err && (
+        {err && (
             <p role="alert" className="text-label text-destructive">
               {err}
             </p>
           )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!ready || busy}>
-              Create rule
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={onClose} primaryLabel="Create rule" onPrimary={() => void submit()} primaryDisabled={!ready} busy={busy} />
+    </CreateSurface>
   )
 }
 
@@ -469,8 +453,7 @@ function NewScheduleDialog({ workspaceId, crews, onClose, onCreated }: { workspa
   const [err, setErr] = React.useState<string | null>(null)
   const ready = crew !== "" && title.trim() !== "" && cron.trim() !== ""
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = async () => {
     if (!ready || busy) return
     setBusy(true)
     setErr(null)
@@ -491,14 +474,10 @@ function NewScheduleDialog({ workspaceId, crews, onClose, onCreated }: { workspa
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <form onSubmit={submit} className="grid gap-4">
-          <DialogHeader>
-            <DialogTitle>New recurring issue</DialogTitle>
-            <DialogDescription>Opens a Backlog issue in the crew on every tick.</DialogDescription>
-          </DialogHeader>
-          <Field id="ri-crew" label="Crew">
+    <CreateSurface open onOpenChange={(o) => !o && onClose()} size="sm" restoreOpenerFocus onSubmit={() => void submit()}>
+      <CreateSurfaceHeader title="New recurring issue" description="Opens a Backlog issue in the crew on every tick." onClose={onClose} />
+      <CreateSurfaceBody className="grid gap-4">
+        <Field id="ri-crew" label="Crew">
             <select id="ri-crew" value={crew} onChange={(e) => setCrew(e.target.value)} className={nativeSelect}>
               <option value="">Choose a crew</option>
               {crews.map((c) => (
@@ -526,21 +505,13 @@ function NewScheduleDialog({ workspaceId, crews, onClose, onCreated }: { workspa
               </select>
             </Field>
           </div>
-          {err && (
+        {err && (
             <p role="alert" className="text-label text-destructive">
               {err}
             </p>
           )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!ready || busy}>
-              Create schedule
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={onClose} primaryLabel="Create schedule" onPrimary={() => void submit()} primaryDisabled={!ready} busy={busy} />
+    </CreateSurface>
   )
 }
