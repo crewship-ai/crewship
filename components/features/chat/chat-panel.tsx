@@ -7,8 +7,6 @@ import {
   Bot,
   Command,
   Link2,
-  Wifi,
-  WifiOff,
   Users,
   Search,
   Download,
@@ -16,7 +14,6 @@ import {
 } from "lucide-react"
 import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
-import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 
@@ -85,6 +82,7 @@ import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
+import { ConnectionBadge } from "./messages/connection-badge"
 import { AgentStrip, type AgentStripAgent } from "./agent-strip"
 import { ChatEmptyState } from "./chat-empty-state"
 import type { ChatKind } from "./chat-kind"
@@ -1638,38 +1636,6 @@ function CommandsButton({ onClick }: { onClick: () => void }) {
         {CHAT_PALETTE_SHORTCUT}
       </kbd>
     </button>
-  )
-}
-
-/**
- * The socket, but only when it is worth saying something about.
- *
- * A permanently-green "Connected" pill is a status light for a state that is
- * true ~100% of the time, in the top-left corner of the thing the reader came
- * to read. What the badge is genuinely FOR is the other two states: typing
- * into a chat whose socket has gone is typing into a void, and that is worth
- * a lot of pixels. So it shows up exactly then, and says nothing otherwise.
- */
-function ConnectionBadge({ status }: { status: string }) {
-  if (status === "connected") return null
-  return (
-    <div className={cn(
-      "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-micro font-medium",
-      status === "connected"
-        ? "bg-success/10 text-success dark:bg-success/30 dark:text-success"
-        : status === "connecting"
-          ? "bg-warn/10 text-warn dark:bg-warn/30 dark:text-warn"
-          : "bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive"
-    )}>
-      {status === "connected" ? (
-        <Wifi className="h-3 w-3" />
-      ) : status === "connecting" ? (
-        <Spinner className="h-3 w-3" />
-      ) : (
-        <WifiOff className="h-3 w-3" />
-      )}
-      <span className="capitalize">{status}</span>
-    </div>
   )
 }
 

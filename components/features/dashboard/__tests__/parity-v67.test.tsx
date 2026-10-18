@@ -59,6 +59,21 @@ describe("PAR-018 card header", () => {
   })
 })
 
+describe("PAR-018 card header size", () => {
+  it("is the 50 px v67 `.card-h` at Compact with a 28 px tile", () => {
+    // 50 px = 3.3654rem and 28 px = 1.8846rem of the 14.857 px Compact root;
+    // min-h-12 / pt-3.5 / pb-2 and an h-7 tile measured 43 px and 24 px.
+    render(<DashCard title="Up next" concept="calendar"><div /></DashCard>)
+    const header = screen.getByRole("region", { name: "Up next" }).querySelector("header")!
+    const cls = header.className.split(" ")
+    expect(cls).toContain("min-h-[3.3654rem]")
+    expect(cls).toContain("py-[0.5385rem]")
+    expect(cls).not.toContain("min-h-12")
+    const tile = header.querySelector('[data-slot="concept-tile"]')!
+    expect(tile.getAttribute("class")!.split(" ")).toContain("size-[1.8846rem]")
+  })
+})
+
 describe("PAR-152/153 sans, sentence case, tabular numerals", () => {
   it("shows a card's meta fact and a sub-heading count in sans tabular figures", () => {
     render(<DashCard title="Run volume" meta="12 runs"><DashSubHead title="Running now" count={2} /></DashCard>)

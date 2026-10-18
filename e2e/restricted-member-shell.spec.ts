@@ -68,8 +68,11 @@ for (const width of [1280, 390]) {
     })
     await page.goto("/routines")
     await expect(page.getByRole("heading", { name: "Private routines" })).toBeVisible()
-    await page.getByRole("button", { name: "User menu" }).click()
     if (width < 768) {
+      // v67 phone header is one row (PAR-052): the user row lives in the
+      // More sheet, as in chrome-roles.spec.ts.
+      await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click()
+      await page.getByRole("dialog", { name: "Navigation" }).getByRole("button", { name: "User menu" }).click()
       // Harbor 2 G12: below 768 px the user menu is the kit MenuSheet, a
       // bottom-sheet dialog whose rows are buttons and links, not menuitems.
       const sheet = page.getByRole("dialog", { name: "User menu" })
@@ -78,6 +81,7 @@ for (const width of [1280, 390]) {
       await sheet.getByRole("button", { name: "Connect CLI…" }).click()
       await expect(sheet).toBeHidden()
     } else {
+      await page.getByRole("button", { name: "User menu" }).click()
       await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
     }
     const dialog = page.getByRole("dialog", { name: "Connect the CLI" })

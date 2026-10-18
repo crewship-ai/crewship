@@ -365,7 +365,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Platform: what is running, and what it is running on. */}
-          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform">
+          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" compactHeader>
             <Row icon={Cpu} label="Engine" description={health?.log_level?.level ? `Log level ${health.log_level.level}${health.log_level.expires_at ? " (temporary)" : ""}` : undefined}>
               {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
             </Row>
@@ -396,7 +396,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Integrity: the instance's tamper-evidence and key custody. */}
-          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity">
+          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" compactHeader>
             <Row icon={ScrollText} label="Journal chain" description={journal?.checkpoints ? `${journal.checkpoints} checkpoints` : undefined}>
               {journalPending ? (
                 <><Loader2 className="h-3 w-3 animate-spin" /> Verifying…</>
@@ -427,7 +427,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Licence ── */}
-          <SettingsCard icon={BadgeCheck} title="License">
+          <SettingsCard icon={BadgeCheck} title="License" compactHeader>
             {license ? (
               <>
                 <Row icon={BadgeCheck} label="Edition" description={license.licensee_org || undefined}>
