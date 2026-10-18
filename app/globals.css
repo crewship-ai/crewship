@@ -51,7 +51,7 @@
   }
 }
 :root { --mobile-tab-bar-h: 0px; }
-@media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(3.5rem + env(safe-area-inset-bottom)); } }
+@media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(62px + env(safe-area-inset-bottom)); } }
 
 /* Reduced motion, covered once rather than per component.
  *
