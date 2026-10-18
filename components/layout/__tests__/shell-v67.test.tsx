@@ -6,8 +6,13 @@ import { act, cleanup, render, screen } from "@testing-library/react"
 // list page's panel docked beside the content; a phone has one top bar.
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
+vi.mock("@/hooks/use-user-preference", () => ({ useUserPreference: (_k: string, d: unknown) => [d, () => {}] }))
 
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { useAppStore } from "@/lib/store"
 import { DEFAULT_SIDEBAR } from "@/lib/theme/appearance"
 
 const store = new Map<string, string>()
@@ -79,5 +84,77 @@ describe("sidebar default", () => {
     const probe = screen.getByTestId("probe")
     expect(probe).toHaveAttribute("data-mode", "pinned")
     expect(probe).toHaveAttribute("data-state", "collapsed")
+  })
+})
+
+// The panel column starts at the top of the card with its own 48 px toolbar;
+// the page's top bar spans the content only (NEW-HEADER, v67). The layout
+// keeps a slot beside the content column and the panel renders into it.
+describe("panel column", () => {
+  beforeEach(() => {
+    useAppStore.setState({ panelSlot: null, secondaryPanel: null, secondaryPanelOpen: false })
+  })
+
+  function withSlot() {
+    const slot = document.createElement("div")
+    slot.setAttribute("data-slot", "panel-slot")
+    document.body.appendChild(slot)
+    useAppStore.setState({ panelSlot: slot })
+    return slot
+  }
+
+  it("renders into the layout's panel slot on a desk", () => {
+    const slot = withSlot()
+    render(
+      <div data-testid="page">
+        <SecondaryPanel id="issues" label="Issues views">
+          <p>views</p>
+        </SecondaryPanel>
+        <main>content</main>
+      </div>,
+    )
+    expect(slot.querySelector("[data-slot=secondary-panel]")).not.toBeNull()
+    expect(screen.getByTestId("page").querySelector("[data-slot=secondary-panel]")).toBeNull()
+    slot.remove()
+  })
+
+  it("docks a list page's panel beside the content on a tablet", async () => {
+    setWidth(1024)
+    const slot = withSlot()
+    render(
+      <SecondaryPanel id="inbox" label="Inbox views" kind="list">
+        <p>queue</p>
+      </SecondaryPanel>,
+    )
+    await act(async () => {})
+    const panel = slot.querySelector("[data-slot=secondary-panel]")
+    expect(panel).not.toBeNull()
+    expect(panel).not.toHaveAttribute("data-float")
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "inbox", kind: "list" })
+    slot.remove()
+  })
+
+  it("keeps a filter page's panel behind the top-bar button on a tablet", async () => {
+    setWidth(1024)
+    const slot = withSlot()
+    render(
+      <SecondaryPanel id="issues" label="Issues views">
+        <p>views</p>
+      </SecondaryPanel>,
+    )
+    await act(async () => {})
+    expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "issues", kind: "filter" })
+    slot.remove()
+  })
+
+  it("the dashboard layout puts the panel slot beside the column that holds the top bar", () => {
+    const layout = readFileSync(path.resolve(__dirname, "../../../app/(dashboard)/layout.tsx"), "utf8")
+    const slotAt = layout.indexOf('data-slot="panel-slot"')
+    const columnAt = layout.indexOf('data-slot="content-column"')
+    const toolbarAt = layout.indexOf("<AppToolbar")
+    expect(slotAt).toBeGreaterThan(-1)
+    expect(columnAt).toBeGreaterThan(slotAt)
+    expect(toolbarAt).toBeGreaterThan(columnAt)
   })
 })
