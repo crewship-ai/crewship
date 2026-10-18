@@ -28,6 +28,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
+- Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
