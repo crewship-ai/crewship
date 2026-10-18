@@ -66,3 +66,21 @@ describe("SkillsLibrary", () => {
     expect(document.querySelectorAll("[data-slot=skills-phone-rows] li")).toHaveLength(50)
   })
 })
+
+// PAR-072 / PAR-152 / PAR-153: v67's trust pill is a sans chip and the uses
+// column is a sans tabular numeral.
+describe("SkillsLibrary typography (v67)", () => {
+  it("draws the trust pill in sans, not mono", () => {
+    renderLib()
+    const pill = screen.getAllByText("Verified")[0].closest("[data-slot=status-pill]")!
+    expect(pill.className).toContain("font-sans")
+    expect(pill.className).toContain("tracking-normal")
+  })
+
+  it("draws the uses numerals sans and tabular", () => {
+    renderLib()
+    const cell = screen.getAllByRole("row")[2].lastElementChild!
+    expect(cell.className).toContain("tabular-nums")
+    expect(cell.className).not.toContain("font-mono")
+  })
+})
