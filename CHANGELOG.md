@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
+
 ### Added
 
 - Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.

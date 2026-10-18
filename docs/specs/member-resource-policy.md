@@ -575,3 +575,24 @@ For an existing restricted member, Settings resource access offers an explicit o
 Known policy-read 401/403/404 responses remove the member editor and its reviewed preset consent. A later transient read failure cannot restore that consent; a fresh successful read starts a new editor. A mutation response from an older verified read cannot overwrite a newer policy read or revive controls after access loss. Transient failures without an earlier access denial retain an existing manual draft.
 
 Switching the member or resource scope invalidates both pending reads and mutation confirmations immediately. Returning to a previously cached scope requires a fresh successful read before an old response can affect visible controls or saved-policy state.
+
+### Client stream credential lifetime
+
+Browser and CLI WebSockets, journal SSE and run NDJSON retain the authenticated
+session or CLI-token row ID and its original expiry. Successful API revocation
+invalidates matching in-memory stream leases after commit and wakes idle streams;
+every frame is fenced again at delivery, including replay and control frames.
+A monotonic admission epoch captured before database authentication prevents
+late registration with a pre-revocation validation result. No TTL or batch skips
+extend access. The registry retains active requests/connections only.
+
+Revocation stops admission of the next frame; already authorized or in-flight
+bytes cannot be recalled. Ordinary logout does not cancel an already started
+routine: its account and grant authority is a separate execution contract.
+CLI-token revocation now also closes an existing CLI WebSocket. Older CLI tickets
+without a source token ID must be replaced through the normal ticket endpoint.
+A short WS ticket lifetime limits admission; it never extends the source expiry.
+Access-token authentication keeps its existing five-second validation grace.
+A non-null malformed CLI-token expiry is invalid and cannot open a stream.
+Offline administrative writes require the exclusive-writer path; this registry
+is an in-process API invalidation mechanism, not cross-process messaging.

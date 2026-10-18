@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -128,7 +129,7 @@ func TestReadPump_RoutesClientMessages(t *testing.T) {
 func TestWritePump_ExitsWhenSendClosed(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, send: make(chan []byte, 1), writeWait: time.Second}
+	c := &Client{ctx: context.Background(), conn: conn, send: make(chan []byte, 1), writeWait: time.Second}
 
 	done := make(chan struct{})
 	go func() {
@@ -154,7 +155,7 @@ func TestWritePump_ExitsWhenSendClosed(t *testing.T) {
 func TestWritePump_ExitsOnWriteFailure(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, send: make(chan []byte, 1), writeWait: time.Nanosecond}
+	c := &Client{ctx: context.Background(), conn: conn, send: make(chan []byte, 1), writeWait: time.Nanosecond}
 
 	done := make(chan struct{})
 	go func() {
@@ -175,7 +176,7 @@ func TestWriteFrame_FailsOnClosedConn(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
 	_ = conn.Close()
-	c := &Client{conn: conn, writeWait: time.Second}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: time.Second}
 	if c.writeFrame([]byte("x")) {
 		t.Fatal("writeFrame must fail on a closed connection")
 	}

@@ -107,15 +107,16 @@ type Hub struct {
 	// observers are non-WebSocket subscribers (the HTTP NDJSON run stream,
 	// #1818). Guarded by the same mu as channels so dispatch fans out to
 	// sockets and observers under one lock acquisition. See observer.go.
-	observers   map[string]map[*Observer]bool
-	register    chan *Client
-	unregister  chan *Client
-	broadcast   chan ChannelMessage
-	mu          sync.RWMutex
-	connCount   atomic.Int64
-	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
-	cancelMu    sync.Mutex
-	channelAuth ChannelAuthorizer
+	observers           map[string]map[*Observer]bool
+	register            chan *Client
+	unregister          chan *Client
+	broadcast           chan ChannelMessage
+	mu                  sync.RWMutex
+	connCount           atomic.Int64
+	cancelFns           map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelMu            sync.Mutex
+	channelAuth         ChannelAuthorizer
+	streamAuthenticator func(context.Context, *auth.Claims) (context.Context, func(), error)
 
 	// streams holds per-session replay buffers so an agent run's output can be
 	// resumed by a client that reconnects mid-generation. See session_stream.go.
@@ -898,13 +899,15 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 			// closes the connection.
 			conn.MaxPayloadBytes = wsMaxInboundFrameBytes
 
-			userID, authSessionID, authOK := h.authenticateUpgradedConn(r, conn)
+			userID, authSessionID, credentialContext, release, authOK := h.authenticateUpgradedConn(r, conn)
 			if !authOK {
 				conn.Close()
 				return
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			defer release()
+			ctx, cancel := context.WithCancel(credentialContext)
+			defer cancel()
 			client := &Client{
 				conn:          conn,
 				hub:           h,
@@ -933,20 +936,20 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 // connection, expects {"type":"auth","token":"..."}, and validates it the
 // same way the old pre-upgrade path did: JWT signature/expiry, then (for
 // browser tickets carrying a sid) that the joined user_sessions row is
-// still active. CLI-derived tickets have no sid — their CLI token is the
-// auth artifact, with its own revocation table — so they skip that check.
+// still active. CLI-derived tickets carry their source token row ID. The router authenticator
+// validates that row and attaches the same revocation fence as HTTP streams.
 //
 // Returns ok=false on any failure, having already sent a client-visible
 // frame (session_revoked or a generic error) and left the connection ready
 // for the caller to Close. Never registers a client on failure.
-func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (userID, authSessionID string, ok bool) {
+func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (userID, authSessionID string, credentialContext context.Context, release func(), ok bool) {
 	timeout := h.authReadTimeout
 	if timeout <= 0 {
 		timeout = wsAuthReadTimeout
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		h.rejectUpgrade(r, conn, "error", "connection setup failed", "stage", "set_read_deadline", "error", err)
-		return "", "", false
+		return "", "", nil, nil, false
 	}
 
 	var raw []byte
@@ -959,7 +962,7 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 		h.rejectUpgrade(r, conn, "error",
 			fmt.Sprintf("no auth message received within %s (handshake timed out)", timeout),
 			"stage", "auth_read", "error", err)
-		return "", "", false
+		return "", "", nil, nil, false
 	}
 
 	var authMsg struct {
@@ -968,7 +971,7 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 	}
 	if err := json.Unmarshal(raw, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Token == "" {
 		h.rejectUpgrade(r, conn, "error", "invalid auth message (expected {\"type\":\"auth\",\"token\":...})", "stage", "auth_parse")
-		return "", "", false
+		return "", "", nil, nil, false
 	}
 
 	// jwtValidator and sessions are guaranteed non-nil by NewHub. No
@@ -977,35 +980,44 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 	claims, err := h.jwtValidator.ValidateWS(authMsg.Token)
 	if err != nil {
 		h.rejectUpgrade(r, conn, "error", "invalid or expired ws-token", "stage", "validate_token", "error", err)
-		return "", "", false
+		return "", "", nil, nil, false
 	}
 	userID = claims.ID
 	authSessionID = claims.Sid
 
-	// Browser tickets carry a sid that joins to user_sessions; refuse the
-	// connection if the row is gone or already revoked. CLI-derived
-	// tickets skip this check (see doc comment above).
+	// Browser tickets additionally validate the session store here. The shared
+	// stream authenticator below validates both kinds and closes registration races.
 	if authSessionID != "" {
 		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
 		if sErr != nil {
 			if errors.Is(sErr, sessions.ErrNotFound) {
 				h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "session_lookup", "user_id", userID)
-				return "", "", false
+				return "", "", nil, nil, false
 			}
 			h.rejectUpgrade(r, conn, "error", "internal error resolving session", "stage", "session_lookup", "user_id", userID, "error", sErr)
-			return "", "", false
+			return "", "", nil, nil, false
 		}
 		if !sess.Active(time.Now()) {
 			h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "session_inactive", "user_id", userID)
-			return "", "", false
+			return "", "", nil, nil, false
 		}
 	}
 
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		h.rejectUpgrade(r, conn, "error", "connection setup failed", "stage", "clear_read_deadline", "user_id", userID, "error", err)
-		return "", "", false
+		return "", "", nil, nil, false
 	}
-	return userID, authSessionID, true
+	credentialContext = context.Background()
+	release = func() {}
+	if h.streamAuthenticator != nil {
+		var err error
+		credentialContext, release, err = h.streamAuthenticator(r.Context(), claims)
+		if err != nil {
+			h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "stream_credential")
+			return "", "", nil, nil, false
+		}
+	}
+	return userID, authSessionID, credentialContext, release, true
 }
 
 // rejectUpgrade is the single exit for a WS connection that fails AFTER the
@@ -1088,4 +1100,10 @@ func wsOriginAllowlisted(origin string) bool {
 		}
 	}
 	return false
+}
+
+// SetStreamAuthenticator is called once during router construction, before the
+// hub accepts connections. It binds signed tickets to their live source row.
+func (h *Hub) SetStreamAuthenticator(f func(context.Context, *auth.Claims) (context.Context, func(), error)) {
+	h.streamAuthenticator = f
 }

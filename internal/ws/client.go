@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -54,6 +56,10 @@ func (c *Client) readPump() {
 		var raw []byte
 		if err := websocket.Message.Receive(c.conn, &raw); err != nil {
 			break
+		}
+
+		if !auth.StreamCredentialCurrent(c.ctx) {
+			return
 		}
 
 		var msg ClientMessage
@@ -137,6 +143,8 @@ func (c *Client) writePump() {
 
 	for {
 		select {
+		case <-c.ctx.Done():
+			return
 		case msg, ok := <-c.send:
 			if !ok {
 				return
@@ -181,6 +189,9 @@ func (c *Client) writeFrame(msg []byte) bool {
 		wait = defaultWriteWait
 	}
 	if err := c.conn.SetWriteDeadline(time.Now().Add(wait)); err != nil {
+		return false
+	}
+	if !auth.StreamCredentialCurrent(c.ctx) {
 		return false
 	}
 	if _, err := c.conn.Write(msg); err != nil {
