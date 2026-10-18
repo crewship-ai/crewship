@@ -200,7 +200,7 @@ export function SubBar<T extends string = string>({
     return (
       <>
         {createPortal(
-          <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={ariaLabel} data-slot="sub-bar">
+          <div className="flex min-w-0 flex-1 items-center gap-2" role="group" aria-label={ariaLabel} data-slot="sub-bar">
             {leading && <div className="flex shrink-0 items-center">{leading}</div>}
             <Heading className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm", repeatsArea && section == null && "sr-only")}>
               {!repeatsArea && (
@@ -242,7 +242,7 @@ export function SubBar<T extends string = string>({
     return (
       <div className={cn("shrink-0", className)}>
         {createPortal(
-          <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" aria-label={ariaLabel}>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" role="group" aria-label={ariaLabel}>
             {leading && <div className="flex shrink-0 items-center">{leading}</div>}
             <div className="flex-1" />
             <ActionsSlot>{actions}</ActionsSlot>
@@ -254,7 +254,7 @@ export function SubBar<T extends string = string>({
             sub-page) is drawn as the chip row's lead, not as a bar. */}
         {!showIdentity && heading && <h1 className="sr-only">{title}</h1>}
         {showIdentity && (
-          <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} aria-label={ariaLabel}>
+          <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} role="group" aria-label={ariaLabel}>
             <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
               <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.005em] text-foreground"}>{title}</span>
               {section != null && (
@@ -286,6 +286,7 @@ export function SubBar<T extends string = string>({
         data-slot="sub-bar-row"
         data-empty={rowEmpty || undefined}
         className={cn(ROW, "h-auto gap-2 data-[empty]:hidden", !rowEmpty && "min-h-9", SCROLL_X)}
+        role="group"
         aria-label={ariaLabel}
       >
         {leading && <div className="flex items-center shrink-0">{leading}</div>}
