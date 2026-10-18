@@ -93,7 +93,7 @@ describe("IssuePeek", () => {
     expect(document.activeElement).toBe(screen.getByRole("dialog"))
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-    expect(document.activeElement).toBe(opener)
+    await waitFor(() => expect(document.activeElement).toBe(opener))
   })
 
   it("says the issue is gone when the server does not know it", async () => {
