@@ -55,3 +55,19 @@ and source rows, archive absence and integer pins are never normalized or repair
 The cutover requires exactly one inserted archive and an exact native persisted
 row acknowledgement after triggers. Ignored, deleted or changed archive writes
 roll back all captures and leave the migration unrecorded for a clean retry.
+
+
+## Canonical run-admission envelope
+
+The version-one `crewship.routine-run-admission` envelope records exact byte
+values, native NULL/TEXT/BLOB distinctions, an immutable selection identity and
+the executed-definition projection. Canonical decoding rejects unknown or
+duplicate fields, omitted values, alternate encodings, trailing content and
+invalid structural bindings. The outer receipt/workspace/routine/run tuple must
+match the encoded identity. The caller supplies a positive buffer bound.
+
+This codec validates storage shape only. It performs no SQL or source
+authentication, grants no execution authority and creates no admission,
+historical receipt or runtime continuation. Runtime writers and readers must
+separately establish current authority, exact source state and transaction
+ownership before using such data.
