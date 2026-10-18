@@ -100,7 +100,7 @@ export function useDocumentHistory({ enabled, workspaceId, humanId, pageId, acti
     return () => { active = false; controller.abort() }
   }, [scope, endpoint, params])
 
-  const list: HistoryRead<DocumentCheckpointList> = !scope.available ? { status: "idle" } : state.scope !== scope ? { status: "loading" } : state.list
+  const list = useMemo<HistoryRead<DocumentCheckpointList>>(() => !scope.available ? { status: "idle" } : state.scope !== scope ? { status: "loading" } : state.list, [scope, state])
   const selectedId = selection?.scope === scope ? selection.id : undefined
   const pin = list.status === "ready" ? list.data.checkpoints.find(item => item.id === selectedId) : undefined
   useEffect(() => {
