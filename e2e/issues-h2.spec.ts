@@ -534,8 +534,9 @@ test.describe("PAR-040/041/042/043/146 v67 details", () => {
     await expect(dialog.getByRole("button", { name: "Create and start" })).toBeEnabled()
   })
 
-  test("phone 390: the New issue footer keeps 44 px targets", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
+  test("phone 390: the New issue footer keeps 44 px targets", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await context.newPage()
     await seed(page, PINNED)
     await page.goto("/issues?create=1")
     const dialog = page.getByRole("dialog", { name: "New issue" })
@@ -544,5 +545,6 @@ test.describe("PAR-040/041/042/043/146 v67 details", () => {
       const box = (await dialog.getByRole("button", { name, exact: true }).boundingBox())!
       expect(box.height).toBeGreaterThanOrEqual(44)
     }
+    await context.close()
   })
 })
