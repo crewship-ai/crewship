@@ -93,7 +93,7 @@ describe("the user menu (v67 pop-user)", () => {
   it("names the edition in the footer, as v67 pu-ver does (Community Edition · dev · sha)", async () => {
     open()
     const footer = await screen.findByTestId("user-menu-footer")
-    await within(footer).findByText("Community Edition")
+    await within(footer).findByTestId("user-menu-edition")
     expect(footer).toHaveTextContent("Community Edition · dev · a41d725")
   })
 

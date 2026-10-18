@@ -14,6 +14,7 @@ const env = vi.hoisted(() => ({
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => env.mobile }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => env.mode }))
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => false,
   useAuth: () => ({ session: { user: { id: "u1", name: "Demo User", email: "demo@crewship.ai" } }, signOut: vi.fn().mockResolvedValue(undefined) }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
