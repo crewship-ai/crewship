@@ -78,7 +78,11 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"wake_pipeline_slug": nullable(str()), "wake_pipeline_id": nullable(str()), "wake_inputs": anyObject(),
 		"wake_fail_closed": boolean(), "catchup_policy": str(), "max_consecutive_failures": integer(),
 	})
-	replay := obj(map[string]any{"pinned_version": integer()})
+	replay := obj(map[string]any{
+		"pinned_version": map[string]any{"type": "integer", "minimum": 1},
+		"inputs":         anyObject(), "metadata": anyObject(),
+		"tags": map[string]any{"type": "array", "items": str(), "maxItems": 10},
+	})
 	metadata := obj(map[string]any{"set": anyObject(), "increment": anyObject(), "append": anyObject()})
 	signal := obj(map[string]any{"event_type": str(), "payload": str()})
 	checkpoint := obj(map[string]any{"label": str()})
