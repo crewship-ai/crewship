@@ -194,6 +194,10 @@ func (h *WorkspaceConversationsHandler) Messages(w http.ResponseWriter, r *http.
 		h.fail(w, err)
 		return
 	}
+	if r.URL.Query().Has("projection") {
+		writeRoomSourceMessages(w, r, ws, r.PathValue("conversationId"), rows, len(rows) == limit)
+		return
+	}
 	writeJSON(w, http.StatusOK, workspaceConversationMessagesResponse{Messages: rows, HasMore: len(rows) == limit})
 }
 func (h *WorkspaceConversationsHandler) Send(w http.ResponseWriter, r *http.Request) {

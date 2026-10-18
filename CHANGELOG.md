@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
+
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 
 - Refuse unsupported run-admission payloads in raw dump restore before opening the write transaction or invoking callbacks.

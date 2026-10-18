@@ -17,6 +17,14 @@ crewship chat <subcommand> ...
 
 Auth: commands require an authenticated session (`crewship login`) except `chat share read`, which uses a dedicated share token. Authenticated commands also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
 
+## Versioned source messages
+
+`crewship chat source messages agent_session <chat-id> --format json` reads a bounded source snapshot using the same current-human authorization as the ordinary transcript. The snapshot is limited to 16 MiB of source data and 1,000 messages; an oversized snapshot returns an error instead of a partial result. Its `source_position` is an ordinal within that snapshot, not a durable event cursor.
+
+`crewship chat source messages workspace_room <room-id> --limit 50 --after-sequence 7 --format json` uses the room's native sequence and existing membership authorization. Use `--before-sequence` for earlier messages; do not combine the two cursor flags. Agent-session snapshots accept no pagination flags.
+
+The version 1 envelope identifies the workspace, source kind, source ID and original message IDs. Missing legacy identity, author, time and relationship fields remain null. Reply, thread and alternative relationships are separate fields; the read does not infer them from message order or metadata. Legacy thinking content and metadata are withheld. This read sends no message and starts no agent run.
+
 ## Subcommands
 
 | Command | Purpose |

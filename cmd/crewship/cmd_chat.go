@@ -1248,6 +1248,7 @@ func init() {
 		"Attach each chat's work source — the routine (with run/step) or issue it belongs to — to every row")
 	addListPagingFlags(chatListCmd.Flags(), 0)
 	chatCmd.AddCommand(chatListCmd)
+	chatCmd.AddCommand(newChatSourceCommand())
 	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatRenameCmd)
 	chatCmd.AddCommand(chatDeleteCmd)
