@@ -677,8 +677,10 @@
   /* Every form control (Input, Textarea, SelectTrigger, native selects):
      the size of the row label beside it, so a field never reads bigger or
      smaller than its label. Touch devices still get 16px (the coarse-pointer
-     floor above), which is what keeps iOS from zooming. */
-  --text-control: 0.8125rem;
+     floor above), which is what keeps iOS from zooming. 13 px at Compact
+     (v67 form fields, row and card titles), the body size: 0.875rem of the
+     14.857 px Compact root, 14 px at Standard. */
+  --text-control: var(--typo-body);
   --text-control--line-height: 1.25rem;
   --text-body: var(--typo-body);
   --text-body--line-height: var(--typo-body-lh);
@@ -836,7 +838,7 @@ body {
      and the portrait finds it faster than the name does. Sized down so the
      row belongs to the face rather than competing with it.
 
-       .type-nav      13px  crew and agent names in a rail
+       .type-nav      13px  crew and agent names in a rail (at Compact)
        .type-nav-sub  11px  the role line, counts, status words
 
      Written here rather than typed into crews-explorer.tsx on purpose. The
@@ -844,7 +846,8 @@ body {
      system, and the next surface copies the number instead of the reason —
      which is how 12 different ways to write "small text" happened. */
   .type-nav {
-    font-size: 0.8125rem;
+    /* 13 px at Compact (v67 nav item and user row), 14 px at Standard. */
+    font-size: 0.875rem;
     line-height: 1.15rem;
   }
   .type-nav-sub {
