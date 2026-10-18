@@ -34,12 +34,39 @@ const BRANDS = [
   "claude", "anthropic", "openai", "chatgpt", "linear", "gitlab", "github", "miro", "cloudflare", "cursor", "notion", "framer", "lovable", "vercel", "stripe", "slack",
   "supabase", "railway", "sentry", "raycast", "perplexity", "mistral", "v0", "coda", "height", "attio", "arc", "superhuman", "figma", "pitch", "discord", "intercom",
   "datadog", "grafana", "atlassian", "jira", "fluent", "microsoft", "posthog", "macos", "apple", "ios", "android", "google", "windows", "gnome", "ubuntu", "kde",
+  "confluence", "pajamas", "primer", "geist", "segoe", "roboto", "yaru", "breeze", "libadwaita", "plasma", "material", "sequoia", "tahoe", "mica", "canonical",
 ]
+
+// Wireframe v67 shows 42 styles under product names. The app carries each one
+// under a neutral name: wireframe id -> app id. Harbor and Harbor Night are
+// Crewship's own and have no counterpart.
+const WIREFRAME_PORTS: Record<string, string> = {
+  openai: "ink", lovable: "blush", mistral: "sunrise", v0: "pewter", linear: "slate", vercel: "mono", github: "cool-grey", railway: "plum",
+  raycast: "ember", height: "lilac", attio: "quartz", pitch: "orchid", intercom: "charcoal", grafana: "signal",
+  claude: "terracotta", cloudflare: "beacon", cursor: "carbon", supabase: "meadow", gitlab: "heather", sentry: "aubergine", perplexity: "lagoon",
+  notion: "parchment", coda: "coral", arc: "iris", superhuman: "twilight", miro: "marigold", framer: "cobalt", figma: "studio", slack: "mulberry",
+  discord: "console", stripe: "bluebell", datadog: "regal", atlassian: "cerulean", fluent: "denim", posthog: "sandstone", macos: "frost", ios: "pebble",
+  android: "wisteria", windows: "pane", gnome: "dove", ubuntu: "tangerine", kde: "skyline",
+}
 
 describe("registry (STY-01, STY-04)", () => {
   it("Harbor is first and the default; the first batch follows", () => {
     expect(STYLES[0]).toBe(HARBOR)
     expect(STYLES.length).toBeGreaterThanOrEqual(13)
+  })
+
+  it("carries every wireframe v67 style under a neutral name: 42 ports + Harbor + Harbor Night", () => {
+    expect(Object.keys(WIREFRAME_PORTS)).toHaveLength(42)
+    expect(STYLES).toHaveLength(44)
+    const ids = new Set(STYLES.map((s) => s.id))
+    for (const [wireframe, id] of Object.entries(WIREFRAME_PORTS)) expect(ids.has(id), `${wireframe} -> ${id}`).toBe(true)
+    expect(new Set(Object.values(WIREFRAME_PORTS)).size).toBe(42)
+    expect(new Set(STYLES.map((s) => s.name)).size).toBe(STYLES.length)
+  })
+
+  it("styles are listed grouped by category, in gallery order", () => {
+    const order = STYLES.map((s) => STYLE_CATEGORIES.indexOf(s.category))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
   })
 
   it("ids are unique and well-formed", () => {

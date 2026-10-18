@@ -44,7 +44,7 @@ export interface StyleState {
 }
 
 /** Gallery sections, in order. */
-export const STYLE_CATEGORIES = ["Crewship", "AI", "Development", "Productivity", "Design", "Communication", "Enterprise"] as const
+export const STYLE_CATEGORIES = ["Crewship", "AI", "Development", "Productivity", "Design", "Communication", "Enterprise", "System"] as const
 export type StyleCategory = (typeof STYLE_CATEGORIES)[number]
 
 /** A registry row: the rendering facts plus what the gallery shows. */
@@ -74,16 +74,44 @@ export const STYLES: StyleInfo[] = [
   { id: "blush", name: "Blush", category: "AI", blurb: "Warm and playful: soft pink, rounded corners.", schemes: ["light","dark"], accent: "pink", swatch: ["#FCF6F3","#FFFFFF","#EC4899","#1A1418"] },
   { id: "sunrise", name: "Sunrise", category: "AI", blurb: "Warm cream surfaces with square corners.", schemes: ["light","dark"], accent: "pink", swatch: ["#FFFAF0","#FFFFFF","#EC4899","#181109"] },
   { id: "pewter", name: "Pewter", category: "AI", blurb: "Monochrome greys with sharp lines.", schemes: ["light","dark"], accent: "blue", swatch: ["#FAFAFA","#FFFFFF","#1E7BFE","#0A0A0A"] },
+  { id: "terracotta", name: "Terracotta", category: "AI", blurb: "Warm paper and clay tones, calm and human, softly rounded.", schemes: ["light","dark"], accent: "pink", swatch: ["#F0EEE6","#FFFFFF","#EC4899","#171716"] },
+  { id: "lagoon", name: "Lagoon", category: "AI", blurb: "Warm cream with a calm teal; made for reading.", schemes: ["light","dark"], accent: "teal", swatch: ["#F3F3EE","#FFFFFF","#0EA5C4","#161717"] },
   { id: "slate", name: "Slate", category: "Development", blurb: "Cool grey with an indigo accent; dark feels at home.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F4F5F8","#FFFFFF","#6366F1","#0F1011"] },
   { id: "mono", name: "Mono", category: "Development", blurb: "Clean black and white with crisp lines.", schemes: ["light","dark"], accent: "graphite", swatch: ["#FAFAFA","#FFFFFF","#64748B","#0A0A0A"] },
   { id: "cool-grey", name: "Cool Grey", category: "Development", blurb: "Restrained greys, blue links, dense content.", schemes: ["light","dark"], accent: "blue", swatch: ["#F6F8FA","#FFFFFF","#1E7BFE","#0D1117"] },
   { id: "plum", name: "Plum", category: "Development", blurb: "Deep violet surfaces with a bright accent.", schemes: ["light","dark"], accent: "violet", swatch: ["#F7F5FB","#FFFFFF","#8B5CF6","#13111C"] },
   { id: "ember", name: "Ember", category: "Development", blurb: "Premium dark surfaces with sharp detail.", schemes: ["light","dark"], accent: "pink", swatch: ["#F4F4F5","#FFFFFF","#EC4899","#111113"] },
+  { id: "beacon", name: "Beacon", category: "Development", blurb: "White sidebar, a strong blue action and square, dashboard-dense corners.", schemes: ["light","dark"], accent: "blue", swatch: ["#F2F2F2","#FFFFFF","#1E7BFE","#181818"] },
+  { id: "carbon", name: "Carbon", category: "Development", blurb: "Charcoal surfaces with fine borders; at home in the dark.", schemes: ["light","dark"], accent: "graphite", swatch: ["#F4F4F4","#FFFFFF","#64748B","#171717"] },
+  { id: "meadow", name: "Meadow", category: "Development", blurb: "Developer-dark neutrals with a fresh green-teal accent.", schemes: ["light","dark"], accent: "teal", swatch: ["#F8F9FA","#FFFFFF","#0EA5C4","#171717"] },
+  { id: "heather", name: "Heather", category: "Development", blurb: "A hint of violet on tight, square-cornered, data-dense surfaces.", schemes: ["light","dark"], accent: "indigo", swatch: ["#FBFAFD","#FFFFFF","#6366F1","#17161B"] },
+  { id: "aubergine", name: "Aubergine", category: "Development", blurb: "Deep purple-tinged surfaces that keep errors easy to spot.", schemes: ["light","dark"], accent: "indigo", swatch: ["#FAF9FB","#FFFFFF","#6366F1","#19131E"] },
   { id: "lilac", name: "Lilac", category: "Productivity", blurb: "Calm project surfaces with a soft violet.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F5F5F7","#FFFFFF","#6366F1","#151519"] },
   { id: "quartz", name: "Quartz", category: "Productivity", blurb: "Near black and white, colour only on actions.", schemes: ["light","dark"], accent: "blue", swatch: ["#FAFAFA","#FFFFFF","#1E7BFE","#121214"] },
+  { id: "parchment", name: "Parchment", category: "Productivity", blurb: "Warm white paper and ink, hairline borders, quiet.", schemes: ["light","dark"], accent: "blue", swatch: ["#F7F7F5","#FFFFFF","#1E7BFE","#141414"] },
+  { id: "coral", name: "Coral", category: "Productivity", blurb: "Warm white documents with a coral-orange accent.", schemes: ["light","dark"], accent: "pink", swatch: ["#F8F7F5","#FFFFFF","#EC4899","#171616"] },
+  { id: "iris", name: "Iris", category: "Productivity", blurb: "Soft lavender surfaces and a bright violet accent.", schemes: ["light","dark"], accent: "indigo", swatch: ["#EDE7FF","#FFFFFF","#6366F1","#181424"] },
+  { id: "twilight", name: "Twilight", category: "Productivity", blurb: "Deep violet-blue darks with an elegant, restrained light.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F4F3F8","#FFFFFF","#6366F1","#151526"] },
   { id: "orchid", name: "Orchid", category: "Design", blurb: "Playful purple with large round shapes.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F6F3FF","#FFFFFF","#6366F1","#160F2C"] },
+  { id: "marigold", name: "Marigold", category: "Design", blurb: "Playful and bright: very round corners over a warm off-white.", schemes: ["light","dark"], accent: "blue", swatch: ["#F7F6F3","#FFFFFF","#1E7BFE","#151428"] },
+  { id: "cobalt", name: "Cobalt", category: "Design", blurb: "High contrast with a vivid blue accent and generous corners.", schemes: ["light","dark"], accent: "sky", swatch: ["#F3F3F3","#FFFFFF","#38BDF8","#111111"] },
+  { id: "studio", name: "Studio", category: "Design", blurb: "A designer’s workspace in neutral grey with a bright blue accent.", schemes: ["light","dark"], accent: "sky", swatch: ["#F5F5F5","#FFFFFF","#38BDF8","#171717"] },
   { id: "charcoal", name: "Charcoal", category: "Communication", blurb: "Black and warm grey surfaces, softly rounded.", schemes: ["light","dark"], accent: "pink", swatch: ["#F5F5F3","#FFFFFF","#EC4899","#141414"] },
+  { id: "mulberry", name: "Mulberry", category: "Communication", blurb: "Friendly plum-tinted surfaces with a green action colour.", schemes: ["light","dark"], accent: "teal", swatch: ["#F5EDF5","#FFFFFF","#0EA5C4","#15171A"] },
+  { id: "console", name: "Console", category: "Communication", blurb: "Layered blue-grey darks and an indigo accent, like a game lobby.", schemes: ["light","dark"], accent: "blue", swatch: ["#E3E5E8","#FFFFFF","#1E7BFE","#1C1D20"] },
   { id: "signal", name: "Signal", category: "Enterprise", blurb: "Dark dashboard surfaces with very sharp corners.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F4F5F5","#FFFFFF","#6366F1","#111217"] },
+  { id: "bluebell", name: "Bluebell", category: "Enterprise", blurb: "Cool pale grey, a violet-blue accent and a deep navy dark mode.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F6F8FA","#FFFFFF","#6366F1","#0C1829"] },
+  { id: "regal", name: "Regal", category: "Enterprise", blurb: "Purple accents on cool greys with sharp corners for dense charts.", schemes: ["light","dark"], accent: "violet", swatch: ["#F4F4F8","#FFFFFF","#8B5CF6","#16161D"] },
+  { id: "cerulean", name: "Cerulean", category: "Enterprise", blurb: "Corporate blue on near-white, with tight corners.", schemes: ["light","dark"], accent: "blue", swatch: ["#F7F8F9","#FFFFFF","#1E7BFE","#16191C"] },
+  { id: "denim", name: "Denim", category: "Enterprise", blurb: "Soft neutral greys, gentle shadows and an office blue.", schemes: ["light","dark"], accent: "blue", swatch: ["#F5F5F5","#FFFFFF","#1E7BFE","#161616"] },
+  { id: "sandstone", name: "Sandstone", category: "Enterprise", blurb: "Beige surfaces and an orange accent; playful but serious.", schemes: ["light","dark"], accent: "pink", swatch: ["#F3F4EF","#FFFFFF","#EC4899","#17181E"] },
+  { id: "frost", name: "Frost", category: "System", blurb: "Translucent-feeling pale greys with a clear system blue.", schemes: ["light","dark"], accent: "blue", swatch: ["#E8E8EA","#FFFFFF","#1E7BFE","#171717"] },
+  { id: "pebble", name: "Pebble", category: "System", blurb: "Grouped-list greys, black dark mode and a bright system blue.", schemes: ["light","dark"], accent: "blue", swatch: ["#F7F7FA","#FFFFFF","#1E7BFE","#000000"] },
+  { id: "wisteria", name: "Wisteria", category: "System", blurb: "Tonal lavender surfaces with pill-shaped controls.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F6F2F9","#F9F6FB","#6366F1","#121116"] },
+  { id: "pane", name: "Pane", category: "System", blurb: "Layered neutral greys with a deep blue accent and tight corners.", schemes: ["light","dark"], accent: "blue", swatch: ["#F3F3F3","#FFFFFF","#1E7BFE","#1B1B1B"] },
+  { id: "dove", name: "Dove", category: "System", blurb: "Soft grey sidebar, roomy rounded cards and a friendly blue.", schemes: ["light","dark"], accent: "blue", swatch: ["#EBEBED","#FFFFFF","#1E7BFE","#121215"] },
+  { id: "tangerine", name: "Tangerine", category: "System", blurb: "Neutral greys warmed by an orange accent; aubergine-leaning darks.", schemes: ["light","dark"], accent: "pink", swatch: ["#EBEBEB","#FFFFFF","#EC4899","#181818"] },
+  { id: "skyline", name: "Skyline", category: "System", blurb: "Light grey panels with a sky-blue accent and compact spacing.", schemes: ["light","dark"], accent: "sky", swatch: ["#EFF0F1","#FFFFFF","#38BDF8","#0D0F10"] },
 ]
 
 /**
