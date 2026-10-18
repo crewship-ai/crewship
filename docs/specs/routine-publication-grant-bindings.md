@@ -50,3 +50,19 @@ they archive old content through the Store and verify that removing that archive
 never falls back to current HEAD. Upsert/resurrection success fixtures also begin
 with a real archived routine and assert its generated identity survives the action.
 These fixture repairs add no HEAD0/schema fallback or production authorization.
+
+
+## Canonical publication identity
+
+The host-only canonical manifest uses schema 2 and the
+`crewship.publication.authority.v2` hash domain. It binds the publisher and exact
+grant memberships, declared and actual acting agents, effective new root origin,
+and each child version/content/authority/archived origin separately. Positional
+tuples, deterministic ordering and bounded UTF-8 identifiers prevent ambiguous
+identity; contradictory immutable grants, versions and callsites are rejected.
+
+Canonicalization does not authorize publishing or running, prove graph
+completeness, refresh grants or select a broker. It writes no storage and exposes
+no request fields. The legacy sentinel identifies exact old child content without
+transferring its execution authority. Strict decoding is a separate prerequisite
+before stored input can be consumed.
