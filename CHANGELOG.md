@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
+
 - Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
 
 - Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
