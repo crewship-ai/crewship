@@ -168,7 +168,7 @@ test.describe("desktop", () => {
     const slug = `h2-tpl-${Date.now().toString(36)}`
     await page.goto("/crews?new=crew")
     const dialog = page.getByRole("dialog", { name: /New crew/ })
-    await dialog.getByPlaceholder("Engineering").fill(slug)
+    await dialog.getByRole("textbox", { name: "Name" }).fill(slug)
     await dialog.getByRole("radio", { name: /From a template/ }).click()
     await dialog.getByRole("button", { name: "Continue" }).click()
     await dialog.locator("button[aria-pressed]").first().click()
