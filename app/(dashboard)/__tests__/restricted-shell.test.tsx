@@ -300,6 +300,9 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mount(<SettingsLayout />)
     expect(await screen.findByText("Account security")).toBeInTheDocument()
     await settle(500)
+    // The same 820 px column every Settings section has (v67 `.settings`).
+    const col = document.querySelector("[data-slot=settings-page-head]")!.closest("div.mx-auto")!
+    expect(col.className.split(" ")).toContain("max-w-[820px]")
     expect(screen.getByRole("button", { name: /New token/ })).toBeEnabled()
     // Profile picture and name are not editable; the password is.
     expect(screen.queryByRole("button", { name: "Upload" })).toBeNull()

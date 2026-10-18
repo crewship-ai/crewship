@@ -98,6 +98,11 @@ describe("PAR-104 table and pills", () => {
       expect(th.className).not.toContain("uppercase")
     }
     expect(heads.map((t) => t.textContent).filter(Boolean)).toEqual(["Person", "Role", "Can do", "Joined", "Open"])
+    // Role groups read like every other grouped list (v67 .grp): "Owners 1".
+    for (const g of Array.from(table.querySelectorAll("th[scope=rowgroup]"))) {
+      expect(g.className).not.toContain("uppercase")
+      expect(g.textContent).not.toContain("·")
+    }
     for (const g of Array.from(table.querySelectorAll("th[scope=rowgroup]"))) expect(g.className).not.toContain("font-mono")
   })
 

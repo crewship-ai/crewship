@@ -149,7 +149,7 @@ describe("Members — the roster", () => {
     expect(within(rowOf("u-mel")).getByText("1/4")).toBeInTheDocument()
     expect(areas("u-vic")).toEqual(["chat"])
     const groups = screen.getAllByRole("rowheader").filter((h) => h.getAttribute("scope") === "rowgroup").map((h) => h.textContent)
-    expect(groups).toEqual(["Owners· 1", "Admins· 1", "Managers· 1", "Members· 1", "Viewers· 1"])
+    expect(groups).toEqual(["Owners1", "Admins1", "Managers1", "Members1", "Viewers1"])
     const summary = document.querySelector("[data-slot=members-summary]")!
     // v67's five tiles (PAR-102): a label over its figure.
     expect(summary).toHaveTextContent("People5")

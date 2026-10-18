@@ -156,7 +156,7 @@ export function SettingsLayout() {
 function RestrictedAccountSettings() {
   const { session, signOut } = useAuth()
   return (
-    <div key={session?.user?.id} className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
+    <div key={session?.user?.id} className="mx-auto w-full max-w-[820px] space-y-4 p-4 md:p-6">
       <SettingsPageHead level={1} icon={Shield} title="Account security" description="Your password, the devices signed in as you and your CLI tokens." />
       {/* One page, as before the Sessions split: password, then sessions and
           token revoke. space-y-5 is the gap ProfileSection used between the
