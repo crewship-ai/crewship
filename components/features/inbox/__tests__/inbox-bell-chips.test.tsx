@@ -39,7 +39,7 @@ const wp = (over: Partial<InboxItem> = {}) =>
 
 describe("inboxKindChips", () => {
   it.each<{ name: string; classes: (InboxItem["attention_class"])[]; want: string[] }>([
-    { name: "nothing", classes: [], want: ["all:0"] },
+    { name: "nothing", classes: [], want: ["all:0", "decision", "input", "review", "repair"] },
     // v67 draws All / Decisions / Input / Review / Repair whatever is in the list.
     { name: "unclassified rows count under All only", classes: [undefined, undefined], want: ["all:2", "decision", "input", "review", "repair"] },
     {
@@ -165,7 +165,7 @@ describe("InboxBellView chips", () => {
 
   it("shows All with its count and every kind, as the wireframe draws them", () => {
     open()
-    expect(screen.getByTestId("bell-chip-all")).toHaveTextContent("All (3)")
+    expect(screen.getByTestId("bell-chip-all")).toHaveTextContent(/All\s*3/)
     expect(screen.getByTestId("bell-chip-all")).toHaveAttribute("aria-pressed", "true")
     for (const kind of ["decision", "input", "review", "repair"]) expect(screen.getByTestId(`bell-chip-${kind}`)).toBeInTheDocument()
   })

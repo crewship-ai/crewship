@@ -260,7 +260,9 @@ describe("<ActivityBell> v67 panel", () => {
     h.runs = WORK()
     render(<ActivityBell />)
     openDropdown()
-    expect(screen.getByTestId("activity-popover").querySelector(".font-mono")).toBeNull()
+    // StatusPill is the shared kit's own component; its type is the kit's to set.
+    const mono = [...screen.getByTestId("activity-popover").querySelectorAll(".font-mono")].filter((el) => !el.closest("[data-slot=status-pill]"))
+    expect(mono).toEqual([])
   })
 
   it("caps each group at 6 rows and points the footer at the active bucket", () => {

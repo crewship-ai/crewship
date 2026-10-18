@@ -43,8 +43,8 @@ function isKeeper(id: string): boolean {
   return id === "keeper" || id.startsWith("keeper_")
 }
 
-export function ActorAvatar({ actor, size = 24 }: { actor: Actor; size?: 20 | 24 | 32 }) {
-  const box = size === 32 ? "h-8 w-8" : size === 20 ? "h-5 w-5" : "h-6 w-6"
+export function ActorAvatar({ actor, size = 24 }: { actor: Actor; size?: 20 | 24 | 28 | 32 }) {
+  const box = size === 32 ? "h-8 w-8" : size === 28 ? "h-7 w-7" : size === 20 ? "h-5 w-5" : "h-6 w-6"
   const glyphSize = size === 32 ? "h-4 w-4" : "h-3.5 w-3.5"
 
   if (actor.kind === "agent") {
@@ -66,7 +66,7 @@ export function ActorAvatar({ actor, size = 24 }: { actor: Actor; size?: 20 | 24
         className={cn(
           "grid shrink-0 place-items-center rounded-full bg-primary/15 font-semibold uppercase text-primary",
           box,
-          size === 32 ? "text-[11px]" : "text-[9px]",
+          size === 32 ? "text-[11px]" : size === 28 ? "text-micro" : "text-[9px]",
         )}
       >
         {actor.label.slice(0, 2)}
@@ -95,7 +95,7 @@ export function ActorLabel({
   showKind = false,
 }: {
   actor: Actor
-  size?: 20 | 24 | 32
+  size?: 20 | 24 | 28 | 32
   className?: string
   showKind?: boolean
 }) {
