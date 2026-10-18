@@ -180,7 +180,7 @@ export function MenuSheetSub({
   if (sheet) {
     return (
       <div role="group" aria-label={label}>
-        <div className="flex min-h-9 items-center gap-3 px-3 pt-2 text-micro font-medium uppercase tracking-wide text-muted-foreground-soft" aria-hidden>
+        <div className="flex min-h-9 items-center gap-3 px-3 pt-2 text-micro font-semibold text-muted-foreground-soft" aria-hidden>
           {label}
         </div>
         {children}
