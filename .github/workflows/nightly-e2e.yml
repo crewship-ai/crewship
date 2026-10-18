@@ -573,6 +573,9 @@ jobs:
         # whole session, so every later spec fails at sign-in. A spec on its
         # own finishes well inside the token's life.
         run: |
+          # The runner's default shell is `bash -e`: without +e the first
+          # failing spec would end the loop and skip every later spec.
+          set +e
           set -uo pipefail
           mkdir -p harbor2-reports
           failed=""
