@@ -343,7 +343,7 @@ export function AddSkillDialog({ open, onOpenChange, workspaceId, crews, agents,
             <ul className="flex flex-col divide-y divide-border rounded-lg border border-border" data-slot="add-skill-found">
               {found.map((f) => (
                 <li key={f.path}>
-                  <label className={cn("flex min-h-[44px] items-start gap-2.5 px-3 py-2", f.refused ? "cursor-not-allowed opacity-70" : "cursor-pointer")}>
+                  <label className={cn("flex min-h-11 coarse:min-h-[44px] items-start gap-2.5 px-3 py-2", f.refused ? "cursor-not-allowed opacity-70" : "cursor-pointer")}>
                     <Checkbox
                       className="mt-0.5"
                       checked={picked.has(f.path)}
@@ -410,7 +410,7 @@ export function AddSkillDialog({ open, onOpenChange, workspaceId, crews, agents,
                 {crews.map((c) => {
                   const n = crewAgents(c.id).length
                   return (
-                    <label key={c.id} className="flex min-h-[44px] cursor-pointer items-center gap-2.5 px-3 py-2 text-control">
+                    <label key={c.id} className="flex min-h-11 coarse:min-h-[44px] cursor-pointer items-center gap-2.5 px-3 py-2 text-control">
                       <Checkbox
                         checked={crewIds.has(c.id)}
                         disabled={n === 0}

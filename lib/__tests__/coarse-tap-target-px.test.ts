@@ -86,6 +86,39 @@ function onInteractiveElement(src: string, idx: number): boolean {
   return INTERACTIVE_ROLE.test(open + after.split(/\/?>/)[0])
 }
 
+/** Scale floors (min-h/min-w 10..12) in a source text that no covering px floor backs up. */
+export function floorFindings(src: string): { token: string; cls: string; line: number }[] {
+  const out: { token: string; cls: string; line: number }[] = []
+  for (const m of src.matchAll(FLOOR)) {
+    if (inComment(src, m.index!)) continue
+    // A px floor in the same class string that applies wherever this one does.
+    if (hasPxFloor(literalAround(src, m.index!), m[1], m[2])) continue
+    out.push({ token: m[2] + "-" + m[3], cls: m[0], line: lineOf(src, m.index!) })
+  }
+  return out
+}
+
+// An unprefixed px floor is 44 px at a fine pointer too, which grows a desktop
+// control past its v67 size (ODCH-06: fine pointer follows v67, coarse is 44).
+// It is for controls that only exist on a phone (a bottom sheet row), or that
+// already hand the size back at sm: (`h-[44px] sm:h-8`). Anything else keeps
+// its fine size and adds `coarse:min-h-[44px]`.
+const PLAIN_PX = /(?<![\w:-])(min-h|min-w|h)-\[44px\]/g
+const PX_ALLOW: Record<string, string> = {
+  "components/ui/menu-sheet.tsx min-h": "MenuSheet sheet rows: the bottom sheet only exists on a phone",
+  "components/features/chat/composer/chat-composer.tsx min-h": "composer actions: Chat-owned, 44 px before this guard (needs Chat team review)",
+}
+export function plainPxFindings(src: string): { token: string; cls: string; line: number }[] {
+  const out: { token: string; cls: string; line: number }[] = []
+  for (const m of src.matchAll(PLAIN_PX)) {
+    if (inComment(src, m.index!)) continue
+    // Handed back above the phone breakpoint: `h-[44px] sm:h-8`, `min-h-[44px] sm:min-h-9`.
+    if (new RegExp(`(^|\\s)(sm|md|lg|xl):${m[1]}-`).test(literalAround(src, m.index!))) continue
+    out.push({ token: m[1], cls: m[0], line: lineOf(src, m.index!) })
+  }
+  return out
+}
+
 function files(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = path.join(dir, name)
@@ -126,15 +159,10 @@ describe("coarse-pointer tap targets", () => {
       for (const f of files(path.join(ROOT, d))) {
         const rel = path.relative(ROOT, f)
         const src = readFileSync(f, "utf8")
-        for (const m of src.matchAll(FLOOR)) {
-          if (inComment(src, m.index!)) continue
-          const token = m[2] + "-" + m[3]
-          const lit = literalAround(src, m.index!)
-          // A px floor in the same class string already guarantees the target.
-          if (hasPxFloor(lit, m[1], m[2])) continue
-          const key = `${rel} ${token}`
+        for (const hit of floorFindings(src)) {
+          const key = `${rel} ${hit.token}`
           if (FLOOR_ALLOW[key]) { seen.add(key); continue }
-          found.push(`${rel}:${lineOf(src, m.index!)}: ${m[0]}`)
+          found.push(`${rel}:${hit.line}: ${hit.cls}`)
         }
       }
     }
@@ -163,5 +191,35 @@ describe("coarse-pointer tap targets", () => {
     expect(found).toEqual([])
     for (const k of Object.keys(FIXED_ALLOW)) expect(seen.has(k), `stale allowlist entry: ${k}`).toBe(true)
   })
-})
 
+  it("keeps the fine-pointer size and adds a coarse px floor (scanner cases)", () => {
+    // The intended pattern passes …
+    expect(floorFindings('<a className="min-h-11 coarse:min-h-[44px]" />')).toEqual([])
+    expect(floorFindings('<b className="min-h-12 px-3 coarse:min-h-[44px]" />')).toEqual([])
+    expect(plainPxFindings('<a className="min-h-11 coarse:min-h-[44px]" />')).toEqual([])
+    expect(plainPxFindings('<a className="h-[44px] sm:h-8" />')).toEqual([])
+    // … a bare scale floor, or one a different variant's px floor does not cover, fails …
+    expect(floorFindings('<a className="min-h-11" />')).toHaveLength(1)
+    expect(floorFindings('<a className="min-h-12 group-data-[mobile=true]/surface:min-h-12 coarse:min-h-[44px]" />').map((f) => f.cls)).toEqual(["group-data-[mobile=true]/surface:min-h-12"])
+    // … and so does a plain px floor that grows the fine-pointer size.
+    expect(plainPxFindings('<a className="flex min-h-[44px] items-center" />')).toHaveLength(1)
+    expect(plainPxFindings('<a className="group-data-[mobile=true]/surface:min-h-[44px]" />')).toEqual([])
+  })
+
+  it("has no plain min-h/min-w/h px floor outside phone-only controls", () => {
+    const found: string[] = []
+    const seen = new Set<string>()
+    for (const d of DIRS) {
+      for (const f of files(path.join(ROOT, d))) {
+        const rel = path.relative(ROOT, f)
+        for (const hit of plainPxFindings(readFileSync(f, "utf8"))) {
+          const key = `${rel} ${hit.token}`
+          if (PX_ALLOW[key]) { seen.add(key); continue }
+          found.push(`${rel}:${hit.line}: ${hit.cls}`)
+        }
+      }
+    }
+    expect(found).toEqual([])
+    for (const k of Object.keys(PX_ALLOW)) expect(seen.has(k), `stale allowlist entry: ${k}`).toBe(true)
+  })
+})

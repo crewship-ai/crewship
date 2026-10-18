@@ -845,7 +845,7 @@ export function AddCredentialWizard({
                     and a credential that can only be tagged after the fact tends
                     never to be. */}
                 <CreateSurfaceField label="Tags" hint="optional" htmlFor="cred-tags">
-                  <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9">
+                  <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9 coarse:min-h-[44px]">
                     {tags.map((t) => (
                       <Badge key={t} variant="outline" className={cn("gap-1 type-meta font-mono", credentialTagClassName(t))}>
                         {t}
@@ -912,13 +912,13 @@ export function AddCredentialWizard({
                             if (selected) return
                             changeInput(() => { setDeviceBusy(false); setLoginMode(method.mode); setSignIn(method.method); setPrimaryValue("") })
                           }}
-                          className={cn("min-h-[44px] rounded-lg border px-3 py-2 text-left text-sm transition-colors", selected ? "border-primary/60 bg-primary/10" : "border-border/60 bg-card hover:bg-surface-raised")}>{method.label}</button>
+                          className={cn("min-h-10 coarse:min-h-[44px] rounded-lg border px-3 py-2 text-left text-sm transition-colors", selected ? "border-primary/60 bg-primary/10" : "border-border/60 bg-card hover:bg-surface-raised")}>{method.label}</button>
                       })}
                     </div>}
                     {initial?.credentialId && provider === "OPENAI" && loginMode === "subscription" && <CardNote>Import a fresh Codex login to update this account and keep its assignments.</CardNote>}
                     {loginMode === "api_key" && connectionGuide ? <div className="space-y-2">
                       <p className="type-meta text-muted-foreground">{connectionGuide.instruction}</p>
-                      <a href={connectionGuide.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[44px] items-center text-sm font-medium text-primary hover:underline">Get API key ↗</a>
+                      <a href={connectionGuide.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 coarse:min-h-[44px] items-center text-sm font-medium text-primary hover:underline">Get API key ↗</a>
                       {connectionGuide.note && <p className="type-meta text-muted-foreground">{connectionGuide.note}</p>}
                     </div> : login.hint && !usingDevice && <CardNote>{login.hint}</CardNote>}
                   </div>
@@ -1145,7 +1145,7 @@ export function AddCredentialWizard({
                   <CreateSurfaceField label="Crews">
                     <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" role="combobox" className="h-[44px] w-full justify-between font-normal text-sm sm:h-9">
+                        <Button variant="outline" role="combobox" className="h-[44px] w-full justify-between font-normal text-sm sm:h-9 coarse:h-[44px]">
                           {crewIds.length === 0 ? "Select crews…" : `${crewIds.length} selected`}
                           <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
                         </Button>
@@ -1331,7 +1331,7 @@ function ChoiceButton({
       aria-pressed={selected}
       onClick={onClick}
       className={cn(
-        "flex min-h-[44px] items-center justify-center rounded-lg border px-3 py-2 text-center type-meta font-medium transition-colors",
+        "flex min-h-10 coarse:min-h-[44px] items-center justify-center rounded-lg border px-3 py-2 text-center type-meta font-medium transition-colors",
         selected
           ? tone === "warn"
             ? "border-warn/50 bg-warn/10 text-warn"
