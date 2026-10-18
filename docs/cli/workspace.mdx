@@ -553,3 +553,24 @@ crewship --workspace WORKSPACE workspace member access preset apply MEMBER --fil
 ```
 
 The command resolves the member once, sends one write and returns canonical policy/provenance in table/JSON/YAML/NDJSON. Unknown/trailing/oversized or malformed consent is rejected before network access. Conflicts/denials exit nonzero without rereading, retrying or replacing consent. Recompute and review a new preview after409; inspect current policy first after an uncertain write outcome.
+
+## Review and transfer content ownership
+
+Review content requiring a human successor before removing a workspace member:
+
+```bash
+crewship workspace page-ownership list --owner USER_ID --limit 25
+crewship workspace page-ownership list --owner USER_ID --cursor NEXT_CURSOR
+crewship workspace page-ownership transfer PAGE_ID --expected-owner USER_ID --successor READER_ID
+```
+
+Choose an eligible successor from the list. The transfer takes effect immediately
+and preserves content and grant records. A successor who has lost read access,
+or an owner changed since review, causes refusal instead of an automatic grant.
+Workspace administrator access is required. Instance administrator access alone
+does not grant access to private content metadata. Use `--format json` for
+machine-readable responses, including `next_cursor` when more results exist.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.

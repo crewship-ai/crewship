@@ -386,6 +386,12 @@ func (h *AdminGDPRHandler) finalizeGDPRAction(ctx context.Context, id string, sc
 	if finalErr != nil {
 		status = "failed"
 		errMsg = finalErr.Error()
+		var needsManual *ErrPagesNeedManualTransfer
+		if errors.As(finalErr, &needsManual) {
+			// Audit storage is not a private Page view. Preserve the failure
+			// reason and matcher IDs without copying Page names into history.
+			errMsg = "page_ownership_transfer_required: unresolved Page IDs " + strings.Join(needsManual.PageIDs, ", ")
+		}
 	}
 	if _, err := h.db.ExecContext(ctx, `
 		UPDATE gdpr_actions
@@ -500,12 +506,29 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 				"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
 		}
 		h.finalizeGDPRAction(r.Context(), actionID, scope, err)
-		writeJSON(w, status, map[string]any{
+		response := map[string]any{
 			"action_id":    actionID,
 			"data_subject": targetID,
 			"workspace_id": wsID,
 			"error":        msg,
-		})
+		}
+		if needsManual != nil {
+			// The GDPR route also admits instance-only administrators. Re-read
+			// current Page visibility after the failed custody transaction;
+			// middleware's role snapshot may have changed during body upload.
+			ph := NewPageHandler(h.db, nil, h.logger)
+			role, roleErr := ph.liveContentHumanRole(r.Context(), wsID, actorID)
+			detailed := roleErr == nil && canRole(role, "manage")
+			if !detailed && !isInstanceAdmin(r, h.db) {
+				response["error"] = "active trusted administrator required"
+				writeJSON(w, http.StatusForbidden, response)
+				return
+			}
+			for key, value := range pageOwnershipConflictPayload("cannot erase this user: ", needsManual, detailed) {
+				response[key] = value
+			}
+		}
+		writeJSON(w, status, response)
 		return
 	}
 
