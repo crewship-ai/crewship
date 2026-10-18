@@ -204,7 +204,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_every_browser_spec_is_classified_once(self):
         text = self.text('nightly-e2e.yml')
         paths = []
-        for name in ('GATE_SPECS', 'DRIFT_SPECS', 'EXCLUDED_SPECS'):
+        for name in ('GATE_SPECS', 'DRIFT_SPECS', 'HARBOR2_SPECS', 'EXCLUDED_SPECS'):
             block = re.search(r'^  ' + name + r': >-\n((?:    [^\n]+\n)+)', text, re.M).group(1)
             paths.extend(block.split())
         self.assertEqual(len(paths), len(set(paths)), 'duplicate test bucket membership')
