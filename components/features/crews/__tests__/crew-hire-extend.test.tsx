@@ -62,7 +62,7 @@ describe("RehireDialog in extend mode", () => {
     const onRehired = vi.fn()
     render(<RehireDialog open onOpenChange={vi.fn()} workspaceId="ws1" agent={{ id: "a3", name: "Pager" }} extend onRehired={onRehired} />)
     expect(screen.getByText("Extend Pager")).toBeInTheDocument()
-    expect(screen.getByText(/from now/i)).toBeInTheDocument()
+    expect(screen.getByText(/The new time counts from now/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/For how long/), { target: { value: "120" } })
     fireEvent.change(screen.getByLabelText(/Why/), { target: { value: "Still paging" } })
     fireEvent.click(screen.getByRole("button", { name: "Extend" }))

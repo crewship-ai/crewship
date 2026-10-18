@@ -27,6 +27,7 @@ import { CrewTools } from "./crew-tools"
 import { CrewEnvironment } from "./crew-environment"
 import { CrewSettings } from "./crew-settings"
 import { HireDialog, RehireDialog } from "./crew-hire-dialog"
+import { useCrewSpend } from "./crew-spend"
 import { MemoryWorkspace } from "./memory-workspace"
 import { CrewMemoryCards } from "./crew-memory"
 import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
@@ -106,12 +107,16 @@ export function CrewCanvas({
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [hireOpen, setHireOpen] = useState(false)
   const [rehireAgent, setRehireAgent] = useState<AgentSummary | null>(null)
+  const [extendingHire, setExtendingHire] = useState(false)
   const [tick, setTick] = useState(0)
 
   const ownProvisioning = useProvisioningStatus(provisioningProp ? null : workspaceId)
   const provisioning = provisioningProp ?? ownProvisioning
   const provisioningCrew = provisioning.detail.find((d) => d.id === crew?.id)
   const crewId = crew?.id
+  // Activity › Spend is for owners and admins; the server does not check, so
+  // nothing is requested for anyone else (#3476).
+  const spend = useCrewSpend(workspaceId, crewId, isAdmin)
 
   useRealtimeEvent("crew.updated", useCallback(() => setTick((n) => n + 1), []))
 
@@ -302,6 +307,7 @@ export function CrewCanvas({
               onTab={onTabChange}
               onNewAgent={() => newAgent(crew.slug)}
               onHire={canUpdate ? () => setHireOpen(true) : undefined}
+              spend={spend}
             />
           )}
           {tab === "team" && (
@@ -316,7 +322,9 @@ export function CrewCanvas({
                 onNewAgent={() => newAgent(crew.slug)}
                 onHire={() => setHireOpen(true)}
                 onApprove={(a) => void approveHire(a)}
-                onRehire={setRehireAgent}
+                onRehire={(a) => { setExtendingHire(false); setRehireAgent(a) }}
+                onExtend={canUpdate ? (a) => { setExtendingHire(true); setRehireAgent(a) } : undefined}
+                costByAgent={spend?.byAgent ?? null}
                 busyAgentId={busyAgent}
               />
               {roster.hasMore && <button type="button" className="text-body text-primary-hover hover:underline" disabled={roster.loadingMore} onClick={() => void roster.loadMore()}>Load more agents</button>}
@@ -341,7 +349,7 @@ export function CrewCanvas({
           )}
           {tab === "memory" && (
             <>
-              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} />
+              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} canDecideProposals={isAdmin} />
               <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />
             </>
           )}
@@ -385,6 +393,7 @@ export function CrewCanvas({
         onOpenChange={(o) => { if (!o) setRehireAgent(null) }}
         workspaceId={workspaceId}
         agent={rehireAgent}
+        extend={extendingHire}
         onRehired={() => { void roster.refresh(); onCrewChanged() }}
       />
       <ConfirmDialog
