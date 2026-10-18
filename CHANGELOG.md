@@ -23,6 +23,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
+
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
 - Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
