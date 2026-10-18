@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import * as React from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 let mobile = false
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
@@ -92,6 +92,49 @@ describe("Peek", () => {
         await openAndClose()
       } finally {
         mobile = false
+      }
+    })
+
+    // COM-15 (nightly 39116538511): in a browser the sheet slides out, so it is
+    // still in the DOM, holding focus, for the length of its exit animation.
+    // jsdom has no animations; make the closed dialog report one, so Radix
+    // Presence keeps it mounted until animationend, as Chromium does.
+    it("returns focus after the exit animation, not while the closing sheet still holds it", async () => {
+      const realStyle = window.getComputedStyle
+      const spy = vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+        const real = realStyle.call(window, el, pseudo)
+        return new Proxy(real, {
+          get(target, prop) {
+            if (prop === "animationName" && el.getAttribute("role") === "dialog") {
+              return el.getAttribute("data-state") === "closed" ? "peek-exit" : "none"
+            }
+            const v = Reflect.get(target, prop)
+            return typeof v === "function" ? v.bind(target) : v
+          },
+        })
+      })
+      const hadEscape = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      if (!hadEscape) vi.stubGlobal("CSS", { escape: (s: string) => s })
+      try {
+        render(<Harness returnFocus />)
+        const opener = screen.getByRole("button", { name: "row" })
+        opener.focus()
+        fireEvent.click(opener)
+        const dialog = screen.getByRole("dialog")
+        expect(document.activeElement).toBe(dialog)
+        fireEvent.keyDown(dialog, { key: "Escape" })
+        // Mid-animation: still mounted, closed, focus still inside it.
+        await new Promise((r) => setTimeout(r, 20))
+        expect(dialog).toHaveAttribute("data-state", "closed")
+        expect(dialog.isConnected).toBe(true)
+        const end = new Event("animationend", { bubbles: true })
+        Object.defineProperty(end, "animationName", { value: "peek-exit" })
+        act(() => { dialog.dispatchEvent(end) })
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+        await waitFor(() => expect(document.activeElement).toBe(opener))
+      } finally {
+        spy.mockRestore()
+        if (!hadEscape) vi.unstubAllGlobals()
       }
     })
 
