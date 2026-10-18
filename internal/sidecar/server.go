@@ -592,6 +592,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/documents/draft":
+				s.handleDocumentDraft(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/draft":
+				s.handleDocumentDraft(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/create":
 				s.handleDocumentCreate(w, r)
 				return

@@ -73,6 +73,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
 - **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+- **Document creation runs can save confirmed draft checkpoints.** An original drafting request permits guarded edits only to its new document in the same live run. Exact retries preserve saved work; a human edit or replacement run never silently extends the permission.
 
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 

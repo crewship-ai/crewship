@@ -26,6 +26,11 @@ import (
 )
 
 func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
+	t.Run("legacy-create-only", func(t *testing.T) { testDocumentCreationManagedRouterSidecarCLI(t, false) })
+	t.Run("explicit-drafting", func(t *testing.T) { testDocumentCreationManagedRouterSidecarCLI(t, true) })
+}
+
+func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	if os.Getenv("CREWSHIP_DOCUMENT_CREATE") != "1" {
 		t.Fatal("requires explicit owned Node24/frozen Docs installation opt-in")
 	}
@@ -37,7 +42,7 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 	if err != nil || !strings.HasPrefix(string(version), "v24.") {
 		t.Fatalf("Node24 required: %s %v", version, err)
 	}
-	f, intent := documentCreationAdmissionFixture(t)
+	f, intent := documentCreationAdmissionFixture(t, drafting)
 	if err := bindCreation(f, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +146,8 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 	if err = os.WriteFile(file, []byte(authoring), 0600); err != nil {
 		t.Fatal(err)
 	}
-	execute := func(inputFile string) ([]byte, error) {
-		command := exec.CommandContext(t.Context(), binary, "doc", "create", "--file", inputFile)
+	executeDoc := func(args ...string) ([]byte, error) {
+		command := exec.CommandContext(t.Context(), binary, append([]string{"doc"}, args...)...)
 		for _, entry := range os.Environ() {
 			if !strings.HasPrefix(entry, "CREWSHIP_") && !strings.HasPrefix(entry, "HTTP_PROXY=") {
 				command.Env = append(command.Env, entry)
@@ -151,6 +156,7 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 		command.Env = append(command.Env, "CREWSHIP_AGENT_TOKEN="+token, "CREWSHIP_SERVER=https://untrusted.invalid", "CREWSHIP_PROFILE=must-not-load-human-profile", "HTTP_PROXY=http://127.0.0.1:9")
 		return command.CombinedOutput()
 	}
+	execute := func(inputFile string) ([]byte, error) { return executeDoc("create", "--file", inputFile) }
 	output, err := execute(file)
 	if err != nil {
 		t.Fatalf("actual protected CLI create: %v %s", err, output)
@@ -253,6 +259,272 @@ func TestDocumentCreationManagedRouterSidecarCLI(t *testing.T) {
 	var actor string
 	if err = h.db.QueryRow(`SELECT actor FROM document_receipts WHERE page_id=?`, created.PageID).Scan(&actor); err != nil || actor != "agent:"+f.a.AgentID+":"+run {
 		t.Fatalf("creation audit actor %s %v", actor, err)
+	}
+	if drafting {
+		viewRaw, err := executeDoc("draft", "view")
+		if err != nil {
+			t.Fatalf("actual drafting view after valid creation: %v %s", err, viewRaw)
+		}
+		var view struct {
+			PageID     string                 `json:"page_id"`
+			Schema     int                    `json:"schema"`
+			Rev        int64                  `json:"rev"`
+			Generation int64                  `json:"generation"`
+			Epoch      string                 `json:"epoch"`
+			Targets    []DocumentOutlineBlock `json:"targets"`
+		}
+		if len(viewRaw) > 64<<10 || json.Unmarshal(viewRaw, &view) != nil || view.PageID != created.PageID || view.Schema != 3 || view.Rev != 0 || view.Epoch == "" || len(view.Targets) == 0 || bytes.Contains(viewRaw, []byte(`"snapshot"`)) || bytes.Contains(viewRaw, []byte(`"updates"`)) {
+			t.Fatalf("actual drafting view lacks bounded consent-bound targets: %s", viewRaw)
+		}
+		var target DocumentOutlineBlock
+		for _, candidate := range view.Targets {
+			if candidate.Type == "paragraph" && candidate.Text == "Pilot with one team and review feedback." {
+				target = candidate
+			}
+		}
+		if target.ID == "" || len(target.Hash) != 64 {
+			t.Fatal("draft view did not expose the real saved paragraph")
+		}
+		// New draft tools return direct semantic JSON; doc_create retains its
+		// original HTTP-status wrapper above.
+		mcpDraft := func(name string, arguments any, wantError bool) []byte {
+			t.Helper()
+			payload := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": name, "arguments": arguments}}
+			raw, status, err := request("http://127.0.0.1:9119", "POST", "/mcp/routines", token, "", payload)
+			var envelope struct {
+				Result struct {
+					IsError bool `json:"isError"`
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"result"`
+			}
+			if err != nil || status != 200 || json.Unmarshal(raw, &envelope) != nil || len(envelope.Result.Content) != 1 || envelope.Result.Content[0].Type != "text" || envelope.Result.IsError != wantError {
+				t.Fatalf("actual draft MCP %s: HTTP%d %v %s", name, status, err, raw)
+			}
+			return []byte(envelope.Result.Content[0].Text)
+		}
+		writeJSONFile := func(name string, value any) string {
+			t.Helper()
+			data, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}
+		type draftRequest struct {
+			ID     string `json:"id"`
+			Schema int    `json:"schema"`
+			PageID string `json:"page_id"`
+			Epoch  string `json:"epoch"`
+			IfRev  int64  `json:"ifRev"`
+			Target string `json:"target,omitempty"`
+			IfHash string `json:"ifHash,omitempty"`
+			Text   string `json:"text,omitempty"`
+		}
+		type draftPacket struct {
+			Generation int64        `json:"generation"`
+			Patch      draftRequest `json:"patch"`
+			Checkpoint draftRequest `json:"checkpoint"`
+		}
+		type preparedDraft struct {
+			Status string      `json:"status"`
+			Packet draftPacket `json:"packet"`
+		}
+		prepareInput := map[string]any{"view": json.RawMessage(viewRaw), "target": target.ID, "text": "CONFIRMED-A checkpoint content", "mutation_id": "managed-draft-a"}
+		preparedRaw, err := executeDoc("draft", "prepare", "--file", writeJSONFile("prepare-a.json", prepareInput))
+		var prepared preparedDraft
+		if err != nil || json.Unmarshal(preparedRaw, &prepared) != nil || prepared.Status != "prepared_unsaved" {
+			t.Fatalf("actual immutable prepare: %v %s", err, preparedRaw)
+		}
+		packet := prepared.Packet
+		if packet.Generation != view.Generation || packet.Patch.ID != "managed-draft-a" || packet.Patch.Schema != view.Schema || packet.Patch.PageID != created.PageID || packet.Patch.Epoch != view.Epoch || packet.Patch.IfRev != view.Rev || packet.Patch.Target != target.ID || packet.Patch.IfHash != target.Hash || packet.Patch.Text != "CONFIRMED-A checkpoint content" || packet.Checkpoint.ID != "managed-draft-a-checkpoint" || packet.Checkpoint.IfRev != view.Rev+1 || packet.Checkpoint.Epoch != view.Epoch || packet.Checkpoint.PageID != created.PageID {
+			t.Fatalf("prepare changed the original server scope: %+v", packet)
+		}
+		packetFile := filepath.Join(dir, "immutable-a.json")
+		if err := os.WriteFile(packetFile, preparedRaw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		type appliedDraft struct {
+			Status     string                   `json:"status"`
+			Patch      DocumentMutationResponse `json:"patch"`
+			Checkpoint DocumentMutationResponse `json:"checkpoint"`
+		}
+		assertApplied := func(raw []byte) {
+			t.Helper()
+			var result appliedDraft
+			if json.Unmarshal(raw, &result) != nil || result.Status != "checkpointed" || result.Patch.ID != packet.Patch.ID || result.Patch.Rev != 1 || result.Patch.Epoch != view.Epoch || result.Patch.Actor != "agent:"+f.a.AgentID+":"+run || result.Patch.Kind != "agent" || result.Checkpoint.ID != packet.Checkpoint.ID || result.Checkpoint.Checkpoint != packet.Checkpoint.ID || result.Checkpoint.Rev != 1 || result.Checkpoint.Epoch != view.Epoch {
+				t.Fatalf("actual commit/pin confirmation: %s", raw)
+			}
+		}
+		applied, err := executeDoc("draft", "apply", "--file", packetFile)
+		if err != nil {
+			t.Fatalf("actual semantic patch and pin: %v %s", err, applied)
+		}
+		assertApplied(applied)
+		for _, retry := range []string{"apply", "checkpoint"} {
+			raw, err := executeDoc("draft", retry, "--file", packetFile)
+			if err != nil {
+				t.Fatalf("actual exact %s retry: %v %s", retry, err, raw)
+			}
+			if retry == "apply" {
+				assertApplied(raw)
+			} else {
+				var result appliedDraft
+				if json.Unmarshal(raw, &result) != nil || result.Status != "checkpointed" || result.Checkpoint.ID != packet.Checkpoint.ID || result.Checkpoint.Rev != 1 {
+					t.Fatalf("checkpoint retry changed pin: %s", raw)
+				}
+			}
+		}
+		assertApplied(mcpDraft("doc_draft_apply", map[string]any{"packet": packet}, false))
+		pin := mcpDraft("doc_draft_checkpoint", map[string]any{"packet": packet}, false)
+		var pinned appliedDraft
+		if json.Unmarshal(pin, &pinned) != nil || pinned.Status != "checkpointed" || pinned.Checkpoint.Checkpoint != packet.Checkpoint.ID || pinned.Checkpoint.Rev != 1 {
+			t.Fatalf("MCP pin retry changed result: %s", pin)
+		}
+		unchanged, err := os.ReadFile(packetFile)
+		if err != nil || !bytes.Equal(unchanged, preparedRaw) {
+			t.Fatal("apply/retry rewrote the original immutable packet")
+		}
+		changedPacket := packet
+		changedPacket.Patch.Text = "Changed same-ID payload must not replace A"
+		changed, err = executeDoc("draft", "apply", "--file", writeJSONFile("changed-packet.json", changedPacket))
+		if err == nil || !bytes.Contains(changed, []byte("409")) {
+			t.Fatalf("changed same-ID packet not conflicted: %v %s", err, changed)
+		}
+		mcpDraft("doc_draft_apply", map[string]any{"packet": changedPacket}, true)
+		assertDurableA := func() {
+			t.Helper()
+			raw, status, err := request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
+			var current DocumentStateResponse
+			if err != nil || status != 200 || json.Unmarshal(raw, &current) != nil || current.PageID != created.PageID || current.Rev != 1 || !bytes.Contains(raw, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(raw, []byte("UNCONFIRMED-B")) || bytes.Contains(raw, []byte(changedPacket.Patch.Text)) {
+				t.Fatalf("durable A changed: HTTP%d %v %s", status, err, raw)
+			}
+			var head, cursor, checkpointRev int64
+			var receipts, checkpoints int
+			if err := h.db.QueryRow(`SELECT head_rev FROM documents WHERE page_id=?`, created.PageID).Scan(&head); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT draft_rev FROM document_creation_consents WHERE result_page_id=?`, created.PageID).Scan(&cursor); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT rev FROM document_checkpoints WHERE page_id=? AND id=?`, created.PageID, packet.Checkpoint.ID).Scan(&checkpointRev); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT count(*) FROM document_receipts WHERE page_id=?`, created.PageID).Scan(&receipts); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT count(*) FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&checkpoints); err != nil {
+				t.Fatal(err)
+			}
+			if head != 1 || cursor != 1 || checkpointRev != 1 || receipts != 3 || checkpoints != 1 {
+				t.Fatalf("retry/conflict changed durable rows: head%d cursor%d pin%d receipts%d pins%d", head, cursor, checkpointRev, receipts, checkpoints)
+			}
+		}
+		assertDurableA()
+		nextView := mcpDraft("doc_draft_view", map[string]any{}, false)
+		if json.Unmarshal(nextView, &view) != nil || view.Rev != 1 || view.Epoch != packet.Patch.Epoch || view.PageID != created.PageID {
+			t.Fatalf("draft reread changed identity/fence: %s", nextView)
+		}
+		pendingInput := map[string]any{"view": json.RawMessage(nextView), "target": target.ID, "text": "UNCONFIRMED-B same-document pending content", "mutation_id": "managed-draft-b"}
+		pendingRaw, err := executeDoc("draft", "prepare", "--file", writeJSONFile("prepare-b.json", pendingInput))
+		var pending preparedDraft
+		if err != nil || json.Unmarshal(pendingRaw, &pending) != nil || pending.Status != "prepared_unsaved" || pending.Packet.Patch.IfRev != 1 || pending.Packet.Patch.PageID != created.PageID || pending.Packet.Patch.Target != target.ID || pending.Packet.Patch.Text != pendingInput["text"] {
+			t.Fatalf("same-Document B was not prepared: %v %s", err, pendingRaw)
+		}
+		var mcpPending preparedDraft
+		if raw := mcpDraft("doc_draft_prepare", pendingInput, false); json.Unmarshal(raw, &mcpPending) != nil || mcpPending != pending {
+			t.Fatalf("MCP prepare rederived original packet: %s", raw)
+		}
+		// Preparing B is local only: it has not been sent to patch or checkpoint.
+		assertDurableA()
+		fresh := f.a
+		fresh.RunID, fresh.MessageID = "managed-fresh-run", "principal-next-message"
+		if err := captureArtifactChatPrincipal(httptest.NewRequest("POST", "/", nil), h.db, fresh.RunID, workspace, fresh.AgentID, fresh.CrewID, fresh.ChatID, fresh.MessageID, f.receipt); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('managed-fresh-start',?,?,?,'run.started','system','test',?)`, workspace, fresh.CrewID, fresh.AgentID, fresh.RunID)
+		if err := h.checkArtifactRunPrincipal(t.Context(), &fresh); err != nil {
+			t.Fatalf("fresh principal control: %v", err)
+		}
+		freshToken := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, fresh.CrewID), workspace, fresh.AgentID, fresh.RunID)
+		crewToken := internaltoken.DeriveCrewToken(h.artifactMasterToken, workspace, fresh.CrewID)
+		for _, method := range []string{"GET", "POST"} {
+			var body any
+			if method == "POST" {
+				body = map[string]any{"operation": "patch", "generation": pending.Packet.Generation, "request": pending.Packet.Patch}
+			}
+			raw, status, err := request(host.URL, method, "/api/v1/internal/documents/draft", freshToken, crewToken, body)
+			if err != nil || status != 403 || bytes.Contains(raw, []byte("CONFIRMED-A")) || bytes.Contains(raw, []byte("UNCONFIRMED-B")) {
+				t.Fatalf("new live run inherited draft rights: HTTP%d %v %s", status, err, raw)
+			}
+		}
+		assertDurableA()
+		// A human's intervening semantic edit invalidates the original agent cursor.
+		raw, status, err = request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
+		if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil {
+			t.Fatalf("human edit control: HTTP%d %v", status, err)
+		}
+		var humanTarget DocumentOutlineBlock
+		for _, candidate := range saved.Outline {
+			if candidate.ID == target.ID {
+				humanTarget = candidate
+			}
+		}
+		if humanTarget.ID == "" || humanTarget.Text != "CONFIRMED-A checkpoint content" {
+			t.Fatal("human cannot see confirmed A target")
+		}
+		humanPatch := map[string]any{"id": "managed-human-edit", "schema": saved.Schema, "page_id": created.PageID, "epoch": saved.Epoch, "ifRev": saved.Rev, "target": humanTarget.ID, "ifHash": humanTarget.Hash, "text": "Human intervening content"}
+		raw, status, err = request(host.URL, "POST", "/api/v1/pages/"+created.Slug+"/document/patch", human, "", humanPatch)
+		if err != nil || status != 200 {
+			t.Fatalf("actual intervening human edit: HTTP%d %v %s", status, err, raw)
+		}
+		refusedView, err := executeDoc("draft", "view")
+		if err == nil || !bytes.Contains(refusedView, []byte("409")) {
+			t.Fatalf("agent reread silently rebound scope: %v %s", err, refusedView)
+		}
+		refusedPatch, err := executeDoc("draft", "apply", "--file", writeJSONFile("pending-b.json", pending))
+		if err == nil || !bytes.Contains(refusedPatch, []byte("409")) {
+			t.Fatalf("pending B rebased after human edit: %v %s", err, refusedPatch)
+		}
+		raw, status, err = request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
+		if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil || saved.Rev != 2 || !bytes.Contains(raw, []byte("Human intervening content")) || bytes.Contains(raw, []byte("UNCONFIRMED-B")) {
+			t.Fatalf("refusal lost human edit or published B: HTTP%d %v %s", status, err, raw)
+		}
+		for _, check := range []struct {
+			query string
+			want  int
+		}{
+			{`SELECT count(*) FROM document_creations`, 1}, {`SELECT count(*) FROM documents`, 1},
+			{`SELECT count(*) FROM document_checkpoints`, 1}, {`SELECT count(*) FROM document_receipts`, 4},
+			{`SELECT count(*) FROM page_grants WHERE subject_type='agent'`, 0},
+			{`SELECT count(*) FROM document_receipts WHERE id='managed-draft-b'`, 0},
+		} {
+			var count int
+			if err := h.db.QueryRow(check.query).Scan(&count); err != nil || count != check.want {
+				t.Fatalf("draft side effects: %s count%d want%d %v", check.query, count, check.want, err)
+			}
+		}
+		if err := filepath.Walk(filepath.Join(dir, "storage"), func(_ string, info os.FileInfo, err error) error {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				return fmt.Errorf("private Document unexpectedly published a storage file")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("actual CLI+MCP draft: immutable original packet, semantic commit and pinned A, exact retries/conflict, B prepared but never committed, live human cursor fence, fresh-run denial, no copies/grants/storage publication; no model/container-interruption evidence")
 	}
 	t.Log(fmt.Sprintf("actual protected CLI binary/fixed sidecar/Router/private Node24: schema3 content+server identities, CLI+MCP exact retry, changed409, one durable creation, durable creation provenance, human owner read, no continuation delegation; no model run; Page %s", created.PageID))
 }

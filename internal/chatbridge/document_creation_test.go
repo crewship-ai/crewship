@@ -200,6 +200,13 @@ func TestDocumentCreationTrustedBridgePersistsOriginalConsent(t *testing.T) {
 			if storedID != messageID || submission != want || intent.SubmissionID != want || text != content {
 				t.Fatal("durable original human message or consent changed")
 			}
+			var drafting bool
+			if err := r.db.QueryRow(`SELECT drafting_allowed FROM document_creation_consents WHERE message_id=?`, messageID).Scan(&drafting); err != nil {
+				t.Fatal(err)
+			}
+			if drafting != !explicit || intent.Drafting != drafting {
+				t.Fatal("literal creation or explicit one-shot purpose changed")
+			}
 		})
 	}
 }
@@ -234,6 +241,10 @@ func TestDocumentCreationProvisioningPreservesOriginalState(t *testing.T) {
 	}
 	if messageID != original.OriginalTriggerMessageID || submission != messageID {
 		t.Fatal("resume minted another submission")
+	}
+	var drafting bool
+	if err := r.db.QueryRow(`SELECT drafting_allowed FROM document_creation_consents WHERE message_id=?`, messageID).Scan(&drafting); err != nil || !drafting || !original.DocumentCreationIntent.Drafting {
+		t.Fatalf("resume lost the original drafting purpose: %v", err)
 	}
 }
 
