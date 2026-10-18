@@ -41,9 +41,14 @@ for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials?tab=providers")
-    await expect(page.getByText("No credentials yet", { exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0)
+    // Harbor 2 (vault Q01/Q02): the empty vault is "The vault is empty", and a
+    // deep link to the providers space lands on Secrets with a note instead of
+    // the provider administration.
+    await expect(page.getByRole("heading", { name: "The vault is empty", exact: true })).toBeVisible()
+    await expect(page.getByRole("note").filter({ hasText: "AI provider accounts are managed by owners and admins." })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Add (AI )?provider$/ })).toHaveCount(0)
     await expect(page.getByRole("tab", { name: /Providers/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^AI providers/ })).toHaveCount(0)
     expect(providerReads).toBe(0)
     if (role === "MANAGER") await expect(page.getByRole("button", { name: "Add secret", exact: true }).first()).toBeVisible()
   })
@@ -73,18 +78,21 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.getByText("Example ChatGPT", { exact: true }).first().click()
     await expect(page.getByText("Connection health", { exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: /Rotate/ })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Re-login", exact: true })).toBeVisible()
+    // Harbor 2 (vault Q03): Re-login is "Sign in again" on the account page.
+    await expect(page.getByRole("button", { name: "Sign in again", exact: true }).first()).toBeVisible()
     await expect(page.getByText("Delivered to the agent as", { exact: true })).not.toBeVisible()
     await page.getByText("Connection details", { exact: true }).click()
     await expect(page.getByText("Delivered to the agent as", { exact: true })).toBeVisible()
     await page.getByText("Connection details", { exact: true }).click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/provider-detail-${viewport.width}.png` })
-    await page.getByRole("button", { name: "Edit provider", exact: true }).first().click()
-    await expect(page.getByRole("dialog", { name: /Edit provider/ })).toBeVisible()
+    // Harbor 2 (vault Q04): the Edit dialog became the Settings tab with the
+    // page's save bar. It still edits metadata only — no way to send a token.
+    await page.getByRole("tab", { name: "Settings", exact: true }).click()
     await expect(page.getByRole("checkbox", { name: "Replace the stored secret" })).toHaveCount(0)
+    await expect(page.getByLabel(/token|value|api key/i)).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Work ChatGPT")
-    await page.getByRole("button", { name: "Save changes", exact: true }).click()
+    await page.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Save", exact: true }).click()
     await expect.poll(() => patch?.name).toBe("Work ChatGPT")
     await expect(page.getByRole("heading", { name: "Work ChatGPT", exact: true })).toBeVisible()
     expect(patch).not.toHaveProperty("value")
@@ -113,14 +121,16 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.getByRole("button", { name: "Cancel", exact: true }).click()
     if (viewport.width > 640) {
       // Pin global navigation so its hover overlay cannot cover the vault rail.
-      await expect(page.getByText("All providers", { exact: true })).toBeVisible()
+      // Harbor 2 (vault V-PANEL): the rail's providers entry is the AI
+      // providers space, counting connected accounts only.
+      await expect(page.getByRole("navigation", { name: "Vault spaces" }).getByRole("button", { name: "AI providers 0", exact: true })).toBeVisible()
       // Since #2622 the rail lists only CONNECTED providers — an empty
       // workspace shows none, and the full catalog lives in Add provider
       // (asserted below). Zero-account rows with "N connected accounts"
       // labels must not come back.
       await expect(page.getByLabel(/connected accounts/)).toHaveCount(0)
     }
-    await page.getByRole("button", { name: "Add provider", exact: true }).first().click()
+    await page.getByRole("button", { name: "Add AI provider", exact: true }).first().click()
     for (const product of ["Go", "Zen"]) {
       await page.getByRole("button", { name: new RegExp(`^OpenCode ${product}`) }).click()
       await expect(page.getByLabel("API key", { exact: true })).toBeVisible()
@@ -159,7 +169,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByText("Name and labels · Grok / xAI", { exact: true })).toBeVisible()
     await page.screenshot({ path: `/tmp/provider-guided-grok-${viewport.width}.png` })
     await page.getByRole("button", { name: "Continue", exact: true }).click()
-    await expect(page.getByText("How will you use it?", { exact: true })).toBeVisible()
+    // Harbor 2 (vault Q05): the third step is "Pays for" (was "How will you use it?").
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Pays for", exact: true })).toBeVisible()
     await expect(page.getByRole("group", { name: "How closely Keeper guards it" })).toHaveCount(0)
     await expect(async () => {
       const box = await page.getByRole("dialog").boundingBox()
@@ -197,30 +208,30 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     })
     await page.goto("/credentials")
     if (viewport.width > 640) await pinSidebar(page)
-    // Open from Recently used is unavailable for an unused secret; the rail is
-    // the canonical list. At mobile width it is the panel sheet in the top bar.
-    if (viewport.width < 640) await page.getByRole("button", { name: "Vault", exact: true }).click()
-    await page.getByText("Example certificate", { exact: true }).first().click()
+    // Harbor 2 (vault Q01): the secrets table in the page is the canonical
+    // list at every width; the rail holds views and facets only.
+    await page.getByRole("main").getByRole("button", { name: "Example certificate", exact: true }).click()
     await expect(page.getByTestId("connection-verification")).toContainText("Connection not verified")
     await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Alex")
     await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Jamie")
     // #2669 replaced the one-line role summary with the server's per-action
     // answers. Assert both the section and a decision that can only come from
-    // the /access/me fixture flowing through.
-    await expect(page.getByTestId("credential-access-summary")).toContainText("Your access")
-    await expect(page.getByTestId("credential-access-summary")).toContainText("Edit: Allowed — Allowed by your workspace role")
-    await expect(page.getByText("Access & security", { exact: true })).toBeVisible()
+    // the /access/me fixture flowing through. Harbor 2 (vault Q03) moved them
+    // to the Access tab, next to the Keeper tier (the old "Access & security").
+    await page.getByRole("tab", { name: "Access", exact: true }).click()
+    await expect(page.getByTestId("your-access")).toContainText("Your access")
+    await expect(page.getByTestId("your-access")).toContainText("Edit: Allowed — Allowed by your workspace role")
+    await expect(page.getByRole("radiogroup", { name: "Keeper tier" }).getByRole("radio", { name: "L3" })).toHaveAttribute("aria-checked", "true")
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/credential-detail-${viewport.width}.png` })
-    await page.getByRole("button", { name: "Edit credential", exact: true }).first().click()
-    await expect(page.getByRole("dialog", { name: "Edit credential" })).toBeVisible()
+    // Harbor 2 (vault Q04): the Edit dialog became the Settings tab. The value
+    // is not editable there at all — Replace value is the one way to change
+    // it — so no secret can travel with a metadata save.
+    await page.getByRole("tab", { name: "Settings", exact: true }).click()
     await expect(page.getByLabel(/^Replace certificate/)).toHaveCount(0)
+    await expect(page.getByRole("checkbox", { name: "Replace the stored secret" })).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Renamed certificate")
     await page.getByLabel("Description", { exact: true }).fill("Metadata only")
-    await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
-    await page.getByLabel(/^Replace certificate/).fill("discarded-fixture-only\nsecond-line")
-    await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
-    await expect(page.getByLabel(/^Replace certificate/)).toHaveCount(0)
     await page.getByRole("button", { name: "Edit CA chain (PEM)", exact: true }).click()
     await page.getByLabel("CA chain (PEM)", { exact: true }).fill("new-public-fixture\nsecond-line")
     await page.getByRole("button", { name: "Save CA chain (PEM)", exact: true }).click()
@@ -236,14 +247,17 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole("button", { name: "Remove tag demo" })).toHaveCount(1)
     await page.getByRole("button", { name: "Remove tag demo" }).click()
     await tags.fill("production")
-    await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeInViewport()
+    const save = page.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Save", exact: true })
+    await expect(save).toBeInViewport()
     await page.screenshot({ path: `/tmp/credentials-edit-${viewport.width}.png` })
-    await page.getByRole("button", { name: "Save changes", exact: true }).click()
+    await save.click()
     await expect.poll(() => patch?.name).toBe("Renamed certificate")
     await expect(page.getByRole("heading", { name: "Renamed certificate", exact: true })).toBeVisible()
     await expect(page.getByText("production", { exact: true })).toBeVisible()
     expect(patch).not.toHaveProperty("value")
-    expect(patch?.security_level).toBe(3)
+    // The old dialog re-sent the tier (3) so a metadata save could not reset
+    // it; the save bar sends only what changed, so the tier is never touched.
+    expect(patch).not.toHaveProperty("security_level")
     expect(patch?.tags).toEqual(["production"])
   })
 }
