@@ -120,6 +120,11 @@ func TestPrivateAudienceCustodyAndAuditCatalog(t *testing.T) {
 	if out.Code != 200 || strings.Contains(out.Body.String(), "private-output") {
 		t.Errorf("ADMIN audit catalog disclosed private artifact: %d %s", out.Code, out.Body.String())
 	}
+	// The database also prevents orphaning a private Document; custody must
+	// move to a human successor rather than silently become unassigned.
+	if _, err := r.db.Exec(`UPDATE pages SET owner_user_id=NULL WHERE id='private-output'`); err == nil {
+		t.Fatal("private Document lost its human custodian")
+	}
 }
 
 func TestPrivateAudienceWorkspaceBackupDoesNotBypassPrivacy(t *testing.T) {
