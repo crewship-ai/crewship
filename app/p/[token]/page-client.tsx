@@ -20,7 +20,7 @@ const PUBLIC_PAGE_PATH_RE = /^\/p\/([^/]+)\/?$/
 
 export function PublicPageClient() {
   const token = useUrlSegment(PUBLIC_PAGE_PATH_RE)
-  const { status, page, message, submitting, submit } = usePublicPage(token)
+  const { status, page, message, submitting, submit, reload } = usePublicPage(token)
 
   // The public bar is the only chrome (Harbor 2): no session, no workspace,
   // nothing that would ask the API for an account this reader does not have.
@@ -33,6 +33,7 @@ export function PublicPageClient() {
         message={message}
         submitting={submitting}
         onSubmitPassword={submit}
+        onRetry={reload}
       />
     </div>
   )
