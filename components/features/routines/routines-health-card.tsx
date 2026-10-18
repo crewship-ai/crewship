@@ -69,7 +69,7 @@ export function RoutinesHealthCard({
               </button>
               <span className="flex h-4 w-28 items-end gap-px" role="img" aria-label={row.runCount ? `Last ${plural(row.runCount, "run", "runs")}, oldest first` : "No runs"}>
                 {row.bars.map((b) => (
-                  <i key={b.id} data-testid="health-bar" title={b.label} className={cn("h-full min-w-px flex-1 rounded-[1px]", BAR[b.tone], b.tone === "mut" && "h-1/3")} />
+                  <i key={b.id} data-testid="health-bar" title={b.label} className={cn("h-full min-w-px flex-1 rounded-sm", BAR[b.tone], b.tone === "mut" && "h-1/3")} />
                 ))}
               </span>
               <span className="font-mono text-label tabular-nums text-muted-foreground">
