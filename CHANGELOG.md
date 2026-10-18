@@ -55,6 +55,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 - **Harbor 2 shell.** A 240 px sidebar (a 56 px rail on tablets) with the workspace, Search ⌘K, the sections, Settings, Admin and your profile at the bottom; one 48 px top bar with the area's breadcrumb, the page's title and its one primary action, and the Activity and Inbox bells; each page's header now sits in that top bar instead of a separate strip, with view tabs kept on the page. Phones get a bottom tab bar with More. ⚠️ **Behaviour change:** the profile menu moved from the top bar to the bottom of the sidebar (in More on a phone).
 - **Harbor 2 kit, filters and panels.** Filters open inside a page's side panel, under its Filter button, with at most six values per facet and "All N…" for the rest; on a tablet the side panel starts closed and opens over the page from the top bar. Wizards show every step done when finished, and confirmation lists name what is lost, kept or at risk in words for screen readers. ⚠️ **Behaviour change:** at 768–1279 px the side panel no longer takes a column; open it with the panel button in the top bar.
+### Added
+
+- Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
+
+- Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
+
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
@@ -88,6 +94,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Clear reviewed member preset consent on access loss and ignore late mutation responses from an older verified policy read.
 
 - Settings resource access offers explicit immutable presets for existing Guest resources, with exact previews and confirmation. Saved intent stays separate from live grant authority; conflicts and uncertain writes require reloading before new consent.
+
+- Clarify that resource preset preview, confirmed application and the Settings selector are available; remove obsolete foundation-only descriptions without changing access behavior.
 
 - The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
 
@@ -123,6 +131,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
 - **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+- **Document creation runs can save confirmed draft checkpoints.** An original drafting request permits guarded edits only to its new document in the same live run. Exact retries preserve saved work; a human edit or replacement run never silently extends the permission.
 
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 

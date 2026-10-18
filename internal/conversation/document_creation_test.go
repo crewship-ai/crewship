@@ -16,7 +16,7 @@ import (
 )
 
 // Use the migrated schema and a real captured receipt, without HTTP admission.
-func creationStore(t *testing.T) (*Store, *chataudience.Receipt, documents.CreationIntent, Message) {
+func creationStore(t *testing.T, drafting ...bool) (*Store, *chataudience.Receipt, documents.CreationIntent, Message) {
 	t.Helper()
 	db := testutil.MigratedDB(t).DB
 	for _, query := range []string{
@@ -37,7 +37,10 @@ func creationStore(t *testing.T) (*Store, *chataudience.Receipt, documents.Creat
 	s := NewStore(t.TempDir(), logging.New("error", "json", nil), WithDB(db))
 	t.Cleanup(s.Close)
 	intent := documents.CreationIntent{SubmissionID: "explicit-consent"}
-	msg := Message{ID: "creation-message", AgentID: receipt.AgentID, Role: RoleUser, Content: "Write a complete document", AuthorUserID: receipt.UserID, Metadata: map[string]any{documents.CreationMetadataKey: map[string]any{"submission_id": intent.SubmissionID}}}
+	if len(drafting) > 0 {
+		intent.Drafting = drafting[0]
+	}
+	msg := Message{ID: "creation-message", AgentID: receipt.AgentID, Role: RoleUser, Content: "Write a complete document", AuthorUserID: receipt.UserID, Metadata: map[string]any{documents.CreationMetadataKey: intent}}
 	return s, receipt, intent, msg
 }
 

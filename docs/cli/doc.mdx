@@ -32,11 +32,50 @@ Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
 The result identifies the saved document and its link. If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
-owner and does not grant the run continued access to read or edit the document.
+owner. A one-shot admission grants no later access. If the original human request
+explicitly includes drafting, the same live run may save further guarded drafts
+of that one new document; it receives no access to another Page.
 
 An agent can also call `doc_create` in the Crewship routines MCP tools with the
 same four fields. The tool uses the same run permission and saved result; an
 exact retry can recover that result across the CLI and MCP interfaces.
+
+## `crewship doc draft`
+
+Save progress while fulfilling an admitted creation request. The original human
+request must include drafting permission. These commands use the current run's
+credential and local sidecar, without a saved human profile or a Page selector.
+They apply only to the document created for that request and stop when the run
+ends, its permission expires or is revoked, or a human changes the document.
+A replacement run inherits no drafting permission.
+
+1. Run `crewship doc draft view` to read a bounded view of confirmed headings and
+   paragraphs, their block IDs and hashes, and the document's revision and epoch.
+2. Run `crewship doc draft prepare --file <input.json>` with `view`, `target`,
+   `text` and a stable `mutation_id` of at most 117 ASCII letters, digits, underscores
+   or hyphens. It prepares an immutable edit and checkpoint
+   packet locally; preparation does not save text.
+3. Retain that output and run `crewship doc draft apply --file <packet.json>` to
+   apply the guarded text replacement and checkpoint the confirmed revision.
+
+Use `--file -` for stdin. Keep the original prepared packet after an uncertain
+response. Applying that same packet again recovers its receipts without another
+write. Changing an existing mutation's contents conflicts; rereading does not
+rebase or authorize a replacement edit automatically.
+
+Draft commands return JSON by default and honor `--format json`, `--format yaml`
+and `--format ndjson`. Use JSON output for packets passed to another draft
+command; input files remain JSON. Output formats preserve original integer
+revisions and checkpoint identities.
+
+If the text edit commits but the checkpoint confirmation fails, the edit remains
+saved. The result reports `committed_checkpoint_pending`; retry only its original
+checkpoint with `crewship doc draft checkpoint --file <packet.json>`. Do not
+report committed content as lost or silently generate a new mutation.
+
+The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
+and `doc_draft_checkpoint` use the same permission and immutable requests. They
+do not accept raw Yjs updates or whole-document replacement.
 
 ## `crewship doc status`
 
@@ -82,16 +121,32 @@ create another write. Revoked credentials cannot replay saved requests.
 
 ## Requesting a document in chat
 
-With Document support and the workspace creation policy enabled, use a direct
-private-chat request such as `vytvoř dokument o plánu uvedení produktu` without
-selecting an existing Page. The run creates a new populated document for you
-and returns its saved link. Quoted or ambiguous text does not grant creation
-permission.
+With Document support and the workspace creation policy enabled, open a private
+agent chat without selecting an existing Page. Select **Create document** in the
+composer, then describe what you want and send the message. For example, write
+“Please draft a garden plan. Include three sections!” or “Napiš mi plán zahrady.”
+The request can use Czech or English, punctuation, and multiple lines.
 
-You remain the document's owner. This request does not grant the run permission
-to edit another Page or to keep accessing the document after creation. For an
-uncertain tool confirmation, retry the original input and mutation ID; sending
-a new chat message is a separate request.
+The selection applies to one sent message. It authorizes creating a new private
+document and saving drafts of that document during the original live run.
+Sending successfully clears the selection; changing users or conversations also
+clears it. A failed local send preserves the selection for retry. The control
+is unavailable while Document support is unconfirmed or an existing Page is
+selected. The server rechecks the original human and private-chat permissions.
+
+The composer carries `document_creation_intent` metadata with a `submission_id`
+and `drafting: true`; it leaves the message text unchanged. The older
+`document_creation` metadata shape remains supported for existing clients.
+Sending both shapes is rejected. Text returned by a model does not grant consent.
+
+The narrow command `vytvoř dokument o plánu uvedení produktu` remains a fallback.
+Its topic must be a single line containing letters, digits, spaces or hyphens;
+quoted, negated or ambiguous text does not grant creation permission. Use the
+composer control for other wording.
+
+The run creates a populated document and returns its saved link. Reopening a
+result does not grant a later run permission to edit it. Repeating an uncertain
+operation must reuse the original request, rather than issuing a new chat task.
 
 ## `crewship doc chat-results <chat-id>`
 

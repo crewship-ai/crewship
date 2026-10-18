@@ -74,7 +74,7 @@ func (s *Store) AppendDocumentCreation(ctx context.Context, session string, msg 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO conversation_messages(id,session_id,agent_id,role,content,tool_summary,ts,author_user_id,run_id) VALUES(?,?,?,?,?,?,?,?,?)`, msg.ID, session, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary, msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), msg.AuthorUserID, msg.RunID); err != nil {
 		return fmt.Errorf("insert document creation message: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at) VALUES(?,?,?,?,?,?)`, msg.ID, receipt.WorkspaceID, receipt.UserID, session, intent.SubmissionID, msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z")); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at,drafting_allowed) VALUES(?,?,?,?,?,?,?)`, msg.ID, receipt.WorkspaceID, receipt.UserID, session, intent.SubmissionID, msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), intent.Drafting); err != nil {
 		return fmt.Errorf("insert document creation consent: %w", err)
 	}
 	return tx.Commit()

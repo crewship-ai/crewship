@@ -222,7 +222,9 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	store := documents.New(h.db, h.documentStoreOptions)
-	if _, err = store.InitRequestTx(ctx, tx, documents.Key{WorkspaceID: a.WorkspaceID, PageID: pageID}, request.MutationID, digest, 3, prepared.Snapshot, prepared.Blocks, "agent:"+a.AgentID+":"+a.RunID); err != nil {
+	initialized, initErr := store.InitRequestTx(ctx, tx, documents.Key{WorkspaceID: a.WorkspaceID, PageID: pageID}, request.MutationID, digest, 3, prepared.Snapshot, prepared.Blocks, "agent:"+a.AgentID+":"+a.RunID)
+	if initErr != nil {
+		err = initErr
 		h.logger.Error("created document initialization failed", "error", err)
 		documentAuthorityError(w, err)
 		return
@@ -238,6 +240,10 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
 		replyError(w, 409, "document creation permission already consumed")
+		return
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE document_creation_consents SET draft_generation=?,draft_rev=? WHERE run_id=? AND result_page_id=? AND drafting_allowed=1 AND draft_generation IS NULL`, initialized.Generation, initialized.HeadRev, a.RunID, pageID); err != nil {
+		replyInternalError(w, h.logger, "bind document drafting generation", err)
 		return
 	}
 	if _, err = h.documentCreationAuthority(ctx, a); err != nil {

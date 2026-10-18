@@ -69,6 +69,8 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// run" verb here to guard against in the first place.
 	"POST /agent/run/end":           guardHandlerIdentity,
 	"POST /api/v1/documents/create": guardHandlerIdentity,
+	"GET /api/v1/documents/draft":   guardHandlerIdentity,
+	"POST /api/v1/documents/draft":  guardHandlerIdentity,
 	// Proposals require a verified token-bound live run in both handlers.
 	"POST /chat/proposal/create": guardHandlerIdentity,
 	"POST /chat/proposal/ /edit": guardHandlerIdentity,

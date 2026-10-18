@@ -2,6 +2,7 @@ package chatbridge
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -74,7 +75,7 @@ func documentCreationForSend(enabled bool, opt ws.ChatMessageOption, info *ChatI
 	} else {
 		intent = explicit
 		if intent == nil && !selected && info.Visibility == "private" && literalDocumentCreation(content) {
-			intent = &documents.CreationIntent{SubmissionID: triggerID}
+			intent = &documents.CreationIntent{SubmissionID: triggerID, Drafting: true}
 		}
 	}
 	if intent == nil {
@@ -86,4 +87,12 @@ func documentCreationForSend(enabled bool, opt ws.ChatMessageOption, info *ChatI
 	}
 	copy := *intent
 	return &copy, nil
+}
+
+func documentCreationRunPrompt(content string, intent *documents.CreationIntent) string {
+	prompt := fmt.Sprintf("%s\n\nThe human explicitly requested a new private document in this message. Create one complete saved Document with Crewship's `doc_create` MCP tool. If using the CLI, use `crewship doc create --file -`. Supply JSON like this: {\"slug\":\"document-topic\",\"name\":\"Document title\",\"mutation_id\":%q,\"blocks\":[{\"type\":\"heading\",\"level\":1,\"text\":\"Document title\"},{\"type\":\"paragraph\",\"text\":\"Complete content about the requested topic.\"}]}. Replace the example slug, title and text with useful content matching the request. Keep this mutation_id and the exact input for any retry after uncertain confirmation. The command generates block identities and hashes. Return the saved result link only after success. Do not upload document contents to crew Files.", content, intent.SubmissionID)
+	if !intent.Drafting {
+		return prompt + " This request does not authorize editing other Pages or later access to the created document."
+	}
+	return prompt + " This original request also authorizes drafting only the newly created Document in this same live run. Save a useful populated initial draft, then use doc_draft_view, doc_draft_prepare, and doc_draft_apply to save further paragraph or heading text and a checkpoint as you work. CLI equivalents are crewship doc draft view, crewship doc draft prepare --file -, and crewship doc draft apply --file -. Keep the exact immutable prepared packet for retries; never regenerate it for an uncertain attempt. A committed edit remains saved even if its checkpoint confirmation fails; retry the original checkpoint packet with doc_draft_checkpoint or crewship doc draft checkpoint --file -, and report that outcome accurately. Do not edit another Page, overwrite a human edit, renew this permission, or assume a new run inherits it. If access or a revision precondition is refused, stop drafting and report the saved document honestly."
 }
