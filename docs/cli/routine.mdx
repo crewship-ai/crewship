@@ -1414,6 +1414,14 @@ crewship routine replay run_cmox10oci00016b48aacd --version 9
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--version` | int | (head) | Pin the replay to this immutable routine version instead of head |
+| `--inputs` | string | inherited | Replace captured inputs with a JSON object, inline or `@file.json`; `{}` clears inputs |
+| `--metadata` | string | inherited | Replace captured metadata with a JSON object, inline or `@file.json`; `{}` clears metadata |
+| `--tags` | string | inherited | Replace captured tags with a JSON string array; `[]` clears tags |
+
+Omitted fields inherit the source run's values. Supplied fields replace the whole
+object or array; `null` is rejected. Changed inputs must satisfy the selected
+routine version's input-form contract. Replay executes real work using the
+current operator's authority.
 
 Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay` (body: `{"pinned_version": N}` when `--version` is set). Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty.
 
