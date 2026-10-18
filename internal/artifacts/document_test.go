@@ -130,6 +130,9 @@ func TestDocumentAdapterLifecycleAndLiveAuthority(t *testing.T) {
 	if _, err = db.Exec("UPDATE documents SET schema_version=99 WHERE page_id='page'"); err != nil {
 		t.Fatal(err)
 	}
+	if state, err = adapter.Create(ctx, key, create, authorize); !errors.Is(err, ErrUnsupported) || state.Snapshot != nil || state.Projection != nil {
+		t.Fatalf("initialize retry leaked future state: %#v %v", state, err)
+	}
 	if state, err = adapter.Read(ctx, key, authorize); !errors.Is(err, ErrUnsupported) || state.Snapshot != nil {
 		t.Fatalf("unknown schema leaked state: %#v %v", state, err)
 	}

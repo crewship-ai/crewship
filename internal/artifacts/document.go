@@ -39,7 +39,16 @@ func (a *DocumentAdapter) Create(ctx context.Context, key documents.Key, request
 	if err := a.check(request.Schema, Create); err != nil {
 		return documents.State{}, err
 	}
-	return a.store.InitRequest(ctx, key, request.ID, request.Fingerprint, request.Schema, request.Snapshot, request.Projection, authorize)
+	state, err := a.store.InitRequest(ctx, key, request.ID, request.Fingerprint, request.Schema, request.Snapshot, request.Projection, authorize)
+	if err != nil {
+		return documents.State{}, err
+	}
+	// An exact initialization retry returns the current head, which may have
+	// advanced to a schema newer than the original request.
+	if err := a.check(state.Schema, Create); err != nil {
+		return documents.State{}, err
+	}
+	return state, nil
 }
 
 func (a *DocumentAdapter) Read(ctx context.Context, key documents.Key, authorize documents.Authorize) (documents.State, error) {
