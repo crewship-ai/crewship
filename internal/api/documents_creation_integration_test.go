@@ -576,17 +576,32 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			}
 			command.Env = append(command.Env, "CREWSHIP_CONFIG="+historyConfig, "CREWSHIP_NO_SLUG_CACHE=1")
 			out, err := command.CombinedOutput()
-			if err != nil { t.Fatalf("actual human history CLI: %v %s", err, out) }
+			if err != nil {
+				t.Fatalf("actual human history CLI: %v %s", err, out)
+			}
 			for _, field := range []string{`"snapshot"`, `"epoch"`, `"generation"`, `"incarnation"`, `"blocks"`} {
-				if bytes.Contains(out, []byte(field)) { t.Fatalf("history exposed engine field %s", field) }
+				if bytes.Contains(out, []byte(field)) {
+					t.Fatalf("history exposed engine field %s", field)
+				}
 			}
 			return out
 		}
-		var history struct { Checkpoints []struct { ID string `json:"id"`; Rev int64 `json:"rev"`; Schema int `json:"schema"` } `json:"checkpoints"` }
+		var history struct {
+			Checkpoints []struct {
+				ID     string `json:"id"`
+				Rev    int64  `json:"rev"`
+				Schema int    `json:"schema"`
+			} `json:"checkpoints"`
+		}
 		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
 			t.Fatalf("history lost confirmed checkpoint identity: %s", out)
 		}
-		var historical struct { PageID string `json:"page_id"`; ID string `json:"id"`; Rev int64 `json:"rev"`; Schema int `json:"schema"` }
+		var historical struct {
+			PageID string `json:"page_id"`
+			ID     string `json:"id"`
+			Rev    int64  `json:"rev"`
+			Schema int    `json:"schema"`
+		}
 		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != 3 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
 			t.Fatalf("historical read did not preserve the immutable saved body: %s", out)
 		}
