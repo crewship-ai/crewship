@@ -38,7 +38,7 @@ test.describe("desktop shell", () => {
       await expect(page.locator("header").first()).toBeVisible()
       // These pages size themselves to the viewport and scroll inside; the
       // page scroller under the top bar must not scroll at all.
-      const scroller = page.locator("[data-slot=sidebar-inset] > .overflow-y-auto").first()
+      const scroller = page.locator("[data-slot=content-column] > .overflow-y-auto").first()
       const overflow = await scroller.evaluate((el) => el.scrollHeight - el.clientHeight)
       expect(overflow).toBeLessThanOrEqual(1)
     })
@@ -206,5 +206,43 @@ test.describe("the build is not in the sidebar", () => {
     const foot = page.getByTestId("user-menu-footer")
     await expect(foot).toBeVisible()
     await expect(foot.getByTestId("user-menu-build")).toBeVisible()
+  })
+})
+
+// The skeleton the owner chose on 2026-10-18 (v67 at every width, #3605).
+test.describe("v67 skeleton", () => {
+  test("1440 px: a new device starts pinned; the panel column starts at the top of the card", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await seed(page, { "crewship-appearance-sync": "0" })
+    await page.goto("/settings")
+    expect(Math.round((await box(page, "[data-slot=sidebar-container]")).width)).toBe(240)
+    const panel = await box(page, "[data-slot=panel-slot] [data-slot=secondary-panel]")
+    const column = await box(page, "[data-slot=content-column]")
+    const header = await box(page, "[data-slot=content-column] > header")
+    // The panel sits beside the column, flush with the card's top; the top
+    // bar spans the content column only.
+    expect(panel.x + panel.width).toBeLessThanOrEqual(column.x + 1)
+    expect(Math.abs(panel.y - column.y)).toBeLessThanOrEqual(1)
+    expect(header.x).toBeGreaterThanOrEqual(column.x - 1)
+  })
+
+  test("1024 px: the rail, a list page's panel docked, no panel button", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 })
+    await seed(page, PINNED)
+    await page.goto("/settings")
+    expect(Math.round((await box(page, "[data-slot=sidebar-container]")).width)).toBe(56)
+    const panel = page.locator("[data-slot=panel-slot] [data-slot=secondary-panel]")
+    await expect(panel).toBeVisible()
+    await expect(panel).not.toHaveAttribute("data-float", "true")
+    await expect(page.getByTestId("secondary-panel-button")).toHaveCount(0)
+  })
+
+  test("390 px: the tab bar is 62 px and More is a grid", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await seed(page, PINNED)
+    await page.goto("/issues")
+    const bar = page.locator("nav[aria-label=Primary]")
+    await expect(bar).toBeVisible()
+    expect(Math.round((await bar.boundingBox())!.height)).toBe(62)
   })
 })
