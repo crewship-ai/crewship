@@ -63,7 +63,7 @@ const hrefOf = (name: string | RegExp) =>
 describe("CommandPalette — every place in the app", () => {
   it("keeps the cards out of an empty palette and finds them as you type", async () => {
     openPalette()
-    await screen.findByRole("group", { name: /navigation/i })
+    await screen.findByRole("group", { name: /go to/i })
     expect(screen.queryByRole("group", { name: /settings & sections/i })).not.toBeInTheDocument()
 
     type("danger")
@@ -119,7 +119,7 @@ describe("CommandPalette — every place in the app", () => {
     FIXTURES["/api/v1/missions"] = { error: "nope" }
     FIXTURES["/automations"] = [{ unexpected: true }]
     openPalette()
-    await screen.findByRole("group", { name: /navigation/i })
+    await screen.findByRole("group", { name: /go to/i })
     expect(screen.queryByRole("group", { name: /missions/i })).not.toBeInTheDocument()
   })
 
