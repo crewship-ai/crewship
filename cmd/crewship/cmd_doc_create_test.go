@@ -80,7 +80,7 @@ func TestProtectedDocCreateRejectsRedirectsAndOverrides(t *testing.T) {
 }
 
 func TestProtectedDocCreateRejectsUnsafeInputAndResponses(t *testing.T) {
-	const token = "agtv2.synthetic-run"
+	const token = "agtv2.test"
 	t.Setenv("CREWSHIP_AGENT_TOKEN", token)
 	const body = `{"slug":"s","name":"N","mutation_id":"one","blocks":[{"type":"paragraph","text":"body"}]}`
 	for _, test := range []struct {
