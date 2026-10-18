@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 import { render, screen, cleanup, within, waitFor, fireEvent } from "@testing-library/react"
 
 const api = vi.hoisted(() => ({ fetch: vi.fn() }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api.fetch(...a) }))
+vi.mock("@/lib/api-fetch", async (orig) => ({ ...(await orig<typeof import("@/lib/api-fetch")>()), apiFetch: (...a: unknown[]) => api.fetch(...a) }))
 
 import { CrewTools } from "../crew-tools"
 import { CrewTeam } from "../crew-team"
