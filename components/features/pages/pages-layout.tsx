@@ -125,6 +125,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const { pages, loading, error } = usePages(workspaceId)
   const detail = usePage(workspaceId, selectedSlug)
+  const selectedRailSlug = selectedSlug?.startsWith("@") ? detail.page?.slug ?? selectedSlug : selectedSlug
 
   // ── Folders (#2527) ──────────────────────────────────────────────────────
   // The rail groups by folder when the server has them. The dialogs live
@@ -438,7 +439,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onSearchChange={setSearch}
               filters={filters}
               onFiltersChange={setFilters}
-              selectedSlug={selectedSlug}
+              selectedSlug={selectedRailSlug}
               onSelectPage={openPage}
               onCreatePage={canCreatePage ? () => setCreating(true) : undefined}
               onToggleCollapse={() => setCollapsed(true)}

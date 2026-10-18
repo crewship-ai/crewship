@@ -263,7 +263,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1")
 			return cmd.CombinedOutput()
 		}
-		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}} {
+		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}, {"page", "get", "@" + created.PageID}, {"doc", "read", "@" + created.PageID}} {
 			out, err := invoke(args...)
 			if role == "OWNER" {
 				if err != nil {

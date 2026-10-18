@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1325,7 +1326,19 @@ func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRec
 
 // ── Loading ────────────────────────────────────────────────────────────────
 
+var immutablePageReferenceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
 func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRecord, error) {
+	// @ cannot be a Page slug. Explicit immutable references never fall back
+	// to an address another object could reuse after deletion.
+	column := "slug"
+	if strings.HasPrefix(slug, "@") {
+		slug = strings.TrimPrefix(slug, "@")
+		if !immutablePageReferenceID.MatchString(slug) {
+			return nil, sql.ErrNoRows
+		}
+		column = "id"
+	}
 	var p pageRecord
 	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `
 		SELECT id, slug, name, COALESCE(description, ''),
@@ -1337,7 +1350,7 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience
-		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
+		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
 		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience)
