@@ -294,7 +294,7 @@ const TONE_DOT: Record<StatusTone, string> = {
  * agent is broken — names it, so "1 agent error" is one click from the agent
  * rather than a hunt through every crew.
  */
-function SystemStatusPanel({
+export function SystemStatusPanel({
   description,
   engineStatus,
   wsStatus,
