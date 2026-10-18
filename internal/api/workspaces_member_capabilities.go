@@ -26,8 +26,8 @@ package api
 // cannot mutate their own capabilities either (defence against a
 // downgrade-then-restore stunt).
 //
-// Every mutation writes an audit row (workspace_member.capability_*)
-// with old + new set so the trail is reconstructable.
+// Every changed set writes a chained member.capabilities_changed event in the
+// same transaction. Values remain on the ADMIN-only endpoint, not in the journal.
 
 import (
 	"context"
@@ -36,6 +36,8 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 type capabilitiesGetResponse struct {
@@ -222,6 +224,44 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin capabilities mutation", err)
+		return
+	}
+	defer tx.Rollback()
+	// Middleware authority can change while the request body is uploaded.
+	// Revalidate the live administrator on the same writer transaction.
+	var liveRole string
+	err = tx.QueryRowContext(r.Context(), `SELECT m.role FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL WHERE m.workspace_id=? AND m.user_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted')`, workspaceID, caller.ID).Scan(&liveRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusForbidden, "active trusted workspace administrator required")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read current capabilities administrator", err)
+		return
+	}
+	if !requireRoleOrForbid(w, h.logger, caller.ID, liveRole, "capability.manage", "workspace:"+workspaceID, "manage") {
+		return
+	}
+	// Re-read under the write transaction: concurrent patches must not apply
+	// to a stale set, and an intervening promotion to OWNER must still deny.
+	var capsJSON sql.NullString
+	err = tx.QueryRowContext(r.Context(), `SELECT capabilities, role FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, memberID).Scan(&capsJSON, &targetRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Member not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read transactional capabilities", err)
+		return
+	}
+	if targetRole == "OWNER" {
+		replyError(w, http.StatusForbidden, "OWNER capabilities are immutable")
+		return
+	}
+	current = resolveCapabilitiesFromRow(capsJSON, targetRole)
 	next, err := applyCapabilityMutation(current, body)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
@@ -240,7 +280,7 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 	}
 
 	serialized := SerializeCapabilities(next)
-	result, err := h.db.ExecContext(r.Context(),
+	result, err := tx.ExecContext(r.Context(),
 		`UPDATE workspace_members SET capabilities = ?, updated_at = datetime('now') WHERE workspace_id = ? AND user_id = ?`,
 		serialized, workspaceID, memberID)
 	if err != nil {
@@ -278,6 +318,23 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 		)
 		replyError(w, http.StatusNotFound, "Member not found (deleted concurrently)")
 		return
+	}
+
+	notify, err := appendAuthorizationAudit(r.Context(), tx, h.policyJournal, journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryMemberCapabilitiesChanged,
+		ActorType: journal.ActorUser, ActorID: caller.ID, Summary: "Member capabilities changed",
+		Payload: map[string]any{"subject_user_id": memberID, "action": "capabilities_changed"},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit capabilities mutation", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit capabilities mutation", err)
+		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	// Cache invalidate so the target user sees the new set on their
