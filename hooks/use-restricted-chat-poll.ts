@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 
+import { checkpointSchema } from "@/lib/chat-event-contract"
 import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 
@@ -9,8 +10,17 @@ import { requireApiPathSegment } from "@/lib/api-path-segment"
 export const RESTRICTED_CHAT_POLL_MS = 10_000
 
 /** Identifies a message list well enough to notice that it changed. */
-export function messagesSignature(messages: readonly { id?: string }[]): string {
-  return `${messages.length}:${messages[messages.length - 1]?.id ?? ""}`
+export function messagesSignature(messages: readonly { id?: string; checkpoint?: unknown }[]): string {
+  const legacy = `${messages.length}:${messages[messages.length - 1]?.id ?? ""}`
+  // A stable message ID can contain a newer checkpoint, including an earlier
+  // retained turn. Only bounded public identity/state metadata enters this key.
+  const checkpoints = messages.flatMap((message, index) => {
+    const parsed = checkpointSchema.safeParse(message.checkpoint)
+    if (!parsed.success) return []
+    const cp = parsed.data
+    return [[index, cp.run_id, cp.turn_id, cp.through_seq, cp.turn_state]]
+  })
+  return checkpoints.length ? `${legacy}:${JSON.stringify(checkpoints)}` : legacy
 }
 
 interface Options {

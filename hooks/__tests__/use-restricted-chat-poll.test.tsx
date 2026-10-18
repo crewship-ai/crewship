@@ -7,7 +7,7 @@ import { act, renderHook } from "@testing-library/react"
 import { serverAllowsRestricted } from "@/lib/__tests__/restricted-route-oracle"
 
 const requests: string[] = []
-let messages: { id: string }[] = []
+let messages: { id: string; checkpoint?: unknown }[] = []
 let status = 200
 
 vi.mock("@/lib/api-fetch", () => ({
@@ -97,4 +97,29 @@ describe("useRestrictedChatPoll", () => {
     await tick()
     expect(requests).toHaveLength(0)
   })
+})
+
+describe("stable checkpoint polling", () => {
+  it("notices checkpoint seq/state changes while the last message and count stay unchanged", async () => {
+    const checkpoint = { version: 1, run_id: "r", turn_id: "m1", through_seq: 1, turn_state: "running" }
+    messages = [{ id: "m1", checkpoint }, { id: "unchanged-tail" }]
+    const { onChange } = setup()
+    await tick()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    messages = [{ id: "m1", checkpoint: { ...checkpoint, through_seq: 2 } }, { id: "unchanged-tail" }]
+    await tick()
+    expect(onChange).toHaveBeenCalledTimes(2)
+    messages = [{ id: "m1", checkpoint: { ...checkpoint, through_seq: 2, turn_state: "failed" } }, { id: "unchanged-tail" }]
+    await tick()
+    expect(onChange).toHaveBeenCalledTimes(3)
+    await tick()
+    expect(onChange).toHaveBeenCalledTimes(3)
+  })
+})
+
+it("keeps bodies, summaries and private checkpoint fields out of the signature", () => {
+  const message = { id: "m", content: "private body", checkpoint: { version: 1, run_id: "r", turn_id: "m", through_seq: 2, turn_state: "running", hash: "private hash", event: { payload: "private event" } } }
+  const signature = messagesSignature([message])
+  expect(signature).not.toContain("private")
+  expect(messagesSignature([{ id: "legacy" }])).toBe("1:legacy")
 })
