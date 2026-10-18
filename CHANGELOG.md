@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Define a host-only canonical publication identity that binds exact grants, actors, source origins and selected child versions without enabling publication or runtime.
+
 - Preserve genuine archived identities in API history, upsert, and resurrection test fixtures.
 
 - Seed pipeline API smoke tests through the migrated database and real archived routine store.
