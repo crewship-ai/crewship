@@ -254,6 +254,7 @@ env:
     e2e/routines-new-wizard.spec.ts
     e2e/chrome-roles.spec.ts
     e2e/harbor2-appearance.spec.ts
+    e2e/tap-target-pointer.spec.ts
 
 jobs:
   build-tools:
