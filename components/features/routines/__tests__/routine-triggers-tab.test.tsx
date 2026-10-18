@@ -192,6 +192,22 @@ describe("<RoutineTriggersTab>", () => {
     }
   })
 
+  it("an edited schedule shows its new recurrence without a reload", async () => {
+    // The page computes the rows once from its own schedules list; the tab
+    // saves through its own. After Save the row must follow the tab's list.
+    h.schedules = [schedule]
+    h.fetcher.mockResolvedValue(json({ items: [], next_cursor: null }))
+    const staleRows = routineTriggerRows({ slug: "weekly", lifecycle: "active", schedules: [schedule] as never[], webhooks: [], automations: [] })
+    const view = render(<RoutineTriggersTab workspaceId="ws" routine={routine} lifecycle="active" depth="simple" rows={staleRows} onOpenRun={vi.fn()} onSettings={vi.fn()} />)
+    expect(within(screen.getByTestId("routine-trigger-list")).getByText("Every day at 09:00")).toBeInTheDocument()
+    h.schedules = [{ ...schedule, cron_expr: "15 3 * * *", timezone: "Europe/Prague" }]
+    view.rerender(<RoutineTriggersTab workspaceId="ws" routine={routine} lifecycle="active" depth="simple" rows={staleRows} onOpenRun={vi.fn()} onSettings={vi.fn()} />)
+    const list = screen.getByTestId("routine-trigger-list")
+    expect(within(list).getByText("Every day at 03:15")).toBeInTheDocument()
+    expect(within(list).queryByText("Every day at 09:00")).toBeNull()
+    expect(list.querySelector("li#schedule-s1")).toHaveTextContent(/Europe\/Prague/)
+  })
+
   it("a draft-only routine has nothing to start yet", () => {
     render(<RoutineTriggersTab workspaceId="ws" routine={{ ...routine, head_version: 0, draft_only: true }} lifecycle="active" depth="simple" rows={[]} onOpenRun={vi.fn()} onSettings={vi.fn()} />)
     expect(screen.getByText(/Not live yet/)).toBeInTheDocument()
