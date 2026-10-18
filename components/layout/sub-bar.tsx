@@ -238,7 +238,10 @@ export function SubBar<T extends string = string>({
   // the page's buttons. The leading control and the actions join the top bar's
   // slot; what stays under it is the page's views and filters, as chips.
   if (slot && isMobile) {
-    const showIdentity = !identityHidden
+    // v67 names only the area in a phone header: a title that repeats it
+    // draws no row, even with the area's current view as its section or a
+    // leading control (that one sits in the top bar). Meta still needs a row.
+    const showIdentity = !repeatsArea || meta != null
     return (
       <div className={cn("shrink-0", className)}>
         {createPortal(
@@ -252,7 +255,7 @@ export function SubBar<T extends string = string>({
         {/* A title that only repeats the area stays the page's heading for
             assistive technology; one that names something else (a section, a
             sub-page) is drawn as the chip row's lead, not as a bar. */}
-        {!showIdentity && heading && <h1 className="sr-only">{title}</h1>}
+        {!showIdentity && heading && <h1 className="sr-only">{section != null ? `${title} / ${section}` : title}</h1>}
         {showIdentity && (
           <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} aria-label={ariaLabel}>
             <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
