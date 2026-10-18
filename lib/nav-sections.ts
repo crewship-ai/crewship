@@ -45,8 +45,8 @@ export interface NavSection {
  * does it and with what). Settings and Admin live in the sidebar footer with
  * the sidebar mode and the user menu. Marketplace — announced, never built —
  * is gone. The Journal is part of Activity (F-02): its admin-only views are
- * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); "Pages" keeps its
- * name until the Artifacts delivery renames it.
+ * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); /pages is labelled
+ * "Artifacts" as v67 draws it (the Artifacts delivery on main renamed it).
  */
 export const navSections: NavSection[] = [
   {
@@ -65,7 +65,7 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
-      { title: "Pages", href: "/pages", icon: CONCEPT_ICON.pages },
+      { title: "Artifacts", href: "/pages", icon: CONCEPT_ICON.pages },
       // F-01: the item arrives with the Calendar page itself (ODCH-12), last
       // in Work as SHL-01 orders it.
       { title: "Calendar", href: "/calendar", icon: CONCEPT_ICON.calendar },

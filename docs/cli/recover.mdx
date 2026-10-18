@@ -45,6 +45,10 @@ What it does, in order:
    queued work, so the restored server boots with nothing firing. Resume each
    with `crewship admin instance holds resume <key>` once you have checked it.
 
+Saved Document content and creation history remain in the recovered database.
+Live document-creation consents and run permissions are cleared. Send a new
+human request before resuming document creation.
+
 It prints a report — `ok`, `partial` (and every gap: files that did not match,
 missing attachment files or memory blobs the bundle recorded, locked
 credentials) or `failed` — and stores it in the restored database's restore

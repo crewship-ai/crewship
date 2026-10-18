@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -57,6 +58,9 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	artifactMasterToken              string
+	documentStoreOptions             documents.Options
+	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
@@ -246,6 +250,7 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	HasDocument bool `json:"has_document"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -312,6 +317,7 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	HasDocument bool `json:"has_document"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -373,6 +379,7 @@ func zeroPanelStates() map[string]int {
 // arrives. The server rebuilds a pages.Document from it and validates again —
 // the client's validation is a courtesy, this one is the gate (§10b.1).
 type pageWriteRequest struct {
+	AllowEmpty  bool             `json:"allow_empty"`
 	Slug        *string          `json:"slug"`
 	Name        *string          `json:"name"`
 	Description *string          `json:"description"`
@@ -392,6 +399,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasDocument        bool
 	HasProject         bool
 	HasApplication     bool
 	PublicationVersion int64
@@ -526,7 +534,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       COALESCE(p.icon, ''), COALESCE(p.color, ''),
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
-		       COALESCE(l.published,0), COALESCE(l.version,0)
+		       COALESCE(l.published,0), COALESCE(l.version,0),
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -541,7 +550,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -620,7 +629,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
-		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -762,6 +771,17 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.decodeWrite(w, r)
 	if !ok {
 		return
+	}
+	if req.AllowEmpty {
+		agent, _ := pageGrantCallerIsAgent(r)
+		if agent {
+			replyError(w, 403, "only a human may stage an empty page")
+			return
+		}
+		if len(req.Panels) != 0 || (req.Owner != nil && *req.Owner != "" && *req.Owner != "user/"+user.ID) {
+			replyError(w, 400, "allow_empty requires an empty human-owned page")
+			return
+		}
 	}
 	doc, ok := h.documentFrom(w, req, "")
 	if !ok {
@@ -915,8 +935,12 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// entry in memory, so an entry emitted while the registry still held the
 	// old rule set would be the one arrangement change a page never sees — its
 	// first (pages_refresh.go).
-	h.emitPageSpecChanged(r.Context(), wsID, rec, doc, true, pageArrangementFingerprint(doc))
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	if req.AllowEmpty {
+		h.emitEmptyPageCreated(r.Context(), wsID, rec, user.ID)
+	} else {
+		h.emitPageSpecChanged(r.Context(), wsID, rec, doc, true, pageArrangementFingerprint(doc))
+	}
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(rec, len(panels) != 0))
 	writeJSON(w, http.StatusCreated, h.pageDocument(r.Context(), rec, panels, nil))
 }
 
@@ -985,6 +1009,10 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Panels != nil && rec.HasDocument {
+		replyError(w, 409, "document pages cannot contain panels")
+		return
+	}
 	if req.Panels != nil {
 		panels, ok := panelSpecsFrom(w, req.Panels)
 		if !ok {
@@ -995,7 +1023,11 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := base.Validate(); err != nil {
+	validate := base.Validate
+	if rec.HasDocument || (len(base.Spec.Panels) == 0 && req.Panels == nil && rec.OwnerUserID != "") {
+		validate = base.ValidateEmpty
+	}
+	if err := validate(); err != nil {
 		writeSpecError(w, err)
 		return
 	}
@@ -1090,7 +1122,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "reload updated panels", err)
 			return
 		}
-		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
+		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
 		writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 		return
 	}
@@ -1182,7 +1214,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if after := pageArrangementFingerprint(base); after != beforeArrangement {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
 	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
@@ -1213,6 +1245,11 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may delete this page", "")
 		return
 	}
+	// Classify an uninitialized human output shell before its panels cascade.
+	payload := map[string]any{"page_id": rec.ID}
+	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
+		payload["slug"] = rec.Slug
+	}
 	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ?`, rec.ID); err != nil {
 		replyInternalError(w, h.logger, "delete page", err)
 		return
@@ -1229,8 +1266,37 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			"page", rec.Slug, "page_id", rec.ID, "error", err)
 	}
 	h.refreshAutomations(r.Context())
-	broadcastWorkspaceEvent(h.hub, wsID, "page.deleted", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	broadcastWorkspaceEvent(h.hub, wsID, "page.deleted", payload)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Workspace members can subscribe without a Page grant. Output titles often
+// become their slugs, so only opaque IDs may invalidate private outputs,
+// including their empty human-owned staging phase before first publication.
+func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
+	payload := map[string]any{"page_id": rec.ID}
+	if !pageHasPrivateOutputMetadata(rec, hasPanels) {
+		payload["slug"] = rec.Slug
+	}
+	return payload
+}
+
+func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
+	return rec.HasDocument || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+}
+
+// Use when panels are not already loaded, before deleting or moving the Page.
+// A failed classification must hide descriptive metadata, never disclose it.
+func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
+	if rec.HasDocument {
+		return true
+	}
+	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
+		return false
+	}
+	var hasPanels bool
+	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_panels WHERE page_id=?)`, rec.ID).Scan(&hasPanels)
+	return err != nil || pageHasPrivateOutputMetadata(rec, hasPanels)
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
@@ -1245,11 +1311,12 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 		       created_at, updated_at,
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
- COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
+ COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
+ EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument)
 	if err != nil {
 		return nil, err
 	}
@@ -1641,7 +1708,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,
@@ -1776,7 +1843,11 @@ func (h *PageHandler) documentFrom(w http.ResponseWriter, req *pageWriteRequest,
 		return nil, false
 	}
 	doc.Spec.Panels = panelSpecs
-	if err := doc.Validate(); err != nil {
+	validate := doc.Validate
+	if req.AllowEmpty {
+		validate = doc.ValidateEmpty
+	}
+	if err := validate(); err != nil {
 		writeSpecError(w, err)
 		return nil, false
 	}

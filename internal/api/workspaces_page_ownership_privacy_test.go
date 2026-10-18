@@ -16,8 +16,7 @@ func TestPrivateOwnershipDepartureConflictPrivacy(t *testing.T) {
 			t.Cleanup(f.r.Shutdown)
 			seedInstanceUser(t, f.db, "departing", "departing@example.invalid", "ws-old", "MEMBER")
 			wmSeedPage(t, f.db, "ws-old", "secret-page-id", "secret-page-slug", "Secret private title", "departing", "")
-			mustExec(t, f.db, `CREATE TABLE documents(page_id TEXT PRIMARY KEY REFERENCES pages(id))`)
-			mustExec(t, f.db, `INSERT INTO documents VALUES('secret-page-id')`)
+			seedOwnershipOutput(t, f.db, "ws-old", "secret-page-id", "documents")
 			var path, body, token string
 			if route == "workspace" {
 				var member string
@@ -72,8 +71,7 @@ func TestPrivateOwnershipDepartureConflictPrivacy(t *testing.T) {
 func TestPrivateOwnershipWorkspaceConflictRechecksAdmission(t *testing.T) {
 	r := wmRemoveMemberSetup(t)
 	wmSeedPage(t, r.db, r.wsID, "secret-page-id", "secret-page-slug", "Secret private title", r.memberUser, "")
-	mustExec(t, r.db, `CREATE TABLE documents(page_id TEXT PRIMARY KEY REFERENCES pages(id))`)
-	mustExec(t, r.db, `INSERT INTO documents VALUES('secret-page-id')`)
+	seedOwnershipOutput(t, r.db, r.wsID, "secret-page-id", "documents")
 	request := withWorkspaceUser(httptest.NewRequest("DELETE", "/", nil), r.ownerID, r.wsID, "OWNER")
 	request.SetPathValue("memberId", r.memberID)
 	mustExec(t, r.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=? AND workspace_id=?`, r.ownerID, r.wsID)

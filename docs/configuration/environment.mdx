@@ -581,3 +581,23 @@ The config is validated at startup (`Config.Validate`). These constraints are en
 | `state.provider` | `bbolt` |
 | `container.default_runtime` | `runc`, `runsc`, `kata-runtime`, or `sysbox-runc` (if set) |
 | `auth.nextjs_url` | Non-empty |
+
+## Private document engine
+
+The document foundation is disabled by default. `CREWSHIP_DOCUMENTS_ENABLED`
+enables its private Go persistence authority. Set
+`CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET` to the private authority socket path,
+`CREWSHIP_DOCUMENTS_SERVICE_SOCKET` to the engine socket path, and
+`CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` to the service credential file path.
+Use distinct, clean absolute paths of at most 100 bytes. The credential file
+must be a regular file with mode `0600`; configure its path rather
+than putting its contents into an environment variable. Invalid enabled
+configuration or an authority startup failure prevents server startup.
+
+`CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE` limits stored documents per
+workspace; zero selects the default of 128.
+`CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` limits new operations per document;
+zero selects 10,000. `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` selects the
+rolling admission window; zero selects 600 seconds and the maximum is 86,400.
+These limits preserve confirmed receipts and history. Exact retries retain their
+original operation identity; a temporary admission refusal does not erase them.

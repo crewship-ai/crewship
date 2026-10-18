@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -332,10 +333,12 @@ func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
 	b.provisioning = p
 }
 
-// BridgeConfig holds default resource limits for containers created by the bridge.
+// BridgeConfig holds resource defaults and optional chat capabilities.
+// Document creation is disabled unless explicitly enabled by the host.
 type BridgeConfig struct {
-	DefaultMemoryMB int
-	DefaultCPUs     float64
+	DocumentCreationEnabled bool
+	DefaultMemoryMB         int
+	DefaultCPUs             float64
 }
 
 // New creates a Bridge that connects WebSocket chat to the orchestrator.
@@ -543,6 +546,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: "Page context is invalid"})
 		return pageErr
 	}
+	triggerMessageID := generateMsgID()
+	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
+		triggerMessageID = msgOpt.OriginalTriggerMessageID
+	}
+	documentCreation, err := documentCreationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content, hasPage, triggerMessageID)
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
+		return err
+	}
+	msgOpt.OriginalTriggerMessageID = triggerMessageID
+	msgOpt.DocumentCreationIntent = documentCreation
 	var pageContext *PageChatContext
 	if hasPage {
 		if b.pageContextResolver == nil {
@@ -609,12 +623,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)["page_context"] = pageContext
 	}
 
+	if documentCreation != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
+	}
+
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
-	triggerMessageID := generateMsgID()
 	persistUserMsg := func() error {
-		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		message := conversation.Message{
 			ID:           triggerMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
@@ -622,7 +642,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
-		}); err != nil {
+		}
+		if documentCreation != nil {
+			return b.convStore.AppendDocumentCreation(ctx, chatID, message, *documentCreation, info.HumanAuthority)
+		}
+		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
 		return b.convStore.SyncSession(ctx, chatID)
@@ -892,6 +916,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
+		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
+			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
+			return err
+		}
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
@@ -1169,6 +1197,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// env / FIFO / exit files from RunID. Set from the id this path already
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
 	// concurrent routine/webhook run of the same agent no longer share them.
+	if documentCreation != nil {
+		req.UserMessage = fmt.Sprintf("%s\n\nThe human explicitly requested a new private document in this message. Create one complete saved Document with Crewship's `doc_create` MCP tool. If using the CLI, use `crewship doc create --file -`. Supply JSON like this: {\"slug\":\"document-topic\",\"name\":\"Document title\",\"mutation_id\":%q,\"blocks\":[{\"type\":\"heading\",\"level\":1,\"text\":\"Document title\"},{\"type\":\"paragraph\",\"text\":\"Complete content about the requested topic.\"}]}. Replace the example slug, title and text with useful content matching the request. Keep this mutation_id and the exact input for any retry after uncertain confirmation. The command generates block identities and hashes. Return the saved result link only after success. Do not upload document contents to crew Files. This request does not authorize editing other Pages or later access to the created document.", content, documentCreation.SubmissionID)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1176,6 +1207,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"crew_slug":   info.CrewSlug,
 		"agent_slug":  info.AgentSlug,
 		"tags":        []string{"chat", info.CLIAdapter},
+	}
+	if documentCreation != nil {
+		runMeta["document_creation_intent"] = documentCreation
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)

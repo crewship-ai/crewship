@@ -45,7 +45,7 @@ describe("the phone More sheet grid", () => {
   it("is one grid of tiles in navigation order, Settings last, no Admin for a non-admin", () => {
     render(<MobileMoreSheet />)
     expect(tiles()).toEqual([
-      "Dashboard", "Inbox", "Chat", "Activity", "Issues", "Routines", "Pages", "Calendar",
+      "Dashboard", "Inbox", "Chat", "Activity", "Issues", "Routines", "Artifacts", "Calendar",
       "Crews", "Skills", "Vault", "Integrations", "Settings",
     ])
   })
