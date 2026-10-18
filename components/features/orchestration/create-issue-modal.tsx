@@ -26,6 +26,7 @@ import {
   CreateSurfacePill,
   CreateSurfacePills,
   CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
   CreateSurfaceTitleInput,
 } from "@/components/layout/create-surface"
 import {
@@ -177,6 +178,9 @@ export function CreateIssueModal({
   const [milestoneLoad, setMilestoneLoad] = useState<PickerLoad>("idle")
   const [milestoneReload, setMilestoneReload] = useState(0)
   const [createMore, setCreateMore] = useState(false)
+  // "Require my acceptance after the Lead review" (client_review_required):
+  // applied to the new issue right after it is created.
+  const [needsAcceptance, setNeedsAcceptance] = useState(false)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. The toast stays — this is the copy
   // that is still on screen when you look back up.
@@ -425,6 +429,7 @@ export function CreateIssueModal({
     setEstimate(null)
     setParentIssueId(null)
     setMilestoneId(null)
+    setNeedsAcceptance(false)
     setRefusal(null)
   }
 
@@ -452,7 +457,7 @@ export function CreateIssueModal({
   const selectedMilestone = milestoneId ? milestones.find((m) => m.id === milestoneId) ?? null : null
   const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
-  const handleSubmit = useCallback(async () => {
+  const submit = useCallback(async (startNow: boolean) => {
     if (submittingRef.current) return
     if (!crewId) { toast.error("Please select a crew"); return }
     if (!title.trim()) { toast.error("Title is required"); return }
@@ -496,7 +501,45 @@ export function CreateIssueModal({
         return
       }
 
-      toast.success("Issue created")
+      // The follow-ups need the issue that now exists. Each is its own call,
+      // so a refusal here leaves a created issue and says exactly what is
+      // missing, instead of reporting the whole create as failed.
+      const created = (await res.json().catch(() => null)) as { identifier?: string | null } | null
+      const identifier = created && !Array.isArray(created) ? created.identifier : null
+      const issuePath = identifier
+        ? `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}`
+        : null
+      const query = `workspace_id=${encodeURIComponent(workspaceId)}`
+      let followUp: string | null = null
+      if (issuePath && needsAcceptance) {
+        try {
+          const detail = await apiFetch(`${issuePath}?${query}`)
+          const revision = detail.ok ? ((await detail.json().catch(() => null)) as { work_revision?: number } | null)?.work_revision : undefined
+          if (typeof revision !== "number") throw new Error("detail")
+          const put = await apiFetch(`${issuePath}/review-policy?${query}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ revision, client_review_required: true }),
+          })
+          if (!put.ok) throw new Error("policy")
+        } catch {
+          followUp = "its acceptance setting was not saved"
+        }
+      }
+      if (issuePath && startNow && !followUp) {
+        try {
+          const started = await apiFetch(`${issuePath}/start?${query}`, { method: "POST" })
+          if (!started.ok) {
+            const body = await started.json().catch(() => null)
+            followUp = body?.detail ?? "it could not be started"
+          }
+        } catch {
+          followUp = "it could not be started"
+        }
+      }
+
+      if (followUp) toast.error(`Issue created, but ${followUp}`, { description: "Open it to finish." })
+      else toast.success(startNow ? "Issue created and started" : "Issue created")
       onCreated()
 
       if (createMore) {
@@ -513,7 +556,9 @@ export function CreateIssueModal({
       setSaving(false)
       submittingRef.current = false
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus])
+  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus, needsAcceptance])
+
+  const handleSubmit = useCallback(() => submit(false), [submit])
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((prev) =>
@@ -535,16 +580,17 @@ export function CreateIssueModal({
         concept="issues"
         title="New issue"
         onClose={() => onOpenChange(false)}
-        // The crew is the breadcrumb: it says where the issue lands before
-        // anything is typed. It is also the only place the crew can be
-        // changed, which is why it is a control and not a label.
-        context={
+        // v67: one plain title, and under it the crew chip: where the issue
+        // lands before anything is typed. The chip is also the only place the
+        // crew can be changed, which is why it is a control and not a label.
+        description={
+          <>
           <Popover open={crewOpen} onOpenChange={setCrewOpen} modal>
             <PopoverTrigger asChild>
               <button
                 type="button"
                 aria-label="Select crew"
-                className="font-medium transition-colors hover:text-foreground"
+                className="rounded-md border border-hairline bg-foreground/[0.04] px-1.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.08]"
               >
                 {crewPrefix}
               </button>
@@ -579,6 +625,8 @@ export function CreateIssueModal({
               </Command>
             </PopoverContent>
           </Popover>
+          {" "}creates {crewPrefix}- issues
+          </>
         }
       />
 
@@ -1133,6 +1181,12 @@ export function CreateIssueModal({
         </Popover>
       </CreateSurfacePills>
 
+      {/* ── Acceptance ── */}
+      <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-hairline px-4 py-2.5 text-xs text-foreground sm:px-5 coarse:min-h-[44px]">
+        <Checkbox checked={needsAcceptance} onCheckedChange={(v) => setNeedsAcceptance(v === true)} className="h-3.5 w-3.5" />
+        Require my acceptance after the Lead review
+      </label>
+
       {/* ── Refusal ── */}
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
@@ -1159,10 +1213,15 @@ export function CreateIssueModal({
           </>
         }
         onCancel={() => onOpenChange(false)}
-        primaryLabel="Create issue"
+        secondary={
+          <CreateSurfaceSecondaryAction disabled={!title.trim() || !crewId || saving} onClick={() => void submit(false)}>
+            Create
+          </CreateSurfaceSecondaryAction>
+        }
+        primaryLabel="Create and start"
         primaryDisabled={!title.trim() || !crewId}
         busy={saving}
-        onPrimary={handleSubmit}
+        onPrimary={() => void submit(true)}
       />
     </CreateSurface>
   )

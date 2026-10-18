@@ -272,15 +272,12 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText("Create more")).toBeInTheDocument()
   })
 
-  it("shows crew selector in header breadcrumb", () => {
+  it("shows the crew selector as the chip under the header title", () => {
     render(<CreateIssueModal {...defaultProps} />)
-    // CreateSurfaceHeader renders `context › Title` as ONE heading (two
-    // headings would make the accessible name "ENGNew issue"), and adds an
-    // sr-only DialogDescription echoing the title when the surface passes no
-    // description — so a bare getByText("New issue") now matches twice.
-    const heading = screen.getByRole("heading", { level: 2 })
-    expect(heading.textContent).toContain("ENG")
-    expect(heading.textContent).toContain("New issue")
+    // v67 (PAR-146): the heading is the plain title; the crew is the chip in the
+    // description line under it ("ENG creates ENG- issues").
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("New issue")
+    expect(screen.getByRole("button", { name: "Select crew" })).toHaveTextContent("ENG")
   })
 
   // ── The shared shell ────────────────────────────────────────────────────
@@ -523,7 +520,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     // The header names where the issue will land, so the choice is visible
     // and still overridable — it is not made behind the user's back.
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("DES")
+      expect(screen.getByRole("button", { name: "Select crew" })).toHaveTextContent("DES")
     })
 
     fireEvent.click(screen.getByText("Assignee"))
