@@ -32,6 +32,7 @@ vi.mock("@/hooks/use-journal-lookup", () => ({
     crews: new Map([[CREW.id, CREW]]),
     agents: new Map([[AGENT.id, AGENT]]),
     missions: new Map(),
+    people: new Map(),
     loading: false,
     refresh: () => {},
   }),

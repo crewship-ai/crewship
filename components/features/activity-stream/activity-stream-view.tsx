@@ -370,11 +370,17 @@ export function ActivityStreamView({
     if (!changesWanted) return []
     const out: ChangeItem[] = []
     for (const e of journal.entries) {
-      const c = changeFromEntry(e, { agentName: (id) => agentName(id), issueLabel, routineName })
+      const c = changeFromEntry(e, {
+        agentName: (id) => agentName(id),
+        crewName: (id) => lookup.crews.get(id)?.name,
+        personName: (id) => lookup.people.get(id)?.name,
+        issueLabel,
+        routineName,
+      })
       if (c && inRange(c.ts, range, now)) out.push(c)
     }
     return out
-  }, [changesWanted, journal.entries, agentName, issueLabel, routineName, range, now])
+  }, [changesWanted, journal.entries, agentName, lookup.crews, lookup.people, issueLabel, routineName, range, now])
 
   const effective = React.useMemo(() => ({ ...filters, q: debouncedQ }), [filters, debouncedQ])
   // Display › Group repeated runs: repeated routine runs become one row, and
@@ -659,7 +665,7 @@ export function ActivityStreamView({
       ? "Everything about this routine: its runs, the changes to it and what they caused"
       : facets > 0
         ? `${facets} filter${facets === 1 ? "" : "s"} · ${rangeLabel(range).toLowerCase()}`
-        : "Everything your crews and people did: runs, agent work, and every change to issues, routines, pages, crews and access"
+        : "Everything your crews and people did: runs, agent work, and every change to issues, routines, artifacts, crews, integrations and access"
 
   const filterWords = [
     filters.q && `“${filters.q}”`,

@@ -225,7 +225,7 @@ describe("change stories: several updates to one object on one day are one row",
     expect(st.type).toBe("story")
     expect(st.objectKind).toBe("artifact")
     expect(st.title).toBe("Weekly report")
-    expect(st.flow).toBe("Changed → Changed → Changed")
+    expect(st.flow).toBe("Updated → Updated → Updated")
   })
 
   it("leaves other kinds of change alone", () => {

@@ -51,10 +51,17 @@ export interface MissionLookup {
   identifier?: string
 }
 
+/** A workspace member, by display name only (#3636). */
+export interface PersonLookup {
+  id: string
+  name: string
+}
+
 export interface JournalLookupValue {
   crews: Map<string, CrewLookup>
   agents: Map<string, AgentLookup>
   missions: Map<string, MissionLookup>
+  people: Map<string, PersonLookup>
   loading: boolean
   refresh: () => void
 }
@@ -63,6 +70,7 @@ const EMPTY_VALUE: JournalLookupValue = {
   crews: new Map(),
   agents: new Map(),
   missions: new Map(),
+  people: new Map(),
   loading: false,
   refresh: () => {},
 }
@@ -84,6 +92,7 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
   const [crews, setCrews] = useState<Map<string, CrewLookup>>(new Map())
   const [agents, setAgents] = useState<Map<string, AgentLookup>>(new Map())
   const [missions, setMissions] = useState<Map<string, MissionLookup>>(new Map())
+  const [people, setPeople] = useState<Map<string, PersonLookup>>(new Map())
   const [loading, setLoading] = useState(false)
 
   // requestSeq guards against out-of-order responses: a slow fetch for
@@ -111,6 +120,8 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
         crews: CrewLookup[]
         agents: AgentLookup[]
         missions: MissionLookup[]
+        /** Absent on a server older than #3636. */
+        people?: PersonLookup[]
       }
       // Stale-response guard: discard if a newer fetch has been kicked
       // off, or if the active workspace has changed since this request
@@ -120,6 +131,7 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
       setCrews(new Map(data.crews.map((c) => [c.id, c])))
       setAgents(new Map(data.agents.map((a) => [a.id, a])))
       setMissions(new Map(data.missions.map((m) => [m.id, m])))
+      setPeople(new Map((data.people ?? []).filter((p) => p.name).map((p) => [p.id, p])))
     } catch {
       // Network errors leave the previous map intact — fail-open over
       // throwing so the journal still renders with whatever cached
@@ -137,6 +149,7 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
     setCrews(new Map())
     setAgents(new Map())
     setMissions(new Map())
+    setPeople(new Map())
     fetchLookup()
   }, [fetchLookup])
 
@@ -154,8 +167,8 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
   useRealtimeEvent("mission.updated", fetchLookup)
 
   const value = useMemo<JournalLookupValue>(
-    () => ({ crews, agents, missions, loading, refresh: fetchLookup }),
-    [crews, agents, missions, loading, fetchLookup],
+    () => ({ crews, agents, missions, people, loading, refresh: fetchLookup }),
+    [crews, agents, missions, people, loading, fetchLookup],
   )
 
   return <JournalLookupContext.Provider value={value}>{children}</JournalLookupContext.Provider>

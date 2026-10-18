@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
     crews: new Map(),
     agents: new Map(),
     missions: new Map(),
+    people: new Map(),
     loading: false,
     refresh: () => {},
   } as {
@@ -43,7 +44,8 @@ beforeEach(() => {
   m.role = "OWNER"
   m.loading = false
   m.search = ""
-  m.lookup = { crews: new Map(), agents: new Map(), missions: new Map(), loading: false, refresh: () => {} }
+  m.lookup = { crews: new Map(), agents: new Map(), missions: new Map(),
+    people: new Map(), loading: false, refresh: () => {} }
 })
 
 describe("/journal redirects into Activity", () => {
@@ -100,6 +102,7 @@ describe("/journal redirects into Activity", () => {
       crews: new Map([["crew-1", { id: "crew-1", slug: "engineering" }]]),
       agents: new Map([["agent-7", { id: "agent-7", slug: "robin" }]]),
       missions: new Map(),
+    people: new Map(),
       loading: false,
       refresh: () => {},
     }
