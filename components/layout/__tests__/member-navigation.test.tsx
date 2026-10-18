@@ -14,7 +14,6 @@ vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "VIEWER" 
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 0 }))
 vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => false, useAuthAvailable: () => true }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
-vi.mock("@/components/layout/sidebar-version", () => ({ SidebarVersion: () => null }))
 vi.mock("@/components/layout/user-menu", () => ({ UserMenu: () => null }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 afterEach(() => { cleanup(); state.workspaceId="alex"; state.workspaces[0].restricted_surfaces=["chat","account_security"] })

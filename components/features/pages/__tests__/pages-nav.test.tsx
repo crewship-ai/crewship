@@ -33,7 +33,6 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 0 }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
-vi.mock("@/components/layout/sidebar-version", () => ({ SidebarVersion: () => null }))
 
 import { AppSidebar, NAV_ICONS } from "@/components/layout/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"

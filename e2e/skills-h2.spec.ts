@@ -117,7 +117,9 @@ test.describe("Skills desktop", () => {
     const views = panel(page).getByRole("navigation", { name: "Skill views" })
     const labels = ["Library", "On agents", "Not on any agent", "Needs attention"]
     for (const [i, label] of labels.entries()) {
-      const hint = views.getByText(label, { exact: true })
+      // The hint is on the row itself (role button, the element that takes
+      // focus and the key), not on its label text: 03e287b45.
+      const hint = views.getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) })
       await expect(hint).toHaveAttribute("aria-keyshortcuts", String(i + 1))
       await expect(hint).toHaveAttribute("title", `${label} · press ${i + 1}`)
     }

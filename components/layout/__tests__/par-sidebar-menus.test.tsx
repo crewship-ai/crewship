@@ -46,8 +46,8 @@ vi.mock("@/lib/api-fetch", () => ({
     ),
 }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
-vi.mock("@/components/layout/sidebar-version", async (orig) => ({
-  ...(await orig<typeof import("@/components/layout/sidebar-version")>()),
+vi.mock("@/lib/build-info", async (orig) => ({
+  ...(await orig<typeof import("@/lib/build-info")>()),
   SidebarVersion: () => null,
 }))
 

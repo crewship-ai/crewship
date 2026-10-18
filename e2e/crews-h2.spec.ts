@@ -11,9 +11,15 @@ async function seed(page: Page) {
   }, PINNED)
 }
 
-/** The first crew the panel lists, and one of its agents. */
+/**
+ * The first crew the panel lists, and one of its agents. At tablet width
+ * (768-1279) the panel starts closed and opens from the toolbar
+ * (components/layout/secondary-panel.tsx), so it is opened first.
+ */
 async function firstCrew(page: Page): Promise<string> {
   await page.goto("/crews")
+  const width = page.viewportSize()?.width ?? 1440
+  if (width >= 768 && width < 1280) await page.getByRole("button", { name: "Crews and agents" }).click()
   const row = page.locator("[data-crew-row]").first()
   await expect(row).toBeVisible()
   return (await row.getAttribute("data-crew-row"))!
@@ -26,12 +32,20 @@ async function firstAgentOf(page: Page, crew: string): Promise<string> {
   return (await row.getAttribute("data-agent-row"))!
 }
 
-/** CRW-03: Tools and access → Add skill opens the shared Give to picker for the agent. */
+/**
+ * CRW-03: Tools and access › Manage skills › Add skill opens the shared Give to
+ * picker for the agent - the shipped path (docs/guides/first-crew.mdx,
+ * overview-structure.test.tsx). v67 K09 puts Add skill on the Skills card
+ * itself; that difference is open with the owner, not decided by this spec.
+ */
 async function openGiveSkills(page: Page) {
   const crew = await firstCrew(page)
   const agent = await firstAgentOf(page, crew)
   await page.goto(`/crews?agent=${agent}&tab=tools`)
-  await page.getByRole("button", { name: "Add skill" }).first().click()
+  await page.getByRole("tabpanel", { name: "Tools and access" }).getByRole("button", { name: "Manage skills" }).click()
+  const manager = page.getByRole("dialog", { name: "Skills" })
+  await expect(manager).toBeVisible()
+  await manager.getByRole("button", { name: "Add skill" }).click()
   const dialog = page.getByRole("dialog", { name: /Give skills to/ })
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('[data-slot="give-to-picker"]')).toBeVisible()

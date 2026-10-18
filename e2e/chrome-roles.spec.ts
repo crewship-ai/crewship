@@ -185,7 +185,8 @@ for (const who of Object.keys(ROLES) as Who[]) {
         const box = (await menu.boundingBox())!
         expect(box.width).toBeLessThan(400)
         expect(box.y + box.height).toBeLessThan(768)
-        const rows = (await menu.getByRole("menuitem").allTextContents()).map((t) => t.replace(/\d+ active$/, "").trim())
+        // "Notification sounds" is a switch row: menuitemcheckbox, not menuitem.
+        const rows = (await menu.locator('[role="menuitem"], [role="menuitemcheckbox"]').allTextContents()).map((t) => t.replace(/\d+ active$/, "").trim())
         expect(rows).toEqual(expect.arrayContaining(["Profile & account", "Appearance", "Sessions & CLI tokens", "Help & resources", "Log out"]))
         // Both demo roles are trusted sessions: the full set, in the v67 order.
         const order = ["Profile & account", "Appearance", "Notification sounds", "Notification preferences", "Sessions & CLI tokens", "Connect CLI…", "Help & resources", "Log out"]

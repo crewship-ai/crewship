@@ -61,18 +61,26 @@ export function Peek({
   const contentRef = React.useRef<HTMLDivElement>(null)
 
   // Layout effect: runs before Radix moves focus into the sheet, so the opener
-  // is still the active element. The cleanup runs on close or unmount.
+  // is still the active element. It is handed back in onCloseAutoFocus, which
+  // Radix fires when the sheet really unmounts - after its exit animation.
+  // Earlier (on `open` turning false) the closing sheet still holds focus.
+  const openerRef = React.useRef<HTMLElement | null>(null)
   React.useLayoutEffect(() => {
     if (!open || !returnFocus) return
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    return () => {
-      if (!opener || opener === document.body) return
-      window.setTimeout(() => {
-        const now = document.activeElement
-        if (opener.isConnected && (!now || now === document.body)) opener.focus({ preventScroll: true })
-      }, 0)
-    }
+    const active = document.activeElement
+    openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
   }, [open, returnFocus])
+
+  const onCloseAutoFocus = (e: Event) => {
+    const opener = openerRef.current
+    openerRef.current = null
+    if (!opener || !opener.isConnected) return
+    const now = document.activeElement
+    // The person put focus somewhere else meanwhile: leave it there.
+    if (now && now !== document.body && !contentRef.current?.contains(now)) return
+    e.preventDefault()
+    opener.focus({ preventScroll: true })
+  }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement
@@ -91,6 +99,7 @@ export function Peek({
         ref={contentRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
+        onCloseAutoFocus={returnFocus ? onCloseAutoFocus : undefined}
         onOpenAutoFocus={initialFocus === undefined ? undefined : (e) => {
           e.preventDefault()
           if (initialFocus === "none") return

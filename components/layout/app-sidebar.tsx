@@ -6,11 +6,10 @@ import { PanelLeft, PanelLeftClose, PanelLeftDashed, Search, type LucideIcon } f
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { navSections, visibleItems } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
-import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
+import { useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
-import { SidebarVersion } from "@/components/layout/sidebar-version"
 import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf } from "@/components/layout/rail"
 import { UserMenu } from "@/components/layout/user-menu"
 import { useAppStore } from "@/lib/store"
@@ -55,7 +54,6 @@ export function AppSidebar() {
   // they stay in lockstep without two pollers.
   // /inbox/count and /system/* are not on the restricted allowlist.
   const trustedWorkspaceId = useTrustedWorkspaceId()
-  const trusted = useAccessMode() === "trusted"
   const inboxUnread = useInboxUnreadCount(trustedWorkspaceId)
   // A restricted session sees only the screens the server says it may open.
   const surfaces = useRestrictedSurfaces()
@@ -105,11 +103,6 @@ export function AppSidebar() {
           <SidebarModeMenu />
           {footer.map(row)}
         </SidebarMenu>
-        {trusted && (
-          <SidebarMenu>
-            <SidebarVersion />
-          </SidebarMenu>
-        )}
         {authAvailable && <UserMenu placement="sidebar" />}
       </SidebarFooter>
       <SidebarRail />

@@ -182,3 +182,29 @@ test.describe("phone page header", () => {
     }
   })
 })
+
+// v67 draws no edition/build row in the navigation; the build is the foot of
+// the user menu (`pu-ver`). Run after deploy at 1440, 1024 and 390.
+test.describe("the build is not in the sidebar", () => {
+  for (const width of [1440, 1024, 390]) {
+    test(`${width} px: no version row in the sidebar or the More sheet`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await seed(page, PINNED)
+      await page.goto("/issues")
+      await expect(page.locator("header").first()).toBeVisible()
+      await expect(page.locator("[data-slot=sidebar-build]")).toHaveCount(0)
+      await expect(page.locator('[data-sidebar=footer] a[href="/admin?tab=overview"]')).toHaveCount(0)
+      await expect(page.getByText("Community Edition", { exact: false })).toHaveCount(0)
+    })
+  }
+
+  test("1440 px: the user menu foot names edition and build", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await seed(page, PINNED)
+    await page.goto("/issues")
+    await page.getByRole("button", { name: /user menu/i }).first().click()
+    const foot = page.getByTestId("user-menu-footer")
+    await expect(foot).toBeVisible()
+    await expect(foot.getByTestId("user-menu-build")).toBeVisible()
+  })
+})

@@ -462,7 +462,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           publish it was read from the same record. Reload before reviewing.
         </p>
         <div>
-          <Button variant="outline" className="min-h-[44px]" onClick={review.refresh}>
+          <Button variant="outline" className="min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
             Try again
           </Button>
         </div>
@@ -589,7 +589,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           <strong>A base you reviewed moved</strong>
           <p className="mt-1">{blockers.find(b => b.code === "definition_moved")!.message}</p>
           <p className="mt-1 text-muted-foreground">Building the candidate again does not clear this. Refresh the review and read the new baseline.</p>
-          <Button variant="outline" className="mt-2 min-h-[44px]" onClick={review.refresh}>
+          <Button variant="outline" className="mt-2 min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
             Refresh review
           </Button>
         </div>
@@ -633,7 +633,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
                 : "The review carries the document this candidate would make live. Its stored definition could not be read as a Page document, so there is nothing to compare with the live Page."}
             </p>
             <p className="mt-1">This is not a statement that the definition is unchanged.</p>
-            <Button variant="outline" className="mt-2 min-h-[44px]" onClick={review.refresh}>
+            <Button variant="outline" className="mt-2 min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
               Try again
             </Button>
           </div>
@@ -728,7 +728,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             {/* Only when the read FAILED. A retained source that was pruned is
                 gone; a Try again there is an invitation to click for ever. */}
             {baselineSourceError !== null && (
-              <Button variant="outline" className="mt-2 min-h-[44px]" onClick={review.refresh}>
+              <Button variant="outline" className="mt-2 min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
                 Try again
               </Button>
             )}
@@ -738,7 +738,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             <strong>The candidate&apos;s source could not be read</strong>
             <p className="mt-1">{candidateSourceError}</p>
             <p className="mt-1">This does not mean there are no changes. No diff is shown because there is nothing truthful to show, and publishing from this review is blocked.</p>
-            <Button variant="outline" className="mt-2 min-h-[44px]" onClick={review.refresh}>
+            <Button variant="outline" className="mt-2 min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
               Try again
             </Button>
           </div>
@@ -777,13 +777,13 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              className="min-h-[44px]"
+              className="min-h-11 coarse:min-h-[44px]"
               disabled={!candidate || previewBuild.build.isPending || build?.state === "running"}
               onClick={() => candidate && previewBuild.build.mutate(candidate.revision)}
             >
               Build preview
             </Button>
-            <Button variant="outline" className="min-h-[44px]" disabled={build?.state !== "ready"} onClick={() => onPaneChange("preview")}>
+            <Button variant="outline" className="min-h-11 coarse:min-h-[44px]" disabled={build?.state !== "ready"} onClick={() => onPaneChange("preview")}>
               Open preview
             </Button>
           </div>
@@ -853,13 +853,13 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             <p className="mt-1 text-sm text-muted-foreground">
               Consent is not offered until all of it is on screen. Nothing above says this candidate is safe or unsafe; it says this review is incomplete.
             </p>
-            <Button variant="outline" className="mt-2 min-h-[44px]" onClick={review.refresh}>
+            <Button variant="outline" className="mt-2 min-h-11 coarse:min-h-[44px]" onClick={review.refresh}>
               Try again
             </Button>
           </div>
         )}
 
-        <label className="mt-3 flex min-h-[44px] items-start gap-2 text-sm">
+        <label className="mt-3 flex min-h-11 coarse:min-h-[44px] items-start gap-2 text-sm">
           <input
             type="checkbox"
             className="mt-1 size-4"
@@ -885,7 +885,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         </label>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button className="min-h-[44px]" disabled={!consent || blocked || !evidence.complete || review.publish.isPending} onClick={() => review.publish.mutate()}>
+          <Button className="min-h-11 coarse:min-h-[44px]" disabled={!consent || blocked || !evidence.complete || review.publish.isPending} onClick={() => review.publish.mutate()}>
             {review.publish.isPending ? "Publishing…" : "Publish application"}
           </Button>
         </div>
@@ -915,7 +915,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             happens, so there is no panel afterwards left to read it in. */}
         <Button
           variant="outline"
-          className="mt-3 min-h-[44px]"
+          className="mt-3 min-h-11 coarse:min-h-[44px]"
           onClick={() => {
             setConsent(false)
             setResetReason(null)
@@ -1042,7 +1042,7 @@ function SourceChanges({ diff, initial }: { diff: SourceDiff; initial: boolean }
               <button
                 type="button"
                 aria-current={file === active ? "true" : undefined}
-                className="flex min-h-[44px] w-full items-center gap-2 rounded-md border px-2 py-1 text-left text-sm aria-[current]:border-primary"
+                className="flex min-h-11 coarse:min-h-[44px] w-full items-center gap-2 rounded-md border px-2 py-1 text-left text-sm aria-[current]:border-primary"
                 onClick={() => setSelected(index)}
               >
                 <span className="font-mono text-xs" aria-hidden="true">
