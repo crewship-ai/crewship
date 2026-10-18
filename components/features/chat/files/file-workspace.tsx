@@ -12,6 +12,7 @@ import { isManagerTier } from "@/lib/permissions/tiers"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { getChatFileIcon, getEditorLanguage } from "../chat-tree-row"
 import { fileRoute, type EditorScope } from "../hooks/use-file-editor"
 import { FilePreview } from "./file-preview"
@@ -133,8 +134,14 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       {canEdit && content !== null && !editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil className="size-3.5" /> Edit</Button>}
       {editing && <>
         <Button variant="outline" size="sm" disabled={saving} onClick={() => {
-          if (dirty && !window.confirm("Discard unsaved file changes?")) return
-          setEditing(false); setDirty(false); onDirtyChange?.(false); setEditorVersion((value) => value + 1)
+          const discard = () => { setEditing(false); setDirty(false); onDirtyChange?.(false); setEditorVersion((value) => value + 1) }
+          if (!dirty) { discard(); return }
+          void askConfirm({
+            title: "Discard unsaved file changes?",
+            confirmLabel: "Discard",
+            cancelLabel: "Keep editing",
+            destructive: true,
+          }).then((ok) => { if (ok) discard() })
         }}><X className="size-3.5" /> Cancel</Button>
         <Button size="sm" disabled={!dirty || saving} onClick={() => saveRef.current?.()}>
           {saving ? <Spinner className="size-3.5" /> : <Save className="size-3.5" />} Save

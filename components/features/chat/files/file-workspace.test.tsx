@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FileWorkspace } from "./file-workspace"
 import { readPreviewBytes } from "./file-preview-data"
 import { apiFetch } from "@/lib/api-fetch"
+import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 
 const role = vi.hoisted(() => ({ value: "MANAGER" }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ role: role.value }) }))
@@ -54,6 +55,21 @@ describe("FileWorkspace", () => {
       expect.objectContaining({ method: "PUT", body: "updated content" }),
     ))
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  it("asks in the page before cancelling unsaved edits and keeps them on refusal", async () => {
+    mountConfirmHost()
+    render(<FileWorkspace {...base} file={file} />)
+    await screen.findByDisplayValue("initial content")
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "File content" }), { target: { value: "changed" } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved file changes?" })).toBeVisible()
+    await answerConfirm("Keep editing")
+    expect(screen.getByTestId("editor-mode")).toHaveTextContent("editable")
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await answerConfirm("Discard")
+    await waitFor(() => expect(screen.getByTestId("editor-mode")).toHaveTextContent("read only"))
   })
 
   it("shows read-only preview for a viewer and routes PDF to the safe renderer", async () => {
