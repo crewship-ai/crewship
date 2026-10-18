@@ -66,6 +66,8 @@ export function matchesRoutineFilters(
   filters: RoutineFilterState,
   live: LiveRuns,
   search = "",
+  /** Slugs the server matched by the text of their steps (GET /pipelines?q=). */
+  stepMatches?: ReadonlySet<string> | null,
 ): boolean {
   if (search) {
     const q = search.toLowerCase()
@@ -77,7 +79,7 @@ export function matchesRoutineFilters(
     ]
       .join(" ")
       .toLowerCase()
-    if (!haystack.includes(q)) return false
+    if (!haystack.includes(q) && !stepMatches?.has(routine.slug)) return false
   }
 
   if (!filters.showEphemeral && routine.ephemeral) return false

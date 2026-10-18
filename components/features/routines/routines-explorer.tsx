@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ArrowDownUp, Check, ChevronLeft, Hand, LayoutDashboard, List, ListChecks, Pause, Pencil, Play, PenLine, X } from "lucide-react"
+import { ArrowDownUp, Check, ChevronLeft, FolderInput, FolderPlus, Hand, LayoutDashboard, List, ListChecks, Pause, Pencil, Play, PenLine, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
@@ -21,6 +21,7 @@ import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/compo
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -50,6 +51,8 @@ import {
   type RoutineSort,
 } from "@/lib/routine-panel-index"
 import { RoutineGlyph } from "./routine-glyph"
+import { RoutineFolderDialog } from "./routine-folder-dialog"
+import { toast } from "@/lib/toast"
 import type { PeekRun } from "./routine-run-peek"
 import { runBarTone } from "@/lib/routine-page"
 import { formatDurationMs } from "@/lib/activity-stream"
@@ -62,8 +65,9 @@ import { formatDurationMs } from "@/lib/activity-stream"
 // Trigger, None) and sort (Next run, Last run, Name, Spend) in View. Trigger,
 // next run and spend come from the panel index the layout composes from the
 // schedule, webhook, budget and chat command lists (lib/routine-panel-index).
-// Folders are not offered: routines have no folders (they are an Artifacts
-// concept), so the crew is the grouping the data actually has.
+// Folders (ODCH-RT-01) are the first grouping once one exists: New folder in
+// the toolbar, Move in the selection bar. A workspace without folders groups
+// by crew until the first one is made.
 
 export type RoutinesView = "overview" | "needs" | "live" | "runs" | "drafts"
 
@@ -104,6 +108,15 @@ interface RoutinesExplorerProps {
     onPeek: (runId: string) => void
     onBack: () => void
   }
+  /** Routine folders. `onCreate` is absent when the role cannot create. */
+  folders?: {
+    list: { id: string; name: string }[]
+    onCreate?: (name: string) => Promise<string | null>
+    /** File routines in a folder, or out of any with null; resolves to a refusal message or null. */
+    onMove?: (slugs: string[], folderId: string | null) => Promise<string | null>
+  }
+  /** Slugs found by the text of their steps (GET /pipelines?q=), added to the name match. */
+  stepMatches?: ReadonlySet<string> | null
   /** Select several (PNL-03). Absent on a phone, where there is no selection. */
   bulk?: {
     /** Turning off is Owner and Admin on the server. */
@@ -141,6 +154,7 @@ const LAST_RUN: { id: Exclude<RoutineStatusFilter, "all">; label: string }[] = [
 ]
 
 const GROUPS: { id: RoutineGroupBy; label: string }[] = [
+  { id: "folder", label: "Folder" },
   { id: "crew", label: "Crew" },
   { id: "trigger", label: "Trigger" },
   { id: "none", label: "None" },
@@ -166,12 +180,14 @@ export function RoutinesExplorer({
   crews,
   index = EMPTY_PANEL_INDEX,
   bulk,
+  folders,
+  stepMatches,
   runsOf,
 }: RoutinesExplorerProps) {
   if (runsOf) return <RoutineRunsPanel {...runsOf} />
   return (
     <RoutinesList
-      {...{ routines, search, onSearchChange, selectedSlug, onSelectRoutine, filters, onChange, view, onViewChange, counts, crews, index, bulk }}
+      {...{ routines, search, onSearchChange, selectedSlug, onSelectRoutine, filters, onChange, view, onViewChange, counts, crews, index, bulk, folders, stepMatches }}
     />
   )
 }
@@ -299,7 +315,10 @@ function RoutinesList({
   crews,
   index = EMPTY_PANEL_INDEX,
   bulk,
+  folders,
+  stepMatches,
 }: Omit<RoutinesExplorerProps, "runsOf">) {
+  const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [selecting, setSelecting] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(() => new Set())
   const [confirmOff, setConfirmOff] = useState(false)
@@ -325,11 +344,22 @@ function RoutinesList({
       setBusy(false)
     }
   }
+  const moveTo = async (folderId: string | null) => {
+    const message = await folders?.onMove?.(pickedSlugs(), folderId)
+    if (message) toast.error("Could not move the routines", { description: message })
+    else {
+      toast.success(folderId ? `Moved to ${folders?.list.find((f) => f.id === folderId)?.name ?? "the folder"}` : "Taken out of their folder")
+      setPicked(new Set())
+    }
+  }
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
-  const [storedGroup, setGroupBy] = useUserPreference<RoutineGroupBy>("routines.panel.group", "crew")
+  const [storedGroup, setGroupBy] = useUserPreference<RoutineGroupBy>("routines.panel.group", "folder")
   const [storedSort, setSortBy] = useUserPreference<RoutineSort>("routines.panel.sort", "recent")
   // A stored value from another version of the panel falls back, never breaks it.
-  const groupBy = GROUPS.some((g) => g.id === storedGroup) ? storedGroup : "crew"
+  const chosenGroup = GROUPS.some((g) => g.id === storedGroup) ? storedGroup : "folder"
+  const folderById = useMemo(() => new Map((folders?.list ?? []).map((f) => [f.id, f])), [folders?.list])
+  // Without a folder yet, Folder would be one "No folder" section: show the crews instead.
+  const groupBy: RoutineGroupBy = chosenGroup === "folder" && folderById.size === 0 ? "crew" : chosenGroup
   const sortBy = SORTS.some((o) => o.id === storedSort) ? storedSort : "recent"
   const input = (p: Pipeline) => routineFilterInput(p, index.triggers.get(p.slug))
 
@@ -338,7 +368,7 @@ function RoutinesList({
   const facetCounts = useMemo(() => {
     const none = { ...filters, status: "all" as const, lifecycle: "all" as const, crewId: null, trigger: null }
     const count = (patch: Partial<RoutineFilterState>) =>
-      routines.filter((p) => matchesRoutineFilters(input(p), { ...none, ...patch }, liveBySlug, search)).length
+      routines.filter((p) => matchesRoutineFilters(input(p), { ...none, ...patch }, liveBySlug, search, stepMatches)).length
     return {
       lifecycle: Object.fromEntries(LIFECYCLE.map((o) => [o.id, count({ lifecycle: o.id })])),
       lastRun: Object.fromEntries(LAST_RUN.map((o) => [o.id, count({ status: o.id })])),
@@ -346,15 +376,14 @@ function RoutinesList({
       crew: Object.fromEntries([...crews.keys()].map((id) => [id, count({ crewId: id })])),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routines, filters, liveBySlug, search, crews, index])
+  }, [routines, filters, liveBySlug, search, stepMatches, crews, index])
 
   const displayed = useMemo(
-    () => sortRoutines(routines.filter((p) => matchesRoutineFilters(input(p), filters, liveBySlug, search)), sortBy, index),
+    () => sortRoutines(routines.filter((p) => matchesRoutineFilters(input(p), filters, liveBySlug, search, stepMatches)), sortBy, index),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [routines, filters, liveBySlug, search, sortBy, index],
+    [routines, filters, liveBySlug, search, stepMatches, sortBy, index],
   )
 
-  const groups = useMemo(() => groupRoutines(displayed, groupBy, index, crews), [displayed, groupBy, index, crews])
 
   const active = {
     lifecycle: filters.lifecycle && filters.lifecycle !== "all" ? filters.lifecycle : null,
@@ -366,6 +395,10 @@ function RoutinesList({
   const activeCount =
     (active.lifecycle ? 1 : 0) + (active.status ? 1 : 0) + (active.trigger ? 1 : 0) + (active.crewId ? 1 : 0) + (filters.showTestRoutines ? 1 : 0) + (filters.showEphemeral ? 1 : 0)
   const clear = () => onChange({ ...filters, status: "all", lifecycle: "all", crewId: null, trigger: null, showTestRoutines: false, showEphemeral: false })
+  const groups = useMemo(
+    () => groupRoutines(displayed, groupBy, index, crews, { folders: folderById, includeEmptyFolders: activeCount === 0 && !search }),
+    [displayed, groupBy, index, crews, folderById, activeCount, search],
+  )
   const facets = useSidebarFacets()
   const viewCount = (id: RoutinesView) => (id === "needs" ? counts.needs : id === "live" ? counts.live : id === "drafts" ? counts.drafts : null)
 
@@ -379,6 +412,11 @@ function RoutinesList({
         <SidebarFilterButton activeCount={activeCount} {...facets.triggerProps}>
           Filter
         </SidebarFilterButton>
+        {folders?.onCreate && (
+          <SidebarViewButton aria-label="New folder" title="New folder" onClick={() => setNewFolderOpen(true)}>
+            <FolderPlus className="h-3.5 w-3.5" />
+          </SidebarViewButton>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarViewButton aria-label="View: group and sort">
@@ -578,6 +616,26 @@ function RoutinesList({
       {selecting && bulk && (
         <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
           <span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
+          {folders?.onMove && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" disabled={!picked.size || busy}>
+                  <FolderInput className="h-3 w-3" aria-hidden />
+                  Move
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuLabel>Move to folder</DropdownMenuLabel>
+                {folders.list.map((f) => (
+                  <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+                    {f.name}
+                  </DropdownMenuItem>
+                ))}
+                {folders.list.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem onSelect={() => void moveTo(null)}>No folder</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {bulk.canTurnOff && (
             <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" disabled={!picked.size || busy} onClick={() => setConfirmOff(true)}>
               <Pause className="h-3 w-3" aria-hidden />
@@ -601,6 +659,7 @@ function RoutinesList({
           </Button>
         </div>
       )}
+      {folders?.onCreate && <RoutineFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} onCreate={folders.onCreate} />}
       <ConfirmDialog
         open={confirmOff}
         onOpenChange={setConfirmOff}

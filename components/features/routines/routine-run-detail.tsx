@@ -963,9 +963,9 @@ export function RoutineRunDetail({ workspaceId, runId, actionsInBar, onClose, on
 
 /** How many runs of this routine may go at once, from the executed recipe. */
 function concurrencyLine(dsl: unknown): string | null {
-  const d = (dsl ?? {}) as { max_concurrent?: unknown; concurrency_key?: unknown }
+  const d = (dsl ?? {}) as { max_concurrent?: unknown; concurrency_key?: unknown; concurrency_policy?: unknown }
   if (typeof d.max_concurrent === "number" && d.max_concurrent > 1) return `Up to ${d.max_concurrent} at a time`
-  if (typeof d.concurrency_key === "string" && d.concurrency_key) return "1 at a time; a new start waits in line"
+  if (typeof d.concurrency_key === "string" && d.concurrency_key) return d.concurrency_policy === "skip" ? "1 at a time; a new start is skipped" : "1 at a time; a new start waits in line"
   return null
 }
 

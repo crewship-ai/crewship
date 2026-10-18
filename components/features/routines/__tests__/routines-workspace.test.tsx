@@ -42,6 +42,7 @@ vi.mock("@/hooks/use-automations", () => ({
 vi.mock("../routine-calendar", () => ({ RoutineCalendar: () => <div>Calendar</div> }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "MANAGER" }) }))
 vi.mock("@/hooks/use-workspace-waitpoints", () => ({ useWorkspaceWaitpoints: () => ({ waitpoints: [], decide: vi.fn(async () => true), refresh: vi.fn() }) }))
+vi.mock("@/hooks/use-routine-health", () => ({ useRoutineHealth: () => null }))
 vi.mock("@/hooks/use-routine-budget", () => ({ useBudgetSummary: () => ({ summary: null, loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("@/components/features/dashboard/run-volume-chart", () => ({ RunVolumeChart: () => <div data-testid="run-volume" /> }))
 

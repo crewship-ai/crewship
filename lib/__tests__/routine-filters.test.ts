@@ -117,3 +117,16 @@ describe("matchesRoutineFilters — Status and Crew facets", () => {
     expect(matchesRoutineFilters(row, { ...all, crewId: "crew_b" }, new Map())).toBe(false)
   })
 })
+
+describe("matchesRoutineFilters — search over steps (ODCH-RT-03)", () => {
+  it("also matches a routine the server found by the text of its steps", () => {
+    const stepText = new Set(["demo"])
+    expect(matchesRoutineFilters(base, all, new Map(), "competitor pricing")).toBe(false)
+    expect(matchesRoutineFilters(base, all, new Map(), "competitor pricing", stepText)).toBe(true)
+    expect(matchesRoutineFilters({ ...base, slug: "other" }, all, new Map(), "competitor pricing", stepText)).toBe(false)
+  })
+
+  it("does not use the step matches without a search", () => {
+    expect(matchesRoutineFilters(base, { ...all, status: "failed" }, new Map(), "", new Set(["demo"]))).toBe(false)
+  })
+})

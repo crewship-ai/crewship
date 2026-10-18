@@ -375,3 +375,68 @@ describe("routineRowState", () => {
     expect(routineRowState(pipeline(row as Partial<Pipeline>), live)?.label ?? null).toBe(label)
   })
 })
+
+describe("<RoutinesExplorer> folders (ODCH-RT-01)", () => {
+  const folderRoutines = routines.map((r) => (r.slug === "weekly" || r.slug === "news" ? { ...r, folder_id: "f_intel" } : r))
+  const list = [
+    { id: "f_intel", name: "Market intel" },
+    { id: "f_empty", name: "Archive" },
+  ]
+  const bulk = () => ({ canTurnOff: true, onTurnOff: vi.fn(async () => {}), onRunNow: vi.fn(async () => {}) })
+
+  it("groups by folder first once a folder exists, with the unfiled last and an empty folder kept", () => {
+    renderPanel({ routines: folderRoutines, folders: { list } })
+    const names = screen.getAllByRole("group").map((g) => g.getAttribute("aria-label"))
+    expect(names.slice(1)).toEqual(["Archive", "Market intel", "No folder"])
+    expect(within(screen.getByRole("group", { name: "Market intel" })).getByText("Weekly report")).toBeInTheDocument()
+    expect(within(screen.getByRole("group", { name: "No folder" })).getByText("Invoice intake")).toBeInTheDocument()
+  })
+
+  it("falls back to the crews while there is no folder", () => {
+    renderPanel({ routines: folderRoutines, folders: { list: [] } })
+    expect(screen.getByRole("group", { name: "Research" })).toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "No folder" })).toBeNull()
+  })
+
+  it("New folder opens a dialog and shows the server's refusal without losing the name", async () => {
+    const onCreate = vi.fn(async () => 'a folder named "Ops" already exists')
+    renderPanel({ routines: folderRoutines, folders: { list, onCreate } })
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }))
+    const name = await screen.findByRole("textbox", { name: /Name/ })
+    fireEvent.change(name, { target: { value: "Ops" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create folder" }))
+    expect(await screen.findByText('a folder named "Ops" already exists')).toBeInTheDocument()
+    expect(onCreate).toHaveBeenCalledWith("Ops")
+    expect(screen.getByRole("textbox", { name: /Name/ })).toHaveValue("Ops")
+  })
+
+  it("has no New folder button without the right to create", () => {
+    renderPanel({ routines: folderRoutines, folders: { list } })
+    expect(screen.queryByRole("button", { name: "New folder" })).toBeNull()
+  })
+
+  it("Move files the selected routines in a folder or out of any", async () => {
+    const onMove = vi.fn(async () => null)
+    renderPanel({ routines: folderRoutines, folders: { list, onMove }, bulk: bulk() })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Invoice intake" }))
+    const move = screen.getByRole("button", { name: "Move" })
+    fireEvent.pointerDown(move, { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Market intel" }))
+    await waitFor(() => expect(onMove).toHaveBeenCalledWith(["invoice"], "f_intel"))
+  })
+
+  it("does not offer Move before the person may create", () => {
+    renderPanel({ routines: folderRoutines, folders: { list }, bulk: bulk() })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    expect(screen.queryByRole("button", { name: "Move" })).toBeNull()
+  })
+})
+
+describe("<RoutinesExplorer> search over steps (ODCH-RT-03)", () => {
+  it("lists a routine the server found by its step text", () => {
+    renderPanel({ search: "pricing", stepMatches: new Set(["cert"]) })
+    expect(screen.getByText("Cert check")).toBeInTheDocument()
+    expect(screen.queryByText("Weekly report")).toBeNull()
+  })
+})

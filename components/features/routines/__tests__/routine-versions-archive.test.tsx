@@ -159,3 +159,23 @@ describe("Restore as draft on the routine page", () => {
     expect(screen.queryByRole("button", { name: "Restore as draft" })).toBeNull()
   })
 })
+
+describe("test result on a version (ODCH-RT-13)", () => {
+  it("says Test run passed or failed only for a version that has a result", async () => {
+    fetcher.mockImplementation(async (url: string) =>
+      json(
+        url.endsWith("/versions")
+          ? [
+              { version: 3, is_head: true, test_result: { passed: true, status: "DRY_RUN_OK", tested_at: "2026-10-18T10:00:00Z" } },
+              { version: 2, test_result: { passed: false, status: "FAILED", tested_at: "2026-10-17T10:00:00Z" } },
+              { version: 1 },
+            ]
+          : { version: 1, definition },
+      ),
+    )
+    render(<RoutineVersionsTab workspaceId="ws" slug="recipe" />)
+    expect(await screen.findByTestId("routine-version-3")).toHaveTextContent("Test run passed")
+    expect(screen.getByTestId("routine-version-2")).toHaveTextContent("Test run failed")
+    expect(screen.getByTestId("routine-version-1")).not.toHaveTextContent("Test run")
+  })
+})
