@@ -169,6 +169,29 @@ describe("<RoutineTriggersTab>", () => {
     expect(await screen.findByText(/copy values now/i)).toBeInTheDocument()
   })
 
+  it("each schedule and webhook row carries its #schedule-/#webhook- anchor, and the URL hash focuses it", async () => {
+    // ⌘K schedule hits and the calendar link to /routines?slug=…&view=plan#schedule-<id>;
+    // the row is the deep-link target, as it was on the Plan tab.
+    h.schedules = [schedule]
+    h.webhooks = [webhook]
+    h.fetcher.mockResolvedValue(json({ items: [], next_cursor: null }))
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    window.history.replaceState(null, "", "/routines?slug=weekly&view=plan#schedule-s1")
+    try {
+      renderTab()
+      const list = screen.getByTestId("routine-trigger-list")
+      const row = list.querySelector("li#schedule-s1")
+      expect(row).not.toBeNull()
+      expect(row).toHaveAttribute("data-kind", "schedule")
+      expect(list.querySelector("li#webhook-w1")).toHaveAttribute("data-kind", "webhook")
+      await waitFor(() => expect(document.activeElement).toBe(row))
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" })
+    } finally {
+      window.history.replaceState(null, "", "/")
+    }
+  })
+
   it("a draft-only routine has nothing to start yet", () => {
     render(<RoutineTriggersTab workspaceId="ws" routine={{ ...routine, head_version: 0, draft_only: true }} lifecycle="active" depth="simple" rows={[]} onOpenRun={vi.fn()} onSettings={vi.fn()} />)
     expect(screen.getByText(/Not live yet/)).toBeInTheDocument()
