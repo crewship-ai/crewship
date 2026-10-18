@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutineRunDetail } from "../routine-run-detail"
+import { Workflow } from "lucide-react"
 import { SubBar } from "@/components/layout/sub-bar"
 
 const PREVIEW_HASH = "a".repeat(64)
@@ -743,7 +744,7 @@ describe("routine run detail — page actions (COM-12)", () => {
   it("with actionsInBar Copy for AI is in the SubBar's slot, not in the header", () => {
     render(
       <>
-        <SubBar icon={() => null} title="Routines" ariaLabel="Routines" />
+        <SubBar icon={Workflow} title="Routines" ariaLabel="Routines" />
         <RoutineRunDetail workspaceId="ws" runId="run_1" actionsInBar />
       </>,
     )

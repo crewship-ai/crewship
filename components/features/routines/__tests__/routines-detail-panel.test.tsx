@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutinesDetailPanel } from "../routines-detail-panel"
+import { Workflow } from "lucide-react"
 import { SubBar } from "@/components/layout/sub-bar"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 
@@ -627,7 +628,7 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
   it("COM-12: with actionsInBar the page actions land in the SubBar's own slot, not in the page", async () => {
     render(
       <>
-        <SubBar icon={() => null} title="Routines" ariaLabel="Routines" />
+        <SubBar icon={Workflow} title="Routines" ariaLabel="Routines" />
         <RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" actionsInBar />
       </>,
     )
