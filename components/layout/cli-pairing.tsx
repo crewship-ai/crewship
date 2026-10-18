@@ -179,8 +179,9 @@ export function PairingBlock({
           <code className="min-w-0 flex-1 select-all break-all font-mono text-label text-foreground" data-testid="pair-command">
             {command}
           </code>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onCopy} aria-label="Copy command" disabled={status !== "pending"}>
+          <Button type="button" variant="outline" size="sm" onClick={onCopy} aria-label="Copy command" disabled={status !== "pending"}>
             {copied ? <Check className="size-3.5 text-success" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+            {copied ? "Copied" : "Copy"}
           </Button>
         </div>
       ) : (
@@ -220,7 +221,7 @@ export function PairingBlock({
             <span>The code expired.</span>
             <Button type="button" variant="outline" size="sm" onClick={onNewCode}>
               <RefreshCw className="size-3.5" aria-hidden />
-              Get a new code
+              New code
             </Button>
           </span>
         </Note>
