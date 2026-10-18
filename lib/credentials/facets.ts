@@ -38,6 +38,10 @@ export interface CredentialLike {
    *  server (see splitAgentRefs in internal/api/credentials.go). */
   agent_ids?: string[] | null
   agent_names?: string[] | null
+  /** Vault folder the secret is filed in; null/absent = unfiled. */
+  folder_id?: string | null
+  /** The folder's replace-reminder has elapsed (server-computed). */
+  replace_due?: boolean
   /** Reveal classification — STANDARD / RESTRICTED / SEALED. The server
    *  COALESCEs a missing one to STANDARD, so absent reads the same way. */
   sensitivity?: string | null
@@ -92,6 +96,7 @@ export function daysUntilExpiry(c: CredentialLike): number | null {
 export function needsAttention(c: CredentialLike): boolean {
   const status = deriveCredentialStatus(c)
   if (status === "Error" || status === "Stale" || status === "Pending") return true
+  if (c.replace_due) return true
   const days = daysUntilExpiry(c)
   return days !== null && days < EXPIRY_WARNING_DAYS
 }
@@ -394,6 +399,9 @@ export interface CredentialFilters {
   crew: string[]
   /** Classifications — STANDARD / RESTRICTED / SEALED. */
   classification: string[]
+  /** Vault folder ids. A root folder also covers its subfolders (see
+   *  `folderIds` in applyCredentialFilters' options). */
+  folder: string[]
   search: string
 }
 
@@ -407,6 +415,7 @@ export const EMPTY_CREDENTIAL_FILTERS: CredentialFilters = {
   agentId: [],
   crew: [],
   classification: [],
+  folder: [],
   search: "",
 }
 
@@ -432,14 +441,19 @@ export function applyCredentialFilters<T extends CredentialLike>(
   credentials: T[],
   filters: CredentialFilters,
   missingToolIds: ReadonlySet<string>,
-  opts: { agentCrew?: ReadonlyMap<string, string>; now?: number } = {},
+  opts: { agentCrew?: ReadonlyMap<string, string>; now?: number; folderIds?: ReadonlySet<string> } = {},
 ): T[] {
   const q = filters.search.trim().toLowerCase()
   const now = opts.now ?? Date.now()
   const crews = filters.crew ?? []
   const classes = filters.classification ?? []
+  const folders = filters.folder ?? []
   return credentials.filter((c) => {
     if (!matchesView(c, filters.status, missingToolIds, now)) return false
+    if (folders.length > 0) {
+      const covered = opts.folderIds ?? new Set(folders)
+      if (!c.folder_id || !covered.has(c.folder_id)) return false
+    }
     if (crews.length > 0) {
       const reach = credentialCrewIds(c, opts.agentCrew)
       if (!crews.some((id) => reach.has(id))) return false

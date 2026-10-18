@@ -178,6 +178,7 @@ export function parseVaultUrl(q: QueryLike): VaultUrlState {
       scope: list(q, "scope").map((s) => (s.toUpperCase() === "WORKSPACE" || s.toUpperCase() === "CREW" ? s.toUpperCase() : s)),
       tag: list(q, "tag"),
       agentId: list(q, "agent"),
+      folder: list(q, "folder"),
       search: q.get("q") ?? "",
     },
     group: q.get("group") === "type" ? "type" : "none",
@@ -224,6 +225,7 @@ export function buildVaultQuery(state: VaultUrlState): string {
   for (const v of f.scope) p.append("scope", v)
   for (const v of f.tag) p.append("tag", v)
   for (const v of f.agentId) p.append("agent", v)
+  for (const v of f.folder) p.append("folder", v)
   if (f.search.trim()) p.set("q", f.search)
   if (state.group !== "none") p.set("group", state.group)
   if (state.id) p.set("id", state.id)
@@ -234,7 +236,7 @@ export function buildVaultQuery(state: VaultUrlState): string {
 
 /** True when the address names a space, a filter or a page — a bare /credentials does not. */
 export function hasExplicitVaultState(q: QueryLike): boolean {
-  for (const key of ["space", "tab", "id", "pool", "view", "q", "type", "brand", "crew", "tier", "class", "scope", "tag", "agent", "provider", "mode", "owner"]) {
+  for (const key of ["space", "tab", "id", "pool", "view", "q", "type", "brand", "crew", "tier", "class", "scope", "tag", "agent", "folder", "provider", "mode", "owner"]) {
     if (q.get(key) !== null) return true
   }
   return false
@@ -250,7 +252,8 @@ export function activeFacetCount(f: CredentialFilters): number {
     f.classification.length +
     f.scope.length +
     f.tag.length +
-    f.agentId.length
+    f.agentId.length +
+    f.folder.length
   )
 }
 

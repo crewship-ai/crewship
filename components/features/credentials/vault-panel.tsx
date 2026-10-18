@@ -7,13 +7,14 @@
  * v67 panel() → pk-fx); while it is closed, a removable chip shows each facet
  * in force.
  *
- * Folders, External vaults and Workspace keys are in the design but have no
- * backend yet; they are not drawn.
+ * Folders sit under the views (v67 V-PANEL); picking one filters the list, and a
+ * root folder covers its subfolders. External vaults and Workspace keys are in
+ * the design but have no backend yet; they are not drawn.
  */
 
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
-import { AlertTriangle, Clock, CircleDashed, KeyRound, PackageX, Sparkles } from "lucide-react"
+import { AlertTriangle, Clock, CircleDashed, Folder, FolderPlus, KeyRound, PackageX, Sparkles } from "lucide-react"
 
 import {
   SidebarActiveChip,
@@ -29,6 +30,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import type { CredentialCrewRef } from "@/hooks/use-credential-readiness"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { buildFolderTree, type CredentialFolder } from "@/lib/credentials/folders"
 import {
   CLASSIFICATIONS,
   EMPTY_CREDENTIAL_FILTERS,
@@ -104,6 +106,10 @@ export interface VaultPanelProps {
   tags: CredentialFacetOption[]
   agents: CredentialFacetOption[]
   crewsById: Record<string, CredentialCrewRef>
+  /** Vault folders, flat; the panel builds the two-level tree. */
+  folders?: CredentialFolder[]
+  /** Opens the New folder dialog; omitted for people who cannot create folders. */
+  onNewFolder?: () => void
   spaces: React.ReactNode
 }
 
@@ -122,6 +128,8 @@ export function VaultPanel({
   tags,
   agents,
   crewsById,
+  folders = [],
+  onNewFolder,
   spaces,
 }: VaultPanelProps) {
   const facets = useSidebarFacets()
@@ -215,6 +223,10 @@ export function VaultPanel({
               return <SidebarActiveChip key={`${g.key}:${v}`} label={text} onRemove={() => toggle(g.key, v)}>{text}</SidebarActiveChip>
             }),
           )}
+          {filters.folder.map((id) => {
+            const text = `Folder: ${folders.find((f) => f.id === id)?.name ?? id}`
+            return <SidebarActiveChip key={`folder:${id}`} label={text} onRemove={() => set({ folder: filters.folder.filter((x) => x !== id) })}>{text}</SidebarActiveChip>
+          })}
           {filters.tier && (
             <SidebarActiveChip label={`Tier: ${label(tiers, filters.tier)}`} onRemove={() => set({ tier: null })}>
               Tier: {label(tiers, filters.tier)}
@@ -240,6 +252,42 @@ export function VaultPanel({
               </SidebarRow>
             )
           })}
+
+        {(folders.length > 0 || onNewFolder) && (
+          <SidebarSection
+            label="Folders"
+            count={folders.length || undefined}
+            actions={onNewFolder ? (
+              <button
+                type="button"
+                onClick={onNewFolder}
+                aria-label="New folder"
+                title="New folder"
+                className="kit-tap inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"
+              >
+                <FolderPlus className="size-3.5" aria-hidden />
+              </button>
+            ) : undefined}
+          >
+            {buildFolderTree(folders).map(({ folder, depth, total }) => {
+              const on = filters.folder.includes(folder.id)
+              return (
+                <SidebarRow
+                  key={folder.id}
+                  indent={depth === 1}
+                  selected={on}
+                  aria-current={on ? "page" : undefined}
+                  onSelect={() => onFiltersChange({ ...EMPTY_CREDENTIAL_FILTERS, status: filters.status, search: filters.search, folder: on ? [] : [folder.id] })}
+                >
+                  <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                  {meta(total)}
+                </SidebarRow>
+              )
+            })}
+            {folders.length === 0 && <p className="px-3 py-1 text-label text-muted-foreground">No folders yet.</p>}
+          </SidebarSection>
+        )}
       </div>
     </div>
   )

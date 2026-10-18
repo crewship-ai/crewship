@@ -9,8 +9,9 @@
  * it, renewal and the workspace default.
  *
  * Usage windows are drawn only when the server reports them (login.quota,
- * #3442). Recorded tokens and calls come from /paymaster/subscriptions. Spend
- * per account has no backend ($0 for flat-rate by construction) and is not drawn.
+ * #3442). Recorded tokens and calls come from /paymaster/subscriptions. An API
+ * key also shows "$ this month" (/paymaster/credential-spend); a flat-rate seat
+ * never shows a price ($0 by construction).
  */
 
 import * as React from "react"
@@ -105,10 +106,16 @@ export function ProviderHealth({ counts, onOpen }: { counts: ProviderHealthCount
 
 // ── One account ─────────────────────────────────────────────────────────────
 
-/** Recorded use of one account over the last 30 days (paymaster subscriptions). Never a price. */
+/** Recorded use of one account over the last 30 days (paymaster subscriptions). */
 export interface AccountTokenUsage {
   tokens: number
   calls: number
+  /** Metered $ this calendar month — API keys only; a flat-rate seat has none. */
+  spendUsd?: number
+}
+
+function money(usd: number): string {
+  return `$${usd.toFixed(2)}`
 }
 
 function compactCount(n: number): string {
@@ -128,7 +135,8 @@ export const NEAR_LIMIT_PCT = 80
 export function AccountUsage({ c, usage }: { c: LoginCredential; usage?: AccountTokenUsage }) {
   const q = c.login?.quota
   const used = usage && (usage.tokens > 0 || usage.calls > 0) ? usage : null
-  if (!q && !used) return <p className="text-label text-muted-foreground-soft">No usage data yet</p>
+  const spend = c.login?.mode === "api_key" && usage?.spendUsd !== undefined ? usage.spendUsd : null
+  if (!q && !used && spend === null) return <p className="text-label text-muted-foreground-soft">No usage data yet</p>
   const near = q ? Math.max(q.window_5h_pct ?? 0, q.window_weekly_pct ?? 0) >= NEAR_LIMIT_PCT : false
   return (
     <div className="flex flex-col gap-1">
@@ -144,6 +152,7 @@ export function AccountUsage({ c, usage }: { c: LoginCredential; usage?: Account
           {compactCount(used.tokens)} tokens · {used.calls} {used.calls === 1 ? "call" : "calls"} · last 30 days
         </p>
       )}
+      {spend !== null && <p className="text-label text-muted-foreground">{money(spend)} this month</p>}
     </div>
   )
 }
