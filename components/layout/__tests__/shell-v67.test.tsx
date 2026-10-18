@@ -178,3 +178,18 @@ describe("top-bar actions on a tablet", () => {
     }
   })
 })
+
+// v67 core.js:345-348 and index.html .tabbar: the phone tab bar's More tab is
+// a grid (it opens a grid of every place), and the bar is 62 px tall.
+describe("phone tab bar", () => {
+  it("draws More as a grid, not a hamburger", () => {
+    const src = readFileSync(path.resolve(__dirname, "../mobile-tab-bar.tsx"), "utf8")
+    expect(src).toMatch(/<LayoutGrid\b/)
+    expect(src).not.toMatch(/<Menu\b/)
+  })
+
+  it("is 62 px plus the home-indicator inset", () => {
+    const css = readFileSync(path.resolve(__dirname, "../../../app/globals.css"), "utf8")
+    expect(css).toMatch(/--mobile-tab-bar-h:\s*calc\(62px \+ env\(safe-area-inset-bottom\)\)/)
+  })
+})
