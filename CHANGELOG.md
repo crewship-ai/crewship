@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+
+- ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.
+- **Agent details now show the configured provider and model** in table, JSON and YAML output; these settings remain distinct from evidence of the model serving a run.
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 

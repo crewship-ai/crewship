@@ -67,6 +67,9 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	if !ok {
 		return
 	}
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
+		return
+	}
 	operation := "read"
 	var body any = map[string]any{}
 	if mutate {
