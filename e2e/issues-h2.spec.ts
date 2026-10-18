@@ -472,6 +472,16 @@ test.describe("ODCH-ISS-04 agent checkpoint in the peek", () => {
       await page.route(/\/issues\/[^/]+\/sessions\?/, (route) => route.fulfill({ json: [{ id: "s1", agent_id: "a-scout", agent_name: "Scout", state: "active" }] }))
       await page.goto("/issues")
       await firstRow(page).locator("button").last().click()
+      if (vp.w < 768) {
+        // A phone has no peek: a row opens the issue page (orchestration-layout
+        // openIssue), and the checkpoint is on that page.
+        await expect(page).toHaveURL(/\/issues\/[^/?]+\?/)
+        await expect(page.locator("[data-slot=peek]")).toHaveCount(0)
+        const main = page.getByRole("main")
+        await expect(main.getByText("Write the remaining four answers")).toBeVisible()
+        await expect(main.getByText("Pricing page is not published")).toBeVisible()
+        return
+      }
       const peek = page.locator("[data-slot=peek]")
       await expect(peek.getByText("Write the remaining four answers")).toBeVisible()
       await expect(peek.getByText("Pricing page is not published")).toBeVisible()
