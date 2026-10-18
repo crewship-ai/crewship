@@ -6,10 +6,12 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 const menu = vi.hoisted(() => ({
   mode: "trusted" as "trusted" | "restricted",
   version: { current: "dev", commit: "a41d725abc", newer: true, latest: "0.9.0", url: "https://example.test/releases/0.9.0" } as Record<string, unknown>,
+  admin: false,
 }))
 
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => menu.mode }))
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => menu.admin,
   useAuth: () => ({ session: { user: { id: "u1", name: "Demo User", email: "demo@crewship.ai" } }, signOut: vi.fn().mockResolvedValue(undefined) }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
@@ -20,7 +22,9 @@ vi.mock("@/lib/api-fetch", () => ({
     Promise.resolve(
       path === "/api/v1/system/version"
         ? { ok: true, json: () => Promise.resolve(menu.version) }
-        : path === "/api/v1/auth/sessions"
+        : path === "/api/v1/system/license"
+          ? { ok: true, json: () => Promise.resolve({ edition: "community" }) }
+          : path === "/api/v1/auth/sessions"
           ? { ok: true, json: () => Promise.resolve([{}, {}, {}]) }
           : { ok: false, json: () => Promise.resolve(null) },
     ),
@@ -31,6 +35,7 @@ import { UserMenu } from "../user-menu"
 beforeEach(() => {
   cleanup()
   menu.mode = "trusted"
+  menu.admin = false
   menu.version = { current: "dev", commit: "a41d725abc", newer: true, latest: "0.9.0", url: "https://example.test/releases/0.9.0" }
   for (const m of ["hasPointerCapture", "releasePointerCapture", "scrollIntoView"] as const) {
     if (!Element.prototype[m]) (Element.prototype as unknown as Record<string, unknown>)[m] = () => false
@@ -83,6 +88,25 @@ describe("the user menu (v67 pop-user)", () => {
     expect(within(footer).getByTestId("user-menu-build")).toHaveTextContent("dev · a41d725")
     const update = within(footer).getByRole("link", { name: "Update available" })
     expect(update).toHaveAttribute("href", "https://example.test/releases/0.9.0")
+  })
+
+  it("names the edition in the footer, as v67 pu-ver does (Community Edition · dev · sha)", async () => {
+    open()
+    const footer = await screen.findByTestId("user-menu-footer")
+    await within(footer).findByText("Community Edition")
+    expect(footer).toHaveTextContent("Community Edition · dev · a41d725")
+  })
+
+  it("links the footer to the Admin overview for an instance admin only", async () => {
+    menu.admin = true
+    open()
+    const footer = await screen.findByTestId("user-menu-footer")
+    expect(within(footer).getByRole("link", { name: /dev · a41d725/ })).toHaveAttribute("href", "/admin?tab=overview")
+    cleanup()
+    menu.admin = false
+    open()
+    const plain = await screen.findByTestId("user-menu-footer")
+    expect(within(plain).queryByRole("link", { name: /dev · a41d725/ })).toBeNull()
   })
 
   it("leaves out Update available when the build is current", async () => {
