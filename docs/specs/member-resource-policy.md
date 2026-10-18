@@ -600,3 +600,7 @@ Access-token authentication keeps its existing five-second validation grace.
 A non-null malformed CLI-token expiry is invalid and cannot open a stream.
 Offline administrative writes require the exclusive-writer path; this registry
 is an in-process API invalidation mechanism, not cross-process messaging.
+
+A storage failure or conservative stream-admission race rejects the upgrade with
+a generic error; it does not claim the session was revoked. Operational errors
+retain their class for server-side handling and logging.

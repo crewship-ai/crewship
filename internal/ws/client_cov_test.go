@@ -182,9 +182,8 @@ func TestWriteFrame_FailsOnClosedConn(t *testing.T) {
 	}
 }
 
-// safeSend on a closed channel panics internally; the recover converts that
-// into a false return instead of crashing the caller.
-func TestSafeSend_RecoversFromClosedChannel(t *testing.T) {
+// safeSend rejects a closed queue without sending on the channel.
+func TestSafeSend_RejectsClosedChannel(t *testing.T) {
 	t.Parallel()
 	hub := newRunningHub(t)
 	c := newClient(t, hub, "u1")

@@ -392,7 +392,7 @@ func (h *Hub) Run(ctx context.Context) {
 					}
 				}
 				client.mu.Unlock()
-				close(client.send)
+				client.closeSend()
 				h.connCount.Add(-1)
 				h.logger.Debug("client disconnected", "user_id", client.userID)
 			}
@@ -1013,7 +1013,7 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 		var err error
 		credentialContext, release, err = h.streamAuthenticator(r.Context(), claims)
 		if err != nil {
-			h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "stream_credential")
+			h.rejectUpgrade(r, conn, "error", "could not verify stream credential", "stage", "stream_credential", "error", err)
 			return "", "", nil, nil, false
 		}
 	}

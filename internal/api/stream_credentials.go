@@ -27,7 +27,10 @@ func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims)
 	var expiry time.Time
 	if c.Sid != "" {
 		s, err := m.sessions.Get(ctx, c.Sid)
-		if err != nil || s.UserID != c.ID || !s.Active(time.Now()) {
+		if err != nil {
+			return nil, nil, err
+		}
+		if s.UserID != c.ID || !s.Active(time.Now()) {
 			return nil, nil, errors.New("inactive stream session")
 		}
 		expiry = s.ExpiresAt
@@ -35,7 +38,10 @@ func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims)
 		var expires, revoked sql.NullString
 		var suspended sql.NullString
 		err := m.db.QueryRowContext(ctx, `SELECT ct.expires_at,ct.revoked_at,u.suspended_at FROM cli_tokens ct JOIN users u ON u.id=ct.user_id WHERE ct.id=? AND ct.user_id=?`, c.CLITokenID, c.ID).Scan(&expires, &revoked, &suspended)
-		if err != nil || revoked.Valid || suspended.Valid {
+		if err != nil {
+			return nil, nil, err
+		}
+		if revoked.Valid || suspended.Valid {
 			return nil, nil, errors.New("inactive stream token")
 		}
 		if expires.Valid {

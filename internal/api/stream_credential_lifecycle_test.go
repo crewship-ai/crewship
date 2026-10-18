@@ -236,7 +236,7 @@ func TestStreamCredentialWebSocketLifecycle(t *testing.T) {
 				if timeout, ok := e.(net.Error); ok && timeout.Timeout() {
 					t.Fatal("revoked ticket was neither rejected nor closed")
 				}
-			} else if frame.Type != "session_revoked" {
+			} else if frame.Type != "session_revoked" && frame.Type != "error" {
 				t.Fatalf("revoked ticket admitted: %s", frame.Type)
 			}
 		})
@@ -330,5 +330,27 @@ func TestStreamCredentialMalformedTokenExpiryFailsClosed(t *testing.T) {
 	_, err := ValidateCLITokenFull(t.Context(), db, bearer, ValidateAuditContext{})
 	if !errors.Is(err, errInvalidCLIToken) {
 		t.Fatalf("malformed expiry accepted: %v", err)
+	}
+}
+
+func TestStreamCredentialStoreErrorsPreserveClass(t *testing.T) {
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	store := sessions.NewDBStore(db)
+	session, err := store.Create(t.Context(), user, "", "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mw := NewAuthMiddleware(newTestJWTValidator(t), store, db, newTestLogger())
+	for _, claims := range []*auth.Claims{{ID: user, Sid: session.ID}, {ID: user, CLITokenID: "own-test-token"}} {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		tracked, release, err := mw.authenticateStream(ctx, claims)
+		if release != nil {
+			release()
+		}
+		if tracked != nil || !errors.Is(err, context.Canceled) {
+			t.Errorf("storage error lost its class: tracked=%v err=%v", tracked != nil, err)
+		}
 	}
 }

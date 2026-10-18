@@ -37,7 +37,9 @@ type Client struct {
 	send             chan []byte
 	ctx              context.Context
 	cancel           context.CancelFunc
-	mu               sync.Mutex // protects channels map
+	mu               sync.Mutex   // protects channels map
+	sendMu           sync.RWMutex // serializes senders with queue closure
+	sendClosed       bool
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
 	// writeWait overrides defaultWriteWait per connection; zero means use
@@ -86,7 +88,7 @@ func (c *Client) readPump() {
 		case "unsubscribe":
 			c.unsubscribe(msg.Channel)
 		case "ping":
-			c.send <- pongMessageBytes
+			c.safeSend(pongMessageBytes)
 		case "send_message":
 			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
 			c.handleSendMessage(msg)
@@ -298,11 +300,11 @@ func (c *Client) unsubscribe(channel string) {
 }
 
 func (c *Client) safeSend(data []byte) (sent bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			sent = false
-		}
-	}()
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
 	select {
 	case c.send <- data:
 		return true
@@ -314,20 +316,33 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 // trySend is the non-blocking variant of safeSend: enqueue if the buffer
 // has room, otherwise drop the frame immediately. Used by hub-side
 // goroutines (connection sweep, revocation notify) that must never park
-// behind one client's saturated buffer. Same panic guard — the hub
-// closes c.send on unregister, and these callers race with that by
-// design.
+// behind one client's saturated buffer. The shared lock synchronizes enqueue
+// with unregister; recovering a send-on-closed panic would still be a race.
 func (c *Client) trySend(data []byte) (sent bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			sent = false
-		}
-	}()
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
 	select {
 	case c.send <- data:
 		return true
 	default:
 		return false
+	}
+}
+
+// closeSend wakes any blocked safeSend before waiting for its read lock.
+// The hub calls this after removing the client from its subscription maps.
+func (c *Client) closeSend() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if !c.sendClosed {
+		c.sendClosed = true
+		close(c.send)
 	}
 }
 
