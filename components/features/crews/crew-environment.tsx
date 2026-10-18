@@ -206,7 +206,7 @@ export function CrewEnvironment({
         {show("container") && (
           <CrCard title="Container" concept="crews" data-testid="env-container">
             <CrKv rows={[
-              ["State", runtime ? <StatusPill status={runtime.status} live={running} /> : <span className="text-muted-foreground">Not created yet · starts on the next run</span>],
+              ["State", runtime ? <StatusPill className="font-sans" status={runtime.status} live={running} /> : <span className="text-muted-foreground">Not created yet · starts on the next run</span>],
               ["Stops when", crew.container_ttl_hours ? `Idle for ${crew.container_ttl_hours} h` : "Never"],
               ["Size", `${state.memoryMB} MB · ${state.cpus} CPU`],
             ]} />
@@ -310,7 +310,7 @@ export function CrewEnvironment({
             <CrLine
               title="Enforced"
               sub={crew.network_mode_enforced === false ? crew.network_mode_unenforced_reason || "Not enforced on this host: the container runtime has no egress fence" : "The egress proxy blocks everything else"}
-              right={<StatusPill status={crew.network_mode_enforced === false ? "not_enforced" : "enforced"} tone={crew.network_mode_enforced === false ? "warn" : "success"} label={crew.network_mode_enforced === false ? "No" : "Yes"} />}
+              right={<StatusPill className="font-sans" status={crew.network_mode_enforced === false ? "not_enforced" : "enforced"} tone={crew.network_mode_enforced === false ? "warn" : "success"} label={crew.network_mode_enforced === false ? "No" : "Yes"} />}
             />
           </CrCard>
         )}

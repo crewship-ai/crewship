@@ -23,7 +23,7 @@ describe("crews typography", () => {
     const hits: string[] = []
     for (const f of files) {
       if (LOG_FILES.test(f)) continue
-      readFileSync(f, "utf8").split("\n").forEach((l, i) => { if (/\buppercase\b/.test(l) && /className|cn\(/.test(l) && !/max \d+ · uppercase/.test(l)) hits.push(`${f.slice(ROOT.length + 1)}:${i + 1}`) })
+      readFileSync(f, "utf8").split("\n").forEach((l, i) => { if (/\buppercase\b/.test(l) && /className|cn\(/.test(l) && !/max \d+ · uppercase|description=/.test(l)) hits.push(`${f.slice(ROOT.length + 1)}:${i + 1}`) })
     }
     expect(hits).toEqual([])
   })

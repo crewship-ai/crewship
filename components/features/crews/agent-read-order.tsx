@@ -52,7 +52,7 @@ export function AgentReadOrder({ crewName, memoryEnabled }: { crewName: string |
               data-skipped={skipped || undefined}
               className={cn("flex min-w-0 items-start gap-3 px-4 py-2", skipped && "opacity-60")}
             >
-              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro tabular-nums text-muted-foreground" aria-hidden>
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-muted text-micro tabular-nums text-muted-foreground" aria-hidden>
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1">
