@@ -7,12 +7,22 @@ import { Button } from "@/components/ui/button"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { toast } from "@/lib/toast"
 
-import { CrCard, CrLine } from "./cr-card"
+import { CrCard } from "./cr-card"
+import { CliCommandRows, copyText, type CliCommandRow } from "./cli-command-rows"
 import { exportCrewManifest, type CrewExport } from "./crew-manifest-export"
 
-/** Commands that exist in the CLI today for this crew. */
+/** Commands that exist in the CLI today for this crew, with what each does. */
+export function crewCommandRows(slug: string): CliCommandRow[] {
+  return [
+    { cmd: `crewship crew get ${slug}`, desc: "Show the crew, its agents and container" },
+    { cmd: `crewship export crew ${slug} > ${slug}.yaml`, desc: "Save the crew as YAML" },
+    { cmd: `crewship apply --file ${slug}.yaml`, desc: "Create or update it from YAML" },
+    { cmd: `crewship agent list --crew ${slug}`, desc: "List the agents in this crew" },
+  ]
+}
+
 export function crewCommands(slug: string): string[] {
-  return [`crewship crew get ${slug}`, `crewship export crew ${slug}`, `crewship agent list --crew ${slug}`]
+  return crewCommandRows(slug).map((r) => r.cmd)
 }
 
 /** Saves text as a file through a temporary link. */
@@ -28,12 +38,12 @@ function saveText(name: string, text: string) {
 }
 
 /**
- * Settings › Command line and crewship.yaml. The commands, and the crew as
- * YAML: the same text `crewship export crew <slug>` prints, composed in the
- * browser from existing reads (there is no export route, #3451). Credential
- * values are never in it.
+ * The crew as YAML: View opens it in a dialog, Download saves it. The same
+ * text `crewship export crew <slug>` prints, composed in the browser from
+ * existing reads (there is no export route, #3451). Credential values are
+ * never in it. Render `dialog` once wherever View is offered.
  */
-export function CrewCommandLine({ workspaceId, crew }: { workspaceId: string; crew: { slug: string; name: string } }) {
+export function useCrewYaml(workspaceId: string, crew: { slug: string; name: string }) {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<{ kind: "idle" } | { kind: "loading" } | { kind: "error" } | { kind: "ready"; out: CrewExport }>({ kind: "idle" })
   const file = `${crew.slug}.yaml`
@@ -58,33 +68,10 @@ export function CrewCommandLine({ workspaceId, crew }: { workspaceId: string; cr
     saveText(file, out.yaml)
     toast.success(`${file} downloaded`)
   }
-  const copy = (text: string, done: string) => {
-    void navigator.clipboard.writeText(text).then(() => toast.success(done), () => toast.error("Could not copy"))
-  }
+  const copy = copyText
 
-  return (
+  const dialog = (
     <>
-      <CrCard title="Command line and crewship.yaml" concept="settings">
-        {crewCommands(crew.slug).map((cmd) => (
-          <CrLine
-            key={cmd}
-            title={<code className="font-mono text-label">{cmd}</code>}
-            right={
-              <Button variant="ghost" size="icon-sm" aria-label={`Copy ${cmd}`} onClick={() => copy(cmd, "Command copied")}>
-                <Copy className="size-3.5" />
-              </Button>
-            }
-          />
-        ))}
-        <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2.5">
-          <Button variant="outline" size="sm" onClick={view}>View as YAML</Button>
-          <Button variant="ghost" size="sm" onClick={() => void download()}><Download className="size-3.5" aria-hidden /> Download</Button>
-        </div>
-        <p className="px-4 pb-3 text-label text-muted-foreground">
-          The file is the same text the export command above prints. It does not carry autonomy, budget, persona layers, people or links yet; those stay in the web app. Credential values are never in it.
-        </p>
-      </CrCard>
-
       <CreateSurface open={open} onOpenChange={setOpen} size="lg">
         <CreateSurfaceHeader
           concept="settings"
@@ -120,6 +107,32 @@ export function CrewCommandLine({ workspaceId, crew }: { workspaceId: string; cr
           onPrimary={() => { if (state.kind === "ready") { saveText(file, state.out.yaml); toast.success(`${file} downloaded`) } }}
         />
       </CreateSurface>
+    </>
+  )
+  return { view, download, copy, dialog, file }
+}
+
+/**
+ * Settings › Command line and crewship.yaml. The commands, and the crew as
+ * YAML: the same text `crewship export crew <slug>` prints, composed in the
+ * browser from existing reads (there is no export route, #3451). Credential
+ * values are never in it.
+ */
+export function CrewCommandLine({ workspaceId, crew }: { workspaceId: string; crew: { slug: string; name: string } }) {
+  const { view, download, dialog } = useCrewYaml(workspaceId, crew)
+  return (
+    <>
+      <CrCard title="Command line and crewship.yaml" concept="settings">
+        <CliCommandRows rows={crewCommandRows(crew.slug)} />
+        <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2.5">
+          <Button variant="outline" size="sm" onClick={view}>View as YAML</Button>
+          <Button variant="ghost" size="sm" onClick={() => void download()}><Download className="size-3.5" aria-hidden /> Download</Button>
+        </div>
+        <p className="px-4 pb-3 text-label text-muted-foreground">
+          The file is the same text the export command above prints. It does not carry autonomy, budget, persona layers, people or links yet; those stay in the web app. Credential values are never in it.
+        </p>
+      </CrCard>
+      {dialog}
     </>
   )
 }

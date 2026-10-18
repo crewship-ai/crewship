@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { motion } from "motion/react"
-import { ArrowUpRight, Search } from "lucide-react"
+import { ArrowUpRight, Plus, Search } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { Appear, DetailCard } from "@/components/ui/detail"
@@ -72,6 +72,8 @@ export interface DetailCellProps {
   /** Used instead of `footerHref` when the destination is in-page. */
   footerOnClick?: () => void
   className?: string
+  /** A header button beside Search ("Add skill"): the card's one add action. */
+  addAction?: { label: string; onClick: () => void }
   /** Position in the grid — drives the entrance stagger. */
   order?: number
 }
@@ -80,7 +82,7 @@ const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
   title, icon, count, warn = false, filters, items, tall = false,
-  footerLabel, footerHref, footerOnClick, className, order = 0,
+  footerLabel, footerHref, footerOnClick, className, addAction, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
   const [searchOpen, setSearchOpen] = useState(false)
@@ -116,6 +118,17 @@ export function DetailCell({
       tone={warn ? "warn" : "default"}
       className="flex w-full flex-col"
       action={
+        <span className="inline-flex items-center gap-1">
+        {addAction && (
+          <button
+            type="button"
+            onClick={addAction.onClick}
+            className="type-meta inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium text-primary hover:bg-foreground/[.06] coarse:min-h-[44px]"
+          >
+            <Plus className="h-3 w-3" aria-hidden />
+            {addAction.label}
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleSearch}
@@ -129,6 +142,7 @@ export function DetailCell({
         >
           <Search className="h-3.5 w-3.5" />
         </button>
+        </span>
       }
     >
       <span className="sr-only" data-testid="cell-badge" data-warn={warn ? "true" : "false"} />

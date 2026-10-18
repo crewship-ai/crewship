@@ -45,6 +45,6 @@ describe("crew page helpers", () => {
   })
 
   it("the command line names commands the CLI has", () => {
-    expect(crewCommands("ops")).toEqual(["crewship crew get ops", "crewship export crew ops", "crewship agent list --crew ops"])
+    expect(crewCommands("ops")).toEqual(["crewship crew get ops", "crewship export crew ops > ops.yaml", "crewship apply --file ops.yaml", "crewship agent list --crew ops"])
   })
 })
