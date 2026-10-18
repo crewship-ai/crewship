@@ -50,8 +50,21 @@ const unfold = (facet: string) => {
   if (header.getAttribute("aria-expanded") !== "true") fireEvent.click(header)
 }
 
+const nav = vi.hoisted(() => ({ push: vi.fn() }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push, replace: vi.fn() }) }))
+
 describe("IssuesPanel", () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it("ends with v67's Intake section: Triage and Recurring issues open the intake page", () => {
+    setup()
+    const text = document.body.textContent ?? ""
+    expect(text.indexOf("Saved views")).toBeLessThan(text.indexOf("Intake"))
+    fireEvent.click(screen.getByText("Triage"))
+    expect(nav.push).toHaveBeenCalledWith("/issues/intake")
+    fireEvent.click(screen.getByText("Recurring issues"))
+    expect(nav.push).toHaveBeenCalledWith("/issues/intake?tab=recurring")
+  })
 
   it("orders the sections Views → Projects → Saved views", () => {
     setup()

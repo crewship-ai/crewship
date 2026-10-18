@@ -393,3 +393,19 @@ test.describe("phone", () => {
     expect(overflow).toBeLessThanOrEqual(0)
   })
 })
+
+// Gap UI (INT-08, INT-13): Choose tools… on Crew MCP servers lists switches;
+// the layout holds at 390, 1024 and 1440. Replay needs a real webhook call and
+// is covered by vitest (receipts-replay).
+for (const width of [390, 1024, 1440]) {
+  test(`INT-13 Choose tools… at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/integrations?view=crew-tools")
+    const choose = page.getByRole("button", { name: "Choose tools…" }).first()
+    test.skip((await choose.count()) === 0, "no crew MCP server on this instance")
+    await choose.click()
+    await expect(page.getByTestId("crew-tool-switches").first()).toBeVisible()
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+}

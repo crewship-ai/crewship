@@ -213,6 +213,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 coveredSince={coveredSince}
                 pendingStarts={pendingStarts}
                 schedules={schedules}
+                spend={spend}
                 onSelect={props.onSelect}
               />
               </div>

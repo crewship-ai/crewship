@@ -34,6 +34,7 @@ export const APP_ROUTE_PATTERNS = [
   "/inbox-v2",
   "/integrations",
   "/issues",
+  "/issues/intake",
   "/issues/manage",
   "/issues/[identifier]",
   "/join",

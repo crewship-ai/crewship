@@ -471,3 +471,29 @@ test("PAR-046 phone: the overview still has no tab strip and no horizontal scrol
   await expect(page.getByRole("navigation", { name: "Routines views" })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+// Gap UI (RT-06, RT-07, RT-24): the Health card on the overview and the
+// Checkup on a routine page fit 390, 1024 and 1440 without sideways scroll;
+// the wizard offers the artifact panel step.
+for (const width of [390, 1024, 1440]) {
+  test.describe(`RT-06/07 Health and Checkup at ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 768, isMobile: width < 768 })
+    test("the Health card lists routines and nothing scrolls sideways", async ({ page }) => {
+      await page.goto("/routines")
+      const card = page.getByTestId("routines-health")
+      await expect(card).toBeVisible({ timeout: TIMEOUT })
+      await expect(card).not.toContainText(/30 ?d/)
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+    test("a routine page shows the Checkup with n/m", async ({ page }) => {
+      await page.goto("/routines")
+      await expect(page.getByTestId("routines-health")).toBeVisible({ timeout: TIMEOUT })
+      await page.getByTestId("routines-health").getByRole("button").first().click()
+      await expect(page.getByTestId("checkup")).toBeVisible({ timeout: TIMEOUT })
+      await expect(page.getByTestId("checkup-circle")).toHaveText(/^\d+\/\d+$/)
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+  })
+}

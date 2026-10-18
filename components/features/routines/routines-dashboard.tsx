@@ -19,6 +19,8 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { routineRunHref } from "./routines-workspace"
 import { RoutineGlyph } from "./routine-glyph"
+import { RoutinesHealthCard } from "./routines-health-card"
+import type { BudgetSummary } from "@/hooks/use-routine-budget"
 
 // routines-dashboard — what the main pane answers when no routine is
 // selected, built from the SAME pieces as /dashboard so the two read as one
@@ -53,6 +55,8 @@ interface Props {
    * waits for capacity. */
   pendingStarts?: PendingStart[]
   schedules: PipelineSchedule[]
+  /** Spend this month per routine (GET /pipelines/budget-summary), when loaded. */
+  spend?: BudgetSummary | null
   onSelect: (slug: string) => void
 }
 
@@ -189,7 +193,7 @@ export function groupLatestResults(runs: DashboardRun[], limit = 8): LatestResul
 // board above (routines-overview-board, RT-OV); this pane keeps the results of
 // the week and the chart. `pendingStarts`, `schedules` and `onSelect` stay on
 // the props for callers that pass them.
-export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince }: Props) {
+export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, spend = null, onSelect }: Props) {
   const now = React.useMemo(() => new Date(), [])
   const visibleRuns = React.useMemo(
     () => runs.filter((r) => routines.some((p) => p.slug === r.pipeline_slug)),
@@ -247,6 +251,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince }:
         </div>
 
       </div>
+
+      <RoutinesHealthCard routines={routines} runs={visibleRuns} spend={spend} onSelect={onSelect} />
 
       <DashCard
         title={`Run outcomes · ${WINDOW_DAYS}d · by day`}

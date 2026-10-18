@@ -13,6 +13,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { apiFetch } from "@/lib/api-fetch"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
+import { CrewToolSwitches } from "../crew-tool-switches"
 import {
   bindCredentialToCrewTool,
   fetchCrewTools,
@@ -66,6 +67,7 @@ export function CrewToolsView({
   const [tools, setTools] = React.useState<CrewTool[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [openId, setOpenId] = React.useState<string | null>(initialServerId)
+  const [toolsId, setToolsId] = React.useState<string | null>(null)
   React.useEffect(() => {
     if (initialServerId) onServerConsumed?.()
     // Consume once, on mount.
@@ -150,12 +152,16 @@ export function CrewToolsView({
                     {tool.agent_binding_count}
                   </span>
                   <StatusPill status={pill.status} label={pill.label} tone={pill.tone} />
+                  <Button variant="ghost" size="sm" className="coarse:h-[44px]" aria-expanded={toolsId === tool.id} onClick={() => setToolsId(toolsId === tool.id ? null : tool.id)}>
+                    {toolsId === tool.id ? "Hide tools" : "Choose tools…"}
+                  </Button>
                   {gap && canManage && (
                     <Button variant={open ? "outline" : "soft"} size="sm" onClick={() => setOpenId(open ? null : tool.id)}>
                       {open ? "Close" : tool.auth_status === "expired" ? "Reconnect" : "Connect"}
                     </Button>
                   )}
                 </div>
+                {toolsId === tool.id && <CrewToolSwitches workspaceId={workspaceId} tool={tool} canManage={canManage} />}
                 {open && gap && canManage && (
                   <ConnectPanel
                     workspaceId={workspaceId}
