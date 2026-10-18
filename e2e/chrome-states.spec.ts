@@ -14,7 +14,7 @@ test.describe("signed out", () => {
     await page.goto("/routines?tab=library")
     await expect(page).toHaveURL(/\/login\?redirect=%2Froutines%3Ftab%3Dlibrary/, { timeout: 15_000 })
     await page.getByLabel(/email/i).fill(EMAIL)
-    await page.getByLabel(/password/i).fill(PASSWORD)
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD)
     await page.getByRole("button", { name: /sign in|log in/i }).click()
     await expect(page).toHaveURL(/\/routines\?tab=library$/, { timeout: 15_000 })
   })

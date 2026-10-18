@@ -737,7 +737,7 @@ export function KindActions({
                   return
                 }
                 toast.success("Credential supplied · the agent gets its name, never the value")
-                await onRefresh("approved")
+                await onRefresh("supplied")
               })}
             />
           )
