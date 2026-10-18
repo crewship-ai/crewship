@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutinesDetailPanel } from "../routines-detail-panel"
+import { SubBar } from "@/components/layout/sub-bar"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 
 
@@ -621,6 +622,20 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     expect(actions.getByRole("button", { name: "Publish" })).toBeInTheDocument()
     // The draft bar says what it is, in words.
     expect(screen.getByTestId("routine-draft-bar")).toHaveTextContent("This routine is not live yet")
+  })
+
+  it("COM-12: with actionsInBar the page actions land in the SubBar's own slot, not in the page", async () => {
+    render(
+      <>
+        <SubBar icon={() => null} title="Routines" ariaLabel="Routines" />
+        <RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" actionsInBar />
+      </>,
+    )
+    expect(await screen.findByRole("heading", { name: "Daily report (copy)" })).toBeInTheDocument()
+    const slot = document.querySelector("[data-slot=sub-bar-actions]") as HTMLElement
+    expect(within(slot).getByRole("button", { name: "Test draft" })).toBeInTheDocument()
+    expect(within(slot).getByRole("button", { name: "Publish" })).toBeInTheDocument()
+    expect(screen.queryByTestId("routine-page-actions")).toBeNull()
   })
 
   it("Test draft runs the test without side effects on the draft's definition", async () => {
