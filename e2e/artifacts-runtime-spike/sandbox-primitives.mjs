@@ -41,6 +41,7 @@ async function bootstrapChecks(page, bootstrap) {
     const check = (value, message) => { if (!value) throw new Error(message); };
     const events = [];
     window.spikeObservations = {};
+    window.spikeChecks = [];
     window.addEventListener('message', event => { if (event.data?.type === 'spike.self') events.push(event.data); });
     // A returned constructor is not proof that worker code ran. Require an
     // actual message/error outcome; silence at the deadline is a failure.
@@ -65,6 +66,7 @@ async function bootstrapChecks(page, bootstrap) {
       document.removeEventListener('securitypolicyviolation', violation);
       return proof;
     }`;
+    window.spikeWorkerProbe = workerProbe;
     const artifact = {
       format: 'crewship-page-preview/v1', css: '',
       javascript: `${workerProbe}; (async () => {
@@ -104,6 +106,7 @@ async function bootstrapChecks(page, bootstrap) {
     await delay(150);
     check(events.length === 0, 'bootstrap admitted a message from its own window instead of its parent');
     for (const rejected of [wrongType, wrongCount, wrongFormat, rejectedOrigin]) check(rejected.received.length === 0, 'bootstrap admitted invalid handshake');
+    window.spikeChecks.push('wrong-source-origin-shape-denied');
     const admitted = send(child, boot);
     const deadline = Date.now() + 3000;
     while (admitted.received.length < 2 && Date.now() < deadline) await delay(10);
@@ -111,15 +114,18 @@ async function bootstrapChecks(page, bootstrap) {
     window.spikeObservations.sandbox = proof ?? null;
     check(proof, 'bootstrap did not return sandbox observations');
     check(proof.parentDenied, 'opaque sandbox permitted parent DOM read');
+    window.spikeChecks.push('opaque-parent-dom-denied');
     check(proof.storageDenied, 'opaque sandbox permitted localStorage read');
+    window.spikeChecks.push('opaque-storage-denied');
     check(proof.worker.message === null, 'worker code executed despite worker-src none');
     check(!proof.worker.timedOut, 'worker denial unknown: deadline without an error or execution outcome');
     check((proof.worker.constructor === 'threw' && proof.worker.errorName === 'SecurityError') ||
       (proof.worker.errorEvent && proof.worker.cspDirective === 'worker-src'), 'worker rejection lacks SecurityError or CSP error evidence');
+    window.spikeChecks.push('csp-worker-denied');
     check(admitted.received.some(value => value.type === 'spike.network' && value.blocked), 'CSP permitted fetch');
-    // Deterministic positive control proves this worker payload can execute.
-    // Only this separate, credential-free control fixture permits blob workers;
-    // the production-shaped negative fixture above retains worker-src none.
+    window.spikeChecks.push('csp-fetch-denied');
+    // Observe engine-specific opaque-origin behavior separately. WebKit can
+    // reject this worker even when CSP permits blob:, which is not a bypass.
     const controlFrame = await frame('null', false, 'blob:');
     const control = send(controlFrame, { ...boot, artifact: { ...artifact,
       javascript: `${workerProbe}; observeWorker().then(worker => window.__crewshipPagesPort.postMessage({type:'spike.worker-control', worker}));`,
@@ -127,18 +133,36 @@ async function bootstrapChecks(page, bootstrap) {
     const controlDeadline = Date.now() + 3000;
     while (!control.received.length && Date.now() < controlDeadline) await delay(10);
     const controlProof = control.received.find(value => value.type === 'spike.worker-control')?.worker;
-    window.spikeObservations.workerControl = controlProof ?? null;
-    check(controlProof?.message === 'spike.worker.executed' && !controlProof.timedOut && !controlProof.errorEvent,
-      'worker positive control did not execute; denial test cannot qualify this environment');
+    window.spikeObservations.opaqueWorkerControl = controlProof ?? null;
+    check(controlProof && !controlProof.timedOut && (controlProof.message === 'spike.worker.executed' || controlProof.errorEvent || controlProof.constructor === 'threw'),
+      'opaque worker observation has no explicit outcome');
     const second = send(child, boot);
     await delay(100);
     check(second.received.length === 0, 'bootstrap admitted a second port');
+    window.spikeChecks.push('single-port-admission');
     for (const handshake of [wrongType, wrongCount, wrongFormat, rejectedOrigin, admitted, second, control]) {
       for (const channel of handshake.channels) channel.port1.close();
     }
     child.remove(); wrongOrigin.remove(); controlFrame.remove();
-    return ['opaque-parent-dom-denied', 'opaque-storage-denied', 'csp-fetch-denied', 'csp-worker-denied', 'wrong-source-origin-shape-denied', 'single-port-admission'];
+    return window.spikeChecks;
   }, bootstrap);
+}
+
+async function sameOriginWorkerControl(context, workerProbe) {
+  const page = await context.newPage();
+  // This exact synthetic loopback navigation is fulfilled without opening a
+  // server or sending an HTTP request. Every other request remains aborted.
+  const url = 'http://127.0.0.1:65530/artifacts-runtime-spike-control';
+  try {
+    await page.route(url, route => route.fulfill({
+      status: 200, contentType: 'text/html',
+      headers: { 'Content-Security-Policy': "default-src 'none'; script-src 'nonce-spike'; connect-src 'none'; worker-src blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" },
+      body: `<!doctype html><script nonce="spike">${workerProbe}; observeWorker().then(proof => window.workerControlProof = proof);</script>`,
+    }));
+    await page.goto(url, { timeout: 5000 });
+    await page.waitForFunction(() => window.workerControlProof, undefined, { timeout: 3000 });
+    return await page.evaluate(() => window.workerControlProof);
+  } finally { await page.close(); }
 }
 
 async function channelChecks(page) {
@@ -157,17 +181,22 @@ async function channelChecks(page) {
     pair.port2.postMessage({ ...request, method: 'arbitraryTool' });
     await delay(30);
     check(calls === 0 && received.some(value => value.error), 'unknown capability entered host handler');
+    window.spikeChecks.push('unknown-rpc-denied');
     received.length = 0;
     pair.port2.postMessage(request);
     const deadline = Date.now() + 3000;
     while (!calls && Date.now() < deadline) await delay(10);
     check(calls === 1, 'known request never reached handler');
     old.close(); check(aborted, 'channel close did not abort pending request');
+    window.spikeChecks.push('close-aborts-pending-handler');
     const freshPair = new MessageChannel(); let freshCalls = 0;
     const fresh = new window.SpikeChannel(freshPair.port1, async () => { freshCalls++; return 'fresh'; });
     finish('late-old-response'); pair.port2.postMessage({ ...request, id: 2 });
     await delay(100);
-    check(calls === 1 && freshCalls === 0 && received.length === 0, 'closed port or late response affected current channel');
+    check(calls === 1 && freshCalls === 0, 'closed port request affected current channel');
+    window.spikeChecks.push('closed-port-request-ignored');
+    check(received.length === 0, 'late response reached the closed connection');
+    window.spikeChecks.push('late-old-response-suppressed');
     fresh.close(); pair.port2.close(); freshPair.port2.close();
     return ['unknown-rpc-denied', 'close-aborts-pending-handler', 'closed-port-request-ignored', 'late-old-response-suppressed'];
   });
@@ -188,6 +217,11 @@ for (const name of ['firefox', 'webkit']) {
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     await page.setContent('<!doctype html><title>Isolated runtime primitive spike</title><body></body>');
     result.checks.push(...await bootstrapChecks(page, sources['internal/pagebuild/bootstrap.js']));
+    const workerControl = await sameOriginWorkerControl(context, await page.evaluate(() => window.spikeWorkerProbe));
+    result.observations = { sameOriginWorkerControl: workerControl };
+    assert.equal(workerControl.message, 'spike.worker.executed', 'same-origin worker positive control must execute');
+    assert.equal(workerControl.timedOut, false, 'worker control timeout is not acceptance');
+    assert.equal(workerControl.errorEvent, false, 'worker control errors cannot qualify this environment');
     result.checks.push(...await channelChecks(page));
     assert.equal(requests.length, 0, 'fixture attempted a network request');
     result.status = 'pass';
@@ -196,7 +230,10 @@ for (const name of ['firefox', 'webkit']) {
     result.error = String(error.message).split('\nCall log:')[0];
     failed = true;
   } finally {
-    if (page) result.observations = await page.evaluate(() => window.spikeObservations ?? null).catch(() => null);
+    if (page) {
+      result.observations = { ...await page.evaluate(() => window.spikeObservations ?? {}).catch(() => ({})), ...result.observations };
+      result.checks = [...new Set([...await page.evaluate(() => window.spikeChecks ?? []).catch(() => []), ...result.checks])];
+    }
     await browser?.close();
   }
 }

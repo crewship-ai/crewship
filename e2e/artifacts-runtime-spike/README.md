@@ -2,7 +2,10 @@
 
 Issue #3632. This standalone runner exercises the production bootstrap and
 MessagePort channel in fresh Firefox and WebKit contexts. It uses only
-`about:blank` and opaque sandboxed `srcdoc`; all network requests are aborted.
+`about:blank` and opaque sandboxed `srcdoc` for negative cases. A separate
+same-origin worker control uses the exact loopback URL
+`http://127.0.0.1:65530/artifacts-runtime-spike-control`, fulfilled entirely by
+Playwright without a server/socket request. All other requests are aborted.
 It does not use the repository's authenticated Playwright global setup, start a
 server, access an application session, or change production browser support.
 
@@ -33,9 +36,12 @@ it does not pretend an application generation/capability protocol exists.
 
 Worker observations distinguish a synchronous `SecurityError`, constructor
 return, asynchronous error/CSP violation, actual worker message and deadline.
-Silence at the deadline fails. A separate credential-free positive control
-permits only `blob:` workers and must execute the same deterministic payload;
-the negative fixture retains `worker-src 'none'` and must never execute it.
+Silence at the deadline fails. A separate credential-free same-origin positive
+control permits only `blob:` workers and must execute the same deterministic
+payload; the negative fixture retains `worker-src 'none'` and must never execute
+it. An additional opaque blob-allowed observation reports engine behavior; an
+explicit engine rejection there is not a sandbox bypass or a required worker
+capability. Completed named checks survive later control failures.
 Individual DOM/storage/worker observations are retained even when an assertion
 fails. The original remote failure from run `39171348217` remains evidence of
 the initial aggregate assertion; it is not retroactively relabelled PASS.
