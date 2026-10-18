@@ -120,6 +120,31 @@ describe("ProjectCardDetail — the rail's editors survive the move", () => {
     expect(e.patch).toHaveBeenCalledWith({ lead_type: "", lead_id: "" })
   })
 
+  // ODCH-ISS-07: PATCH /projects takes lead_type "user" | "agent", so the lead
+  // can be a person. The backend still has one lead; a second one is not offered.
+  it("offers people as the lead when the host passes them, and sets lead_type user", () => {
+    const e = renderCard({ edit: edit({ people: [{ id: "u-jana", name: "Jana Nováková" }] }) })!
+    fireEvent.click(within(openPicker(/change lead/i)).getByRole("button", { name: /Jana/ }))
+    expect(e.patch).toHaveBeenCalledWith({ lead_type: "user", lead_id: "u-jana" })
+  })
+
+  it("offers no people without a members list", () => {
+    renderCard()
+    const dialog = openPicker(/change lead/i)
+    expect(within(dialog).queryByText("People")).toBeNull()
+  })
+
+  it("draws a person lead as a person, not an agent", () => {
+    renderCard({ project: project({ lead_type: "user", lead_id: "u-jana", lead_name: "Jana Nováková" }), edit: null })
+    const lead = screen.getAllByText("Jana Nováková")[0].closest("[data-lead-kind]")
+    expect(lead).toHaveAttribute("data-lead-kind", "user")
+  })
+
+  it("draws an agent lead as an agent", () => {
+    renderCard({ project: project({ lead_type: "agent", lead_id: "agent-robin", lead_name: "Robin" }), edit: null })
+    expect(screen.getAllByText("Robin")[0].closest("[data-lead-kind]")).toHaveAttribute("data-lead-kind", "agent")
+  })
+
   it("renames the project on Enter", () => {
     const e = renderCard()!
     fireEvent.click(screen.getByRole("button", { name: /edit project name/i }))

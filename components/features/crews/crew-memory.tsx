@@ -6,6 +6,7 @@ import { Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 import { CrCard, CrLine, CrNote } from "./cr-card"
+import { CrewMemoryReview } from "./crew-memory-review"
 import { HistoryEntries, useWorkspaceResource } from "./memory-workspace"
 import type { MemoryDocument } from "./memory-notes-browser"
 import type { AgentSummary } from "./crew-canvas-tabs/types"
@@ -15,15 +16,17 @@ interface Versions { entries?: Array<{ id: string; written_at: string; written_b
 
 /**
  * C-MEM: CREW.md (who wrote it last, version history), and every agent's
- * AGENT.md with a way into that agent's Memory tab. The design's "Waiting for
- * review" queue is not here: the server can approve or reject a memory
- * proposal by id but has no list of them (the Inbox shows them instead).
+ * AGENT.md with a way into that agent's Memory tab. "Waiting for review" is
+ * CrewMemoryReview, built from the inbox because the server has no list of
+ * memory proposals (#3462); it is absent while none wait.
  */
-export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent }: {
+export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent, canDecideProposals = false }: {
   workspaceId: string
   crewId: string
   agents: Array<Pick<AgentSummary, "id" | "name" | "slug"> & { memory_enabled?: boolean }>
   onOpenAgent: (slug: string) => void
+  /** OWNER / ADMIN: the only roles the server lets decide a memory proposal. */
+  canDecideProposals?: boolean
 }) {
   const ws = encodeURIComponent(workspaceId)
   const inventory = useWorkspaceResource<Inventory>(`/api/v1/crews/${crewId}/memory?workspace_id=${ws}`)
@@ -31,6 +34,8 @@ export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent }: {
   const sharedCount = inventory.data?.documents.filter((d) => d.scope === "crew" && d.name !== "CREW.md").length ?? 0
 
   return (
+    <div className="space-y-4">
+    <CrewMemoryReview workspaceId={workspaceId} crewId={crewId} canDecide={canDecideProposals} />
     <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <CrewMdCard workspaceId={workspaceId} doc={crewMd} loading={!inventory.data && !inventory.error} failed={!!inventory.error} />
       <CrCard title="Shared notes and agent knowledge" concept="memory" count={agents.length || undefined}>
@@ -46,6 +51,7 @@ export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent }: {
           />
         ))}
       </CrCard>
+    </div>
     </div>
   )
 }

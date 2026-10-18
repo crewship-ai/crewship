@@ -36,6 +36,7 @@ beforeEach(() => {
   h.api.mockReset()
   h.api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === "PATCH") return new Response("{}", { status: 200 })
+    if (String(url).includes("/members")) return new Response(JSON.stringify([{ user_id: "u-jana", user: { full_name: "Jana Nováková" } }]), { status: 200 })
     if (String(url).includes("/agents")) return new Response(JSON.stringify([{ id: "agent-robin", name: "Robin", slug: "robin" }]), { status: 200 })
     return new Response("{}", { status: 200 })
   })
@@ -62,6 +63,18 @@ describe("ProjectDetailSurface on the page save bar", () => {
     const [url, init] = patches()[0]
     expect(String(url)).toContain("/api/v1/projects/p1")
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ status: "completed", health: "off_track" })
+  })
+
+  it("a person picked as lead is saved as lead_type user and drawn as a person", async () => {
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
+    await waitFor(() => expect(h.api.mock.calls.some((c) => String(c[0]).includes("/members"))).toBe(true))
+    fireEvent.click(screen.getByRole("button", { name: /change lead/i }))
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: /Jana/ })).toBeInTheDocument())
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Jana/ }))
+    expect(screen.getAllByText("Jana Nováková")[0].closest("[data-lead-kind]")).toHaveAttribute("data-lead-kind", "user")
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(patches()).toHaveLength(1))
+    expect(JSON.parse(String((patches()[0][1] as RequestInit).body))).toEqual({ lead_type: "user", lead_id: "u-jana" })
   })
 
   it("Discard puts the card back", async () => {

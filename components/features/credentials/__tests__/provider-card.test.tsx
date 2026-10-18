@@ -45,6 +45,29 @@ describe("AccountCard", () => {
     expect(screen.queryByText("No usage data yet")).not.toBeInTheDocument()
   })
 
+  it("draws 'Near the limit' only when a reported window is at 80% or more", () => {
+    const { rerender } = render(<AccountCard c={acc("a", { quota: { window_5h_pct: 62, window_weekly_pct: 41, resets_at: null } })} onOpen={() => {}} />)
+    expect(screen.queryByText("Near the limit")).not.toBeInTheDocument()
+    rerender(<AccountCard c={acc("a", { quota: { window_5h_pct: 62, window_weekly_pct: 84, resets_at: null } })} onOpen={() => {}} />)
+    expect(screen.getByText("Near the limit")).toBeInTheDocument()
+    rerender(<AccountCard c={acc("a")} onOpen={() => {}} />)
+    expect(screen.queryByText("Near the limit")).not.toBeInTheDocument()
+  })
+
+  it("with no quota but recorded usage, says the tokens and calls of the last 30 days instead of 'No usage data yet'", () => {
+    render(<AccountCard c={acc("a")} usage={{ tokens: 1_250_000, calls: 47 }} onOpen={() => {}} />)
+    expect(screen.queryByText("No usage data yet")).not.toBeInTheDocument()
+    expect(screen.getByText("1.3M tokens · 47 calls · last 30 days")).toBeInTheDocument()
+    expect(screen.queryAllByRole("progressbar")).toHaveLength(0)
+    expect(document.body.textContent).not.toMatch(/\$\d/)
+  })
+
+  it("quota bars and usage line sit together when both exist", () => {
+    render(<AccountCard c={acc("a", { quota: { window_5h_pct: 10, window_weekly_pct: 20, resets_at: null } })} usage={{ tokens: 900, calls: 1 }} onOpen={() => {}} />)
+    expect(screen.getAllByRole("progressbar")).toHaveLength(2)
+    expect(screen.getByText("900 tokens · 1 call · last 30 days")).toBeInTheDocument()
+  })
+
   it("a signed-out account says Sign in again; one that pays for nobody says Not used", () => {
     const { rerender } = render(<AccountCard c={acc("a", { refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: null } })} onOpen={() => {}} />)
     expect(screen.getByTestId("account-state-signin")).toHaveTextContent("Sign in again")
@@ -133,5 +156,14 @@ describe("ProviderHead", () => {
     expect(screen.getByText("Renews itself on the server")).toBeInTheDocument()
     expect(screen.getByText("OpenAI production")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Add ChatGPT account/ })).toBeInTheDocument()
+  })
+})
+
+describe("AccountsList · usage (phone)", () => {
+  it("passes each account's usage to its card on a phone", () => {
+    const props = { onLayoutChange: vi.fn(), group: "none" as const, onGroupChange: vi.fn(), onOpen: vi.fn(), poolOf: () => null }
+    render(<AccountsList rows={[acc("a"), acc("b")]} layout={null} {...props} isPhone usage={{ a: { tokens: 2000, calls: 3 } }} />)
+    expect(screen.getByText("2k tokens · 3 calls · last 30 days")).toBeInTheDocument()
+    expect(screen.getAllByText("No usage data yet")).toHaveLength(1)
   })
 })

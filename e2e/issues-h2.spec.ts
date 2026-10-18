@@ -392,3 +392,111 @@ test.describe("#3484 finish desktop", () => {
     await expect(block).toBeVisible()
   })
 })
+
+// UI for functions the backend already supports (ODCH-ISS-04/05/07). Network
+// answers are fulfilled in the page so the specs do not depend on what the
+// seed holds or write to it. To run after the branch is deployed.
+const GAP_VIEWPORTS = [
+  { w: 1440, h: 1000 },
+  { w: 1024, h: 800 },
+  { w: 390, h: 844 },
+] as const
+
+test.describe("ODCH-ISS-05 Intake", () => {
+  for (const vp of GAP_VIEWPORTS) {
+    test(`/issues/intake at ${vp.w}: tabs, a new rule, no sideways scroll`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h })
+      await seed(page, PINNED)
+      const rule = { id: "r1", name: "Bugs to Ops", pattern: "bug", match_type: "contains", crew_id: null, assignee_id: null, priority: "high", project_id: null, labels_json: null, position: 0, enabled: true, match_count: 3, created_at: "2026-10-01T00:00:00Z" }
+      const posted: unknown[] = []
+      await page.route(/\/api\/v1\/triage-rules(\?|$)/, async (route) => {
+        if (route.request().method() === "POST") {
+          posted.push(route.request().postDataJSON())
+          return route.fulfill({ status: 201, json: { ...rule, id: "r2" } })
+        }
+        return route.fulfill({ json: [rule] })
+      })
+      await page.route(/\/api\/v1\/recurring-issues(\?|$)/, (route) =>
+        route.fulfill({ json: [{ id: "q1", crew_id: "c", crew_name: "Ops", title: "Weekly cost review", priority: "none", cron_expression: "0 9 * * 1", enabled: true, next_run: "2026-10-19T09:00:00Z", last_run: null, run_count: 2 }] }),
+      )
+      await page.goto("/issues/intake")
+      await expect(page.getByText("Bugs to Ops")).toBeVisible()
+      await expect(page.getByText("Title contains “bug”")).toBeVisible()
+      const tabs = page.getByRole("tablist", { name: "Intake" })
+      await tabs.getByRole("tab", { name: "Recurring issues" }).click()
+      await expect(page).toHaveURL(/[?&]tab=recurring/)
+      await expect(page.getByText("Every Monday at 09:00 UTC")).toBeVisible()
+      await tabs.getByRole("tab", { name: "Triage rules" }).click()
+      await page.getByRole("button", { name: "New rule" }).click()
+      const dialog = page.getByRole("dialog")
+      await dialog.getByLabel("Name").fill("Docs")
+      await dialog.getByLabel("Title pattern").fill("docs")
+      await dialog.getByRole("button", { name: "Create rule" }).click()
+      await expect.poll(() => posted).toEqual([{ name: "Docs", pattern: "docs", match_type: "contains" }])
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+  }
+
+  test("ISS-05 phone 390: switch and delete are 44 px targets", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    await seed(page, PINNED)
+    await page.route(/\/api\/v1\/triage-rules(\?|$)/, (route) =>
+      route.fulfill({ json: [{ id: "r1", name: "Bugs to Ops", pattern: "bug", match_type: "contains", crew_id: null, assignee_id: null, priority: null, project_id: null, labels_json: null, position: 0, enabled: true, match_count: 0, created_at: "" }] }),
+    )
+    await page.goto("/issues/intake")
+    const del = page.getByRole("button", { name: "Delete rule Bugs to Ops" })
+    await expect(del).toBeVisible()
+    const box = (await del.boundingBox())!
+    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44)
+    await ctx.close()
+  })
+})
+
+test.describe("ODCH-ISS-04 agent checkpoint in the peek", () => {
+  for (const vp of [GAP_VIEWPORTS[0], GAP_VIEWPORTS[2]]) {
+    test(`the peek shows next step and blockers at ${vp.w}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h })
+      await seed(page, PINNED)
+      await listView(page)
+      await page.route(/\/api\/v1\/issues\/[^/?]+\?/, async (route) => {
+        if (route.request().method() !== "GET") return route.continue()
+        const res = await route.fetch()
+        const json = res.ok() ? await res.json() : {}
+        await route.fulfill({ response: res, json: { ...json, work_mode: "agent", delegate: { id: "a-scout", name: "Scout" } } })
+      })
+      await page.route(/\/sessions\/s1\/checkpoints/, (route) =>
+        route.fulfill({ json: [{ id: "k1", session_id: "s1", next_step: "Write the remaining four answers", blockers: "Pricing page is not published", done: "Drafted six answers", created_at: new Date().toISOString() }] }),
+      )
+      await page.route(/\/issues\/[^/]+\/sessions\?/, (route) => route.fulfill({ json: [{ id: "s1", agent_id: "a-scout", agent_name: "Scout", state: "active" }] }))
+      await page.goto("/issues")
+      await firstRow(page).locator("button").last().click()
+      const peek = page.locator("[data-slot=peek]")
+      await expect(peek.getByText("Write the remaining four answers")).toBeVisible()
+      await expect(peek.getByText("Pricing page is not published")).toBeVisible()
+      // The peek is the compact form: no plan and no done list.
+      await expect(peek.getByText("Drafted six answers")).toHaveCount(0)
+    })
+  }
+})
+
+test.describe("ODCH-ISS-07 project lead can be a person", () => {
+  for (const vp of [GAP_VIEWPORTS[0], GAP_VIEWPORTS[1]]) {
+    test(`Settings › Lead lists people and agents at ${vp.w}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h })
+      await seed(page, PINNED)
+      const projects = await (await page.request.get("/api/v1/projects")).json()
+      test.skip(!Array.isArray(projects) || projects.length === 0, "no projects in the seed")
+      await page.route(/\/members\?/, (route) => route.fulfill({ json: [{ user_id: "u-jana", user: { full_name: "Jana Nováková" } }] }))
+      await page.goto(`/issues?project=${projects[0].id}&tab=settings`)
+      await page.getByRole("button", { name: "Change lead" }).click()
+      const pop = page.getByRole("dialog")
+      await expect(pop.getByText("People")).toBeVisible()
+      await expect(pop.getByRole("button", { name: /Jana Nováková/ })).toBeVisible()
+      await pop.getByRole("button", { name: /Jana Nováková/ }).click()
+      // Staged on the page's Save bar, not written.
+      await expect(page.getByRole("region", { name: "Unsaved changes" })).toContainText("1 unsaved change")
+    })
+  }
+})

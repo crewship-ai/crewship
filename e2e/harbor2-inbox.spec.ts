@@ -378,3 +378,68 @@ for (const vp of [{ name: "tablet 1024", width: 1024, height: 800 }, { name: "ph
     })
   })
 }
+
+// ODCH-I03 / I04: a typed answer, a credential value and a trigger activation
+// from the Inbox. The feed is served through page.route (the seed has none of
+// these rows); the three write endpoints are intercepted so nothing is changed.
+const ASK = {
+  question: inboxRow({ id: "ib_e2e_q", kind: "escalation", state: "unread", source_id: "esc_e2e_q", title: "Merge now or fix lint first?", blocking: true, target_role: "MANAGER", payload: { escalation_type: "TEXT" } }),
+  cred: inboxRow({ id: "ib_e2e_c", kind: "escalation", state: "unread", source_id: "esc_e2e_c", title: "Credential requested: Notion API key", blocking: true, target_role: "ADMIN", payload: { escalation_type: "CREDENTIAL", needs_credential_value: true } }),
+  trigger: inboxRow({ id: "ib_e2e_t", kind: "escalation", state: "unread", source_id: "trg_e2e", title: "Routine trigger ready: competitor-change", blocking: true, target_role: "MANAGER", payload: { kind: "routine_trigger_activation", schedule_id: "sch_e2e", slug: "competitor-scan" } }),
+  held: inboxRow({ id: "ib_e2e_h", kind: "escalation", state: "unread", source_id: "held_e2e", title: "Artifact creation held for approval: Q4 board", blocking: true, target_role: "MANAGER", payload: { kind: "page_create_held", requested_name: "Q4 board" } }),
+}
+
+for (const vp of [{ n: "1440", width: 1440, height: 900 }, { n: "1024", width: 1024, height: 800 }, { n: "390", width: 390, height: 844, mobile: true }]) {
+  test.describe(`typed answers and activation at ${vp.n}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, ...(vp.mobile ? { hasTouch: true, isMobile: true } : {}) })
+
+    test("a question takes a written answer", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let sent: unknown = null
+      await page.route(/\/api\/v1\/escalations\/esc_e2e_q\/resolve/, async (route) => { sent = route.request().postDataJSON(); await route.fulfill({ json: {} }) })
+      await page.goto("/inbox?item=ib_e2e_q")
+      const answer = page.getByRole("textbox", { name: "Your answer" })
+      await answer.fill("Fix lint first")
+      await page.getByRole("button", { name: "Send answer" }).click()
+      await expect.poll(() => sent).toMatchObject({ action: "approve", resolution: "Fix lint first" })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+    })
+
+    test("a credential request takes the value in a masked field and empties it", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let sent: { value?: string } | null = null
+      await page.route(/\/api\/v1\/escalations\/esc_e2e_c\/supply/, async (route) => { sent = route.request().postDataJSON(); await route.fulfill({ json: { credential: null } }) })
+      await page.goto("/inbox?item=ib_e2e_c")
+      const field = page.getByLabel("Value")
+      await expect(field).toHaveAttribute("type", "password")
+      await field.fill("secret_e2e_value")
+      await page.getByRole("button", { name: "Supply credential" }).click()
+      await expect.poll(() => sent?.value).toBe("secret_e2e_value")
+      await expect(field).toHaveValue("")
+      await expect(page.locator("body")).not.toContainText("secret_e2e_value")
+    })
+
+    test("a routine trigger is activated by a manager and has no Dismiss", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      let hit = false
+      await page.route(/\/pipeline-schedules\/sch_e2e\/activate/, async (route) => { hit = true; await route.fulfill({ json: {} }) })
+      await page.goto("/inbox?item=ib_e2e_t")
+      await expect(page.getByRole("button", { name: /Dismiss|Keep off/ })).toHaveCount(0)
+      const activate = page.getByRole("button", { name: "Activate trigger" })
+      if (vp.mobile) expect((await activate.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await activate.click()
+      await expect.poll(() => hit).toBe(true)
+    })
+
+    test("Artifact creation held has no buttons", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: Object.values(ASK) })
+      await page.goto("/inbox?item=ib_e2e_h")
+      await expect(page.getByRole("main", { name: "Inbox detail" })).toContainText("Artifact creation held")
+      await expect(page.getByTestId("decision-dock").getByRole("button")).toHaveCount(0)
+    })
+  })
+}

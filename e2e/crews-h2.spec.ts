@@ -418,3 +418,71 @@ test.describe("phone", () => {
     if (await row.count()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   })
 })
+
+// Functions the backend already had (ODCH-CR-05/08/10/11, #3454 #3451 #3462 #3475).
+// Run after deploy, as an owner or admin (the demo seed login).
+for (const vp of [{ name: "1440", width: 1440, height: 1000 }, { name: "1024", width: 1024, height: 900 }, { name: "390", width: 390, height: 844 }]) {
+  test.describe(`gap UI at ${vp.name}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height } })
+    test.beforeEach(async ({ page }) => seed(page))
+
+    test(`CR-08 Settings › View as YAML shows the crew as crewship.yaml`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=settings`)
+      await page.getByRole("button", { name: "View as YAML" }).click()
+      const dialog = page.getByRole("dialog", { name: new RegExp(`${crew}\\.yaml`) })
+      await expect(dialog).toBeVisible()
+      const text = await dialog.getByTestId("crew-yaml").textContent()
+      expect(text).toContain("apiVersion: crewship/v1")
+      expect(text).toContain(`slug: ${crew}`)
+      expect(text).not.toMatch(/sk-[A-Za-z0-9]{12,}/)
+      await expect(dialog.getByRole("button", { name: "Download" })).toBeVisible()
+      const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(over).toBeLessThanOrEqual(1)
+    })
+
+    test(`CR-08 Settings › Download saves <crew>.yaml`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=settings`)
+      const download = page.waitForEvent("download")
+      await page.getByRole("button", { name: "Download" }).click()
+      expect((await download).suggestedFilename()).toBe(`${crew}.yaml`)
+    })
+
+    test(`CR-11 Health shows Spend · 30 d; Team has a Cost · 30 d column from md up`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=overview`)
+      await expect(page.getByTestId("crew-health").getByText("Spend · 30 d")).toBeVisible()
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      const head = page.getByTestId("crew-team").locator("table").first().getByRole("columnheader", { name: "Cost · 30 d" })
+      if (vp.width >= 768) await expect(head).toBeVisible()
+      else await expect(head).toBeHidden()
+    })
+
+    test(`CR-05 Team never offers Release now; a live hire offers Extend`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=team`)
+      await expect(page.getByTestId("crew-temporary-hires")).toBeVisible()
+      await expect(page.getByRole("button", { name: /Release now/ })).toHaveCount(0)
+      await expect(page.getByText("Planned", { exact: true })).toHaveCount(0)
+      const live = page.locator('[data-hire-state="active"]').first()
+      test.skip(!(await live.count()), "no live temporary hire in the seed")
+      const extend = live.getByRole("button", { name: "Extend" })
+      await expect(extend).toBeVisible()
+      await extend.click()
+      const dialog = page.getByRole("dialog", { name: /^Extend / })
+      await expect(dialog.getByRole("button", { name: "Extend" })).toBeVisible()
+    })
+
+    test(`CR-10 Memory: no Waiting for review error; if proposals wait they can be decided`, async ({ page }) => {
+      const crew = await firstCrew(page)
+      await page.goto(`/crews?crew=${crew}&tab=memory`)
+      await expect(page.getByRole("region", { name: "CREW.md · how this crew works" })).toBeVisible()
+      await expect(page.getByText("Memory proposals could not be loaded.")).toHaveCount(0)
+      const card = page.getByTestId("crew-memory-review")
+      if (await card.count()) {
+        await expect(card.getByRole("button", { name: "View changes" }).first()).toBeVisible()
+      }
+    })
+  })
+}
