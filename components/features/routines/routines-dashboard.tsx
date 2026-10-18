@@ -7,7 +7,7 @@ import { ChevronRight, Radio } from "lucide-react"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { DashCard } from "@/components/features/dashboard/dash-card"
 import { honestPct } from "@/lib/honest-pct"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import type { OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
@@ -216,8 +216,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince }:
     <div className="@container/overview flex flex-col gap-3" data-testid="routines-dashboard">
       <div className="flex flex-wrap items-center gap-2">
         <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
-        <h2 className="eyebrow">Routine run summary</h2>
-        <span data-testid="run-summary-scope" className="font-mono text-[11px] tabular-nums text-muted-foreground-soft">
+        <h2 className="text-body font-semibold text-foreground">Routine run summary</h2>
+        <span data-testid="run-summary-scope" className="text-label tabular-nums text-muted-foreground-soft">
           {coveredSince
             ? `newest ${kpis.total} ${kpis.total === 1 ? "run" : "runs"} · since ${formatAgo(coveredSince, now.getTime())}`
             : `${WINDOW_DAYS}d · ${kpis.total} ${kpis.total === 1 ? "run" : "runs"}`}
@@ -227,47 +227,41 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince }:
 
       <div>
         <div>
-          <DashboardCard
+          <DashCard
             title="Latest results"
             icon={Radio}
-            hint={`${WINDOW_DAYS}d · ${finished.length} finished`}
-            action={
-              <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
-                All runs →
-              </Link>
-            }
+            meta={`${WINDOW_DAYS}d · ${finished.length} finished`}
+            link={{ label: "All runs", href: "/activity?lens=routines" }}
             className="h-full"
           >
             {finished.length === 0 ? (
               <InlineEmpty icon={Radio} text={runsLoading ? "Loading runs…" : "Nothing finished in the last 7 days."} />
             ) : (
-              <div>
+              <div className="px-2 pb-3">
                 {resultGroups.map(({ latest, count }) => (
                   <ResultRow key={latest.id} run={latest} count={count} routine={routineOf(latest.pipeline_slug)} />
                 ))}
               </div>
             )}
-          </DashboardCard>
+          </DashCard>
         </div>
 
       </div>
 
-      <DashboardCard
+      <DashCard
         title={`Run outcomes · ${WINDOW_DAYS}d · by day`}
         icon={Radio}
-        hint={`${kpis.total} runs`}
-        action={
-          <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
-            Activity →
-          </Link>
-        }
+        meta={`${kpis.total} runs`}
+        link={{ label: "Activity", href: "/activity?lens=routines" }}
       >
+        <div className="px-4 pb-4">
         {volumeShape === "single-day" ? (
           <SingleDayOutcomes buckets={volume.buckets} series={volume.series} now={now} partial={Boolean(coveredSince)} />
         ) : (
           <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
         )}
-      </DashboardCard>
+        </div>
+      </DashCard>
     </div>
   )
 }
@@ -289,14 +283,14 @@ function ResultRow({ run, count = 1, routine }: { run: DashboardRun; count?: num
         <span className="truncate text-body font-medium text-foreground">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
         {count > 1 && (
           <span
-            className="shrink-0 rounded-md bg-foreground/[0.06] px-1.5 font-mono text-micro font-semibold tabular-nums text-muted-foreground"
+            className="shrink-0 rounded-md bg-foreground/[0.06] px-1.5 text-micro font-semibold tabular-nums text-muted-foreground"
             title={`${count} runs with this result in the window; the newest opens`}
           >
             ×{count}
           </span>
         )}
       </span>
-      <span className="hidden font-mono text-label tabular-nums text-muted-foreground-soft @3xl/overview:inline">
+      <span className="hidden text-label tabular-nums text-muted-foreground-soft @3xl/overview:inline">
         {count > 1 ? "latest " : ""}
         {formatAgo(run.started_at)}
         {run.duration_ms ? ` · ${formatDurationMs(run.duration_ms)}` : ""}
@@ -331,11 +325,11 @@ function SingleDayOutcomes({ buckets, series, now, partial = false }: { buckets:
       <p className="text-body text-muted-foreground">
         {partial ? (
           <>
-            The newest <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} all started {when}.
+            The newest <span className="tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} all started {when}.
           </>
         ) : (
           <>
-            All <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} in the window started {when}.
+            All <span className="tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} in the window started {when}.
           </>
         )}
       </p>
@@ -348,7 +342,7 @@ function SingleDayOutcomes({ buckets, series, now, partial = false }: { buckets:
         {counts.map((s) => (
           <span key={s.key} className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} aria-hidden />
-            <span className="font-mono tabular-nums text-foreground">{s.n}</span> {s.label}
+            <span className="tabular-nums text-foreground">{s.n}</span> {s.label}
           </span>
         ))}
       </div>

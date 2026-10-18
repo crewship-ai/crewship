@@ -125,6 +125,6 @@ describe("<RoutinesOverviewBoard>", () => {
     const card = screen.getByRole("region", { name: "Next 24 hours" })
     const rows = within(card).getAllByRole("listitem")
     expect(rows.map((r) => r.textContent)).toEqual([expect.stringMatching(/Weekly report.*Schedule/), expect.stringMatching(/Review pull requests.*One-time/)])
-    expect(within(card).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/routines?tab=calendar")
+    expect(within(card).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/calendar")
   })
 })

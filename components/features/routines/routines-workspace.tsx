@@ -1,10 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import Link from "next/link"
-import { ArrowUpRight, Workflow } from "lucide-react"
+import { Workflow } from "lucide-react"
 
-import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { usePendingStarts } from "@/hooks/use-pending-starts"
@@ -16,9 +14,7 @@ import {
   routineFilterInput,
   type RoutineFilterState,
 } from "@/lib/routine-filters"
-import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
-import { RoutineCalendar } from "./routine-calendar"
 import { RoutinesDashboard, outcomeKpis, windowCoverage } from "./routines-dashboard"
 import { RoutinesOverviewBoard } from "./routines-overview-board"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -61,9 +57,6 @@ export function routineRunLabel(run: { status?: string; outcome?: string }) {
 // "what needs me" first (three tiles, each opening the concrete run or plan),
 // then lists what each routine does, how it starts and how it went last time
 // (docs/ux/routines-operator-console-2026-09-15.md §3, screen 1).
-
-type ListTab = "routines" | "calendar"
-const TABS: readonly ListTab[] = ["routines", "calendar"]
 
 /** The list row's `draft` field (operator console contract, "Pipeline list
  * item"): present only when an unpublished draft exists for the routine. */
@@ -123,8 +116,6 @@ export function routineLastState(
 }
 
 export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
-  const [selectedTab, setTab] = useUrlSelection("tab")
-  const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
   const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
   const { starts: pendingStarts } = usePendingStarts(props.workspaceId)
@@ -162,34 +153,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   // planned start. Each tile opens the concrete run or plan, not a list.
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <nav aria-label="Routines views" className="flex shrink-0 gap-4 border-b border-border px-6">
-        {TABS.map((view) => (
-          <button
-            key={view}
-            type="button"
-            aria-pressed={tab === view}
-            onClick={() => setTab(view === "routines" ? null : view)}
-            className={cn(
-              "border-b-2 px-1 py-3 text-xs transition-colors",
-              tab === view
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {view === "routines" ? "Overview" : view[0].toUpperCase() + view.slice(1)}
-          </button>
-        ))}
-        {/* Runs are not a third tab: Activity already lists every routine run
-            with its steps and files, so the tab was a second, poorer copy. */}
-        <Link
-          href="/activity?lens=routines"
-          className="ml-auto inline-flex items-center gap-1 border-b-2 border-transparent px-1 py-3 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Runs in Activity <ArrowUpRight className="h-3 w-3" />
-        </Link>
-      </nav>
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "routines" && (
           <section aria-label="Routines overview" className="p-4 md:p-6">
             {props.error && (
               <PageError
@@ -254,12 +218,6 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
               </div>
             )}
           </section>
-        )}
-        {tab === "calendar" && (
-          <div className="p-4 md:p-6">
-            <RoutineCalendar workspaceId={props.workspaceId} routines={props.routines} />
-          </div>
-        )}
       </div>
     </div>
   )

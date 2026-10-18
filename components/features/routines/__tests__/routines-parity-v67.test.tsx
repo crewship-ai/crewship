@@ -37,7 +37,7 @@ describe("Routines overview cards (v67)", () => {
     render(<RoutinesOverviewBoard {...board} />)
     for (const name of ["Needs you", "Running now", "Next 24 hours"]) {
       const card = screen.getByRole("region", { name })
-      expect(within(card).getAllByRole("region")).toHaveLength(1) // the card itself, no wrapper repeating the name
+      expect(screen.getAllByRole("region", { name })).toHaveLength(1) // one card, no wrapper repeating the name
       const heading = within(card).getByRole("heading", { name: new RegExp(`^${name}`) })
       expect(heading.className).not.toMatch(/eyebrow|uppercase|font-mono/)
       expect(card.querySelector('[data-slot="concept-tile"]')).not.toBeNull()
