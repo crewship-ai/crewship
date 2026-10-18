@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
+
 ### Fixed
 
 - ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.
@@ -149,6 +151,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
+
+- Isolate shared issue-search limiter capacity to 256 accounts and 2048 audience buckets per workspace while retaining global bounds. Ordered idle expiry avoids scanning active buckets on capacity refusal and preserves their rate budgets; global saturation can still refuse new buckets.
 - Waitpoint decision confirmations and CLI errors no longer repeat approval capabilities; transport failures retain their existing error type and exit code.
 - **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
 - **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator/requester checks before commit; per-tool, async and legacy paths retain their existing behavior.

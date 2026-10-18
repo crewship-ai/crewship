@@ -13,15 +13,15 @@ func TestSharedSearchGlobalAudienceCapacity(t *testing.T) {
 	s.now = func() time.Time { return now }
 	for user := 0; user < 4096; user++ {
 		for project := 0; project < 8; project++ {
-			if ok, _ := s.take(context.Background(), fmt.Sprintf("user%d", user), "ws", fmt.Sprintf("project%d", project)); !ok {
+			if ok, _ := s.take(context.Background(), fmt.Sprintf("user%d", user), fmt.Sprintf("ws%d", user/256), fmt.Sprintf("project%d", project)); !ok {
 				t.Fatalf("fill user%d project%d refused", user, project)
 			}
 		}
 	}
-	if ok, wait := s.take(context.Background(), "user0", "ws", "overflow"); ok || wait != time.Minute {
+	if ok, wait := s.take(context.Background(), "user0", "ws0", "overflow"); ok || wait != time.Minute {
 		t.Fatalf("global audience overflow allowed%t wait%s; want false/1m", ok, wait)
 	}
-	if ok, _ := s.take(context.Background(), "user0", "ws", "project0"); !ok {
+	if ok, _ := s.take(context.Background(), "user0", "ws0", "project0"); !ok {
 		t.Fatal("global capacity blocked existing audience")
 	}
 }
