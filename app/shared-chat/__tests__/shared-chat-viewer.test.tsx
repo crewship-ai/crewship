@@ -18,7 +18,8 @@ afterEach(() => {
 
 describe("shared chat viewer", () => {
   it("sends the secret only as an isolated bearer and renders transcript text literally", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages: [
+    // A fresh Response per call: a body can be read once, and Refresh reads again.
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ messages: [
       { id: "m1", role: "assistant", content: "<img src=x onerror=alert(1)>\nplain text", created_at: "2026-09-27T00:00:00Z" },
     ] }), { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
@@ -37,7 +38,7 @@ describe("shared chat viewer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    fireEvent.click(screen.getByRole("button", { name: "Change" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Change" }))
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
     expect(screen.getByLabelText("Share ID")).toHaveValue("")
     expect(screen.getByLabelText("Share token")).toHaveValue("")
