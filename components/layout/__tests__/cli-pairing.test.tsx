@@ -46,6 +46,15 @@ describe("PairingBlock", () => {
     expect(screen.getByText(/Waiting for the CLI… code expires in/)).toHaveTextContent("9:41")
   })
 
+  // v67 (popups.js:475 secret + Copy; onboarding.md O04): the command box has
+  // a labelled Copy button, not a bare icon.
+  it("Copy is a labelled button and says Copied after the click", () => {
+    const { rerender } = render(<PairingBlock {...base} status="pending" />)
+    expect(screen.getByRole("button", { name: "Copy command" })).toHaveTextContent("Copy")
+    rerender(<PairingBlock {...base} status="pending" copied />)
+    expect(screen.getByRole("button", { name: "Copy command" })).toHaveTextContent("Copied")
+  })
+
   it("starting: says a code is on its way, no command yet", () => {
     render(<PairingBlock {...base} command="" status="starting" />)
     expect(screen.getByRole("status")).toHaveTextContent("Generating a code…")
@@ -67,7 +76,7 @@ describe("PairingBlock", () => {
     const onNewCode = vi.fn()
     render(<PairingBlock {...base} status="expired" remainingSec={0} onNewCode={onNewCode} />)
     expect(screen.getByText("The code expired.").closest("[data-slot=note]")).toHaveAttribute("data-tone", "warn")
-    fireEvent.click(screen.getByRole("button", { name: "Get a new code" }))
+    fireEvent.click(screen.getByRole("button", { name: "New code" }))
     expect(onNewCode).toHaveBeenCalledOnce()
   })
 
