@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 
-import { isAccentId } from "@/lib/theme/accents"
+import { ACCENTS, isAccentChoice, STYLE_ACCENTS } from "@/lib/theme/accents"
 import {
   STYLES,
   HARBOR,
@@ -69,6 +69,18 @@ describe("registry (STY-01, STY-04)", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
 
+  it("each style carries its own accent from the design; the hidden ones are not in the picker", () => {
+    const style = (id: string) => STYLES.find((s) => s.id === id)!
+    expect(style("terracotta").accent).toBe("clay")
+    expect(ACCENTS.map((a) => a.id as string)).not.toContain("clay")
+    const hidden = new Set(STYLE_ACCENTS.map((a) => a.id as string))
+    const carried = STYLES.filter((s) => s.id !== "harbor" && s.id !== "harbor-night").map((s) => s.accent as string)
+    for (const a of carried) expect(hidden.has(a), a).toBe(true)
+    // Every hidden accent belongs to some style; one spare is not allowed.
+    expect([...hidden].filter((a) => !carried.includes(a))).toEqual([])
+    expect(new Set(carried).size).toBeGreaterThanOrEqual(40)
+  })
+
   it("ids are unique and well-formed", () => {
     const ids = STYLES.map((s) => s.id)
     expect(new Set(ids).size).toBe(ids.length)
@@ -88,7 +100,7 @@ describe("registry (STY-01, STY-04)", () => {
       expect(s.name.length, s.id).toBeGreaterThan(1)
       expect(s.blurb.length, s.id).toBeGreaterThan(10)
       expect(STYLE_CATEGORIES, s.id).toContain(s.category)
-      expect(isAccentId(s.accent), s.id).toBe(true)
+      expect(isAccentChoice(s.accent), s.id).toBe(true)
       expect(s.swatch, s.id).toHaveLength(4)
       for (const c of s.swatch) expect(c).toMatch(/^#[0-9A-F]{6}$/)
     }
