@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, expect, it } from "vitest"
+import { afterEach, expect, it, vi } from "vitest"
+import { DOMSerializer } from "@tiptap/pm/model"
 import { DocumentReadonly } from "./document-readonly"
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const text = (value: string) => ({ type: "text", text: value })
 const paragraph = (value: string) => ({ type: "paragraph", attrs: { id: "p1" }, content: [text(value)] })
 const doc = (...content: unknown[]) => ({ type: "doc", content })
@@ -78,4 +79,13 @@ it("does not change or remount an adjacent draft when saved content changes", ()
   rerender(view(null))
   expect(screen.getByRole("textbox", { name: "Current draft" })).toBe(draft)
   expect(draft).toHaveValue("Unsent human edits")
+})
+
+it("clears prior DOM if serialization of a new valid read unexpectedly fails", () => {
+  const { rerender } = render(<DocumentReadonly schema={3} content={doc(paragraph("Prior private body"))} accessibleLabel={label} />)
+  vi.spyOn(DOMSerializer, "fromSchema").mockImplementation(() => { throw new Error("Reader unavailable") })
+  rerender(<DocumentReadonly schema={3} content={doc(paragraph("New private body"))} accessibleLabel={label} />)
+  expect(screen.queryByText("Prior private body")).toBeNull()
+  expect(screen.queryByText("New private body")).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent("Document unavailable")
 })
