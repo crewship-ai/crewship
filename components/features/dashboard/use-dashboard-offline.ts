@@ -21,18 +21,26 @@ const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-d
  */
 export function useDashboardOffline(): { offline: boolean; since: string | undefined } {
   const { status } = useRealtime()
-  const lost = status === "disconnected" || status === "error"
-  const [state, setState] = useState<{ offline: boolean; since: string | undefined }>({ offline: false, since: undefined })
+  // An outage runs from the first loss until "connected" (or "unavailable"),
+  // as the shell's RealtimeStatusBanner counts it: the "connecting" of a retry
+  // inside the outage neither ends it nor restarts the 3 s.
+  const [lostAt, setLostAt] = useState<Date | null>(null)
+  const [offline, setOffline] = useState(false)
 
   useEffect(() => {
-    if (!lost) {
-      setState((s) => (s.offline ? { offline: false, since: undefined } : s))
+    if (status === "disconnected" || status === "error") setLostAt((prev) => prev ?? new Date())
+    else if (status === "connected" || status === "unavailable") setLostAt(null)
+  }, [status])
+
+  useEffect(() => {
+    if (!lostAt) {
+      setOffline(false)
       return
     }
-    const since = clock.format(new Date())
-    const timer = setTimeout(() => setState({ offline: true, since }), OFFLINE_AFTER_MS)
+    const timer = setTimeout(() => setOffline(true), Math.max(0, lostAt.getTime() + OFFLINE_AFTER_MS - Date.now()))
     return () => clearTimeout(timer)
-  }, [lost])
+  }, [lostAt])
 
-  return lost ? state : { offline: false, since: undefined }
+  const over = status === "connected" || status === "unavailable"
+  return offline && lostAt && !over ? { offline: true, since: clock.format(lostAt) } : { offline: false, since: undefined }
 }
