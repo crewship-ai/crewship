@@ -697,14 +697,14 @@ function ConnectedSetupChat({
               }`}
             />
           </div>
-          <div className="text-[11px] text-muted-foreground truncate">
+          <div className="text-micro text-muted-foreground truncate">
             {connectionStatus === "connected"
               ? "Tell it what you need — it'll propose a crew"
               : "Reconnecting to the Guide…"}
           </div>
         </div>
         {connectionStatus !== "connected" && (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0" data-testid="onboarding-chat-connection">
+          <span className="flex items-center gap-1 text-micro text-muted-foreground shrink-0" data-testid="onboarding-chat-connection">
             <WifiOff className="h-3 w-3" />
             {connectionStatus}
           </span>
@@ -750,12 +750,12 @@ function ConnectedSetupChat({
                   <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                   <span className="min-w-0">
                     <span className="block text-xs font-medium tracking-tight">{p.title}</span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{p.prompt}</span>
+                    <span className="mt-0.5 block text-micro leading-relaxed text-muted-foreground">{p.prompt}</span>
                   </span>
                 </motion.button>
               ))}
             </div>
-            <p className="mt-3 text-center text-[11px] text-muted-foreground">{starters.footer}</p>
+            <p className="mt-3 text-center text-micro text-muted-foreground">{starters.footer}</p>
           </div>
         )}
         {historyWarning && (

@@ -263,7 +263,6 @@
   "components/features/members/invite-member-dialog.tsx": 1,
   "components/features/missions/create-mission-dialog.tsx": 1,
   "components/features/missions/mission-header.tsx": 1,
-  "components/features/onboarding/onboarding-setup-chat.tsx": 4,
   "components/features/orchestration/agent-card-node.tsx": 10,
   "components/features/orchestration/agent-node.tsx": 9,
   "components/features/orchestration/context-detail-panel.tsx": 14,
