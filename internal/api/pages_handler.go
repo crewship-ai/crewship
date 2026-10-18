@@ -399,6 +399,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	PrivateAudience    bool
 	HasDocument        bool
 	HasProject         bool
 	HasApplication     bool
@@ -535,7 +536,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=p.id)
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -550,13 +551,26 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	for _, rec := range records {
+		if rec.PrivateAudience {
+			role, err := h.liveContentHumanRole(ctx, wsID, viewer.UserID)
+			if err != nil {
+				return nil, err
+			}
+			copyViewer := *viewer
+			copyViewer.Role = role
+			viewer = &copyViewer
+			break
+		}
 	}
 
 	// Every grant in scope, in ONE query, with its use-time verdict already
@@ -592,6 +606,9 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 	out := &pageIndex{folders: folders, acl: acl, rows: make([]pageIndexRow, 0, len(records))}
 	for i := range records {
 		rec := records[i]
+		if rec.PrivateAudience && !privatePageViewer(&rec, viewer) {
+			continue
+		}
 		panels := panelsByPage[rec.ID]
 		// Rendered the way ownerRef renders it: the slug when the crew row is
 		// there, the id when it is not.
@@ -735,6 +752,10 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	if !reachable {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
+		return
+	}
+
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 
@@ -1274,6 +1295,9 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // become their slugs, so only opaque IDs may invalidate private outputs,
 // including their empty human-owned staging phase before first publication.
 func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
+	if rec.PrivateAudience {
+		return map[string]any{}
+	}
 	payload := map[string]any{"page_id": rec.ID}
 	if !pageHasPrivateOutputMetadata(rec, hasPanels) {
 		payload["slug"] = rec.Slug
@@ -1312,13 +1336,26 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id)
+ EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience)
 	if err != nil {
 		return nil, err
+	}
+	if p.PrivateAudience {
+		user := UserFromContext(ctx)
+		if user == nil {
+			return nil, sql.ErrNoRows
+		}
+		role, err := h.liveContentHumanRole(ctx, wsID, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !privatePageViewer(&p, &pageViewer{UserID: user.ID, Role: role}) {
+			return nil, sql.ErrNoRows
+		}
 	}
 	return &p, nil
 }

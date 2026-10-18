@@ -57,6 +57,11 @@ describe("entityHref", () => {
     )
   })
 
+  it("opens spend on Activity's Spend view, not the retired /paymaster (#3618)", () => {
+    expect(entityHref({ kind: "spend" })).toBe("/activity?mode=spend")
+    expect(entityHref({ kind: "spend", crewId: "crw_1" })).toBe("/activity?mode=spend")
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
     expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/activity?mission=m%2F1")

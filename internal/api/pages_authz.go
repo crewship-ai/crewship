@@ -144,6 +144,15 @@ const (
 // cannot be edited apart.
 func (h *PageHandler) pageReach(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord, viewer *pageViewer, folderSlug string, granted bool) []string {
 	var out []string
+	if rec.PrivateAudience {
+		if privatePageViewer(rec, viewer) {
+			if rec.OwnerUserID == viewer.UserID {
+				return []string{pageReachOwner}
+			}
+			return []string{pageReachRole}
+		}
+		return nil
+	}
 	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
 		out = append(out, pageReachOwner)
 	}
@@ -204,6 +213,9 @@ func (h *PageHandler) pageReachedWithoutGrant(rec *pageRecord, panels []*panelRe
 // ACL names the viewer, or it does not (#2533 §3/3).
 func (h *PageHandler) canSeePage(ctx context.Context, wsID string, rec *pageRecord,
 	panels []*panelRecord, viewer *pageViewer) (bool, error) {
+	if rec.PrivateAudience {
+		return privatePageViewer(rec, viewer), nil
+	}
 	if h.pageReachedWithoutGrant(rec, panels, viewer) {
 		return true, nil
 	}
@@ -280,6 +292,9 @@ func (h *PageHandler) isPageOwner(ctx context.Context, wsID, userID string, rec 
 
 // mayEditSpec answers the `write` verb: add, remove and re-arrange panels.
 func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
+	if rec.PrivateAudience {
+		return privatePageViewer(rec, &pageViewer{UserID: userID, Role: role})
+	}
 	if canRole(role, "manage") {
 		return true
 	}

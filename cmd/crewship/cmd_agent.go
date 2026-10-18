@@ -129,6 +129,8 @@ var agentGetCmd = &cobra.Command{
 			{"Crew", crewName},
 			{"Status", agent.Status},
 			{"CLI Adapter", agent.CLIAdapter},
+			{"LLM Provider", agent.LLMProvider},
+			{"LLM Model", agent.LLMModel},
 			{"Tool Profile", agent.ToolProfile},
 			{"Memory", mem},
 			{"Timeout", fmt.Sprintf("%ds", agent.TimeoutSeconds)},
@@ -316,6 +318,8 @@ type agentCrewShort struct {
 }
 
 type agentDetailResponse struct {
+	LLMProvider    string          `json:"llm_provider" yaml:"llm_provider"`
+	LLMModel       string          `json:"llm_model" yaml:"llm_model"`
 	ID             string          `json:"id" yaml:"id"`
 	Name           string          `json:"name" yaml:"name"`
 	Slug           string          `json:"slug" yaml:"slug"`
