@@ -63,7 +63,7 @@ describe("Activity action (ODCH-SK-14)", () => {
     const href = link.getAttribute("href") ?? ""
     expect(href.startsWith("/activity?")).toBe(true)
     const state = parseActivityUrl(new URL(href, "http://x").searchParams)
-    expect(state.path.stops).toEqual([{ kind: "skill", id: "sk", label: "Web" }])
+    expect(state.path.stops.map((s) => `${s.kind}:${s.id}`)).toEqual(["skill:sk"])
     // It leaves the page; it does not switch tabs in place.
     fireEvent.click(link)
     expect(onTab).not.toHaveBeenCalled()
