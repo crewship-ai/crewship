@@ -1,0 +1,138 @@
+name: Artifact Runtime Stop Spike
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/workflows/artifacts-runtime-stop-spike.yml
+      - e2e/artifacts-runtime-spike/runaway-isolation.mjs
+      - e2e/artifacts-runtime-spike/stop-fixture/**
+      - e2e/artifacts-runtime-spike/runaway-isolation.README.md
+      - internal/pagebuild/runtime.go
+      - internal/pagebuild/bootstrap.js
+      - lib/pages/runtime-support.ts
+permissions:
+  contents: read
+concurrency:
+  group: artifacts-runtime-stop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  lifecycle:
+    name: Firefox and WebKit bounded stop lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        timeout-minutes: 1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        timeout-minutes: 8
+        with:
+          go-version: 1.27.2
+      - uses: ./.github/actions/setup-node-pnpm
+        timeout-minutes: 10
+        with:
+          node-version: 24.21.0
+      - uses: ./.github/actions/setup-playwright-browser
+        timeout-minutes: 14
+        with:
+          browser: firefox
+      - uses: ./.github/actions/setup-playwright-browser
+        timeout-minutes: 14
+        with:
+          browser: webkit
+      - name: Compile production bootstrap fixture
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifacts-runtime-stop"
+          timeout --kill-after=5s 240s go build -o "$RUNNER_TEMP/artifacts-runtime-stop/fixture" ./e2e/artifacts-runtime-spike/stop-fixture
+      - name: Execute sequential bounded browser cases
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ephemeral runner only; no dev-host installs or authenticated state.
+          timeout --kill-after=5s 110s node e2e/artifacts-runtime-spike/runaway-isolation.mjs \
+            "$RUNNER_TEMP/artifacts-runtime-stop/fixture" \
+            > "$RUNNER_TEMP/artifacts-runtime-stop/raw-report.json" \
+            2> "$RUNNER_TEMP/artifacts-runtime-stop/stderr.log"
+      - name: Validate strict evidence and preserve failed reports
+        if: always()
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync, statSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          import { createRequire } from 'node:module';
+          import { join } from 'node:path';
+          const dir = join(process.env.RUNNER_TEMP, 'artifacts-runtime-stop');
+          const file = join(dir, 'raw-report.json');
+          assert.ok(statSync(file).size > 0 && statSync(file).size <= 256 * 1024);
+          const report = JSON.parse(readFileSync(file, 'utf8'));
+          assert.equal(report.format, 'crewship-artifacts-runtime-stop-spike/v1');
+          assert.equal(report.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim());
+          const sources = ['internal/pagebuild/runtime.go','internal/pagebuild/bootstrap.js','lib/pages/runtime-support.ts'];
+          assert.deepEqual(Object.keys(report.sourceSHA256).sort(), sources.sort());
+          for (const source of sources) assert.equal(report.sourceSHA256[source], createHash('sha256').update(readFileSync(source)).digest('hex'));
+          assert.equal(report.environment.node, process.version);
+          assert.equal(report.environment.platform, 'linux');
+          assert.equal(report.environment.playwright, createRequire(import.meta.url)('playwright/package.json').version);
+          assert.equal(report.runtimeAcceptance, false); assert.equal(report.productionSupportChanged, false);
+          assert.equal(report.scope, 'Browser-context lifecycle only; not OS-process/CPU isolation or R1 acceptance');
+          assert.equal(report.origins.studio, 'https://studio.crewship.test');
+          assert.equal(report.origins.runtime, 'https://runtime.artifacts.test');
+          assert.match(report.bootstrapSHA256, /^[a-f0-9]{64}$/);
+          assert.deepEqual(report.browsers.map(value=>value.browser).sort(), ['firefox','webkit']);
+          const expected = ['iframe-loop-actually-started','host-responsive-during-iframe-loop',
+            'stop-detaches-context-and-closes-old-port','restart-executes-fresh-context-and-stale-port-has-no-response',
+            'host-responsive-after-stop-and-restart','host-owned-worker-loop-actually-started',
+            'host-owned-worker-terminate-closes-browser-worker-context'].sort();
+          let passed = true;
+          for (const result of report.browsers) {
+            assert.ok(['pass','fail','environment-blocked'].includes(result.status));
+            assert.ok(Array.isArray(result.checks) && result.checks.every(value=>expected.includes(value)));
+            assert.equal(new Set(result.checks).size, result.checks.length);
+            assert.equal(result.assertionCount, result.checks.length);
+            if (result.status === 'pass') {
+              assert.deepEqual([...result.checks].sort(), expected);
+              assert.ok(result.browserVersion && result.userAgent);
+              assert.deepEqual(result.unexpected, []); assert.deepEqual(result.blocked, []);
+              assert.equal(result.hostOwnedWorker.browserCloseEvent, true);
+              assert.equal(result.iframeObservations.oldPortClosed, true);
+              assert.equal(result.iframeObservations.framesCreated, 2);
+              assert.equal(result.watchdogKilled, undefined); assert.equal(result.cleanupError, undefined);
+            } else { assert.ok(result.error || result.cleanupError); passed = false; }
+          }
+          writeFileSync(join(dir,'report.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+          assert.ok(passed, 'Both browsers must complete every required case; unknown is not PASS');
+          NODE
+      - name: Retain strict JSON evidence
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: artifacts-runtime-stop-json-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/artifacts-runtime-stop/report.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain attempted-run diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: artifacts-runtime-stop-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/artifacts-runtime-stop/raw-report.json
+            ${{ runner.temp }}/artifacts-runtime-stop/stderr.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: State qualification boundary
+        if: always()
+        timeout-minutes: 1
+        run: |
+          echo 'Browser-context stop/restart only; neither OS-process/CPU isolation nor R1 acceptance. Production Apps remain desktop Chromium only.' >> "$GITHUB_STEP_SUMMARY"
