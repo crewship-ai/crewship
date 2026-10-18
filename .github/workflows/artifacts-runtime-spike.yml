@@ -1,0 +1,165 @@
+name: Artifact Runtime Primitive Spike
+
+# A separate, optional evidence lane. No required-check or production support
+# policy is changed. Never run untrusted PR code through pull_request_target.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/workflows/artifacts-runtime-spike.yml
+      - .github/actions/setup-node-pnpm/**
+      - .github/actions/setup-playwright-browser/**
+      - e2e/artifacts-runtime-spike/**
+      - internal/pagebuild/bootstrap.js
+      - lib/pages/preview-runtime.ts
+      - lib/pages/runtime-support.ts
+      - package.json
+      - pnpm-lock.yaml
+      - .npmrc
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artifacts-runtime-spike-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  primitives:
+    name: Firefox and WebKit sandbox primitives
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          persist-credentials: false
+
+      - name: Set up locked Node dependencies
+        timeout-minutes: 10
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: 24.21.0
+
+      # Existing action keys browser downloads on the resolved Playwright
+      # version, probes launch, and bounds any necessary OS dependency install.
+      # These installs affect only this ephemeral GitHub runner, never dev hosts.
+      - name: Install matching Firefox
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: firefox
+
+      - name: Install matching WebKit
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: webkit
+
+      - name: Probe local opaque sandboxes and MessagePorts
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifacts-runtime-spike"
+          # No application/server/auth configuration or browser storage state.
+          # The host-specific crewship-heavy wrapper is absent on this runner;
+          # the job/step/process deadlines bound its isolated resource budget.
+          timeout --kill-after=10s 90s \
+            node e2e/artifacts-runtime-spike/sandbox-primitives.mjs \
+            > "$RUNNER_TEMP/artifacts-runtime-spike/raw-report.json" \
+            2> "$RUNNER_TEMP/artifacts-runtime-spike/stderr.log"
+
+      - name: Require strict evidence from both browsers
+        if: always()
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync, statSync } from 'node:fs';
+          import { createRequire } from 'node:module';
+          import { join } from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          const directory = join(process.env.RUNNER_TEMP, 'artifacts-runtime-spike');
+          const input = join(directory, 'raw-report.json');
+          assert.ok(statSync(input).size > 0 && statSync(input).size <= 256 * 1024, 'Missing or oversized spike JSON');
+          const report = JSON.parse(readFileSync(input, 'utf8'));
+          assert.equal(report.format, 'crewship-artifacts-runtime-primitives-spike/v1');
+          assert.equal(report.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
+          const sources = ['internal/pagebuild/bootstrap.js', 'lib/pages/preview-runtime.ts', 'lib/pages/runtime-support.ts'];
+          assert.deepEqual(Object.keys(report.sourceSHA256).sort(), [...sources].sort());
+          for (const source of sources) {
+            assert.match(report.sourceSHA256[source], /^[a-f0-9]{64}$/);
+            assert.equal(report.sourceSHA256[source], createHash('sha256').update(readFileSync(source)).digest('hex'));
+          }
+          assert.equal(report.environment.node, process.version);
+          assert.equal(report.environment.platform, 'linux');
+          const require = createRequire(import.meta.url);
+          assert.equal(report.environment.playwright, require('playwright/package.json').version);
+          assert.equal(report.scope, 'Local opaque-sandbox and MessagePort primitives only; not production App or runtime 1.1 acceptance');
+          assert.ok(Array.isArray(report.browsers));
+          assert.deepEqual(report.browsers.map(value => value.browser).sort(), ['firefox', 'webkit']);
+          const expected = [
+            'opaque-parent-dom-denied', 'opaque-storage-denied', 'csp-fetch-denied',
+            'csp-worker-denied', 'wrong-source-origin-shape-denied', 'single-port-admission',
+            'unknown-rpc-denied', 'close-aborts-pending-handler',
+            'closed-port-request-ignored', 'late-old-response-suppressed',
+          ].sort();
+          let passed = true;
+          for (const browser of report.browsers) {
+            assert.ok(['pass', 'fail', 'environment-blocked'].includes(browser.status));
+            assert.ok(Array.isArray(browser.checks) && browser.checks.every(value => typeof value === 'string'));
+            assert.equal(new Set(browser.checks).size, browser.checks.length);
+            // Count complete named assertion groups, not skipped or attempted work.
+            browser.assertionCount = browser.checks.length;
+            browser.browserVersion ??= null;
+            if (browser.status === 'pass') {
+              assert.ok(typeof browser.browserVersion === 'string' && browser.browserVersion.length > 0);
+              assert.ok(typeof browser.userAgent === 'string' && browser.userAgent.length > 0);
+              assert.deepEqual([...browser.checks].sort(), expected);
+            } else {
+              assert.ok(typeof browser.error === 'string' && browser.error.length > 0);
+              passed = false;
+            }
+          }
+          report.productionBrowserSupportChangedByThisWorkflow = false;
+          report.runtimeAcceptance = false;
+          writeFileSync(join(directory, 'report.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
+          assert.ok(passed, 'Both target browsers must execute all assertions; unavailable is not PASS');
+          NODE
+
+      - name: Preserve strict JSON evidence
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: artifacts-runtime-spike-json-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/artifacts-runtime-spike/report.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Preserve attempted-run diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: artifacts-runtime-spike-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/artifacts-runtime-spike/raw-report.json
+            ${{ runner.temp }}/artifacts-runtime-spike/stderr.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: State the qualification boundary
+        if: always()
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          {
+            echo 'Production Page applications remain desktop-Chromium-only.'
+            echo 'This lane tests Firefox/WebKit sandbox and port primitives directly.'
+            echo 'A primitive PASS is not R1 acceptance, new capability authority, or a production support change.'
+            echo 'Separate-site process isolation, runaway stop, real Go serving, transactional revocation and receipts remain unqualified here.'
+          } >> "$GITHUB_STEP_SUMMARY"
