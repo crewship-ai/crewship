@@ -1,23 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Copy } from "lucide-react"
-import { toast } from "@/lib/toast"
-
-import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
 import type { CrewMember } from "@/lib/types/crew"
 
-import { CrCard, CrLine, CrNote } from "./cr-card"
+import { CrCard, CrNote } from "./cr-card"
 import { CrewMembers } from "./crew-members"
+import { CrewCommandLine } from "./crew-yaml"
 import { SettingsTab } from "./crew-canvas-tabs/settings-tab"
 import type { AgentSummary, CrewRecord } from "./crew-canvas-tabs/types"
 
-/** Commands that exist in the CLI today for this crew. */
-export function crewCommands(slug: string): string[] {
-  return [`crewship crew get ${slug}`, `crewship export crew ${slug}`, `crewship agent list --crew ${slug}`]
-}
+export { crewCommands } from "./crew-yaml"
 
 /**
  * C-SET: what the Crew administration dialog held, on the page — profile,
@@ -77,24 +71,7 @@ export function CrewSettings({
         )}
       </CrCard>
 
-      <CrCard title="Command line" concept="settings">
-        {crewCommands(crew.slug).map((cmd) => (
-          <CrLine
-            key={cmd}
-            title={<code className="font-mono text-label">{cmd}</code>}
-            right={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Copy ${cmd}`}
-                onClick={() => { void navigator.clipboard.writeText(cmd).then(() => toast.success("Command copied"), () => toast.error("Could not copy the command")) }}
-              >
-                <Copy className="size-3.5" />
-              </Button>
-            }
-          />
-        ))}
-      </CrCard>
+      <CrewCommandLine workspaceId={workspaceId} crew={crew} />
     </div>
   )
 }

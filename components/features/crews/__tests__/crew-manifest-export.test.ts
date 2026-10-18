@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 
 import { describe, it, expect } from "vitest"
+import { parse } from "yaml"
 
 import { exportCrewManifest } from "@/components/features/crews/crew-manifest-export"
 
@@ -66,7 +67,7 @@ describe("exportCrewManifest: behaviour", () => {
   it("a failed skill or credential lookup for one agent exports the rest and says what is missing", async () => {
     const { yaml, warnings } = await exportCrewManifest("ws1", "ops", {}, serve({}, ["/credentials"]).get)
     expect(yaml).toContain("kind: Crew")
-    expect(warnings.some((w) => /credential bindings/.test(w))).toBe(true)
+    expect(warnings.some((w) => /credential bindings/i.test(w))).toBe(true)
   })
 
   it("every call is a GET of an existing read endpoint", async () => {
@@ -88,5 +89,26 @@ describe("exportCrewManifest: behaviour", () => {
     expect(block.indexOf("name: db")).toBeLessThan(block.indexOf("image: postgres:16"))
     expect(block.indexOf("image: postgres:16")).toBeLessThan(block.indexOf("ports:"))
     expect(block).toContain("auto_credentials:")
+  })
+})
+
+describe("exportCrewManifest: awkward text survives the round trip", () => {
+  const tricky = [
+    "yes", "no", "true", "null", "~", "1001", "1e3", "0x1f", "- not a list", "# not a comment", "key: value", "a: b: c",
+    " leading space", "trailing space ", "tab\there", "quote \" and ' mixed", "{braces}", "[brackets]", "*star", "&anchor", "!tag", "%percent", "@at", "`tick",
+    "multi\nline", "multi\nline\n", "trailing blank\n\n", "  indented first\nsecond", "line with trailing space \nnext", "emoji \u{1F680} and ünïcode", "",
+  ]
+  it("every prompt comes back exactly when the file is read as YAML", async () => {
+    const agents = tricky.map((t, i) => ({ id: `a${i}`, slug: `agent-${String(i).padStart(2, "0")}`, name: `Agent ${i}`, agent_role: "AGENT", cli_adapter: "CLAUDE_CODE", tool_profile: "CODING", timeout_seconds: 60, memory_enabled: true, system_prompt: t, suggested_prompts: t, crew_id: "c1" }))
+    const crews = [{ id: "c1", name: "T", slug: "t", description: tricky[10], runtime_image: "x", services_json: null }]
+    const over: Record<string, unknown> = { "/api/v1/crews": crews, "/api/v1/agents?crew_id=c1": agents }
+    for (const a of agents) { over[`/api/v1/agents/${a.id}/skills`] = []; over[`/api/v1/agents/${a.id}/credentials`] = [] }
+    over["/api/v1/crews/c1/integrations"] = []
+    const { yaml } = await exportCrewManifest("ws1", "t", {}, serve(over).get)
+    const doc = parse(yaml) as { metadata: { description: string }; spec: { agents: Array<{ prompt?: string; suggested_prompts?: string }> } }
+    expect(doc.metadata.description).toBe(tricky[10])
+    const back = doc.spec.agents.map((a) => a.prompt ?? "")
+    expect(back).toEqual(tricky)
+    expect(doc.spec.agents.map((a) => a.suggested_prompts ?? "")).toEqual(tricky)
   })
 })
