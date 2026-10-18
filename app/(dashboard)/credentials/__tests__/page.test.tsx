@@ -49,6 +49,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
+vi.mock("@/hooks/use-paymaster", () => ({ useSubscriptionUsage: () => ({ data: { rows: [] }, loading: false, error: null, notConfigured: false }) }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 vi.mock("next/link", () => ({
