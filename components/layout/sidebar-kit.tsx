@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "motion/react"
 import { cn } from "@/lib/utils"
 import { ListRow } from "@/components/ui/list-row"
 import { SecondaryPanelContext } from "@/components/layout/secondary-panel"
+export { SidebarRowTile } from "@/components/layout/row-tile"
 
 /**
  * sidebar-kit — the canonical building blocks for every in-page LEFT sidebar
@@ -132,8 +133,9 @@ export function SidebarFilterButton({
   ...props
 }: React.ComponentProps<"button"> & { activeCount?: number; active?: boolean; icon?: LucideIcon }) {
   const on = active ?? activeCount > 0
-  // In a 272 px SecondaryPanel the label would squeeze the search field: the
-  // button shows its icon (and count) and keeps the label for screen readers.
+  // v67: a labelled "Filter" button beside the panel's search, with the count
+  // when filters apply — icon and label in a panel too, so a person does not
+  // have to guess what the funnel is.
   const inPanel = React.useContext(SecondaryPanelContext) != null
   return (
     <button
@@ -149,7 +151,7 @@ export function SidebarFilterButton({
       {...props}
     >
       <Icon className="h-3 w-3" />
-      {inPanel ? <span className="sr-only">{children}</span> : children}
+      {children}
       {activeCount > 0 && (
         <span className="ml-0.5 rounded-full bg-primary-hover px-1.5 min-w-[15px] text-center text-micro leading-4 font-bold text-background tabular-nums">
           {activeCount}
@@ -321,7 +323,7 @@ export function SidebarFacet({
   return (
     <>
       {!first && <div className="mt-1 border-t border-foreground/[0.06]" />}
-      <div className="px-3 py-1 text-micro font-semibold text-muted-foreground-soft">
+      <div className="type-group-head px-3 py-1 text-muted-foreground-soft">
         {label}
       </div>
       <button
@@ -510,11 +512,11 @@ export function SidebarSection({
         />
       )}
       {/* Harbor 2: an 11 px grey heading with its count beside it. */}
-      <span className="min-w-0 truncate text-micro font-semibold text-muted-foreground-soft">
+      <span className="type-group-head min-w-0 truncate text-muted-foreground-soft">
         {label}
       </span>
       {count != null && (
-        <span className="text-micro tabular-nums text-muted-foreground-soft">{count}</span>
+        <span className="type-group-head tabular-nums text-muted-foreground-soft">{count}</span>
       )}
       {!collapsible && actions && <span className="ml-auto" />}
       {!collapsible && actions}
@@ -576,7 +578,7 @@ export function SidebarRow({
         // py-1 rather than py-1.5: with the role line gone from every
         // unselected row, the portrait is what sets the height, and the extra
         // padding was only ever there to keep two lines of text from touching.
-        "kit-tap mx-1.5 items-center gap-2 rounded-md px-2 py-1 type-nav",
+        "kit-tap mx-1.5 min-h-[30px] items-center gap-2 rounded-md px-2 py-1 type-nav",
         indent && "ml-6",
         className,
       )}

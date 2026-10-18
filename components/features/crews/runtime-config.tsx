@@ -627,7 +627,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           things. Under `tabs` this label is the only thing naming the block,
           because the Features tab holds both it and the feature list. */}
       {layout === "tabs" && (
-        <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Base Image</Label>
+        <Label className="text-label font-medium text-muted-foreground">Base image</Label>
       )}
               {isCustomImage ? (
                 <div className="flex gap-2">

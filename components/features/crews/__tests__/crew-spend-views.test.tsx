@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, cleanup, within } from "@testing-library/react"
 
+vi.mock("@/components/features/crews/memory-workspace", () => ({ useWorkspaceResource: (url: string) => ({ key: url, error: "offline" }) }))
 vi.mock("@/components/features/crews/crew-activity-feed", () => ({ CrewActivityFeed: () => <p>recent activity</p> }))
 
 import { CrewOverview } from "@/components/features/crews/crew-overview"
@@ -60,8 +61,10 @@ describe("Team › Cost · 30 d", () => {
     team(new Map())
     expect(screen.getByRole("columnheader", { name: "Cost · 30 d", hidden: true }).className).toContain("max-md:hidden")
   })
-  it("has no column when spend is unknown or hidden", () => {
+  // The column is part of the design (PAR-121); an unknown cost reads a dash, never zero.
+  it("keeps the column with a dash when spend is unknown or hidden", () => {
     team(null)
-    expect(screen.queryByRole("columnheader", { name: "Cost · 30 d" })).toBeNull()
+    expect(screen.getByRole("columnheader", { name: "Cost · 30 d", hidden: true })).toBeInTheDocument()
+    expect(screen.queryByText("$0.00")).toBeNull()
   })
 })

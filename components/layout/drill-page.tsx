@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarToolbar } from "@/components/layout/sidebar-kit"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
 import { SecondaryPanel, useCloseSecondaryPanelSheet, useIsTabletPanel } from "@/components/layout/secondary-panel"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
@@ -256,7 +257,7 @@ export function DrillNavSection({
       {count != null && <span className="ml-auto tabular-nums">{count}</span>}
     </>
   )
-  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 text-micro font-semibold text-muted-foreground-soft"
+  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 type-group-head text-muted-foreground-soft"
   return (
     <div className="px-1.5 pt-2.5" data-slot="drill-section">
       {collapsible ? (
@@ -294,6 +295,7 @@ export function DrillNavItem({
   selected,
   onSelect,
   icon,
+  tile,
   label,
   sub,
   meta,
@@ -305,6 +307,8 @@ export function DrillNavItem({
   selected?: boolean
   onSelect: () => void
   icon?: React.ReactNode
+  /** An icon on the kit's 24 px row tile (v67); `icon` is for anything else. */
+  tile?: LucideIcon
   label: React.ReactNode
   /** A second, quieter line. */
   sub?: React.ReactNode
@@ -329,12 +333,12 @@ export function DrillNavItem({
       className={cn(
         // kit-tap: 44px under a coarse pointer (globals.css), desktop density
         // untouched — these rows are the panel's whole navigation on a phone.
-        "kit-tap drill-row-in row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
+        "kit-tap drill-row-in row-interactive row-hover min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]",
         selected && "row-selected font-medium",
         muted && !selected && "text-muted-foreground",
       )}
     >
-      {icon}
+      {tile ? <SidebarRowTile icon={tile} active={selected} /> : icon}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub != null && <span className="block truncate text-[11px] font-normal text-muted-foreground">{sub}</span>}
