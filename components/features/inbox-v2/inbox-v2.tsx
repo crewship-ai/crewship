@@ -612,7 +612,7 @@ export function InboxV2() {
             per user. On a phone the list IS the page while nothing is open
             (phoneInline), and an opened row or the Overview shows alone with
             Back in the bar (PNL-05). Tablet keeps the panel beside the detail. */}
-        {!phoneDetail && <SecondaryPanel id="inbox" label="Inbox views" phoneInline footer={bulkBar}>
+        {!phoneDetail && <SecondaryPanel kind="list" id="inbox" label="Inbox views" phoneInline footer={bulkBar}>
           <InboxV2Explorer
             view={view}
             onView={showView}

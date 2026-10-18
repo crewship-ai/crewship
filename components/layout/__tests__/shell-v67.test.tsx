@@ -13,6 +13,8 @@ import path from "node:path"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { useAppStore } from "@/lib/store"
+import { SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { Plus, Upload } from "lucide-react"
 import { DEFAULT_SIDEBAR } from "@/lib/theme/appearance"
 
 const store = new Map<string, string>()
@@ -156,5 +158,23 @@ describe("panel column", () => {
     expect(slotAt).toBeGreaterThan(-1)
     expect(columnAt).toBeGreaterThan(slotAt)
     expect(toolbarAt).toBeGreaterThan(columnAt)
+  })
+})
+
+// v67 index.html:275-276: on a tablet the top bar's labelled actions become
+// icon squares, so the path, the actions and both bells fit one 48 px row.
+describe("top-bar actions on a tablet", () => {
+  it("keeps the label for assistive tech and as a tooltip, shows the icon only below 1280", () => {
+    render(
+      <>
+        <SubBarPrimary icon={Plus}>New issue</SubBarPrimary>
+        <SubBarSecondary icon={Upload}>Import</SubBarSecondary>
+      </>,
+    )
+    for (const name of ["New issue", "Import"]) {
+      const button = screen.getByRole("button", { name })
+      expect(button).toHaveAttribute("title", name)
+      expect(button.querySelector("span")).toHaveClass("max-xl:sr-only")
+    }
   })
 })

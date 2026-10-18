@@ -95,7 +95,7 @@ describe("Settings navigation panel", () => {
     await screen.findByTestId("profile-section")
     expect(panel()).toBeNull()
     expect(screen.queryByRole("button", { name: "Open settings navigation" })).toBeNull()
-    expect(useAppStore.getState().secondaryPanel).toEqual({ id: "settings", label: "Settings navigation" })
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "settings", label: "Settings navigation" })
 
     act(() => useAppStore.getState().setSecondaryPanelOpen(true))
     const sheet = screen.getByRole("dialog", { name: "Settings navigation" })

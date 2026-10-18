@@ -40,7 +40,8 @@ describe("SubBar on a phone", () => {
     withSlot()
     render(<SubBar title="Routines" actions={<SubBarPrimary icon={Plus}>New routine</SubBarPrimary>} />)
     const btn = screen.getByRole("button", { name: "New routine" })
-    expect(btn.querySelector("span.max-md\\:sr-only")).toHaveTextContent("New routine")
+    // Icon-only below 1280: phone and tablet (v67 index.html:275).
+    expect(btn.querySelector("span.max-xl\\:sr-only")).toHaveTextContent("New routine")
   })
 
   it("gives a text-only create action a plus on a phone", () => {
@@ -64,7 +65,7 @@ describe("SubBar on a phone", () => {
         actions={<><SubBarSecondary icon={Download}>Export</SubBarSecondary><SubBarSecondary>Import</SubBarSecondary></>}
       />,
     )
-    expect(screen.getByRole("button", { name: "Export" }).querySelector(".max-md\\:sr-only")).not.toBeNull()
+    expect(screen.getByRole("button", { name: "Export" }).querySelector(".max-xl\\:sr-only")).not.toBeNull()
     expect(screen.getByRole("button", { name: "Import" }).className).toContain("max-md:hidden")
   })
 

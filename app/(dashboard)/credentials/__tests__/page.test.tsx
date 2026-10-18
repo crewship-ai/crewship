@@ -632,7 +632,7 @@ describe("the panel is the shared SecondaryPanel", () => {
     h.mobile = true
     routeApi({ credentials: [makeCredential()] })
     renderPage()
-    await waitFor(() => expect(useAppStore.getState().secondaryPanel).toEqual({ id: "vault", label: "Vault" }))
+    await waitFor(() => expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "vault", label: "Vault" }))
     expect(document.querySelector('[data-slot="secondary-panel"]')).toBeNull()
     fireEvent.click(await screen.findByRole("radio", { name: "AI providers" }))
     expect(query().get("space")).toBe("providers")

@@ -198,12 +198,16 @@ describe("DrillPage on a tablet (1024 px)", () => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("1279"), media: q, addEventListener: () => {}, removeEventListener: () => {} }))
   })
 
-  it("keeps the way back on the top bar, with the parent's name, while the panel is closed", () => {
+  // Owner decision 2026-10-18 (v67): a drill page's panel is a list, docked
+  // beside the content on a tablet, with the way back as its first row.
+  it("docks the panel with the way back as its first row, once", () => {
     renderPage()
-    expect(panel()).toBeNull()
+    expect(panel()).not.toBeNull()
+    expect(panel()).not.toHaveAttribute("data-float")
     const back = screen.getByRole("link", { name: "Back to Settings" })
     expect(back).toHaveAttribute("href", "/settings")
-    expect(back).toHaveTextContent("Settings")
+    expect(back.closest("[data-slot=drill-back-row]")).not.toBeNull()
+    expect(screen.getAllByRole("link", { name: "Back to Settings" })).toHaveLength(1)
   })
 
   it("shows the path, the head and the content as on a desktop", () => {

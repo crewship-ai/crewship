@@ -201,7 +201,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phone
   return (
     // The one secondary panel (Harbor 2): a 272 px column with a remembered
     // collapse, and a bottom sheet from the top bar's panel button on a phone.
-    <SecondaryPanel id="settings" label="Settings navigation" phoneInline={phoneInline}>
+    <SecondaryPanel kind="list" id="settings" label="Settings navigation" phoneInline={phoneInline}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}

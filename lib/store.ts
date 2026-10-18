@@ -32,8 +32,13 @@ interface AppState {
   setPageBarSlot: (el: HTMLElement | null) => void
   /** The page's secondary panel (Harbor 2 SecondaryPanel), registered while
    *  it is mounted so the phone top bar can offer it as a sheet. */
-  secondaryPanel: { id: string; label: string } | null
-  setSecondaryPanel: (panel: { id: string; label: string } | null) => void
+  /** The page's SecondaryPanel. `kind`: "list" panels (Inbox, Settings,
+   *  Admin) stay docked on a tablet; "filter" panels float from a button. */
+  secondaryPanel: { id: string; label: string; kind: "list" | "filter" } | null
+  setSecondaryPanel: (panel: { id: string; label: string; kind: "list" | "filter" } | null) => void
+  /** The layout's panel column, beside the column with the top bar. */
+  panelSlot: HTMLElement | null
+  setPanelSlot: (el: HTMLElement | null) => void
   secondaryPanelOpen: boolean
   setSecondaryPanelOpen: (open: boolean) => void
   commandPaletteOpen: boolean
@@ -58,6 +63,8 @@ export const useAppStore = create<AppState>((set) => ({
   setSecondaryPanel: (panel) => set({ secondaryPanel: panel }),
   secondaryPanelOpen: false,
   setSecondaryPanelOpen: (open) => set({ secondaryPanelOpen: open }),
+  panelSlot: null,
+  setPanelSlot: (el) => set({ panelSlot: el }),
   pageBarSlot: null,
   setPageBarSlot: (el) => set({ pageBarSlot: el }),
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -45,10 +46,14 @@ export function useIsTabletPanel(): boolean {
  * - On a phone the same content opens as a bottom sheet from the top bar's
  *   panel button (AppToolbar reads the registration below); there is one phone
  *   pattern instead of four.
- * - On a tablet (768–1279) the panel starts closed and opens from the same
- *   top-bar button, floating over the content (v67 `panelBtn`); its close
- *   button, Escape or a click outside closes it. The desktop collapse
- *   preference does not apply there.
+ * - On a tablet (768–1279) a `list` panel (Inbox, Settings, Admin — the
+ *   panel IS the page's list) stays docked beside the content, as v67 draws
+ *   it. A `filter` panel starts closed and opens from the top-bar button,
+ *   floating over the content (v67 `panelBtn`); its close button, Escape or a
+ *   click outside closes it. The desktop collapse preference does not apply.
+ * - Docked, it renders into the layout's panel column (`panelSlot`), beside
+ *   the column that holds the top bar, so it starts at the top of the card
+ *   with its own 48 px toolbar and the top bar spans the content only (v67).
  *
  * Content is composed from components/layout/sidebar-kit.
  */
@@ -58,6 +63,7 @@ export function SecondaryPanel<S extends string = string>({
   toolbar,
   footer,
   phoneInline = false,
+  kind = "filter",
   spaces,
   className,
   children,
@@ -76,6 +82,9 @@ export function SecondaryPanel<S extends string = string>({
    *  for sections whose panel IS the list (Inbox), while nothing is open.
    *  List → detail → back (PNL-05). */
   phoneInline?: boolean
+  /** "list" when the panel is the page's list (Inbox, Settings, Admin): it
+   *  stays docked on a tablet. "filter" (views and facets) floats there. */
+  kind?: "list" | "filter"
   /** Two to nine places that each show a different page body, listed first in
    *  the body (under the toolbar) and switched on keys 1-9 (PNL-02). */
   spaces?: PanelSpacesConfig<S>
@@ -84,7 +93,10 @@ export function SecondaryPanel<S extends string = string>({
 }) {
   const spacesNode = spaces ? <PanelSpaces<S> {...spaces} /> : null
   const isMobile = useIsMobile()
-  const tablet = useIsTabletPanel() && !isMobile
+  const tabletWidth = useIsTabletPanel() && !isMobile
+  const tablet = tabletWidth && kind === "filter"
+  const slot = useAppStore((s) => s.panelSlot)
+  const dock = (node: React.ReactElement) => (slot ? createPortal(node, slot) : node)
   // Whether the content brought its own kit toolbar (which then carries the
   // collapse button); otherwise the panel draws a toolbar for it.
   const [claimed, setClaimed] = React.useState(0)
@@ -100,12 +112,12 @@ export function SecondaryPanel<S extends string = string>({
   const inlineOnPhone = isMobile && phoneInline
   React.useEffect(() => {
     if (inlineOnPhone) return
-    register({ id, label })
+    register({ id, label, kind })
     return () => {
       register(null)
       setSheetOpen(false)
     }
-  }, [id, label, register, setSheetOpen, inlineOnPhone])
+  }, [id, label, kind, register, setSheetOpen, inlineOnPhone])
 
   if (inlineOnPhone) {
     return (
@@ -208,7 +220,9 @@ export function SecondaryPanel<S extends string = string>({
     )
   }
 
-  const toggle = (
+  // A list docked on a tablet has no collapse: the width is planned for it.
+  const isCollapsed = collapsed && !tabletWidth
+  const toggle = tabletWidth ? null : (
     <button
       type="button"
       onClick={() => setCollapsed(!collapsed)}
@@ -221,15 +235,15 @@ export function SecondaryPanel<S extends string = string>({
     </button>
   )
 
-  return (
+  return dock(
     <aside
       data-slot="secondary-panel"
       data-panel-id={id}
-      data-collapsed={collapsed ? "true" : "false"}
+      data-collapsed={isCollapsed ? "true" : "false"}
       aria-label={label}
       className={cn("secondary-panel", className)}
     >
-      {collapsed ? (
+      {isCollapsed ? (
         <div className="secondary-panel-rail">{toggle}</div>
       ) : (
         <SecondaryPanelContext.Provider value={{ toggle, claim }}>

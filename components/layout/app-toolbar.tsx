@@ -205,7 +205,9 @@ export function AppToolbar() {
         {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3).
             Tablet: it floats over the content and this button toggles it
             (v67 panelBtn, COM-05). */}
-        {(isMobile || tabletPanel) && secondaryPanel && (
+        {/* A tablet's list panel (Inbox, Settings, Admin) is docked, so it has
+            no button (v67 panelBtn is for filter panels only). */}
+        {(isMobile || (tabletPanel && secondaryPanel?.kind !== "list")) && secondaryPanel && (
           <Button
             variant="ghost"
             size="icon-sm"

@@ -388,7 +388,7 @@ function AdminConsole() {
       <div className="flex flex-1 min-h-0">
         {/* The one SecondaryPanel: a 272 px column on a desktop; on a phone
             the page itself until a section opens, then the top bar's sheet. */}
-        <SecondaryPanel id="admin" label="Admin navigation" phoneInline={phoneList}>{adminNav}</SecondaryPanel>
+        <SecondaryPanel kind="list" id="admin" label="Admin navigation" phoneInline={phoneList}>{adminNav}</SecondaryPanel>
 
         {/* tabIndex + role/label, not decoration: this pane scrolls, and the
             default section (Overview) renders nothing focusable inside it, so

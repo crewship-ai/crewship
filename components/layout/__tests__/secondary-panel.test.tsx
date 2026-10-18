@@ -60,7 +60,7 @@ describe("SecondaryPanel", () => {
 
   it("registers itself for the phone top bar while mounted", () => {
     const { unmount } = render(<SecondaryPanel id="issues" label="Issues views" />)
-    expect(useAppStore.getState().secondaryPanel).toEqual({ id: "issues", label: "Issues views" })
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "issues", label: "Issues views" })
     unmount()
     expect(useAppStore.getState().secondaryPanel).toBeNull()
   })
@@ -112,7 +112,7 @@ describe("SecondaryPanel", () => {
       render(<SecondaryPanel id="routines" label="Routines views"><p>Views</p></SecondaryPanel>)
       expect(screen.queryByText("Views")).toBeNull()
       expect(screen.queryByRole("complementary")).toBeNull()
-      expect(useAppStore.getState().secondaryPanel).toEqual({ id: "routines", label: "Routines views" })
+      expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "routines", label: "Routines views" })
     })
 
     it("ignores a remembered desktop collapse", () => {
