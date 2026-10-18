@@ -171,7 +171,9 @@ test.describe("desktop", () => {
     await dialog.getByRole("textbox", { name: "Name" }).fill(slug)
     await dialog.getByRole("radio", { name: /From a template/ }).click()
     await dialog.getByRole("button", { name: "Continue" }).click()
-    await dialog.locator("button[aria-pressed]").first().click()
+    // A template tile, not the "Start empty" / "Import YAML" tiles above the
+    // grid: a template names its agent count, and it is never zero.
+    await dialog.locator("button[aria-pressed]").filter({ hasText: /[1-9]\d* agents/ }).first().click()
     await dialog.getByRole("button", { name: "Continue" }).click()
     // A provider choice shows only when the template asks for one; a click
     // on a missing radio would wait out the whole test timeout.
@@ -179,6 +181,8 @@ test.describe("desktop", () => {
     if (await provider.count()) await provider.first().click()
     await dialog.getByRole("button", { name: /Create crew/ }).click()
     await expect(page).toHaveURL(new RegExp(`crew=${slug}`))
+    // The canvas opens the crew just created, not the one /crews had opened.
+    await expect(page.getByTestId("crew-header").getByRole("heading", { level: 1 })).toHaveText(slug)
     await page.getByRole("tab", { name: /Team/ }).click()
     await expect(page.locator("[data-agent-row]").first()).toBeVisible()
   })
