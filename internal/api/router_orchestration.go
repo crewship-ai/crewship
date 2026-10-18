@@ -459,6 +459,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
+	// openapi: query range:string since:string until:string
+	r.mux.Handle("GET /api/v1/paymaster/credential-spend", authed(wsCtx(http.HandlerFunc(ph.CredentialSpend))))
 
 	// Chains: the causal graph around one anchor (issue identifier, issue id,
 	// run id, routine id or slug, assignment id, inbox item id) in a single

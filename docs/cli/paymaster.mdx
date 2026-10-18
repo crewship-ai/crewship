@@ -23,6 +23,7 @@ crewship paymaster <subcommand> [flags]
 | `by-mission <missionId>` | Spend rolled up for a single mission. |
 | `top` | Highest-cost scopes in the window. |
 | `subscriptions` | Subscription-plan usage rollup (flat-rate credentials). |
+| `credential-spend` | Metered spend per API key in a window (OWNER/ADMIN). |
 
 ---
 
@@ -110,6 +111,23 @@ crewship paymaster subscriptions --format json | jq '.[].call_count'
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--range` | `string` | `7d` | Time window: `1h`, `24h`, `7d`, or `30d`. |
+| `--since` | `string` | | RFC3339 start cutoff (overrides `--range` if both set). |
+| `--until` | `string` | | RFC3339 end cutoff. |
+
+---
+
+## `crewship paymaster credential-spend`
+
+Show what each API key cost, from the metered ledger — the API counterpart to "$ this month" on a Vault AI provider card. `--range month` is the calendar month so far (UTC), the window a provider bills by. Flat-rate subscription seats have no `$` figure; use `paymaster subscriptions` for those. OWNER or ADMIN only. Only the credential id is shown, never a value.
+
+```bash
+crewship paymaster credential-spend
+crewship paymaster credential-spend --range 30d --format json
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--range` | `string` | `month` | Time window: `1h`, `24h`, `7d`, `30d`, or `month` (calendar month so far, UTC). |
 | `--since` | `string` | | RFC3339 start cutoff (overrides `--range` if both set). |
 | `--until` | `string` | | RFC3339 end cutoff. |
 

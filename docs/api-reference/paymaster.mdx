@@ -22,6 +22,7 @@ Paymaster exposes read-only cost rollups across crew, agent, and mission scopes,
 | GET | [`/api/v1/paymaster/spend/by-mission/{missionId}`](#spend-by-mission) | Total spend for one mission |
 | GET | [`/api/v1/paymaster/top-spenders`](#top-spenders) | Leaderboard of agents by spend |
 | GET | [`/api/v1/paymaster/subscriptions`](#subscriptions) | Flat-rate credential usage rollup |
+| GET | [`/api/v1/paymaster/credential-spend`](#credential-spend) | Metered spend per API key (OWNER/ADMIN) |
 | POST | [`/api/v1/internal/cost/record`](#internal-cost-record) | Internal: sidecar reports parsed LLM usage |
 
 ## Time window parameters
@@ -264,6 +265,30 @@ Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`.
 | `rows[].last_ts` | string (RFC3339) | Most recent `ts` in the group. |
 
 **Errors:** `401` no workspace; `500` DB error.
+
+---
+
+## Credential spend
+
+```
+GET /api/v1/paymaster/credential-spend?range=month
+```
+
+What each API key cost, from the metered ledger: one row per `credential_id`, highest spend first. `range=month` is the calendar month so far in UTC, the window a provider bills by; `1h`, `24h`, `7d`, `30d`, `since` and `until` work as on the other endpoints. Flat-rate seats are excluded (their cost is \$0 by construction, see [Subscriptions](#subscriptions)), and so are ledger rows with no credential attribution. **OWNER or ADMIN only** (`403` otherwise), like the provider accounts it describes. The response carries ids and sums, never a value.
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    { "credential_id": "cm...", "cost_usd": 41.2, "call_count": 912, "input_tokens": 4120000, "output_tokens": 310000, "last_ts": "2026-10-18T09:41:00.000Z" }
+  ],
+  "since": "2026-10-01T00:00:00Z",
+  "until": "2026-10-18T22:00:00Z"
+}
+```
+
+**Errors:** `401` no workspace; `403` below ADMIN; `500` DB error.
 
 ---
 
