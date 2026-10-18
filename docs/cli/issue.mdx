@@ -105,6 +105,8 @@ crewship issue list --status IN_PROGRESS --crew backend-team
 crewship issue list --priority high --label bug
 crewship issue list --search "auth flow"
 crewship issue list --counts --crew backend-team
+crewship issue list --needs reply
+crewship issue list --mine --counts
 ```
 
 | Flag | Type | Default | Description |
@@ -114,6 +116,13 @@ crewship issue list --counts --crew backend-team
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--assignee` | `string` | | Filter by assignee ID. |
 | `--label` | `string` | | Filter by label name. |
+| `--owner` | `string` | | Only issues owned by this user ID, or `me`. |
+| `--delegate` | `string` | | Only issues delegated to this agent ID. |
+| `--work-mode` | `string` | | Who holds the work: `agent` or `human`. |
+| `--mine` | `bool` | `false` | My work: open issues I own or hold as the worker. |
+| `--working` | `bool` | `false` | Agents working: an agent holds the issue and its session is active. |
+| `--needs` | `string` | | `reply` (an agent awaits my answer on an issue I own) or `review` (in `REVIEW` and I own it). |
+| `--blocked` | `bool` | `false` | Blocked: an open issue blocks it. |
 | `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
 | `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
 | `--offset` | `int` | `0` | Skip this many rows. Page with `--offset 50`, `--offset 100`, … |

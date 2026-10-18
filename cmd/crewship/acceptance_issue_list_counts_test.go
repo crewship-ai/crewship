@@ -10,6 +10,7 @@ package main
 // filter rather than describe the whole workspace.
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
@@ -30,6 +31,14 @@ const issueCountsWorkspaceID = "cisscountsws0000001a"
 // startIssueCountsServer seeds one crew with four issues — two BACKLOG, one
 // TODO, one DONE — and returns the CLI config path pointing at the router.
 func startIssueCountsServer(t *testing.T) string {
+	t.Helper()
+	cfg, _ := startIssueCountsServerDB(t)
+	return cfg
+}
+
+// startIssueCountsServerDB is startIssueCountsServer that also hands back the
+// database, for acceptance tests that need to shape the seed further.
+func startIssueCountsServerDB(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 
 	dbh := testutil.MigratedDB(t)
@@ -75,7 +84,7 @@ func startIssueCountsServer(t *testing.T) string {
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return cfgPath
+	return cfgPath, db
 }
 
 func runIssueCountsCLI(t *testing.T, cfgPath string, args ...string) string {
@@ -144,5 +153,60 @@ func TestAcceptance_IssueList_CountsShareTheFilter(t *testing.T) {
 	}
 	if len(rows) != 4 {
 		t.Errorf("bare array has %d rows, want 4", len(rows))
+	}
+}
+
+// The Issues panel's quick views are server filters (ODCH-ISS-03); the CLI
+// carries them as flags, and the totals follow the filter.
+func TestAcceptance_IssueList_QuickViews(t *testing.T) {
+	cfg, db := startIssueCountsServerDB(t)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("seed exec %q: %v", q, err)
+		}
+	}
+	// ENG-1 (ic-issue-a) and ENG-3 (ic-issue-c, made REVIEW) are mine; an agent
+	// awaits an answer on ENG-1; ENG-2 blocks ENG-4... which is DONE, so use ENG-3.
+	mustExec(`UPDATE missions SET owner_user_id = 'ic-owner' WHERE id IN ('ic-issue-a','ic-issue-c')`)
+	mustExec(`UPDATE missions SET status = 'REVIEW' WHERE id = 'ic-issue-c'`)
+	mustExec(`INSERT INTO issue_agent_sessions (id, workspace_id, mission_id, agent_id, state)
+		VALUES ('ic-s1', ?, 'ic-issue-a', 'ic-lead', 'awaiting_input')`, issueCountsWorkspaceID)
+	mustExec(`INSERT INTO mission_relations (id, source_id, target_id, relation_type) VALUES ('ic-r1', 'ic-issue-b', 'ic-issue-c', 'blocks')`)
+
+	cases := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"--mine"}, []string{"ENG-1", "ENG-3"}},
+		{[]string{"--owner", "me"}, []string{"ENG-1", "ENG-3"}},
+		{[]string{"--needs", "reply"}, []string{"ENG-1"}},
+		{[]string{"--needs", "review"}, []string{"ENG-3"}},
+		{[]string{"--blocked"}, []string{"ENG-3"}},
+		{[]string{"--working"}, nil},
+		{[]string{"--work-mode", "agent", "--delegate", "ic-lead"}, nil},
+	}
+	for _, tc := range cases {
+		out := runIssueCountsCLI(t, cfg, append([]string{"issue", "list", "-f", "json"}, tc.args...)...)
+		var rows []struct {
+			Identifier string `json:"identifier"`
+		}
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatalf("%v: decode: %v\n%s", tc.args, err, out)
+		}
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.Identifier)
+		}
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("issue list %v = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+
+	// Bad vocabulary is a usage error from the server, not an empty list.
+	cmd := exec.Command(buildCrewshipBinary(t), "issue", "list", "--needs", "everything")
+	cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "NO_COLOR=1", "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "needs must be reply or review") {
+		t.Errorf("--needs everything should fail with the server's message, got err=%v out=%s", err, out)
 	}
 }

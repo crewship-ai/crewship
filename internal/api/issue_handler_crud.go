@@ -81,6 +81,14 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		args = append(args, labelName)
 	}
 
+	// Quick views: owner, delegate, work mode, mine, working, needs, blocked.
+	var viewErr string
+	where, args, viewErr = applyIssueViewFilters(r, where, args)
+	if viewErr != "" {
+		writeProblem(w, r, http.StatusBadRequest, viewErr)
+		return
+	}
+
 	// Search. `q` is the S1 spelling shared by every list; `search` stays
 	// as the older alias. It matches the title and the identifier, so a
 	// person who types "ENG-4" or "launch" finds the issue either way —
@@ -92,14 +100,14 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM missions m"+where, args...).Scan(&total); err != nil {
+		"SELECT COUNT(*) FROM missions m LEFT JOIN issue_work iw ON iw.mission_id = m.id"+where, args...).Scan(&total); err != nil {
 		internalError(w, r, h.logger, "count issues", err)
 		return
 	}
 
 	// Optional status totals share the exact scope/filter with the page.
 	if r.URL.Query().Get("counts") == "1" {
-		rows, err := h.db.QueryContext(r.Context(), "SELECT m.status, COUNT(*) FROM missions m"+where+" GROUP BY m.status", args...)
+		rows, err := h.db.QueryContext(r.Context(), "SELECT m.status, COUNT(*) FROM missions m LEFT JOIN issue_work iw ON iw.mission_id = m.id"+where+" GROUP BY m.status", args...)
 		if err != nil {
 			internalError(w, r, h.logger, "count issue statuses", err)
 			return
