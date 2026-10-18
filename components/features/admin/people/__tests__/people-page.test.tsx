@@ -324,3 +324,20 @@ describe("one confirm for one or many", () => {
     await waitFor(() => expect(calls("POST", "/suspend")).toHaveLength(2))
   })
 })
+
+describe("People load failure (COM-03)", () => {
+  it("is the kit PageBanner (alert, bad tone) and Retry reads again", async () => {
+    const normal = h.apiFetch.getMockImplementation()!
+    let fail = true
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) =>
+      fail && String(u).startsWith("/api/v1/admin/users?") ? res({ error: "boom" }, 500) : normal(u, init))
+    render(<PeoplePage />)
+    const banner = await screen.findByRole("alert")
+    expect(banner).toHaveAttribute("data-tone", "bad")
+    expect(banner).toHaveClass("page-banner", "page-banner-bad")
+    expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+    fail = false
+    fireEvent.click(within(banner).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+  })
+})

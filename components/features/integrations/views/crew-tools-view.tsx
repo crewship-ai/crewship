@@ -2,10 +2,11 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Bot, KeyRound, Plug, RefreshCw, Wrench } from "lucide-react"
+import { Bot, KeyRound, Plug, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { OAuthAutoConnect } from "@/components/features/integrations/oauth-auto-connect"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -106,10 +107,13 @@ export function CrewToolsView({
       </div>
 
       {error ? (
-        <div role="alert" className="flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
-        </div>
+        <PageBanner
+          tone="bad"
+          icon={TriangleAlert}
+          action={<Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>}
+        >
+          {error}
+        </PageBanner>
       ) : tools === null ? (
         <div className="h-24 animate-pulse rounded-xl border border-border/60 bg-card" aria-busy="true" />
       ) : tools.length === 0 ? (

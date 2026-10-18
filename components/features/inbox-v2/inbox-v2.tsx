@@ -8,6 +8,7 @@ import { toast } from "@/lib/toast"
 
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { inboxArchivable, InboxMessageMenu } from "@/components/features/inbox/inbox-detail"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-state"
@@ -597,11 +598,14 @@ export function InboxV2() {
       />
       {sourceState.degraded && !inboxFailed && (
         // The page's one banner (KIT-04, bad tone): some source did not answer.
-        <div role="alert" className="page-banner m-2 mb-0 bg-chip-danger-bg text-chip-danger-fg">
-          <ShieldX className="h-4 w-4 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1">This inbox may be incomplete — {sourceState.detail}</span>
-          <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Retry</Button>
-        </div>
+        <PageBanner
+          tone="bad"
+          icon={ShieldX}
+          className="m-2 mb-0"
+          action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Retry</Button>}
+        >
+          This inbox may be incomplete — {sourceState.detail}
+        </PageBanner>
       )}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* The one SecondaryPanel (Harbor 2, #3350): 272 px, collapse remembered

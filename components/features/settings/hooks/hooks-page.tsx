@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useReducedMotion } from "motion/react"
 import { useSearchParams } from "next/navigation"
-import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, Webhook, X } from "lucide-react"
+import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, TriangleAlert, Webhook, X } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { isAdminTier } from "@/lib/permissions/tiers"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -220,9 +221,9 @@ export function HooksPage() {
             </div>
 
             {loadError && (
-              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                The hooks could not be loaded. <button type="button" className="underline" onClick={() => setReload((n) => n + 1)}>Retry</button>
-              </p>
+              <PageBanner tone="bad" icon={TriangleAlert} action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Retry</Button>}>
+                The hooks could not be loaded.
+              </PageBanner>
             )}
 
             <Toolbar filters={filters} setFilters={setFilters} view={view} setView={setView} hasHooks={all.length > 0} />
