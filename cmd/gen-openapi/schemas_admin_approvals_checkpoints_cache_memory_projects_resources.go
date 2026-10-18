@@ -460,7 +460,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			Response: object(map[string]any{
 				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
 				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),
-				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray()}, "ok", "detail", "warnings"),
+				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray(), "images_checked": integer(), "images_older": integer()}, "ok", "detail", "warnings", "images_checked", "images_older"),
 				// One runtime check per complete container environment (Track E).
 				"environments": array(object(map[string]any{
 					"crew": str(), "action": str(), "platform": str(), "host_platform": str(),

@@ -81,6 +81,18 @@ describe("restore checks › older image", () => {
     expect(screen.getByTestId("image-age-check")).not.toHaveTextContent(/current image/)
   })
 
+  it("uses the server's archive comparison when it ran, not the crews on this server", async () => {
+    const f = checksFixture("workspaces")
+    h.api.mockImplementation((url: string) => {
+      if (url.endsWith("/restore/checks")) return json({ ...f, runtime: { ...f.runtime, images_checked: 3, images_older: 2 } })
+      return Promise.resolve(new Response("404", { status: 404 }))
+    })
+    await toChecks()
+    expect(await screen.findByText("2 of 3 crews in the archive were built on an older image than this server's")).toBeInTheDocument()
+    expect(screen.queryByTestId("image-age-check")).toBeNull()
+    expect(h.api.mock.calls.map(([u]) => String(u)).some((u) => u.includes("image-status"))).toBe(false)
+  })
+
   it("is absent when the checks are unavailable", async () => {
     h.api.mockImplementation(() => Promise.resolve(new Response("404", { status: 404 })))
     await toChecks()

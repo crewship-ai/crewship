@@ -384,6 +384,14 @@ func (h *InstanceBackupsHandler) RestoreChecks(w http.ResponseWriter, r *http.Re
 		}
 		cancel()
 	}
+	if dg, ok := cfg.DockerOps.(backup.ImageDigester); ok && in.DockerErr == nil && len(m.Contents.Crews) > 0 {
+		in.CurrentImageDigest = func(image string) (string, bool) {
+			ictx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			d, err := dg.ImageDigest(ictx, image)
+			return d, err == nil
+		}
+	}
 	// Layers are available when the bundle carries them inline or the
 	// store beside it still holds them.
 	envStore := backup.EnvironmentStoreFor(filepath.Dir(entry.FilePath))
