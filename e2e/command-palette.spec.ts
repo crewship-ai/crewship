@@ -141,8 +141,16 @@ test.describe("⌘K — every row opens the thing it names", () => {
     const slug = decodeURIComponent(/slug=([^&]+)/.exec(hit!.href)![1])
     await hit!.row.click()
 
-    await expect(page).toHaveURL(/\/routines\?slug=/, { timeout: TIMEOUT })
-    await expect(page.locator("main")).toContainText(slug, { timeout: TIMEOUT })
+    await expect(page).toHaveURL(new RegExp(`/routines\\?slug=${slug}(?:&|$)`), { timeout: TIMEOUT })
+    // The routine page, not an empty shell: its header names the routine the
+    // row named. Harbor 2 (routines R05) prints the slug only in Full detail,
+    // so the slug is proven there.
+    const header = page.getByTestId("routine-page-header")
+    await expect(header.getByRole("heading")).toHaveText(hit!.name, { timeout: TIMEOUT })
+    await page.getByRole("radio", { name: "Full detail", exact: true }).click()
+    await expect(header.getByTestId("routine-meta-line")).toContainText(slug, { timeout: TIMEOUT })
+    // The depth is remembered per person; leave it as the other specs expect.
+    await page.getByRole("radio", { name: "Simple", exact: true }).click()
   })
 
   test("a project filters the board to that project", async ({ page }) => {
