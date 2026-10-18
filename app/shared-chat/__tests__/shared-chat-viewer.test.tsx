@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, cleanup, within } from "@testing-library/react"
 
 import { SharedChatViewer } from "../shared-chat-viewer"
 
@@ -37,6 +37,7 @@ describe("shared chat viewer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole("button", { name: "Change" }))
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
     expect(screen.getByLabelText("Share ID")).toHaveValue("")
     expect(screen.getByLabelText("Share token")).toHaveValue("")
@@ -134,7 +135,8 @@ describe("shared chat viewer", () => {
     fillCredentials()
     fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
     const alert = await screen.findByRole("alert")
-    expect(alert.querySelector(`[data-state=${kind === "not-available" ? "empty" : "error"}]`) ?? alert.closest("[data-state]")).not.toBeNull()
+    const stateEl = alert.matches("[data-state]") ? alert : alert.querySelector("[data-state]")
+    expect(stateEl?.getAttribute("data-state")).toBe(kind === "not-available" ? "not-found" : "error")
     if (kind === "not-available") expect(alert).toHaveTextContent("This share is not available")
     expect(screen.queryByRole("button", { name: "Retry" }) !== null).toBe(retry)
     if (retry) {
@@ -151,5 +153,109 @@ describe("shared chat viewer", () => {
     const bar = screen.getByRole("banner")
     expect(bar).toHaveTextContent("Shared chat")
     expect(bar.querySelectorAll("a, button")).toHaveLength(0)
+  })
+
+  async function openWith(messages: unknown[]) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages }), { status: 200 })))
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    await screen.findByLabelText("Shared transcript")
+  }
+
+  const rows = [
+    { id: "m1", role: "user", content: "Where is the report?", created_at: "2026-09-27T08:05:00Z" },
+    { id: "m2", role: "assistant", content: "It is attached.", created_at: "2026-09-27T08:06:00Z" },
+  ]
+
+  // ── P06: v67 message row ──────────────────────────────────────────────────
+
+  it("draws each message as a row: 30 px avatar, who, time, text", async () => {
+    await openWith(rows)
+    const items = document.querySelectorAll('[data-slot="shared-message"]')
+    expect(items).toHaveLength(2)
+
+    const person = items[0] as HTMLElement
+    expect(person.querySelector('[data-slot="shared-message-who"]')).toHaveTextContent("Person")
+    const personAvatar = person.querySelector('[data-slot="shared-message-avatar"]') as HTMLElement
+    expect(personAvatar.className).toContain("size-[30px]")
+    // The API sends no name, so the person is the initial P.
+    expect(personAvatar).toHaveTextContent("P")
+    const time = person.querySelector("time") as HTMLTimeElement
+    expect(time.getAttribute("datetime")).toBe("2026-09-27T08:05:00Z")
+    expect(time.textContent).not.toBe("")
+    expect(person).toHaveTextContent("Where is the report?")
+
+    const agent = items[1] as HTMLElement
+    expect(agent.querySelector('[data-slot="shared-message-who"]')).toHaveTextContent("Agent")
+    const agentAvatar = agent.querySelector('[data-slot="shared-message-avatar"]') as HTMLElement
+    // A neutral bot tile: a glyph, no letter, because the agent has no name here.
+    expect(agentAvatar.querySelector("svg")).not.toBeNull()
+    expect(agentAvatar.textContent).toBe("")
+  })
+
+  it("keeps the 760 px reading column and a 16 px gutter on a phone", async () => {
+    await openWith(rows)
+    const column = document.querySelector('[data-slot="shared-transcript-column"]') as HTMLElement
+    expect(column.className).toContain("max-w-[760px]")
+    const row = document.querySelector('[data-slot="shared-message"]') as HTMLElement
+    expect(row.className).toContain("px-4")
+    expect(row.className).toContain("md:px-6")
+    // Rows are not cards any more.
+    expect(document.querySelector("article")).toBeNull()
+  })
+
+  // ── P06: the form folds into one line above the transcript ─────────────────
+
+  it("folds the form into 'cshr_… · Change' once the transcript is open, without showing the token", async () => {
+    await openWith(rows)
+    expect(screen.queryByLabelText("Share token")).toBeNull()
+    expect(screen.queryByLabelText("Share ID")).toBeNull()
+    const summary = document.querySelector('[data-slot="shared-chat-summary"]') as HTMLElement
+    expect(summary).toHaveTextContent(shareID.slice(0, 13))
+    expect(summary).not.toHaveTextContent(shareID)
+    expect(summary).not.toHaveTextContent(token)
+    fireEvent.click(screen.getByRole("button", { name: "Change" }))
+    expect(screen.getByLabelText("Share ID")).toHaveValue(shareID)
+    expect(screen.getByLabelText("Share token")).toHaveValue(token)
+  })
+
+  it("Try another share on the not-available state reopens the form on Share ID", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })))
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    const alert = await screen.findByRole("alert")
+    fireEvent.click(within(alert).getByRole("button", { name: "Try another share" }))
+    expect(screen.getByLabelText("Share ID")).toHaveFocus()
+    expect(screen.queryByText("This share is not available")).toBeNull()
+  })
+
+  it("shows the transcript's loading as four avatar rows in the reading column", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})))
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    await waitFor(() => expect(document.querySelector('[data-state="loading"]')).not.toBeNull())
+    const state = document.querySelector('[data-state="loading"]') as HTMLElement
+    expect(state.querySelectorAll(".page-sk-av")).toHaveLength(4)
+    expect(state.closest('[data-slot="shared-transcript-column"]')).not.toBeNull()
+  })
+
+  it("offers Copy details on an invalid answer and on nothing else", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ nope: true }), { status: 200 })))
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByRole("button", { name: "Copy details" })).toBeTruthy()
+    cleanup()
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 503 })))
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    const second = await screen.findByRole("alert")
+    expect(within(second).queryByRole("button", { name: "Copy details" })).toBeNull()
   })
 })
