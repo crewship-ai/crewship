@@ -32,7 +32,7 @@ import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
-import { AccountsList, ProviderHead, ProviderHealth, providerLabel } from "@/components/features/credentials/provider-accounts"
+import { AccountsList, type AccountTokenUsage, ProviderHead, ProviderHealth, providerLabel } from "@/components/features/credentials/provider-accounts"
 import { PROVIDER_VIEW_LABEL, ProvidersPanel } from "@/components/features/credentials/providers-panel"
 import { AccountGroupPage } from "@/components/features/credentials/account-group-page"
 import { NewAccountGroupDialog } from "@/components/features/credentials/new-account-group-dialog"
@@ -63,6 +63,7 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useSubscriptionUsage } from "@/hooks/use-paymaster"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import {
@@ -401,6 +402,16 @@ export default function CredentialsPage() {
 
   // Account groups: the panel's list, and their members for the Group column.
   const inProviders = space === "providers" && canBind && Boolean(workspaceId)
+  const subUsage = useSubscriptionUsage("30d", 0, inProviders)
+  const accountUsage = React.useMemo(() => {
+    const m: Record<string, AccountTokenUsage> = {}
+    for (const r of subUsage.data?.rows ?? []) {
+      if (!r.credential_id) continue
+      const cur = m[r.credential_id] ?? { tokens: 0, calls: 0 }
+      m[r.credential_id] = { tokens: cur.tokens + r.input_tokens + r.output_tokens, calls: cur.calls + r.call_count }
+    }
+    return m
+  }, [subUsage.data])
   const poolsApi = useProviderPools(workspaceId ?? "", inProviders)
   const poolItems: ProviderPool[] | undefined = poolsApi.pools?.items
   const poolDetails = useQueries({
@@ -736,6 +747,7 @@ export default function CredentialsPage() {
                 onAdd={canBind ? () => openAddProvider(providerPage ?? undefined) : undefined}
                 poolOf={poolOf}
                 isPhone={isMobile}
+                usage={accountUsage}
               />
             )}
             <p className="mt-4 text-label text-muted-foreground">
