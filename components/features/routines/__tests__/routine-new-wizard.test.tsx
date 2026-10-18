@@ -378,3 +378,13 @@ describe("<RoutineNewWizard> keyboard", () => {
     expect(props.onOpenChange).not.toHaveBeenCalledWith(false)
   })
 })
+
+describe("COM-15: phone sheet height", () => {
+  it("fills the phone viewport through the kit's phoneHeight, not a local class", () => {
+    renderWizard()
+    const dialog = screen.getByRole("dialog", { name: "New routine" })
+    expect(dialog.className).toContain("max-sm:h-dvh")
+    expect(dialog.className).not.toContain("max-sm:h-[100dvh]")
+  })
+})
+

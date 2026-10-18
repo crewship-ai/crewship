@@ -106,3 +106,14 @@ describe("<RoutinesExplorer> live buckets filter the list, not just the counts",
     expect(screen.getByText("Nightly")).toBeInTheDocument()
   })
 })
+
+describe("<RoutinesExplorer> Views list (COM-15)", () => {
+  it("marks the open view with aria-current and no other", () => {
+    render(<RoutinesExplorer {...PROPS} view="overview" routines={[]} />)
+    const views = screen.getByRole("group", { name: "Views" })
+    const current = Array.from(views.querySelectorAll("[aria-current]"))
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveTextContent("Overview")
+  })
+})
+
