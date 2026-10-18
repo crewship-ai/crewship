@@ -25,6 +25,7 @@ export function Peek({
   actions,
   footer,
   initialFocus,
+  returnFocus = false,
   className,
   children,
 }: {
@@ -36,6 +37,13 @@ export function Peek({
    * roving focus); a ref focuses that element.
    */
   initialFocus?: "content" | "none" | React.RefObject<HTMLElement | null>
+  /**
+   * On close, focus returns to the element that had it when the Peek opened
+   * (a list row, a search field). A Peek has no trigger, so without this
+   * Radix drops focus to the page. If the person has already moved focus
+   * somewhere else by then, it is left where they put it.
+   */
+  returnFocus?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   title: React.ReactNode
@@ -51,6 +59,20 @@ export function Peek({
 }) {
   const isMobile = useIsMobile()
   const contentRef = React.useRef<HTMLDivElement>(null)
+
+  // Layout effect: runs before Radix moves focus into the sheet, so the opener
+  // is still the active element. The cleanup runs on close or unmount.
+  React.useLayoutEffect(() => {
+    if (!open || !returnFocus) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    return () => {
+      if (!opener || opener === document.body) return
+      window.setTimeout(() => {
+        const now = document.activeElement
+        if (opener.isConnected && (!now || now === document.body)) opener.focus({ preventScroll: true })
+      }, 0)
+    }
+  }, [open, returnFocus])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement

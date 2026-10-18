@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useMemo, useState } from "react"
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
+import { Segmented } from "@/components/ui/segmented"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TimeRangePicker, type TimeRange } from "@/components/features/logs/time-range-picker"
 
@@ -48,46 +49,22 @@ export function AuditRangeBar({ filters, onChange, bounds, tally, now }: {
   now: Date
 }) {
   const [open, setOpen] = useState(false)
-  const refs = useRef<(HTMLButtonElement | null)[]>([])
   const custom = filters.range === "custom"
-  const selected = AUDIT_RANGES.findIndex((r) => r.value === filters.range)
   const pick = (value: AuditFilters["range"]) => onChange({ range: value, from: "", to: "", sliceFrom: "", sliceTo: "" })
-  const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0
-    const to = e.key === "Home" ? 0 : e.key === "End" ? AUDIT_RANGES.length - 1 : step ? (i + step + AUDIT_RANGES.length) % AUDIT_RANGES.length : -1
-    if (to < 0) return
-    e.preventDefault()
-    pick(AUDIT_RANGES[to].value)
-    refs.current[to]?.focus()
-  }
   const label = customText(filters)
 
   return (
     <div className="flex items-center gap-1.5" data-slot="audit-range">
-      <div role="radiogroup" aria-label="Time range" className="inline-flex h-[var(--control-sm)] items-center gap-0.5 rounded-md border border-border bg-surface-subtle p-0.5">
-        {AUDIT_RANGES.map((r, i) => {
-          const on = r.value === filters.range
-          return (
-            <button
-              key={r.value}
-              ref={(el) => { refs.current[i] = el }}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              aria-label={r.label}
-              tabIndex={on || (selected < 0 && i === 0) ? 0 : -1}
-              onClick={() => { if (!on) pick(r.value) }}
-              onKeyDown={(e) => onKey(e, i)}
-              className={cn(
-                "inline-flex h-full items-center rounded px-2 font-mono text-micro tabular-nums transition-colors",
-                on ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {SHORT[r.value] ?? r.label}
-            </button>
-          )
-        })}
-      </div>
+      <Segmented
+        ariaLabel="Time range"
+        value={filters.range}
+        onChange={pick}
+        options={AUDIT_RANGES.map((r) => ({
+          value: r.value,
+          ariaLabel: r.label,
+          label: <span className="font-mono text-micro tabular-nums">{SHORT[r.value] ?? r.label}</span>,
+        }))}
+      />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant={custom ? "outline" : "ghost"} size={label ? "sm" : "icon-sm"} aria-label="Custom range" aria-pressed={custom}

@@ -346,6 +346,7 @@ export function PageNoAccess({
  */
 export function PageNotFound({
   what = "page",
+  icon = Search,
   title,
   description,
   back,
@@ -354,6 +355,8 @@ export function PageNotFound({
   className,
 }: {
   what?: string
+  /** The tile's icon; a magnifier by default. */
+  icon?: LucideIcon
   /** Replaces "This {what} doesn’t exist", e.g. "This routine no longer exists". */
   title?: string
   description?: React.ReactNode
@@ -368,7 +371,7 @@ export function PageNotFound({
   return (
     <div className={cn("page-state", className)} data-state="not-found">
       <div className="page-es page-es-solid">
-        <Tile icon={Search} />
+        <Tile icon={icon} />
         <h2>{title ?? <>This {what} doesn’t exist</>}</h2>
         <p>{description ?? <>It may have been deleted, or the link is wrong.</>}</p>
         {(primary || secondary || back) && (
