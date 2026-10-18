@@ -2199,7 +2199,18 @@ included. `X-Total-Count` counts the filtered total and `X-Next-Offset` pages re
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Unavailable Guest membership/project |
+| `429` | Temporary search budget/capacity refusal; honor `Retry-After` |
 | `500` | Database error |
+
+Collection searches and empty-query lists share an authenticated user/workspace
+budget across browser sessions and CLI tokens: default 20 requests/minute with
+burst 15, and 20/minute with burst 5 per authorized project or all-project
+selection. Query/offset changes do not reset the budget. A temporary refusal
+returns `429`, `Cache-Control: no-store` and integer `Retry-After` seconds, with
+a generic retry message and no workspace/audience counts. Scripts should wait
+at least that interval. Details and comments retain their separate behavior.
+The in-memory policy applies per server process, and finite capacity can also
+produce the same temporary refusal.
 
 ## Guest project issue detail
 
@@ -2610,3 +2621,69 @@ View/Results, inactive issuer, private origin or non-Guest; 413 oversized detail
 500 unavailable data.
 Responses are `Cache-Control: no-store`.
 CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.
+
+### Resource access preset catalog
+
+`GET /api/v1/workspaces/{workspaceId}/access/presets` returns `{presets: [{definition, definition_hash}]}`. Each definition includes its immutable `preset_id`, `version`, resource `kind`, managed operations, and explicit level bundles. The read requires the same live trusted workspace OWNER/ADMIN authority and `workspace:admin` credential scope as member-policy GET. Responses are `Cache-Control: no-store`. Listing does not change grants, membership revisions or saved selections.
+
+Catalog responses: `200` returns the definitions; `400` rejects invalid workspace context; `401` requires authentication; `403` rejects insufficient credential scope or route authority; `404` hides unavailable workspaces or live administrative authority; `500` reports an internal database failure.
+
+### Informational preset selections
+
+Administrative member access GET/PUT responses include `preset_selections: []` or saved selection entries (`id`, `kind`, `resource_id`, `preset_id`, `version`, `level`, `definition_hash`, `selected_at`, optional `selected_by`, and `state`). Entries describe saved intent, not effective authority. A manual PUT may round-trip this read-only field but cannot create or rewrite a selection through it; the response is computed from stored canonical state. Own-access responses omit the administrative metadata.
+
+
+## Preview member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` is read-only. It requires current active trusted OWNER/ADMIN authority, the existing administrative GET credential boundary (`workspace:admin` for scoped credentials) and an existing restricted member. Responses use `Cache-Control: no-store`. Submit:
+
+```json
+{"membership_id":"current-member-row","revision":9,"resource":{"kind":"project","id":"project-id"},"preset_id":"project-levels","preset_version":1,"level":"manage","reissue":[]}
+```
+
+Only this resource's managed operations change in the proposed policy. Unrelated and orthogonal rights remain intact. Explicit reissue names a retained managed right, never an unrelated or newly added right. Bounded strict JSON rejects unknown and trailing input.
+
+The response includes `selection`, `definition_hash`, nullable `current_selection`, complete `before` provenance, `changes`, `after_rights`, `orthogonal_rights`, `warnings` and `confirmation_digest`. One snapshot binds membership incarnation/revision, caller/issuer authority, role floors, resource state and exact consequences. Display names and future application timestamps are not authority; the digest never authorizes a write.
+
+Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. Application uses the separate confirmed endpoint described below.
+
+Malformed/version/reissue/trusted-target input returns400; stale membership revision returns409 requiring a fresh preview; hidden/foreign targets return404 without their identities; administrative credential denial returns403. Database errors return500.
+
+## Apply a confirmed member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply` requires the same current trusted workspace administrator and `workspace:admin` credential scope as policy replacement. Submit only `{selection: <normalized preview selection>, confirmation_digest: <exact preview checksum>}`. Bounded strict JSON rejects unknown and trailing fields. The existing restricted membership and immutable version/level must still match.
+
+The server recomputes the whole preview in the writer transaction and compares its digest before replacing canonical managed grants. Unrelated rights and unchanged grant IDs/issuers/timestamps remain intact; only deliberately named retained managed rights are reissued as the authenticated actor. It never changes mode, role or future publication authority. Canonical replacement, complete provenance/preset audit and final informational selection commit once. Any audit/selection failure rolls back all grants, revisions and metadata. The no-store response is the current complete administrative member policy with server-computed selections.
+
+Malformed consent returns400; changed membership/authority/resource/consequences returns409 and requires a new reviewed preview; foreign/hidden targets return404; credential denial returns403; transactional failures return500 without partial writes. The server never substitutes a refreshed revision or automatic reissue. On an uncertain network outcome, read current policy before producing new consent.
+
+## Human-owned content custody
+
+`GET /api/v1/workspaces/{workspaceId}/page-ownership` lists human-owned
+content that requires explicit succession. Workspace owners and administrators
+can review its current owner and eligible successors. The endpoint returns
+metadata and current readers, without document, HTML, or drawing source.
+Use `owner_user_id`, `limit` (1–100, default 25), and the returned `next_cursor`
+to review one owner's content across pages. Keep the owner filter unchanged
+when following the cursor. Responses use `Cache-Control: no-store`.
+
+`POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
+`expected_owner_user_id` and `successor_user_id`. The successor must already
+have current read access and be an active trusted human workspace member.
+The server rechecks the actor, original owner and successor inside the transfer
+transaction. An owner changed since review returns 409. The operation preserves
+content and grant records; each existing grant still requires its issuer's
+current authority. Transferring ownership does not reveal linked source content.
+
+Documents, Slides, Boards and static Artifacts retain human custody when their
+storage is present. Ordinary Pages retain their existing succession behavior.
+An owner departure that would remove private content custody returns a conflict
+until the affected content has been transferred. Instance administration alone
+does not expose workspace-private names or successor contacts.
+
+CLI: `crewship workspace page-ownership list` and
+`crewship workspace page-ownership transfer <page-id>`.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.

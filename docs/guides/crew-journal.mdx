@@ -320,6 +320,8 @@ _, _ = h.journal.Emit(ctx, journal.Entry{
 
 Emit is asynchronous: entries are queued (buffer 1024), a background goroutine batches up to 64 rows or flushes every 100ms. When the queue is saturated the call falls back to a synchronous write -- durability over latency. Call `Flush` before tearing down a long-running test to guarantee all prior emits are on disk.
 
+Transactional `AppendTx` reports success only after exactly one journal row is inserted. An ignored insert returns an error and no post-commit notification; the caller must roll back its business transaction rather than commit a change without its required audit record.
+
 ## Reading
 
 ### HTTP

@@ -69,7 +69,6 @@ func TestPipelineTestRunRoute_Registered(t *testing.T) {
 // a save_token that verifies for the same (workspace, definition_hash, user).
 func TestTestRunHandler_MintsVerifiableSaveToken(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), &stubRunner{output: "unused-in-dry-run"}, nil)
 	secret := []byte("test-secret-32-bytes-long-padxxx")
 	h.SetSaveTokenSecret(secret)

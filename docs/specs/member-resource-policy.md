@@ -123,6 +123,33 @@ admission. Changes in an unrelated workspace do not revoke valid local shares.
 The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
+### Ordered preset foundations (not enabled)
+
+The immutable v1 catalog defines routine View (`view,results`), Run
+(`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
+View (`list,read`), Contribute (`list,read,contribute`) and Manage
+(`list,read,contribute,manage`). Publication and `delete_issues` remain separate.
+These are future explicit bundles: this foundation exposes no preset application
+route, CLI command or selector and changes no existing grants or access mode.
+
+An empty-on-upgrade `access_preset_selections` table preserves deliberately saved
+choice provenance separately from canonical `access_grants`. Matching independent
+grants remain Custom. Managed grant edits invalidate a saved label; orthogonal
+rights, unrelated revisions and issuer liveness changes preserve saved intent.
+Inactive grants stay inactive. Versioned definitions are immutable, with no
+backfill or automatic reissue. Applying and previewing these bundles, including
+regular-results disclosure and retained destructive consequences, require the
+subsequent API/CLI/UI work tracked by #3271.
+
+An internal transaction-scoped planner now computes explicit before/after
+operations, retained issuer/timestamp provenance, deliberate reissue intent and
+independent Results, execution, destructive and file-role consequences. Its
+confirmation digest binds the current member incarnation/revision, caller and
+issuer authority, resource state and immutable definition in one snapshot.
+The selected resource is validated live; FK-valid historical grants for unrelated unavailable resources remain in the canonical before/after plan without regaining resource authority. The planner performs no writes and the digest supplies no authority. Administrative preview API/CLI and the confirmed apply API expose these contracts; application recomputes the same snapshot inside its writer transaction. The administrative apply CLI submits the same confirmed selection once; the selector remains follow-up work.
+An empty starting grant collection serializes as `before: []`, including in the
+canonical confirmation fingerprint; preview collections remain JSON arrays.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -158,6 +185,14 @@ CLI: `crewship issue shared --project PROJECT_ID` lists a shared project;
 `--offset` page the catalog without using shared workspace issue endpoints.
 `--search TEXT` filters shared issue titles and identifiers, without searching
 private descriptions or comments. It is only valid for the collection command.
+On a temporary 429 the browser preserves the current result view and search
+draft, pauses collection polling and disables search/refresh/pagination until
+the bounded Retry-After interval ends, then checks again. User/workspace
+changes clear that state. Definitive 401/403/404 responses discard the result
+projection; a subsequent 429 or failed query cannot restore its cached titles.
+Only a fresh successful response restores results. Project metadata and
+contribution forms retain their separate requests. CLI prints the server retry guidance, exits 6 and does not
+retry automatically.
 
 The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
 Unicode characters, trimmed). Search is a literal substring of title or identifier,
@@ -174,6 +209,26 @@ issue board, global search and statistics routes remain closed to Guests;
 searching this dedicated Guest projection does not open them. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header
 supports pagination.
+
+Shared issue collection requests (including empty search and pagination) have a
+per-process authenticated budget shared by browser sessions and CLI tokens of the
+same user/workspace: default 20/minute, burst 15, plus 20/minute, burst 5 for
+each explicitly authorized project or the all-project selection. Both budgets
+are charged together only when admitted. Query text, offset and IP do not create
+new budgets. Detail, comments and project metadata are outside this policy.
+Invalid inputs and forbidden explicit projects retain their existing errors.
+A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
+`Retry-After` seconds; it discloses no audience or workspace counts.
+
+The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
+per entry (256 valid List projects plus all-projects), and 32768 audiences
+globally. Existing audiences remain usable at capacity; a refused new audience
+does not allocate an empty account or charge either budget. Capacity overflow is the
+same transient 429; active entries are never evicted to grant a fresh burst.
+Idle entries expire after at least five minutes and the configured full-refill
+interval. Rate settings are exposed in Rate Limiters; process restart resets
+these in-memory budgets and replicas enforce their own budgets. Rate limiting
+does not truncate counts or bound the cost of one large authorized search.
 
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
@@ -341,6 +396,20 @@ snapshot; CLI requires the reviewed version and never automatically retries it.
 Live account, local membership, Read/Manage issuers, update and journal entry
 share one transaction. Other client projects and private metadata remain hidden.
 
+Known-project metadata and milestones also open at
+`/issues/manage?project=<known-project-id>` with Read+Manage and no List share.
+The exact route checks only that resource through the dedicated API before
+showing protected fields; it adds no Issues navigation, selector, issue list,
+search or count. Query data never grants access or selects another workspace.
+User/workspace/project changes require fresh verification and reset protected
+drafts; current credential hints still control mutation affordances. Temporary
+workspace-directory loss preserves the existing draft behind the availability
+boundary; it cannot admit another resource. Actual resource access loss clears
+protected fields. An optional explicit `issue_id` opens only that issue's fresh
+deletion preview after project verification, with matching project and current
+Read+Manage+`delete_issues`. Successful confirmed deletion stays on this route
+and preserves the project draft; it never opens an issue collection.
+
 Milestones and explicit issue deletion use dedicated scoped routes. Remaining
 project settings require further scoped enforcement. The original
 PRD's level hierarchy remains a target: current operations are explicit, additive
@@ -454,3 +523,49 @@ Selected output content is capped at 256 KiB before loading; the encoded
 response is capped at 1 MiB. Oversized details return 413 while list metadata
 remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
+
+Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.
+
+### Administrative preset catalog
+
+The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Application is not enabled by the catalog slice.
+
+The OpenAPI `MemberAccessAgentRight` component names the existing agent-right variant for reuse in administrative policies. It preserves exact operation choices, required IDs and rejection of undeclared fields, without changing grants or runtime authority.
+
+OpenAPI also names `MemberAccessProjectRight`, `MemberAccessRoutineRight` and their complete `MemberAccessRight` union. The schemas preserve existing primitive operation choices, IDs and closed objects exactly; naming them does not add inheritance or alter grant authority.
+
+### Saved selection in administrative policies
+
+Administrative member-policy GET/PUT responses include `preset_selections`, a complete array of informational saved intent. An empty array means no saved preset choice; matching permission bits alone never fabricate a choice. Every item carries the immutable definition reference, saved level/hash/time and optional historical selecting actor. `selected` describes supported saved intent, while `custom` marks unsupported definitions or inconsistent managed bits; neither state grants effective authority. The grant issuer and original creation time remain canonical in `grant_details`.
+
+Only a current trusted workspace administrator can read these choices. Personal `OwnPolicy` responses omit the field. The manual policy PUT accepts the read-only field when round-tripping a GET but ignores its contents: it changes only the explicitly supplied canonical rights, and returns freshly computed selection metadata. Managed-grant changes invalidate the saved choice; unrelated rights and issuer liveness do not rewrite intent. Reading metadata performs no application or automatic backfill; application uses the separate confirmed endpoint.
+
+OpenAPI names the unchanged `MemberAccessGrant` provenance shape for reuse. This retains every original issuer, timestamp and liveness field and changes no policy inputs or effective authority.
+
+### Transactional selection recorder
+
+The internal recorder accepts only a caller-owned transaction, a live trusted administrator, an existing restricted membership with the expected post-replacement incarnation/revision, a supported immutable definition and exact matching canonical managed operations. It records the authenticated selecting actor and server time without changing canonical grant rows, issuers, timestamps or membership revisions. The caller must first perform fresh preview/digest checks, canonical replacement and transactional audit, then record selection last and commit once. Any failure must roll back the whole transaction. The helper alone exposes no apply endpoint and performs no backfill.
+
+### Read-only preset preview transport
+
+The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only; no apply endpoint is enabled by this slice.
+
+The reusable OpenAPI `MemberAccessPolicy` names the same complete administrative policy envelope used by existing GET and PUT. This documentation refactor preserves closed fields, required incarnation/revision/mode/rights and all grant/provenance constraints; it introduces no endpoint or permission change.
+
+The preset CLI uses one shared bounded decoder for explicit JSON documents. File/stdin handling, unknown/trailing-field rejection, exact integer revisions and the absence of automatic consent repair remain unchanged.
+
+Preset application uses a transaction-scoped managed-subset writer. It validates the selected resource and fresh operator/member authority, changes only the immutable definition’s managed operations, and leaves orthogonal grant IDs, issuers and creation timestamps untouched even for FK-valid inactive historical resources. It neither revives unavailable resources nor changes ordinary complete-document PUT validation. Failed audit or selection writes roll back managed changes and revision together.
+
+The managed-subset writer is used by the confirmed apply API; the existing complete-document policy API is unchanged. Transactional journal acknowledgement requires one inserted row before any post-commit notification is available.
+
+### Explicit preset application
+
+The administrative apply endpoint takes only the preview’s exact normalized selection and digest. Current operator authority, membership incarnation/revision, immutable definition, resource/issuer state and consequences are recomputed in one writer transaction. The digest is confirmation data, never authorization. Managed replacement preserves unrelated rights and unchanged rows, including historical unavailable resources; deliberate retained managed reissue uses the authenticated actor. Audit records exact before/after provenance, preset ID/version/level/hash and reissue intent. Selection metadata is written last; all writes roll back together. Conflicts require a new reviewed preview, with no silent retries or account conversion. The administrative `workspace member access preset apply MEMBER --file confirmed.json` command submits this consent once and does not refresh or retry it. The Settings selector exposes the same reviewed selection explicitly.
+
+### Settings preset selection
+
+For an existing restricted member, Settings resource access offers an explicit ordered preset after choosing a project or routine. The server catalog supplies exact immutable versioned operations; matching manual bits remain Custom without a saved choice. Save/discard manual drafts first. Preview lists managed changes, retained original/inactive issuers, unrelated rights, Results history and conditional destructive eligibility. Optional reissue explicitly names only retained managed rights. A separate confirmation submits the same normalized selection and digest, never inferred authority. Selection changes clear consent. Conflicts and uncertain apply outcomes require reloading saved policy before a new preview; explicit reload discards editor drafts and stale consent even if the membership revision is unchanged, because resource/authority state can invalidate a digest independently; the UI never refreshes or retries writes automatically and never converts trusted accounts.
+
+Known policy-read 401/403/404 responses remove the member editor and its reviewed preset consent. A later transient read failure cannot restore that consent; a fresh successful read starts a new editor. A mutation response from an older verified read cannot overwrite a newer policy read or revive controls after access loss. Transient failures without an earlier access denial retain an existing manual draft.
+
+Switching the member or resource scope invalidates both pending reads and mutation confirmations immediately. Returning to a previously cached scope requires a fresh successful read before an old response can affect visible controls or saved-policy state.

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,31 +132,23 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	}
 }
 
-// TestRestartCrewAgents_NoContainer is the "nothing to do" path — endpoint
-// should return 200 with restarted=0 even if the crew has no live container.
-// Always runs; no Docker needed because we pass nil docker (and the handler
-// returns 503 in that case, not the no-container path). So we install a
-// stub-friendly variant here: skip if no Docker, else assert the no-name path.
+// TestRestartCrewAgents_NoContainer exercises the empty-inventory response
+// through the real Docker SDK and handler using an owned HTTP fixture. It
+// requires no daemon or image and runs in both normal and short test modes.
 func TestRestartCrewAgents_NoContainer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-Docker restart test in short mode")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	docker, err := client.New(client.FromEnv)
-	if err != nil {
-		t.Skipf("docker client unavailable: %v", err)
-	}
-	if _, err := docker.Ping(ctx, client.PingOptions{}); err != nil {
-		t.Skipf("docker daemon not reachable: %v", err)
-	}
-	defer func() { _ = docker.Close() }()
-
+	var inventoryReads atomic.Int64
+	docker, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/containers/json") {
+			t.Errorf("unexpected Docker operation: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected Docker operation", http.StatusBadRequest)
+			return
+		}
+		inventoryReads.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
 	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, docker, nil, "", nil)
-	t.Cleanup(h.Stop)
+	h := covCPRHandler(t, db, docker)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -180,13 +174,20 @@ func TestRestartCrewAgents_NoContainer(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		Restarted int `json:"restarted"`
+		Restarted      int   `json:"restarted"`
+		RuntimeRemoved *bool `json:"runtime_removed"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if resp.Restarted != 0 {
 		t.Errorf("restarted = %d, want 0 (no container existed)", resp.Restarted)
+	}
+	if resp.RuntimeRemoved == nil || *resp.RuntimeRemoved {
+		t.Error("empty inventory must report runtime_removed=false")
+	}
+	if got := inventoryReads.Load(); got != 1 {
+		t.Errorf("inventory reads = %d, want 1", got)
 	}
 }
 

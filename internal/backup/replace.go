@@ -60,6 +60,9 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	// bundle. The slug is the durable user-visible identifier; if a
 	// fresh bootstrap workspace exists under the same slug we need
 	// to clear it under THAT id, not the bundle's id.
+	if err := rejectRunAdmissionReplaceIn(ctx, tx, bundleWorkspaceID, bundleWorkspaceSlug); err != nil {
+		return nil, err
+	}
 	targetIDs, err := resolveTargetWorkspaceIDs(ctx, tx, bundleWorkspaceID, bundleWorkspaceSlug)
 	if err != nil {
 		return nil, err

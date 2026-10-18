@@ -21,6 +21,359 @@
         ],
         "type": "object"
       },
+      "AccessPresetApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_digest": {
+            "pattern": "^[A-Fa-f0-9]{64}$",
+            "type": "string"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AccessPresetRequest"
+          }
+        },
+        "required": [
+          "selection",
+          "confirmation_digest"
+        ],
+        "type": "object"
+      },
+      "AccessPresetCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetCatalogEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "presets"
+        ],
+        "type": "object"
+      },
+      "AccessPresetCatalogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/AccessPresetDefinition"
+          },
+          "definition_hash": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "definition",
+          "definition_hash"
+        ],
+        "type": "object"
+      },
+      "AccessPresetChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "remove",
+              "retain",
+              "reissue"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "issuer_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "right": {
+            "$ref": "#/components/schemas/MemberAccessRight"
+          }
+        },
+        "required": [
+          "right",
+          "action",
+          "issuer_id",
+          "live"
+        ],
+        "type": "object"
+      },
+      "AccessPresetDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "project",
+              "routine"
+            ],
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetLevel"
+            },
+            "type": "array"
+          },
+          "managed_operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preset_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "preset_id",
+          "version",
+          "kind",
+          "managed_operations",
+          "levels"
+        ],
+        "type": "object"
+      },
+      "AccessPresetLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "operations"
+        ],
+        "type": "object"
+      },
+      "AccessPresetPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "after_rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "before": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetChange"
+            },
+            "type": "array"
+          },
+          "confirmation_digest": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "current_selection": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessPresetSelection"
+              }
+            ],
+            "nullable": true
+          },
+          "definition_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "orthogonal_rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "type": "array"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AccessPresetRequest"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetWarning"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "selection",
+          "definition_hash",
+          "current_selection",
+          "before",
+          "changes",
+          "after_rights",
+          "orthogonal_rights",
+          "warnings",
+          "confirmation_digest"
+        ],
+        "type": "object"
+      },
+      "AccessPresetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "membership_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "preset_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "preset_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reissue": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "resource": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "project",
+                  "routine"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "membership_id",
+          "revision",
+          "resource",
+          "preset_id",
+          "preset_version",
+          "level"
+        ],
+        "type": "object"
+      },
+      "AccessPresetSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "definition_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "project",
+              "routine"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "preset_id": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "selected_at": {
+            "type": "string"
+          },
+          "selected_by": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "selected",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "resource_id",
+          "preset_id",
+          "version",
+          "level",
+          "definition_hash",
+          "selected_at",
+          "state"
+        ],
+        "type": "object"
+      },
+      "AccessPresetWarning": {
+        "additionalProperties": false,
+        "properties": {
+          "after_eligible": {
+            "type": "boolean"
+          },
+          "before_eligible": {
+            "type": "boolean"
+          },
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
       "ActiveRunList": {
         "items": {
           "properties": {
@@ -7552,101 +7905,7 @@
           },
           "rights": {
             "items": {
-              "oneOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "agent"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "discover",
-                        "chat",
-                        "run",
-                        "delegate"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "project"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "list",
-                        "read",
-                        "write",
-                        "delete",
-                        "contribute",
-                        "manage",
-                        "delete_issues"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "routine"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "view",
-                        "results",
-                        "run",
-                        "edit"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/MemberAccessRight"
             },
             "maxItems": 256,
             "type": "array",
@@ -7757,101 +8016,7 @@
           },
           "rights": {
             "items": {
-              "oneOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "agent"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "discover",
-                        "chat",
-                        "run",
-                        "delegate"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "project"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "list",
-                        "read",
-                        "write",
-                        "delete",
-                        "contribute",
-                        "manage",
-                        "delete_issues"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "routine"
-                      ],
-                      "type": "string"
-                    },
-                    "operation": {
-                      "enum": [
-                        "view",
-                        "results",
-                        "run",
-                        "edit"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "operation"
-                  ],
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/MemberAccessRight"
             },
             "maxItems": 256,
             "type": "array",
@@ -9898,6 +10063,205 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "MemberAccessAgentRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "discover",
+              "chat",
+              "run",
+              "delegate"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "MemberAccessGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issuer_id": {
+            "type": "string"
+          },
+          "issuer_name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "operation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation",
+          "issuer_id",
+          "created_at",
+          "live"
+        ],
+        "type": "object"
+      },
+      "MemberAccessPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "grant_details": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "membership_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
+          "preset_selections": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetSelection"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "reissue": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "membership_id",
+          "mode",
+          "revision",
+          "rights"
+        ],
+        "type": "object"
+      },
+      "MemberAccessProjectRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "project"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "list",
+              "read",
+              "write",
+              "delete",
+              "contribute",
+              "manage",
+              "delete_issues"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "MemberAccessRight": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MemberAccessAgentRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessProjectRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessRoutineRight"
+          }
+        ]
+      },
+      "MemberAccessRoutineRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "routine"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "view",
+              "results",
+              "run",
+              "edit"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
         "type": "object"
       },
       "MemoryHybridSearchRequest": {
@@ -18415,6 +18779,125 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "WorkspacePageOwnershipError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "owner_changed"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspacePageOwnershipSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipSuccessor": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "email"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "eligible_successors": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspacePageOwnershipSuccessor"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "owner_user_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "artifact",
+              "board",
+              "document",
+              "slides"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "type",
+          "owner_user_id",
+          "owner_name",
+          "eligible_successors"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipTransferRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_owner_user_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "successor_user_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_owner_user_id",
+          "successor_user_id"
+        ],
+        "type": "object"
       },
       "WorkspacePendingRunResponseV1": {
         "properties": {
@@ -142876,6 +143359,159 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspaceId}/access/presets": {
+      "get": {
+        "description": "List workspace access presets (GET /api/v1/workspaces/{workspaceId}/access/presets).",
+        "operationId": "get_api_v1_workspaces_workspaceId_access_presets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPresetCatalog"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List workspace access presets",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/invitations": {
       "get": {
         "description": "List workspace invitations (GET /api/v1/workspaces/{workspaceId}/invitations).",
@@ -145216,275 +145852,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "grant_details": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "created_at": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "issuer_id": {
-                            "type": "string"
-                          },
-                          "issuer_name": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string"
-                          },
-                          "live": {
-                            "type": "boolean"
-                          },
-                          "operation": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "id",
-                          "operation",
-                          "issuer_id",
-                          "created_at",
-                          "live"
-                        ],
-                        "type": "object"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "membership_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "mode": {
-                      "enum": [
-                        "trusted",
-                        "restricted"
-                      ],
-                      "type": "string"
-                    },
-                    "reissue": {
-                      "items": {
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
-                    "revision": {
-                      "format": "int64",
-                      "minimum": 1,
-                      "type": "integer"
-                    },
-                    "rights": {
-                      "items": {
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    }
-                  },
-                  "required": [
-                    "membership_id",
-                    "mode",
-                    "revision",
-                    "rights"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessPolicy"
                 }
               }
             },
@@ -145623,275 +145991,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "grant_details": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "created_at": {
-                          "type": "string"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "issuer_id": {
-                          "type": "string"
-                        },
-                        "issuer_name": {
-                          "type": "string"
-                        },
-                        "kind": {
-                          "type": "string"
-                        },
-                        "live": {
-                          "type": "boolean"
-                        },
-                        "operation": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "id",
-                        "operation",
-                        "issuer_id",
-                        "created_at",
-                        "live"
-                      ],
-                      "type": "object"
-                    },
-                    "readOnly": true,
-                    "type": "array"
-                  },
-                  "membership_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "mode": {
-                    "enum": [
-                      "trusted",
-                      "restricted"
-                    ],
-                    "type": "string"
-                  },
-                  "reissue": {
-                    "items": {
-                      "oneOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "agent"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "discover",
-                                "chat",
-                                "run",
-                                "delegate"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "project"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "list",
-                                "read",
-                                "write",
-                                "delete",
-                                "contribute",
-                                "manage",
-                                "delete_issues"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "routine"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "view",
-                                "results",
-                                "run",
-                                "edit"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "maxItems": 256,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "revision": {
-                    "format": "int64",
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "rights": {
-                    "items": {
-                      "oneOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "agent"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "discover",
-                                "chat",
-                                "run",
-                                "delegate"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "project"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "list",
-                                "read",
-                                "write",
-                                "delete",
-                                "contribute",
-                                "manage",
-                                "delete_issues"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "kind": {
-                              "enum": [
-                                "routine"
-                              ],
-                              "type": "string"
-                            },
-                            "operation": {
-                              "enum": [
-                                "view",
-                                "results",
-                                "run",
-                                "edit"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "id",
-                            "operation"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "maxItems": 256,
-                    "type": "array",
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "membership_id",
-                  "mode",
-                  "revision",
-                  "rights"
-                ],
-                "type": "object"
+                "$ref": "#/components/schemas/MemberAccessPolicy"
               }
             }
           },
@@ -145902,275 +146002,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "grant_details": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "created_at": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "issuer_id": {
-                            "type": "string"
-                          },
-                          "issuer_name": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string"
-                          },
-                          "live": {
-                            "type": "boolean"
-                          },
-                          "operation": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "id",
-                          "operation",
-                          "issuer_id",
-                          "created_at",
-                          "live"
-                        ],
-                        "type": "object"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "membership_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "mode": {
-                      "enum": [
-                        "trusted",
-                        "restricted"
-                      ],
-                      "type": "string"
-                    },
-                    "reissue": {
-                      "items": {
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
-                    "revision": {
-                      "format": "int64",
-                      "minimum": 1,
-                      "type": "integer"
-                    },
-                    "rights": {
-                      "items": {
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "agent"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "discover",
-                                  "chat",
-                                  "run",
-                                  "delegate"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "project"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "list",
-                                  "read",
-                                  "write",
-                                  "delete",
-                                  "contribute",
-                                  "manage",
-                                  "delete_issues"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "kind": {
-                                "enum": [
-                                  "routine"
-                                ],
-                                "type": "string"
-                              },
-                              "operation": {
-                                "enum": [
-                                  "view",
-                                  "results",
-                                  "run",
-                                  "edit"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "id",
-                              "operation"
-                            ],
-                            "type": "object"
-                          }
-                        ]
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    }
-                  },
-                  "required": [
-                    "membership_id",
-                    "mode",
-                    "revision",
-                    "rights"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessPolicy"
                 }
               }
             },
@@ -146557,6 +146389,366 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply": {
+      "post": {
+        "description": "Apply workspace member access presets (POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply).",
+        "operationId": "post_api_v1_workspaces_workspaceId_members_memberId_access_presets_apply",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memberId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessPresetApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberAccessPolicy"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Apply workspace member access presets",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview": {
+      "post": {
+        "description": "Preview workspace member access presets (POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview).",
+        "operationId": "post_api_v1_workspaces_workspaceId_members_memberId_access_presets_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memberId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessPresetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPresetPreview"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Preview workspace member access presets",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities": {
       "get": {
         "description": "Get workspace member capabilities (GET /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities).",
@@ -146851,6 +147043,306 @@
           }
         ],
         "summary": "Update workspace member capabilities",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/page-ownership": {
+      "get": {
+        "description": "Get workspace page ownership (GET /api/v1/workspaces/{workspaceId}/page-ownership).",
+        "operationId": "get_api_v1_workspaces_workspaceId_page-ownership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter outputs by their current human owner.",
+            "in": "query",
+            "name": "owner_user_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum output summaries per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque next_cursor returned for the same workspace and owner filter.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipListResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Private custody metadata and workspace member contacts must not be cached.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace page ownership",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/page-ownership/{pageID}": {
+      "post": {
+        "description": "Submit workspace page ownership (POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}).",
+        "operationId": "post_api_v1_workspaces_workspaceId_page-ownership_pageID",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pageID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspacePageOwnershipTransferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipSummary"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Private custody metadata and workspace member contacts must not be cached.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace page ownership",
         "tags": [
           "workspaces"
         ],
@@ -160837,6 +161329,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {

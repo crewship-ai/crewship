@@ -55,6 +55,75 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 - **Harbor 2 shell.** A 240 px sidebar (a 56 px rail on tablets) with the workspace, Search ⌘K, the sections, Settings, Admin and your profile at the bottom; one 48 px top bar with the area's breadcrumb, the page's title and its one primary action, and the Activity and Inbox bells; each page's header now sits in that top bar instead of a separate strip, with view tabs kept on the page. Phones get a bottom tab bar with More. ⚠️ **Behaviour change:** the profile menu moved from the top bar to the bottom of the sidebar (in More on a phone).
 - **Harbor 2 kit, filters and panels.** Filters open inside a page's side panel, under its Filter button, with at most six values per facet and "All N…" for the rest; on a tablet the side panel starts closed and opens over the page from the top bar. Wizards show every step done when finished, and confirmation lists name what is lost, kept or at risk in words for screen readers. ⚠️ **Behaviour change:** at 768–1279 px the side panel no longer takes a column; open it with the panel button in the top bar.
+- Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
+
+- Refuse unsupported run-admission payloads in raw dump restore before opening the write transaction or invoking callbacks.
+
+- Add byte-preserving canonical validation for routine run-admission envelopes and their outer identity tuple. This storage prerequisite does not create admissions or enable execution.
+
+- Document a review proposal for crew and credential sharing with explicit human audiences; no access behavior changes.
+
+- Archive only verified native legacy routine heads during upgrade, preserving exact content, origins and integer pins without reconstructing historical versions. Verify each persisted archive before recording the cutover.
+
+- Await final host-capture fixture writes before removing temporary directories.
+
+- Preserve distinct routine version authority identities and legacy history without enabling Guest publication or runtime.
+
+- Decode exact publication identities and capture nonsecret provider declarations without enabling publication or provider execution.
+
+- Define a host-only canonical publication identity that binds exact grants, actors, source origins and selected child versions without enabling publication or runtime.
+
+- Preserve genuine archived identities in API history, upsert, and resurrection test fixtures.
+
+- Seed pipeline API smoke tests through the migrated database and real archived routine store.
+
+- Prepare host-only exact grant provenance for bounded routine publication: selected grant and publisher/issuer membership identities survive unrelated policy saves but cannot be replaced by trusted-mode bypass or reissued shares. No publication endpoint, permission or runtime is enabled.
+
+- Invalidate protected editor reads and pending saves when switching members or resources, so returning to a cached scope requires a fresh read.
+
+- Clear reviewed member preset consent on access loss and ignore late mutation responses from an older verified policy read.
+
+- Settings resource access offers explicit immutable presets for existing Guest resources, with exact previews and confirmation. Saved intent stays separate from live grant authority; conflicts and uncertain writes require reloading before new consent.
+
+- The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
+
+- Transactional audit appends reject ignored journal inserts and withhold notifications so the owning business transaction can roll back.
+
+- Applying a resource preset preserves every unrelated canonical grant row, including inactive historical grants whose resources are unavailable; ordinary complete-document policy updates retain their existing validation.
+
+
+- Preset CLI document decoding shares the existing bounded, strict file/stdin contract without changing supported consent fields or refreshing revisions.
+
+- OpenAPI administrative member-policy reads and replacements reuse a named complete policy document; accepted fields, CAS requirements and permissions are unchanged.
+
+- Explicit resource-preset application in the API recomputes reviewed consent atomically with canonical grants, audit and saved selection. Retained issuers and unrelated rights are preserved; stale consent requires a new preview and never triggers automatic reissue.
+
+- Read-only resource-preset previews in the administrative API and CLI show exact managed changes, retained provenance, Results disclosure and independent destructive consequences. Confirmation digests bind live state without granting authority or changing permissions.
+
+- Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
+
+### Added
+
+- Administrative member-access reads include server-computed preset selection provenance. Saved intent remains separate from effective permissions; manual edits cannot forge selections and personal access responses omit this metadata. The new selection fields keep their API names in CLI YAML. OpenAPI reuses the existing grant-provenance shape without changing authority.
+
+### Changed
+
+- OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.
+
+### Changed
+
+- OpenAPI administrative member-access documents reuse the existing agent-right shape as a named schema. Accepted operations and runtime permissions are unchanged.
+
+
+### Added
+
+- Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
+- Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
+
+- **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
+
+- Guests with explicit project Read+Manage can open a known-project management link without List. The screen reuses reviewed metadata/milestone forms, preserves drafts during temporary workspace-directory loss, and optionally previews a known issue for confirmed deletion with the separate Delete issues share, without issue discovery or broader grants.
+
 - **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
@@ -63,6 +132,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - **Protected chat runs wait for confirmed execution results after their observer disconnects.** Chat preserves partial replies and leaves the run admitted for retained-output reconciliation instead of recording a false failure or cancellation.
+- **Human-owned content can be handed over explicitly.** Workspace administrators can review eligible readers and transfer custody while preserving content and grants. Private content requires a human successor before its owner leaves; ordinary Pages retain their existing succession behavior.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.
 
@@ -82,6 +152,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
+
+- **Shared issue searches explain temporary rate limits.** The browser keeps results and search drafts, pauses search polling and disables repeated requests until the retry interval ends. A definitive access denial discards old results so later throttled retries cannot restore them. CLI commands print retry guidance, exit 6 and require an explicit retry.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
@@ -97,6 +169,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
+- Waitpoint decision confirmations and CLI errors no longer repeat approval capabilities; transport failures retain their existing error type and exit code.
 - **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
 - **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator/requester checks before commit; per-tool, async and legacy paths retain their existing behavior.
 - **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator checks before commit, with live requester admission required for approval; authorized refusal can still settle withdrawn requests; per-tool, async and legacy paths retain their existing behavior.
@@ -132,6 +205,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change:** Page shares become inactive when their issuer is suspended or restricted as a Guest anywhere. Existing share metadata remains visible to Page administrators with an account-status explanation.
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
+
+- Internal foundations preserve explicit versioned resource-preset choice provenance through backup and fork restore. Existing grants remain unchanged and no preset selector/API/CLI is enabled yet; immutable v1 bundles, managed-edit invalidation and empty migration state prepare #3271.
+- Internal preset planning reads one live-authority snapshot and explains exact bundle changes, preserved issuers and independent consequences without changing any grants. Empty grant collections remain JSON arrays; unavailable unrelated historical resource grants remain preserved without granting authority. Confirmation checksums do not authorize access; public preview and application remain disabled pending the next #3271 slices.
 
 - Guests with an explicit routine View share can inspect its definition without an execution runtime or agent Run grants. Stored Run grants retain their existing invocation-only disclosure; View does not expose another person’s private runs. UI, CLI and access explanations use the same live issuer policy.
 - Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.
@@ -461,6 +537,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Shared project management now has a verified CLI/API contract.** Real-router acceptance checks known-project Read+Manage without List, unrelated-client isolation, metadata and milestones, separate issue deletion, narrow credentials, active work, conflicts, audit rollback and live issuer revocation. Existing rights remain independent.
+
+
 - **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
 
 - Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
@@ -468,6 +547,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
+
+- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+- Cap shared issue search limiter memory globally at 32768 lazy audiences, retaining active budgets and reclaiming only safely expired entries.
 
 ### Fixed
 

@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { usePageSave } from "@/components/ui/page-save-bar"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
+import { ResourcePresetEditor } from "./resource-preset-editor"
+import { useRestrictedProjection } from "@/hooks/use-restricted-projection"
 import { nativeSelect } from "@/components/features/settings/shared"
 
 const rightSchema = resourceRightSchema
@@ -24,34 +26,40 @@ export function MemberResourceAccess({ workspaceId, memberId, label, role, onSav
   onSaved?: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [presetBusy, setPresetBusy] = useState(false)
+  const projection = useRestrictedProjection<Policy>(JSON.stringify([workspaceId, memberId]))
   const url = `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/members/${requireApiPathSegment(memberId)}/access?workspace_id=${encodeURIComponent(workspaceId)}`
   const queryKey = ["member-resource-access", workspaceId, memberId]
   const policy = useQuery({
-    queryKey, enabled: open, retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
+    queryKey, enabled: open, retry: false, staleTime: 0, refetchOnWindowFocus: false,
     queryFn: async ({ signal }) => {
+      const read = projection.read(signal)
       const response = await apiFetch(url, { signal })
-      if (!response.ok) throw new Error("Resource policy unavailable")
+      if (!response.ok) { read.reject(response.status); throw new Error("Resource policy unavailable") }
       const parsed = policySchema.parse(await response.json())
-      if (parsed.membership_id !== memberId) throw new Error("Membership changed; reload the roster")
+      if (parsed.membership_id !== memberId) { read.reject(404); throw new Error("Membership changed; reload the roster") }
+      read.accept(parsed)
       return parsed
     },
   })
   return <section className="mt-4 space-y-2" aria-label={`Resource access for ${label}`}>
-    <Button variant="outline" className="coarse:h-[44px]" onClick={() => setOpen(!open)} aria-expanded={open}>
+    <Button variant="outline" className="coarse:h-[44px]" disabled={presetBusy} onClick={() => setOpen(!open)} aria-expanded={open}>
       {open ? "Close resource access" : "Edit resource access"}
     </Button>
     {open && policy.isPending && <p className="text-xs">Loading resource access…</p>}
     {open && policy.isError && <p role="alert" className="text-xs">Resource policy unavailable. <button type="button" onClick={() => void policy.refetch()}>Reload policy</button></p>}
-    {open && policy.data && <PolicyEditor key={`${workspaceId}:${memberId}:${policy.data.revision}`} policy={policy.data} url={url}
-      queryKey={queryKey} workspaceId={workspaceId} role={role} label={label} onSaved={onSaved} />}
+    {open && projection.value && <PolicyEditor key={`${workspaceId}:${memberId}:${projection.value.revision}:${reloadKey}`} policy={projection.value} url={url}
+      queryKey={queryKey} workspaceId={workspaceId} role={role} label={label} onSaved={onSaved} onPresetBusy={setPresetBusy} onPolicySaveStarted={projection.captureSave} onReload={async () => { const result = await policy.refetch(); if (!result.isError) setReloadKey(key => key + 1) }} />}
   </section>
 }
 
-function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved }: {
+function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved, onPresetBusy, onPolicySaveStarted, onReload }: {
   policy: Policy; url: string; queryKey: string[]; workspaceId: string; role: string; label: string
-  onSaved?: () => void
+  onSaved?: () => void; onPresetBusy: (busy: boolean) => void; onPolicySaveStarted: () => (policy: Policy) => boolean; onReload: () => Promise<void>
 }) {
   const queryClient = useQueryClient()
+  const [presetBusy, setPresetBusy] = useState(false)
   const [mode, setMode] = useState(policy.mode)
   const [rights, setRights] = useState<Right[]>(policy.rights)
   const [reissue, setReissue] = useState<Right[]>([])
@@ -68,6 +76,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   }
   const directory = directories[kind]
   const save = useMutation({
+    onMutate: () => onPolicySaveStarted(),
     mutationFn: async () => {
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" ? [] : rights,
@@ -80,7 +89,8 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
     },
     // The saved revision remounts this editor (its key), so the draft goes
     // clean. A failure rejects into the page bar, which toasts it.
-    onSuccess: updated => {
+    onSuccess: (updated, _variables, confirm) => {
+      if (!confirm?.(updated)) return
       queryClient.setQueryData(queryKey, updated)
       if (updated.mode !== policy.mode) onSaved?.()
     },
@@ -90,7 +100,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   // until the current policy is reloaded.
   const pending = changeCount(policy, mode, rights) + (mode === "restricted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
   usePageSave({
-    label: `Resource access for ${label}`, count: pending, canSave: !conflict, saving: save.isPending,
+    label: `Resource access for ${label}`, count: pending, canSave: !conflict && !presetBusy, saving: save.isPending || presetBusy,
     save: () => save.mutateAsync(),
     discard: () => { setMode(policy.mode); setRights(policy.rights); setReissue([]) },
   })
@@ -103,7 +113,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const protectedRole = role === "OWNER" || role === "ADMIN"
   return <div className="space-y-3 text-xs">
     <label className="flex flex-wrap items-center gap-2">Access mode
-      <select aria-label="Access mode" className={selectClass} value={mode} disabled={save.isPending || conflict}
+      <select aria-label="Access mode" className={selectClass} value={mode} disabled={save.isPending || presetBusy || conflict}
         onChange={event => setMode(event.target.value as Policy["mode"])}>
         <option value="trusted">Trusted workspace access</option>
         <option value="restricted" disabled={protectedRole}>Guest — explicit resources</option>
@@ -116,33 +126,35 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
         {policy.grant_details?.filter(detail => rightKey(detail) === rightKey(right)).map(detail => <span key={rightKey(detail)} className="text-muted-foreground">
           Issuer: {detail.issuer_name || detail.issuer_id} · {detail.live ? "Active" : "Inactive — issuer no longer has authority"}
-          {!detail.live && <Button size="sm" variant="outline" disabled={save.isPending || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
+          {!detail.live && <Button size="sm" variant="outline" disabled={save.isPending || presetBusy || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
             {reissue.some(r => rightKey(r) === rightKey(right)) ? "Cancel reissue" : "Reissue as me"}
           </Button>}
         </span>)}
         <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
-        <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
+        <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || presetBusy || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
       {rights.length === 0 && <p>No resource operations are granted.</p>}
       <div className="flex flex-wrap gap-2">
-        <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || conflict} onChange={event => {
+        <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || presetBusy || conflict} onChange={event => {
           const next = event.target.value as Right["kind"]; setKind(next); setResourceId(""); setOperation(operations[next][0])
         }}><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
-        <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
+        <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || presetBusy || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
         </select>
-        <select aria-label="Resource operation" className={selectClass} value={operation} disabled={save.isPending || conflict} onChange={event => setOperation(event.target.value)}>
+        <select aria-label="Resource operation" className={selectClass} value={operation} disabled={save.isPending || presetBusy || conflict} onChange={event => setOperation(event.target.value)}>
           {operations[kind].map(value => <option key={value} value={value}>{resourceOperationLabel(value)}</option>)}
         </select>
-        <Button size="sm" className="coarse:h-[44px]" variant="outline" disabled={save.isPending || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
+        <Button size="sm" className="coarse:h-[44px]" variant="outline" disabled={save.isPending || presetBusy || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
       </div>
+      {policy.mode === "restricted" && (kind === "project" || kind === "routine") && resourceId && <ResourcePresetEditor key={`${kind}:${resourceId}:${policy.revision}`} workspaceId={workspaceId} policy={policy} resource={{kind,id:resourceId}}
+        disabled={pending > 0 || save.isPending || conflict} onSaveStarted={onPolicySaveStarted} onBusy={busy => {setPresetBusy(busy);onPresetBusy(busy)}} onSaved={updated => queryClient.setQueryData(queryKey,updated)} />}
       {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={() => void directory.refetch()}>Reload resources</button></p>}
     </>}
     <EffectiveAccess url={url.replace("/access?", "/access/effective?")} revision={policy.revision} memberId={policy.membership_id} />
     {conflict && <p role="alert">Policy changed. Reload to discard this draft and review the current grants.</p>}
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
+      <Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={save.isPending || presetBusy} onClick={() => void onReload()}>Reload current policy</Button>
     </div>
   </div>
 }

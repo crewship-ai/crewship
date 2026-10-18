@@ -440,6 +440,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	if err := runAdmissionBundlePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions, opts.ResumeWorkspaceID); err != nil {
+		return nil, err
+	}
 	servicePlan, err := extracted.prepareServiceRestorePlan(ctx, manifest.Contents.ServiceSnapshots)
 	if err != nil {
 		return nil, err
@@ -1239,7 +1242,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		var commitTx *sql.Tx
 		var existingTranscriptChats map[string]bool
 		hooks := &RestoreDumpHooks{
-			RejectNoOp: true,
+			legacySourceVersions: manifest.SchemaMigrationVersions,
+			RejectNoOp:           true,
 			// Provenance for the DR resume (#1716), written only for a
 			// rewritten restore — that is the only case that creates a
 			// workspace whose identity the tenant guard cannot recognise

@@ -318,10 +318,11 @@ func buildDocument(routes []route) map[string]any {
 	_, chatDecisionComponents := chatDecisionSchemaCatalog()
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
+	_, accessPresetComponents := accessPresetSchemaCatalog()
 	for _, catalog := range []map[string]any{
-		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
+		memberAccessSchemaComponents(), presetSelectionSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -331,6 +332,10 @@ func buildDocument(routes []route) map[string]any {
 	}
 	_, workflowRequestComponents := workflowRequestSchemaCatalog()
 	for name, schema := range workflowRequestComponents {
+		schemas[name] = schema
+	}
+	_, ownershipComponents := workspacePageOwnershipSchemaCatalog()
+	for name, schema := range ownershipComponents {
 		schemas[name] = schema
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
@@ -636,6 +641,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range routineTrustSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	ownershipRoutes, _ := workspacePageOwnershipSchemaCatalog()
+	for key, schema := range ownershipRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()
 	for key, schema := range providerLoginRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -709,6 +718,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	restrictedWorkflowRoutes, _ := restrictedWorkflowSchemaCatalog()
 	for key, schema := range restrictedWorkflowRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	presetRoutes, _ := accessPresetSchemaCatalog()
+	for key, schema := range presetRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result

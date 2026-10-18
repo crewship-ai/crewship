@@ -29,7 +29,7 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["pr-contract.spec.ts", ...HARBOR2_PR_SPECS],
+  testMatch: ["pr-contract.spec.ts", "shared-issue-search-retry.spec.ts", "known-project-manage.spec.ts", "resource-presets.spec.ts", ...HARBOR2_PR_SPECS],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -50,7 +50,7 @@ export default defineConfig({
   // (grep is tested against "project file describe title", so the file name
   // selects every test in it).
   grep: [
-    /PR browser contract subset/,
+    /PR browser contract subset|explicit preset consent and stale recovery/,
     new RegExp(`(^|\\s)(${HARBOR2_PR_SPECS.map(escape).join("|")})(\\s|$)`),
   ],
 })

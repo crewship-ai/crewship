@@ -96,7 +96,7 @@ function assertSameOrigin(input: RequestInfo | URL): string {
 
 /**
  * Surfaces the two failure classes that are invisible from the UI: a 429 from
- * the 120/min bucket and any 5xx. Both present identically to a user — the
+ * a request budget and any 5xx. Both present identically to a user — the
  * screen simply stops updating and the realtime stream reconnects — so a
  * report of "it broke" carries no evidence unless the console says which call
  * was rejected.
@@ -119,7 +119,7 @@ function reportBadStatus(target: RequestInfo | URL, res: Response): void {
   const url = typeof target === "string" ? target : String((target as Request).url ?? target)
   console.warn(
     res.status === 429
-      ? `[crewship] 429 rate limited: ${url} — the 120/min bucket is full; the UI will look frozen until it drains.`
+      ? `[crewship] 429 rate limited: ${url} — the request budget is exhausted; respect Retry-After before retrying.`
       : `[crewship] ${res.status} from ${url}`,
   )
 }

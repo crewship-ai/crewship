@@ -257,7 +257,7 @@ func (g pageGrantRecord) grant() pageGrant {
 // pageRecord parameter precisely so the batch form can exist at all — one
 // statement, one CASE, one definition of live, two entry points.
 func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID string) (map[string][]pageGrantRecord, error) {
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT g.page_id, g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
@@ -435,7 +435,7 @@ func (h *PageHandler) agentGrants(ctx context.Context, wsID string, rec *pageRec
 // arrangement, never over content.
 func (h *PageHandler) agentViewer(ctx context.Context, wsID, agentID string) (*pageViewer, error) {
 	v := &pageViewer{UserID: "", Role: "", Crews: map[string]bool{}}
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT a.crew_id
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id

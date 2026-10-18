@@ -522,3 +522,55 @@ Unrelated edits do not reactivate shares from an inactive issuer.
 Use [`share`](./share) and [`unshare`](./unshare) to change an existing Guest's
 individual routine or project operations without replacing unrelated rights.
 The versioned member-policy commands remain available for complete policies.
+
+### List resource access presets
+
+```bash
+crewship workspace member access presets --format json
+```
+
+Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.
+
+Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
+
+
+### `crewship workspace member access preset preview MEMBER`
+
+Preview an explicit bundle for an existing restricted member without saving it. `--file` is required; provide a JSON file or `--file -` for stdin. Input contains current `membership_id`, `revision`, `resource: {kind,id}`, `preset_id`, `preset_version`, `level` and optional explicit `reissue` rights. Read the revision with `access get`; unknown/trailing/oversized input is rejected and conflicts are never silently refreshed or retried.
+
+```bash
+crewship --workspace WORKSPACE --format json workspace member access preset preview MEMBER --file selection.json
+```
+
+Table output shows the saved choice or Custom, managed changes, retained orthogonal rights and original issuers/timestamps. Review Results history, execution prerequisites, file-role floors and conditional `delete_issues` eligibility. JSON/YAML/NDJSON preserve the complete normalized selection, provenance, consequences and confirmation checksum, including exact int64 revisions. The checksum supplies no authority; this command never applies a preset. See the [API contract](../api-reference/workspaces.mdx#preview-member-access-preset).
+
+### `crewship workspace member access preset apply MEMBER`
+
+Apply an explicitly reviewed preview using required `--file confirmed.json` or `--file -` for stdin. The JSON document contains only `selection` copied unchanged from preview and its exact `confirmation_digest`. Review preview warnings and provenance before creating this document. Requires current trusted OWNER/ADMIN authority and `workspace:admin` for scoped credentials.
+
+```bash
+crewship --workspace WORKSPACE workspace member access preset apply MEMBER --file confirmed.json
+```
+
+The command resolves the member once, sends one write and returns canonical policy/provenance in table/JSON/YAML/NDJSON. Unknown/trailing/oversized or malformed consent is rejected before network access. Conflicts/denials exit nonzero without rereading, retrying or replacing consent. Recompute and review a new preview after409; inspect current policy first after an uncertain write outcome.
+
+## Review and transfer content ownership
+
+Review content requiring a human successor before removing a workspace member:
+
+```bash
+crewship workspace page-ownership list --owner USER_ID --limit 25
+crewship workspace page-ownership list --owner USER_ID --cursor NEXT_CURSOR
+crewship workspace page-ownership transfer PAGE_ID --expected-owner USER_ID --successor READER_ID
+```
+
+Choose an eligible successor from the list. The transfer takes effect immediately
+and preserves content and grant records. A successor who has lost read access,
+or an owner changed since review, causes refusal instead of an automatic grant.
+Workspace administrator access is required. Instance administrator access alone
+does not grant access to private content metadata. Use `--format json` for
+machine-readable responses, including `next_cursor` when more results exist.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.

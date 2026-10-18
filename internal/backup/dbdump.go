@@ -217,6 +217,7 @@ var BackupTables = []string{
 	"assignments",
 	"approvals_queue",
 	"pipelines",
+	"access_preset_selections", // informational choice; after membership and typed resource parents
 	"pipeline_versions",
 	"pipeline_drafts",
 	"pipeline_schedules",
@@ -640,6 +641,10 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
 				args = append(args, workspaceID)
 			}
+			where, args, err = includePresetSelectionUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
+			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {
 				return nil, err
@@ -1031,6 +1036,8 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
 type RestoreDumpHooks struct {
+	// Bundle source versions only strengthen unsupported-transport refusals.
+	legacySourceVersions []int
 	// RejectNoOp refuses a nonempty dump whose rows all collided, before
 	// PostInsert/PreCommit can publish filesystem or service changes.
 	// The insert transaction rolls back and its statistics remain available.
@@ -1063,6 +1070,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		hooks = &RestoreDumpHooks{}
 	}
 	var stats RestoreStats
+	if err := rejectRunAdmissionInput(dump, false); err != nil {
+		return stats, err
+	}
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
 	// BeginTx. db.Conn pins us to a single pooled connection; we
@@ -1097,6 +1107,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
+	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
+		return stats, err
+	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
 	if err != nil {
 		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)

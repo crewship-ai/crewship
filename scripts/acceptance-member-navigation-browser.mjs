@@ -48,6 +48,10 @@ try {
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  if (process.env.CREWSHIP_ISSUES_MANAGE_BROWSER === '1') {
+    const { knownProjectManage } = await import('./acceptance-known-project-manage-browser.mjs')
+    await knownProjectManage({fixture,contexts,pages,check,open,output})
+  } else {
   // Object sharing uses the real versioned policy and transactional audit.
   const projectResponse = await contexts.owner.request.post(`${fixture.server}/api/v1/projects?workspace_id=${fixture.workspace}`, {data:{name:'Client sharing project'}})
   if(projectResponse.status()!==201) throw new Error(`project fixture create ${projectResponse.status()}`)
@@ -594,6 +598,7 @@ try {
   }
   await directDenied('other')
   await desktop.screenshot({ path: join(output, 'revoked-navigation.png') })
+  }
 } catch (error) {
   results.push({ name: 'browser harness', status: 'ERROR', error: String(error) })
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
