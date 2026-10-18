@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { activityUrl } from "@/lib/activity-url"
 import { Streamdown } from "streamdown"
 import {
   Activity,
@@ -699,10 +700,8 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
     else toast.success(`${skillName(skill)} taken from ${holders.length} ${holders.length === 1 ? "agent" : "agents"}`)
   }
 
-  const openActivity = () => {
-    onTab("used")
-    setTimeout(() => recentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)
-  }
+  // Activity filtered to this skill (?walk=skill:<id>), the same walk the crew and agent pages use.
+  const activityHref = activityUrl("/activity", { path: { stops: [{ kind: "skill", id: skill.id, label: skillName(skill) }], dropped: 0 }, lens: "workflows" })
 
   return (
     <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-3.5 p-4 pb-24 md:p-6" data-slot="skill-page">
@@ -713,8 +712,10 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
         actions={
           <>
             {/* Named apart from the shell's own Activity button in the same bar. */}
-            <SubBarSecondary icon={Activity} onClick={openActivity} aria-label="Skill activity" className="max-sm:hidden">
-              Activity
+            <SubBarSecondary asChild icon={Activity}>
+              <Link href={activityHref} aria-label="Skill activity">
+                <span className="max-md:sr-only">Activity</span>
+              </Link>
             </SubBarSecondary>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
