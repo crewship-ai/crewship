@@ -15,7 +15,7 @@ Problem Details shape (`error` is the human-readable message).
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit` (1–500), `offset` (0–1000000), `include_ephemeral=1`, `include_hidden=1` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `q` (words that must all appear in the name, slug, description or step text; `limit`/`offset` then page the matches), `order` (`popularity`, `recent`, `name`), `limit` (1–500), `offset` (0–1000000), `include_ephemeral=1`, `include_hidden=1` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete; the routine's schedules are disabled and soft-deleted in the same transaction |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
@@ -36,6 +36,18 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records` | member | Typed run-record projection |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel` | manage | Cancel a run |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-folders` | member | Routine folders with the number of routines in each |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-folders` | create | Create a folder (`name` 1–80 characters, unique per workspace ignoring case; optional `color`); `409` on a duplicate |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Rename or recolour (`color: ""` clears) |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Delete a folder; its routines are kept and become unfiled |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-folders/move` | create | `{"slugs":[…],"folder_id":"…"|null}` files up to 200 routines in a folder or takes them out; all-or-nothing, `404` for an unknown routine or folder |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-health` | member | Health table: per routine with a run, its last 20 outcomes (oldest first), success rate over the finished ones, and runs and spend in the last `days` days (default 30, 1–366). Test and dry runs are not counted |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup` | member | The server's checklist for one routine: agents, credentials, cost cap, failures in a row, schedule circuit breaker, untested changes. Each check is `ok`, `warn` or `bad`, worst first |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-templates` | member | Routine templates (name, description, category, step count; no definition) |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}` | member | One template with its definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-templates` | create | Create from `definition` or from `from_routine` (a slug); the definition must parse and validate as a save would; `409` on a duplicate name |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}` | create | Delete a template; routines made from it are not affected |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use` | create | Save a **draft** routine from the template (`slug`, optional `name`, `author_crew_id`); never publishes. `409` if the slug is taken |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs` | member | Workspace run list |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}` | member | One run |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree` | member | Run tree |
@@ -85,6 +97,32 @@ parameters preserves each endpoint's legacy behavior.
 MANAGER+, OWNER/ADMIN, and OWNER/ADMIN respectively). A missing pipeline is
 `404`; malformed JSON or invalid input is `400`; insufficient role is `403`;
 an unavailable runner/store is `503`.
+
+## Test results on drafts and versions
+
+`POST .../pipelines/test_run` keeps its outcome against the **hash of the
+definition it tested**. `GET .../pipelines/{slug}/draft`, `GET .../versions` and
+`GET .../versions/{n}` then carry `test_result` (`passed`, `status`,
+`tested_at`, `tested_by`) for exactly the definition they hold, and omit it for
+content that was not tested; an edit therefore has no result until it is
+tested again. The latest test of a definition replaces the earlier one.
+
+## Concurrency policy
+
+A definition may set `concurrency_policy`: `queue` (the default) or `skip`.
+With `skip`, a scheduled fire or a webhook delivery that finds the routine's
+`concurrency_key` slot taken is dropped on purpose: the schedule records
+`SKIPPED` (no failure, alert or circuit-breaker tick) and the webhook answers
+`200 {"status":"SKIPPED"}` with no `Retry-After`. `skip` needs a
+`concurrency_key`. Manual runs and deferred starts are unchanged.
+
+## Routine folders
+
+A folder organises the Routines panel (Group by Folder): a name, an optional
+colour, and the routines filed in it. A routine is in at most one folder; the
+list `GET .../pipelines` returns `folder_id` on a filed routine. A folder grants
+no access: sharing is still per routine, and a folder ACL ("access from the
+folder") does not exist. CLI: `crewship routine folders list|create|update|delete|move`.
 
 ## Core endpoint contract
 

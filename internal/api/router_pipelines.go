@@ -153,6 +153,24 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// handler body, so they are declared here.
 	// openapi: responses 200,400,401,403,409,500,503
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", roleCreate, pipes.ApproveWaitpoint)
+	// Health table (ODCH-RT-07): last 20 outcomes, success rate and a rolling
+	// window of runs and spend per routine. Its own path, not under
+	// /pipelines/, so no routine slug can shadow it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-health", authed(wsCtx(http.HandlerFunc(pipes.GetHealth))))
+	// Routine templates (ODCH-RT-22). Their own path so no slug can shadow it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-templates", authed(wsCtx(http.HandlerFunc(pipes.ListTemplates))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}", authed(wsCtx(http.HandlerFunc(pipes.GetTemplate))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-templates", roleCreate, pipes.CreateTemplate)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}", roleCreate, pipes.DeleteTemplate)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use", roleCreate, pipes.UseTemplate)
+	// Routine folders (ODCH-RT-01): organise the Routines panel. Literal
+	// "move" under /pipeline-folders cannot collide with {id}, which only has
+	// PATCH and DELETE.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-folders", authed(wsCtx(http.HandlerFunc(pipes.ListFolders))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-folders", roleCreate, pipes.CreateFolder)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-folders/move", roleCreate, pipes.MoveToFolder)
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}", roleCreate, pipes.UpdateFolder)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}", roleCreate, pipes.DeleteFolder)
 	// Pipeline schedules — cron triggers for saved pipelines (the
 	// Routines integration). CRUD-only; the scheduler runs in-process
 	// in cmd_start and reads the table directly.
@@ -184,6 +202,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// collide with the per-slug route the way /pipelines/runs/... would
 	// (see the comment below on /pipeline-runs/).
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup", authed(wsCtx(http.HandlerFunc(pipes.GetCheckup))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", authed(wsCtx(http.HandlerFunc(pipes.GetOriginBinding))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", roleManage, pipes.ClearOriginBinding)

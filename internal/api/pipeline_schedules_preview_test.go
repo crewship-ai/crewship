@@ -95,3 +95,49 @@ func TestPreviewSchedule_CountCappedAt20(t *testing.T) {
 		t.Fatalf("got %d occurrences, want capped at 20", len(out.Occurrences))
 	}
 }
+
+// ODCH-RT-15: "When, in words". The preview takes a phrase= parameter,
+// derives the cron through pipeline.ParseNaturalCron and answers with the
+// cron it derived plus the next starts. cron_expr stays the explicit path.
+func TestPreviewSchedule_Phrase(t *testing.T) {
+	cases := []struct {
+		name     string
+		query    string
+		wantCode int
+		wantCron string
+		wantN    int
+	}{
+		{"every day at 9", "phrase=every+day+at+9am&timezone=Europe/Prague&count=3", http.StatusOK, "0 9 * * *", 3},
+		{"weekdays", "phrase=every+weekday+at+8:30", http.StatusOK, "30 8 * * 1-5", 5},
+		{"unknown phrase", "phrase=whenever+the+moon+is+full", http.StatusBadRequest, "", 0},
+		{"phrase and cron together", "phrase=every+day+at+9am&cron_expr=0+9+*+*+*", http.StatusBadRequest, "", 0},
+		{"blank phrase and no cron", "phrase=+", http.StatusBadRequest, "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, userID, wsID := scheduleHandlerRig(t)
+			req := withWorkspaceUser(httptest.NewRequest("GET",
+				"/api/v1/workspaces/"+wsID+"/pipeline-schedules/preview?"+tc.query, nil),
+				userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.PreviewSchedule(rr, req)
+			if rr.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d, body=%s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+			if tc.wantCode != http.StatusOK {
+				return
+			}
+			var out struct {
+				CronExpr    string   `json:"cron_expr"`
+				Phrase      string   `json:"phrase"`
+				Occurrences []string `json:"occurrences"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if out.CronExpr != tc.wantCron || len(out.Occurrences) != tc.wantN || out.Phrase == "" {
+				t.Fatalf("got cron=%q phrase=%q n=%d, want cron=%q n=%d", out.CronExpr, out.Phrase, len(out.Occurrences), tc.wantCron, tc.wantN)
+			}
+		})
+	}
+}

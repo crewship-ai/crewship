@@ -38,7 +38,8 @@ Query parameters:
 
 | Parameter | Required | Contract |
 |---|---|---|
-| `cron_expr` | yes | Five-field cron expression. |
+| `cron_expr` | one of | Five-field cron expression. |
+| `phrase` | one of | The schedule in words ("every weekday at 8:30"). The server derives the cron with the same parser as `routine schedules create --when`; the response adds `phrase` and the derived `cron_expr`. Not together with `cron_expr`; an unrecognised phrase is `400`. |
 | `timezone` | no | IANA timezone; defaults to `UTC`. |
 | `count` | no | How many fire times to return; defaults to `5`, capped at `20`. |
 
@@ -64,8 +65,8 @@ The computation uses real IANA tzdata, so it reflects DST transitions exactly
 as the scheduler will: a spring-forward gap (as above, 2026-03-29 has no
 02:30 in `Europe/Prague` and is skipped) and a fall-back fold (an ambiguous
 local time occurs twice, one hour apart in UTC) are both real answers, not
-approximations. An invalid `cron_expr` or `timezone`, or a missing
-`cron_expr`, returns `400`.
+approximations. An invalid `cron_expr` or `timezone`, a missing `cron_expr` and
+`phrase`, or both together, returns `400`.
 
 ## Create and update
 

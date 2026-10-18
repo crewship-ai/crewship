@@ -69,6 +69,14 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 		VALUES ('rel-pipe-2', ?, 'rel-routine-2', 'rel-routine-2', '{"name":"rel-routine-2","steps":[]}', 'hash', ?, ?, ?)`,
 		reliabilityAcceptanceWorkspaceID, now, now, now)
 
+	// Two finished runs of the first routine, for `routine health`.
+	for i, status := range []string{"completed", "failed"} {
+		ts := time.Now().UTC().Add(-time.Duration(2-i) * time.Hour).Format(time.RFC3339Nano)
+		mustExec(`INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, mode, started_at, cost_usd, created_at, updated_at)
+			VALUES (?, ?, 'rel-pipe', 'rel-routine', ?, 'run', ?, 0.25, ?, ?)`,
+			"rel-run-"+status, reliabilityAcceptanceWorkspaceID, status, ts, ts, ts)
+	}
+
 	const ownerToken = "crewship_cli_relowner00000000000000000"
 	mustExec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES ('clt-rel-owner', 'rel-owner', 't', ?, datetime('now'))`,
 		sha256HexToken(ownerToken))
@@ -377,5 +385,270 @@ func TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		t.Fatalf("the URL stopped resolving after --slug/--pin-version/--unpin — the token rotated")
+	}
+}
+
+// ODCH-RT-15: `routine schedules preview --when "every day at 9am"` asks the
+// server to turn the phrase into a cron (GET .../preview?phrase=) and prints
+// the cron it derived with the next starts.
+func TestAcceptance_RoutineSchedulesPreview_Phrase(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+
+	out, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "schedules", "preview",
+		"--when", "every weekday at 8:30", "--timezone", "Europe/Prague", "--count", "3")
+	if err != nil {
+		t.Fatalf("preview --when failed: %v\n%s", err, out)
+	}
+	var result struct {
+		CronExpr    string   `json:"cron_expr"`
+		Occurrences []string `json:"occurrences"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode: %v\nraw: %s", err, out)
+	}
+	if result.CronExpr != "30 8 * * 1-5" || len(result.Occurrences) != 3 {
+		t.Fatalf("got cron %q with %d occurrences, want \"30 8 * * 1-5\" with 3:\n%s", result.CronExpr, len(result.Occurrences), out)
+	}
+
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "schedules", "preview", "--when", "every day at 9am", "--cron", "0 9 * * *"); err == nil {
+		t.Fatalf("--when with --cron must fail, got:\n%s", out)
+	}
+}
+
+// ODCH-RT-03: `routine list --search` is GET /pipelines?q= — words that must
+// all appear in a routine's name, slug, description or step text.
+func TestAcceptance_RoutineList_Search(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	slugs := func(args ...string) []string {
+		t.Helper()
+		out, err := runReliabilityCLI(t, cfgPath, append([]string{"-f", "json", "routine", "list"}, args...)...)
+		if err != nil {
+			t.Fatalf("routine list %v: %v\n%s", args, err, out)
+		}
+		var rows []struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatalf("decode: %v\n%s", err, out)
+		}
+		got := []string{}
+		for _, r := range rows {
+			got = append(got, r.Slug)
+		}
+		return got
+	}
+	if got := slugs("--search", "ROUTINE-2"); len(got) != 1 || got[0] != "rel-routine-2" {
+		t.Fatalf("--search ROUTINE-2 = %v, want [rel-routine-2]", got)
+	}
+	if got := slugs("--search", "no such text"); len(got) != 0 {
+		t.Fatalf("--search with no match = %v, want none", got)
+	}
+	if got := slugs(); len(got) != 2 {
+		t.Fatalf("without --search = %v, want both routines", got)
+	}
+}
+
+// ODCH-RT-01: `routine folders` drives pipeline-folders end to end: create,
+// list with counts, move routines in and out, rename, delete (routines stay).
+func TestAcceptance_RoutineFolders(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runReliabilityCLI(t, cfgPath, append([]string{"-f", "json", "routine"}, args...)...)
+		if err != nil {
+			t.Fatalf("routine %v: %v\n%s", args, err, out)
+		}
+		return out
+	}
+	var created struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(run("folders", "create", "Market intel", "--color", "teal")), &created); err != nil || created.ID == "" || created.Name != "Market intel" {
+		t.Fatalf("create: %v %+v", err, created)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "folders", "create", "market INTEL"); err == nil {
+		t.Fatalf("a duplicate name must be refused, got:\n%s", out)
+	}
+
+	run("folders", "move", "rel-routine", "rel-routine-2", "--folder", created.ID)
+	folders := func() []struct {
+		Name         string `json:"name"`
+		RoutineCount int    `json:"routine_count"`
+	} {
+		var rows []struct {
+			Name         string `json:"name"`
+			RoutineCount int    `json:"routine_count"`
+		}
+		if err := json.Unmarshal([]byte(run("folders", "list")), &rows); err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	if got := folders(); len(got) != 1 || got[0].RoutineCount != 2 {
+		t.Fatalf("after move: %+v", got)
+	}
+
+	// The routine list reports the folder.
+	var listed []struct {
+		Slug     string `json:"slug"`
+		FolderID string `json:"folder_id"`
+	}
+	if err := json.Unmarshal([]byte(run("list")), &listed); err != nil || len(listed) != 2 || listed[0].FolderID != created.ID {
+		t.Fatalf("list: %v %+v", err, listed)
+	}
+
+	run("folders", "move", "rel-routine-2", "--none")
+	run("folders", "update", created.ID, "--name", "Intel")
+	if got := folders(); got[0].Name != "Intel" || got[0].RoutineCount != 1 {
+		t.Fatalf("after unfile+rename: %+v", got)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "folders", "move", "rel-routine"); err == nil {
+		t.Fatalf("move without --folder/--none must fail, got:\n%s", out)
+	}
+
+	run("folders", "delete", created.ID)
+	if got := folders(); len(got) != 0 {
+		t.Fatalf("after delete: %+v", got)
+	}
+	if err := json.Unmarshal([]byte(run("list")), &listed); err != nil || len(listed) != 2 || listed[0].FolderID != "" {
+		t.Fatalf("routines must survive the folder: %v %+v", err, listed)
+	}
+}
+
+// ODCH-RT-07: `routine health` prints what the Health table shows — the last
+// outcomes, the success rate over the finished runs, and runs and spend in a
+// rolling window.
+func TestAcceptance_RoutineHealth(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	out, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "health", "--days", "7")
+	if err != nil {
+		t.Fatalf("routine health: %v\n%s", err, out)
+	}
+	var got struct {
+		WindowDays int `json:"window_days"`
+		Routines   []struct {
+			Slug         string   `json:"slug"`
+			LastOutcomes []string `json:"last_outcomes"`
+			SuccessPct   *int     `json:"success_pct"`
+			Runs         int      `json:"runs"`
+			SpendUSD     float64  `json:"spend_usd"`
+		} `json:"routines"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if got.WindowDays != 7 || len(got.Routines) != 1 || got.Routines[0].Slug != "rel-routine" {
+		t.Fatalf("health = %+v", got)
+	}
+	r := got.Routines[0]
+	if len(r.LastOutcomes) != 2 || r.LastOutcomes[0] != "completed" || r.LastOutcomes[1] != "failed" || r.SuccessPct == nil || *r.SuccessPct != 50 || r.Runs != 2 || r.SpendUSD != 0.5 {
+		t.Fatalf("rel-routine = %+v", r)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "health", "--days", "0"); err == nil {
+		t.Fatalf("--days 0 must be refused, got:\n%s", out)
+	}
+	if human, err := runReliabilityCLI(t, cfgPath, "routine", "health"); err != nil || !strings.Contains(human, "rel-routine") || !strings.Contains(human, "50%") {
+		t.Fatalf("human output: %v\n%s", err, human)
+	}
+}
+
+// ODCH-RT-06: `routine checkup` prints the server's checklist and exits
+// non-zero while something needs fixing.
+func TestAcceptance_RoutineCheckup(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	out, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "checkup", "rel-routine")
+	// The seeded routine has no cost cap (a warning) and a failed last run;
+	// nothing needs fixing, so the command succeeds.
+	if err != nil {
+		t.Fatalf("routine checkup: %v\n%s", err, out)
+	}
+	var rep struct {
+		Slug   string `json:"slug"`
+		Total  int    `json:"total"`
+		Failed int    `json:"failed"`
+		Checks []struct {
+			Key   string `json:"key"`
+			Level string `json:"level"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	levels := map[string]string{}
+	for _, c := range rep.Checks {
+		levels[c.Key] = c.Level
+	}
+	if rep.Slug != "rel-routine" || rep.Total != len(rep.Checks) || levels["runnable"] != "ok" || levels["cost"] != "warn" {
+		t.Fatalf("checkup = %+v", rep)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "checkup", "no-such-routine"); err == nil {
+		t.Fatalf("an unknown routine must fail, got:\n%s", out)
+	}
+	if human, err := runReliabilityCLI(t, cfgPath, "routine", "checkup", "rel-routine"); err != nil || !strings.Contains(human, "Can run") {
+		t.Fatalf("human output: %v\n%s", err, human)
+	}
+}
+
+// ODCH-RT-22: `routine templates` keeps a definition, starts a DRAFT from it
+// (never a live routine), and deletes it.
+func TestAcceptance_RoutineTemplates(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runReliabilityCLI(t, cfgPath, append([]string{"-f", "json", "routine"}, args...)...)
+		if err != nil {
+			t.Fatalf("routine %v: %v\n%s", args, err, out)
+		}
+		return out
+	}
+	file := filepath.Join(t.TempDir(), "tpl.json")
+	if err := os.WriteFile(file, []byte(`{"name":"digest","steps":[{"id":"a","type":"transform","transform":{"input":"{}","expression":"."}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		StepCount int    `json:"step_count"`
+	}
+	if err := json.Unmarshal([]byte(run("templates", "create", "Daily digest", "--file", file, "--category", "ops")), &created); err != nil || created.ID == "" || created.StepCount != 1 {
+		t.Fatalf("create: %v %+v", err, created)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "templates", "create", "Daily digest", "--file", file); err == nil {
+		t.Fatalf("a duplicate name must be refused, got:\n%s", out)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "templates", "create", "X"); err == nil {
+		t.Fatalf("create without a source must fail, got:\n%s", out)
+	}
+
+	var listed []struct {
+		ID       string `json:"id"`
+		Category string `json:"category"`
+	}
+	if err := json.Unmarshal([]byte(run("templates", "list")), &listed); err != nil || len(listed) != 1 || listed[0].Category != "ops" {
+		t.Fatalf("list: %v %+v", err, listed)
+	}
+	if out := run("templates", "get", created.ID); !strings.Contains(out, `"definition"`) {
+		t.Fatalf("get has no definition:\n%s", out)
+	}
+
+	var draft struct {
+		Slug     string `json:"slug"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.Unmarshal([]byte(run("templates", "use", created.ID, "--slug", "morning-digest")), &draft); err != nil || draft.Slug != "morning-digest" || draft.Revision != 1 {
+		t.Fatalf("use: %v %+v", err, draft)
+	}
+	// It is a draft: the routine list does not have it.
+	if out := run("list"); strings.Contains(out, "morning-digest") {
+		t.Fatalf("a template must start a draft, not a live routine:\n%s", out)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "templates", "use", created.ID, "--slug", "morning-digest"); err == nil {
+		t.Fatalf("a taken slug must be refused, got:\n%s", out)
+	}
+
+	run("templates", "delete", created.ID)
+	if err := json.Unmarshal([]byte(run("templates", "list")), &listed); err != nil || len(listed) != 0 {
+		t.Fatalf("after delete: %v %+v", err, listed)
 	}
 }

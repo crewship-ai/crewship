@@ -349,6 +349,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range providerLoginComponents {
 		schemas[name] = schema
 	}
+	_, routineOrganisationComponents := routineOrganisationSchemaCatalog()
+	for name, schema := range routineOrganisationComponents {
+		schemas[name] = schema
+	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
 		"chatShareBearer":     map[string]any{"type": "http", "scheme": "bearer", "bearerFormat": "cshr_ share token", "description": "Dedicated, revocable token for reading one shared chat transcript. A workspace session or ordinary API bearer token does not satisfy this scheme."},
@@ -661,6 +665,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()
 	for key, schema := range providerLoginRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	routineOrganisationRoutes, _ := routineOrganisationSchemaCatalog()
+	for key, schema := range routineOrganisationRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
