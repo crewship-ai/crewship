@@ -70,7 +70,7 @@ export function WeekLine({ values, muted }: { values: number[]; muted?: boolean 
 export function DrawerSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section aria-label={label}>
-      <h4 className="mb-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</h4>
+      <h4 className="mb-1.5 text-micro font-medium text-muted-foreground-soft">{label}</h4>
       {children}
     </section>
   )

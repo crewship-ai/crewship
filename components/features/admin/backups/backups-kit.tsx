@@ -173,7 +173,7 @@ export function ItemRow({ lead, title, detail, action, className }: {
 
 /** The mono label the design uses above a block. */
 export function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <span className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{children}</span>
+  return <span className=" text-micro font-medium text-muted-foreground-soft">{children}</span>
 }
 
 /** Table cell classes, so every table in the section reads alike. */
