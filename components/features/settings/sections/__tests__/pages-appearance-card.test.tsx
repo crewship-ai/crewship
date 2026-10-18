@@ -44,7 +44,8 @@ it("does not offer write controls to a member", () => {
  expect(screen.queryByRole("button", { name: /reset to crewship default/i })).toBeNull()
  expect(screen.getByText("#123abc")).toBeInTheDocument()
  // The palette is still shown, contrast included: one badge per text colour.
- expect(screen.getByTestId("pages-mini-preview")).toBeInTheDocument()
+ // The sample Page lives in the Preview panel (v67), not in the card.
+ expect(screen.queryByTestId("pages-mini-preview")).toBeNull()
  expect(screen.getAllByTestId("contrast-badge")).toHaveLength(2)
 })
 
@@ -55,8 +56,10 @@ it("defaults to the Crewship palette and says so", () => {
  render(<PagesAppearanceCard workspaceId="ws1" role="ADMIN" />)
  expect(screen.getByTestId("pages-theme-status")).toHaveTextContent("Crewship default")
  expect(screen.getByRole("radio", { name: "Crewship" })).toHaveAttribute("aria-checked", "true")
- expect(screen.getByLabelText("Accent")).toHaveValue("#1e7bfe")
- expect(screen.getByLabelText("Background")).toHaveValue("#0a0b0e")
+ // The six colours are shown as they are (v67); the hex editor is under Custom…
+ expect(screen.getByText("#1e7bfe")).toBeInTheDocument()
+ expect(screen.getByText("#0a0b0e")).toBeInTheDocument()
+ expect(screen.queryByLabelText("Accent")).toBeNull()
  // Nothing to reset when already following the default.
  expect(screen.queryByRole("button", { name: /reset to crewship default/i })).toBeNull()
 })
@@ -70,6 +73,9 @@ it("sets the whole draft from a preset, marks it, and falls back to Custom on an
  fireEvent.click(screen.getByRole("radio", { name: "Paper" }))
  expect(screen.getByRole("radio", { name: "Paper" })).toHaveAttribute("aria-checked", "true")
  expect(screen.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "false")
+ // Custom… opens the editor on the colours Paper set, without changing one.
+ fireEvent.click(screen.getByRole("radio", { name: "Custom" }))
+ expect(screen.getByRole("radio", { name: "Paper" })).toHaveAttribute("aria-checked", "true")
  const paper = { Accent: "#1d4ed8", Background: "#fbfaf7", Cards: "#ffffff", Text: "#1c2430", "Secondary text": "#566072", Borders: "#e7e3da" }
  for (const [label, value] of Object.entries(paper)) expect(screen.getByLabelText(label)).toHaveValue(value)
  fireEvent.change(screen.getByLabelText("Cards"), { target: { value: "#fefefe" } })

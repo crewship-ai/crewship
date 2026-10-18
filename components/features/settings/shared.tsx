@@ -197,12 +197,14 @@ export function SettingsRow({
   lead,
   lock,
   lockTitle,
+  "data-testid": testId,
 }: {
   label: ReactNode
   description?: ReactNode
   children: ReactNode
   border?: boolean
   className?: string
+  "data-testid"?: string
   /** Icon for the small grey tile before the label. */
   lead?: LucideIcon
   /** Who may change this row: a lock and this word beside the label. */
@@ -213,6 +215,7 @@ export function SettingsRow({
   return (
     <div
       data-slot="settings-row"
+      data-testid={testId}
       className={cn(
         // Wraps rather than squeezes. The label side is at least 11rem; when
         // it and the control do not fit side by side (a phone), the control
@@ -428,7 +431,8 @@ export function SettingsSegmented<T extends string | number>({ label, options, v
     <div className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label={label}>
       {options.map((o) => (
         <button key={String(o.value)} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onChange(o.value)}
-          className={cn("h-7 rounded-md px-2.5 text-xs transition-colors disabled:opacity-50",
+          // v67 `.seg button`: 28 px high (--control-sm) with a 13 px label.
+          className={cn("h-[var(--control-sm)] rounded-md px-2.5 text-control transition-colors disabled:opacity-50",
             value === o.value ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
           {o.label}
         </button>
