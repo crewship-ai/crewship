@@ -25,9 +25,7 @@
 [data-style="harbor"]:not(.dark) {
   --sidebar: #F3F4F6;
   --background: #FFFFFF;
-  --card: 1=4.78/4.69, 2=10.57/10.39,
-   *  3=3.53/3.47, 4=7.53/7.40, 5=3.50/3.44 — all ≥ 3:1, the WCAG 1.4.11
-   *  non-text minimum these decorative marks are held to. */
+  --card: #FFFFFF;
   --chart-1: #0E6BE8;
   --popover: #FFFFFF;
   --muted: #F8F9FA;
@@ -52,8 +50,7 @@
 .dark[data-style="harbor"] {
   --sidebar: #0A0B0D;
   --background: #0F1013;
-  --card: 1=5.22/4.95,
-   *  2=4.87/4.63, 3=13.22/12.55, 4=5.62/5.33, 5=11.95/11.35. */
+  --card: #181A1F;
   --chart-1: #1E7BFE;
   --popover: #181A1F;
   --muted: #1E2127;

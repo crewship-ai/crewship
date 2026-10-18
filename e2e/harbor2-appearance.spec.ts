@@ -70,7 +70,10 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     const gallery = page.getByRole("radiogroup", { name: "Style" })
     await expect(gallery).toBeVisible()
     await expect(gallery.getByRole("radio", { name: "Harbor", exact: true })).toHaveAttribute("aria-checked", "true")
-    const harborGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    // Plum and Harbor share a white content ground in light; their app ground
+    // (the sidebar, --sidebar: #F3F4F6 vs #F7F5FB) is what differs.
+    const ground = () => page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=sidebar-inner]")!).backgroundColor)
+    const harborGround = await ground()
 
     await gallery.getByRole("radio", { name: "Plum", exact: true }).click()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
@@ -80,7 +83,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     await page.reload()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
     await expect(page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Plum", exact: true })).toHaveAttribute("aria-checked", "true")
-    const plumGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    const plumGround = await ground()
     expect(plumGround).not.toBe(harborGround)
 
     await page.getByRole("button", { name: "Reset style" }).click()
@@ -90,6 +93,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
   test("a corner knob changes the radius tokens and nothing else", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await expect(page.getByRole("group", { name: "Corners" })).toBeVisible()
     const radius = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-slot='card'], .rounded-card")!).borderTopLeftRadius))
     const before = await radius()
     await page.getByRole("group", { name: "Corners" }).getByRole("button", { name: "Sharp" }).click()
