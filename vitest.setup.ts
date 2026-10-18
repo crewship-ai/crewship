@@ -1,6 +1,10 @@
 import { expect, afterEach, vi } from 'vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import * as matchers from '@testing-library/jest-dom/matchers'
+
+// findBy*/waitFor ceiling. The 1 s default timed out unrelated tests under
+// full parallel load (lib/__tests__/testing-library-wait.test.ts).
+configure({ asyncUtilTimeout: 3000 })
 
 // Extend Vitest's expect with jest-dom matchers
 expect.extend(matchers)

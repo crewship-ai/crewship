@@ -173,9 +173,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
-    // The first-run screen, not the ordinary sign-in. Harbor 2 (auth A10)
-    // dropped the "Initial setup" eyebrow; the Auth card names the job.
-    await expect(page.getByRole("heading", { level: 1, name: "Create the administrator account" })).toBeVisible()
+    await expect(page.getByText(/initial setup/i)).toBeVisible()
     await page.fill("#full_name", fullName)
     await page.fill("#email", email)
     await page.fill("#password", password)
@@ -271,16 +269,10 @@ test.describe("onboarding wizard — first-run flow", () => {
 
     // "Start chatting" when the agent slug resolved, "Go to dashboard" when it
     // did not — handleLaunch resolves it with one GET /agents/<id> and falls
-    // back deliberately. Harbor 2's receipt (onboarding O08) keeps a secondary
-    // "Go to dashboard" beside the primary "Start chatting" when the slug
-    // resolved, so take the primary action that is offered, then assert below
-    // that it was the good one: a fallback becomes a one-line failure naming
-    // its cause instead of a 15s timeout.
-    const startChatting = page.getByRole("button", { name: /start chatting/i })
-    const primary = (await startChatting.count()) > 0
-      ? startChatting
-      : page.getByRole("button", { name: /go to dashboard/i })
-    await primary.click()
+    // back deliberately, so both buttons are legitimate. Take whichever is
+    // offered, then assert below that it was the good one: a fallback becomes
+    // a one-line failure naming its cause instead of a 15s timeout.
+    await page.getByRole("button", { name: /start chatting|go to dashboard/i }).first().click()
 
     await page.waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", {
       timeout: 15_000,
