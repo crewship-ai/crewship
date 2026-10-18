@@ -52,3 +52,8 @@ These tests use explicit props fixtures. They do not certify real endpoints,
 CLI behavior, a live browser, complete history/compare/restore or access-audit
 acceptance. Existing panel/application history controls have different mutation
 semantics and are intentionally not reused as Document restore behavior.
+
+The confirmed snapshot body reuses `../document-readonly/DocumentReadonly` after
+the exact selected checkpoint and current scope checks. That shared reader rejects
+non-Document roots and clears prior DOM if serialization fails. Browsing still
+does not create a live editor or restore the original run authority.
