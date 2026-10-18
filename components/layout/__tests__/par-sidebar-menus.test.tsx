@@ -55,9 +55,13 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { UserMenu } from "@/components/layout/user-menu"
 import { SidebarProvider } from "@/components/ui/sidebar"
 
+// vitest.setup.ts replaces localStorage with bare mocks; give it a store.
+const store = new Map<string, string>()
 beforeEach(() => {
   cleanup()
-  localStorage.clear()
+  store.clear()
+  vi.mocked(localStorage.getItem).mockImplementation((k: string) => store.get(k) ?? null)
+  vi.mocked(localStorage.setItem).mockImplementation((k: string, v: string) => { store.set(k, v) })
   for (const m of ["hasPointerCapture", "releasePointerCapture", "scrollIntoView"] as const) {
     if (!Element.prototype[m]) (Element.prototype as unknown as Record<string, unknown>)[m] = () => false
   }
@@ -112,9 +116,10 @@ describe("the user menu (PAR-141)", () => {
     open()
     expect(screen.getByRole("menu")).toHaveAttribute("data-side", "right")
   })
-  it("states the role in the workspace as one chip", () => {
+  it("states the role as a chip with the workspace beside it", () => {
     open()
-    expect(screen.getByText("Owner in Acme Company")).toBeInTheDocument()
+    expect(within(screen.getByRole("menu")).getByText("Owner")).toBeInTheDocument()
+    expect(screen.getByText("in Acme Company")).toBeInTheDocument()
   })
   it("keeps Sessions & CLI tokens on one line beside its count", async () => {
     open()

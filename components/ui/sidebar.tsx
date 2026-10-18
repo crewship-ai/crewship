@@ -86,6 +86,13 @@ function useSidebar() {
 }
 
 
+/** For surfaces that also render outside a provider (a menu in a test, a
+ *  standalone page): the context, or null. */
+function useSidebarOptional() {
+  return React.useContext(SidebarContext)
+}
+
+
 function SidebarProvider({
   defaultOpen: _defaultOpen = true,
   open: openProp,
@@ -511,4 +518,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 }
