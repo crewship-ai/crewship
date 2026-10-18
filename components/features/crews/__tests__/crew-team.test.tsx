@@ -35,7 +35,7 @@ function renderTeam(extra: Partial<React.ComponentProps<typeof CrewTeam>> = {}) 
 }
 
 describe("CrewTeam", () => {
-  it("temporary hires: pending shows Approve, active shows time left, expired shows Rehire; Extend absent", () => {
+  it("temporary hires: pending shows Approve, active shows time left, expired shows Rehire", () => {
     const p = renderTeam()
     const pending = document.querySelector('[data-hire-state="pending"]') as HTMLElement
     const active = document.querySelector('[data-hire-state="active"]') as HTMLElement
@@ -48,7 +48,7 @@ describe("CrewTeam", () => {
     expect(within(active).getByText(/Expires in 38 min/)).toBeInTheDocument()
     fireEvent.click(within(expired).getByRole("button", { name: /Rehire/ }))
     expect(p.onRehire).toHaveBeenCalledWith(expect.objectContaining({ id: "a4" }))
-    expect(screen.queryByRole("button", { name: /Extend/ })).toBeNull()
+    // Release now has no endpoint yet (#3454): never offered, on any row.
     expect(screen.queryByRole("button", { name: /Release now/ })).toBeNull()
   })
 
