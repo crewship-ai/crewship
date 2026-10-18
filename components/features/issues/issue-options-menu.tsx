@@ -58,6 +58,11 @@ export function IssueOptionsMenu({
   const url = `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`
   const allowed = issue.allowed_actions
   const can = (a: IssueAction) => !allowed || allowed.includes(a)
+  // The server grants "delete" with the other write actions and then drops it
+  // while the issue is not Backlog or Cancelled (issue_chat_metadata.go
+  // issueActionsForState). A writer still sees the row, disabled with why.
+  const deletable = DELETABLE.has(String(issue.status))
+  const showDelete = can("delete") || (!deletable && can("edit_fields"))
 
   const copyLink = () => {
     const link = `${window.location.origin}/issues/${encodeURIComponent(id)}`
@@ -91,17 +96,17 @@ export function IssueOptionsMenu({
               <FolderKanban className="size-3.5" aria-hidden /> Move to project…
             </DropdownMenuItem>
           )}
-          {(can("change_status") || can("delete")) && <DropdownMenuSeparator />}
+          {(can("change_status") || showDelete) && <DropdownMenuSeparator />}
           {can("change_status") && !CLOSED.has(String(issue.status)) && (
             <DropdownMenuItem onSelect={() => setDialog("cancel")}>
               <Archive className="size-3.5" aria-hidden /> Cancel issue…
             </DropdownMenuItem>
           )}
-          {can("delete") && (
+          {showDelete && (
             <DropdownMenuItem
               variant="destructive"
-              disabled={!DELETABLE.has(String(issue.status))}
-              title={DELETABLE.has(String(issue.status)) ? undefined : "Only Backlog or Cancelled issues can be deleted. Cancel it first."}
+              disabled={!deletable}
+              title={deletable ? undefined : "Only Backlog or Cancelled issues can be deleted. Cancel it first."}
               onSelect={() => setDialog("delete")}
             >
               <Trash2 className="size-3.5" aria-hidden /> Delete issue…
