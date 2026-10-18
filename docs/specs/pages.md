@@ -287,6 +287,16 @@ architecture and reuses two systems that already exist here.
 
 ## 7. Permission model
 
+Private chat artifacts are an explicit exception to the ordinary Page role and
+grant paths described below. Their persisted private audience permits only the
+human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
+reads return 404 and catalogs omit the name and entry. OWNER opening another
+human's private output writes a content-free audit before metadata or content is
+released; unavailable audit storage refuses that access. Ordinary grants,
+folders and legacy public links cannot silently publish a private artifact.
+Shared Page authorization and workspace-wide storage accounting are unchanged.
+
+
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant
 read and write to others.

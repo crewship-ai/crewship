@@ -301,6 +301,17 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 				replyError(w, http.StatusForbidden, "active trusted workspace administrator required")
 				return
 			}
+			if liveRole != "OWNER" {
+				var private bool
+				if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM pages WHERE workspace_id=? AND owner_user_id=? AND private_audience=1)`, workspaceID, memberUserID).Scan(&private); err != nil {
+					replyInternalError(w, h.logger, "authorize custody conflict", err)
+					return
+				}
+				if private {
+					writeJSON(w, 409, map[string]string{"code": "page_ownership_transfer_required", "error": "workspace OWNER must select a private artifact successor before removing this member"})
+					return
+				}
+			}
 			replyPageOwnershipConflict(w, "cannot remove this member: ", needsManual)
 			return
 		}

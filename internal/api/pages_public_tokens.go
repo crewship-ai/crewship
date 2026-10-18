@@ -198,6 +198,10 @@ func (h *PageHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for publish", err)
 		return
 	}
+	if rec.PrivateAudience {
+		replyError(w, 409, "private artifacts cannot be published through legacy Page links")
+		return
+	}
 	// Publishing is at least as consequential as deleting, so it takes the
 	// delete gate and not the edit gate: owner or workspace ADMIN/OWNER. A
 	// `write` grantee rearranges the page — §7.1b rule 2 makes that authority
