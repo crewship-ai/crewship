@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState, type CSSProperties } from "react"
-import { Contrast, Palette, SlidersHorizontal } from "lucide-react"
+import { Contrast, Palette, Shapes, SlidersHorizontal } from "lucide-react"
+import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
@@ -11,8 +12,10 @@ import { useAppearance } from "@/hooks/use-appearance"
 import { retryAppearanceSync, useAppearanceSyncStatus } from "@/hooks/use-appearance-sync"
 import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
 import { ACCENTS, WORKSPACE_ACCENT, type AccentChoice } from "@/lib/theme/accents"
+import { HARBOR, KNOBS, STYLES, allowedSchemes, knobValue, type Scheme } from "@/lib/theme/appearance-style"
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
 import { SettingsCard, SettingsRow, SettingsSegmented } from "../shared"
+import { StyleGallery } from "./style-gallery"
 
 // Settings › Account › Appearance.
 //
@@ -39,6 +42,13 @@ const SIDEBAR_OPTIONS: { value: SidebarChoice; label: string }[] = [
   { value: "collapsed", label: "Rail" },
   { value: "pinned", label: "Pinned open" },
 ]
+
+// What each knob changes, and only that.
+const KNOB_HINTS: Record<string, string> = {
+  radius: "Scales every corner together. Style default keeps the style's own.",
+  cards: "Border is flat with a hairline; Shadow lifts cards off the page.",
+  lines: "How strong borders and dividers are. Form field outlines stay readable.",
+}
 
 const MOTION_OPTIONS: { value: MotionChoice; label: string }[] = [
   { value: "system", label: "System" },
@@ -83,7 +93,7 @@ function ThemePreview({ variant }: { variant: keyof typeof PREVIEW }) {
   )
 }
 
-function ThemeTiles({ value, onChange }: { value: ThemeChoice | undefined; onChange: (t: ThemeChoice) => void }) {
+function ThemeTiles({ value, onChange, allowed }: { value: ThemeChoice | undefined; onChange: (t: ThemeChoice) => void; allowed: ThemeChoice[] }) {
   // As ThemeSwitcher: next-themes knows the stored theme only after
   // hydration, so nothing is pressed until then.
   const [mounted, setMounted] = useState(false)
@@ -93,6 +103,7 @@ function ThemeTiles({ value, onChange }: { value: ThemeChoice | undefined; onCha
     <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-2.5 px-4 pb-4 pt-3.5">
       {THEME_OPTIONS.map(({ value: option, label, icon: Icon }) => {
         const checked = mounted && value === option
+        const disabled = !allowed.includes(option)
         return (
           <button
             key={option}
@@ -100,10 +111,12 @@ function ThemeTiles({ value, onChange }: { value: ThemeChoice | undefined; onCha
             role="radio"
             aria-checked={checked}
             aria-label={label}
+            disabled={disabled}
             onClick={() => onChange(option)}
             className={cn(
               "group grid gap-2 rounded-xl border bg-card p-2 text-left outline-none transition-colors",
               "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/50",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border",
               checked ? "border-primary ring-[3px] ring-primary/20" : "border-border",
             )}
           >
@@ -212,15 +225,60 @@ function TeamColourRow({ hex, value, onChange }: { hex: string | null | undefine
   )
 }
 
+/**
+ * Why Light and System are off while a single-scheme style is active, and the
+ * way out. Harbor is the style that always has both.
+ */
+function SchemeHint({ styleId, onSwitch }: { styleId: string; onSwitch: () => void }) {
+  const def = STYLES.find((s) => s.id === styleId)
+  if (!def || def.schemes.length !== 1) return null
+  const only = def.schemes[0]
+  return (
+    <div data-testid="scheme-hint" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/60 bg-surface-subtle/60 px-4 py-3">
+      <p className="min-w-0 flex-1 text-label text-muted-foreground">
+        {def.name} is a {only} style, so {only === "dark" ? "Light" : "Dark"} and System are off.
+      </p>
+      <Button size="sm" variant="outline" onClick={onSwitch} className="coarse:h-[44px]">
+        Switch to {HARBOR.name}
+      </Button>
+    </div>
+  )
+}
+
 export function AppearanceSection() {
-  const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled } = useAppearance()
+  const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled, style, pickStyle, resetStyle, setKnob } = useAppearance()
+  const { resolvedTheme } = useTheme()
   const syncStatus = useAppearanceSyncStatus()
   const workspaceHex = useWorkspaceAccentHex()
+  const scheme: Scheme = resolvedTheme === "light" || (resolvedTheme !== "dark" && theme === "light") ? "light" : "dark"
+  const styleId = style?.style ?? HARBOR.id
+  const atDefault = styleId === HARBOR.id && Object.keys(style?.knobs ?? {}).length === 0
 
   return (
     <div className="space-y-5">
+      <SettingsCard
+        icon={Shapes}
+        title="Style"
+        description="The surfaces, corners and colours of the whole app. Choosing one also suggests an accent."
+        actions={
+          <Button variant="outline" size="xs" onClick={resetStyle} disabled={atDefault} className="coarse:h-[44px]">
+            Reset style
+          </Button>
+        }
+      >
+        <StyleGallery state={style} scheme={scheme} onPick={pickStyle} />
+        <div className="border-t border-border/60">
+          {Object.entries(KNOBS).map(([name, knob]) => (
+            <SettingsRow key={name} label={knob.label} description={KNOB_HINTS[name]}>
+              <SettingsSegmented label={knob.label} options={knob.options} value={knobValue(style, name)} onChange={(v) => setKnob(name, v)} />
+            </SettingsRow>
+          ))}
+        </div>
+      </SettingsCard>
+
       <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system">
-        <ThemeTiles value={theme} onChange={setTheme} />
+        <ThemeTiles value={theme} onChange={setTheme} allowed={allowedSchemes(styleId)} />
+        <SchemeHint styleId={styleId} onSwitch={() => pickStyle(HARBOR.id)} />
       </SettingsCard>
 
       <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus">

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
 @import "./styles/accents.css";
+@import "./styles/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -244,6 +245,10 @@
      dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
+  /* The rail and list rows (7 px): the sixth corner token, scaled with the
+     five in @theme below. A plain property here, not in @theme, so it exists
+     whether or not a utility uses it. */
+  --radius-row: calc(7px * var(--radius-k, 1));
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
   --surface-subtle: #F8F9FA;
@@ -621,13 +626,16 @@
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* The six corner tokens all scale by --radius-k (1 unless a style or the
+     Corners knob sets it, app/styles/styles.css), so the knob moves them
+     together and keeps their proportions. */
+  --radius-sm: calc((var(--radius) - 4px) * var(--radius-k, 1));
+  --radius-md: calc((var(--radius) - 2px) * var(--radius-k, 1));
+  --radius-lg: calc(var(--radius) * var(--radius-k, 1));
+  --radius-xl: calc((var(--radius) + 4px) * var(--radius-k, 1));
   /* rounded-card: every card, panel and dialog surface. In px: a radius is
      drawn, not read, so it stays 10 px at every text size. */
-  --radius-card: 10px;
+  --radius-card: calc(10px * var(--radius-k, 1));
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -1119,7 +1127,7 @@ body {
     height: 30px !important;
     padding: 0 10px !important;
     gap: 10px !important;
-    border-radius: 7px !important;
+    border-radius: var(--radius-row) !important;
     justify-content: flex-start !important;
     overflow: visible !important;
     color: var(--muted-foreground);
@@ -1219,7 +1227,7 @@ body {
     width: 100%;
     height: 30px;
     padding: 0 9px;
-    border-radius: 7px;
+    border-radius: var(--radius-row);
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--muted-foreground-soft);

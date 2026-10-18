@@ -1,9 +1,20 @@
 "use client"
 
-import { useCallback, useSyncExternalStore } from "react"
+import { useCallback, useMemo, useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 
 import { DEFAULT_ACCENT, type AccentChoice } from "@/lib/theme/accents"
+import {
+  applyStyleAttributes,
+  parseStyleState,
+  planStyleSelection,
+  readStyleState,
+  resetStyleState,
+  serializeStyleState,
+  setKnobValue,
+  writeStyleState,
+  type StyleState,
+} from "@/lib/theme/appearance-style"
 import {
   DEFAULT_DENSITY,
   DEFAULT_MOTION,
@@ -16,6 +27,7 @@ import {
   readSidebar,
   readTextSize,
   readSyncEnabled,
+  emitAppearanceChange,
   setAccentChoice,
   setDensity,
   setMotion,
@@ -61,6 +73,17 @@ export function useAppearanceSyncEnabled(): boolean {
   return useSyncExternalStore(subscribeAppearance, readSyncEnabled, serverSync)
 }
 
+const serverStyle = () => null
+function readStyleRaw(): string | null {
+  const s = readStyleState()
+  return s ? serializeStyleState(s) : null
+}
+/** The stored style state (null until one is picked), as the sync hook keeps it. */
+export function useStyleState(): StyleState | null {
+  const raw = useSyncExternalStore(subscribeAppearance, readStyleRaw, serverStyle)
+  return useMemo(() => (raw ? parseStyleState(JSON.parse(raw)) : null), [raw])
+}
+
 export interface AppearanceState {
   /** The stored theme choice (System stays "system"); undefined until
    *  next-themes knows it. */
@@ -71,6 +94,13 @@ export interface AppearanceState {
   textSize: TextSize
   sidebar: SidebarChoice
   syncEnabled: boolean
+  /** The stored style and knobs; null while Harbor is simply the default. */
+  style: StyleState | null
+  /** One-shot: the style, its suggested accent and, for a single-scheme style, its scheme. */
+  pickStyle: (id: string) => void
+  /** Back to Harbor with default knobs; theme and accent are left alone. */
+  resetStyle: () => void
+  setKnob: (name: string, value: string) => void
   setTheme: (t: ThemeChoice) => void
   setAccent: (id: AccentChoice) => void
   setDensity: (d: Density) => void
@@ -91,12 +121,38 @@ export interface AppearanceState {
  * refused.
  */
 export function useAppearance(): AppearanceState {
-  const { theme: rawTheme, setTheme: setNextTheme } = useTheme()
+  const { theme: rawTheme, resolvedTheme, setTheme: setNextTheme } = useTheme()
   const theme = isThemeChoice(rawTheme) ? rawTheme : undefined
   const setTheme = useCallback((t: ThemeChoice) => setNextTheme(t), [setNextTheme])
+  const style = useStyleState()
+  const accent = useAccentChoice()
+  const paint = (next: StyleState, scheme: "light" | "dark") => {
+    writeStyleState(next)
+    applyStyleAttributes(document.documentElement, next, scheme)
+  }
+  const currentScheme = resolvedTheme === "light" ? "light" : "dark"
+  const pickStyle = (id: string) => {
+    const plan = planStyleSelection(id, style, theme)
+    paint(plan.style, plan.theme === "light" || plan.theme === "dark" ? plan.theme : currentScheme)
+    setAccentChoice(plan.accent)
+    if (plan.theme) setTheme(plan.theme)
+    emitAppearanceChange()
+  }
+  const resetStyle = () => {
+    paint(resetStyleState(), currentScheme)
+    emitAppearanceChange()
+  }
+  const setKnob = (name: string, value: string) => {
+    paint(setKnobValue(style, name, value), currentScheme)
+    emitAppearanceChange()
+  }
   return {
     theme,
-    accent: useAccentChoice(),
+    accent,
+    style,
+    pickStyle,
+    resetStyle,
+    setKnob,
     density: useDensity(),
     motion: useMotionChoice(),
     textSize: useTextSize(),
