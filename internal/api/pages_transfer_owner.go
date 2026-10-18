@@ -15,7 +15,11 @@ package api
 // whole erasure refuses rather than proceeding halfway when a page cannot be
 // resolved.
 //
-// The rule, in order (§7.1 rule 1b):
+// Docs, Artifacts and Boards always refuse until an administrator explicitly transfers
+// them through WorkspaceHandler.TransferPageOwnership. The automatic rule below
+// applies only to regular panel Pages.
+//
+// The regular Page rule, in order (§7.1 rule 1b):
 //
 //  1. the crew that owns the most panels on the page
 //  2. else the crew the departing user belonged to (in this workspace)
@@ -28,9 +32,9 @@ package api
 // RESTRICT constraint exists to prevent — a page with a made-up owner is
 // still a lie about who is responsible for it. A human decides instead.
 //
-// Every resolved transfer emits one journal entry and one inbox notification
+// Every resolved transfer emits one post-commit journal entry and one inbox notification
 // targeted at workspace ADMIN/OWNER (§7.1 rule 1b: "so a role that does not
-// leave can reassign the page"), both inside the same transaction as the
+// leave can reassign the page"). The notification is inside the transaction as the
 // ownership UPDATE — either the whole batch of transfers (and their
 // notifications) lands, or none of it does.
 
@@ -66,27 +70,30 @@ type pageOwnerTransferResult struct {
 	PageName   string
 	ToCrewID   string
 	ToCrewName string
-	// Reason is "most_panels" or "member_crew" — which half of §7.1 rule 1b
+	ToUserID   string
+	// Reason is "explicit_human_transfer", "most_panels" or "member_crew" — which rule
 	// resolved the target, recorded on the journal entry and the
 	// notification payload so a reviewing ADMIN/OWNER can see why.
 	Reason string
 }
 
 // ErrPagesNeedManualTransfer is returned when one or more of the departing
-// user's pages cannot be auto-assigned to a crew: no crew owns any panel on
+// user's pages need explicit human selection, or cannot be assigned to a crew: no crew owns any panel on
 // the page, AND the departing user belongs to no crew in this workspace.
 // Per §7.1 rule 1b (corrected 2026-08-12) there is no third fallback — an
 // orphaned or silently-deleted page is precisely what the rule forbids, so
 // the caller must refuse the erasure and let a human reassign the page
 // first (e.g. `crewship page grant` / a manual owner change).
 type ErrPagesNeedManualTransfer struct {
-	Pages []string // "slug (name)" for every page that could not be resolved
+	OutputPages []pageOwnershipSummary
+	PageIDs     []string // Opaque IDs of all unresolved Pages, including ordinary Pages.
+	Pages       []string // "slug (name)" for every page that could not be resolved
 }
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s have no crew that owns their panels and the user belongs to no crew in this workspace — reassign these pages to a crew manually, then retry",
-		strings.Join(e.Pages, ", "))
+		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts and Boards require an explicit human successor selection. %s",
+		strings.Join(e.Pages, ", "), pageOwnershipHelp)
 }
 
 // transferDepartingUserPages hands every page `userID` owns in `wsID` to a
@@ -149,17 +156,24 @@ func emitPageOwnerTransferJournals(ctx context.Context, j journal.Emitter, wsID,
 // rows, and on the instance route the audit entry). It neither commits nor
 // writes the journal; the caller does both.
 func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID string) ([]pageOwnerTransferResult, error) {
-	type pageRow struct{ id, slug, name string }
+	type pageRow struct {
+		id, slug, name string
+		humanOnly      bool
+	}
 	var pages []pageRow
+	predicate, _, err := privatePageOwnershipSQL(ctx, tx, "pages")
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, name FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
+		`SELECT id, slug, name, `+predicate+` FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
 		wsID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select user-owned pages: %w", err)
 	}
 	for rows.Next() {
 		var p pageRow
-		if err := rows.Scan(&p.id, &p.slug, &p.name); err != nil {
+		if err := rows.Scan(&p.id, &p.slug, &p.name, &p.humanOnly); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan user-owned page: %w", err)
 		}
@@ -185,14 +199,21 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	}
 	var toTransfer []resolvedTransfer
 	var unresolved []string
+	var unresolvedIDs []string
 
 	for _, p := range pages {
+		if p.humanOnly {
+			unresolved = append(unresolved, fmt.Sprintf("%s (%s; requires explicit human transfer)", p.slug, p.name))
+			unresolvedIDs = append(unresolvedIDs, p.id)
+			continue
+		}
 		crewID, reason, err := resolveTransferTargetCrew(ctx, tx, wsID, p.id, userID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve target crew for page %s: %w", p.slug, err)
 		}
 		if crewID == "" {
 			unresolved = append(unresolved, fmt.Sprintf("%s (%s)", p.slug, p.name))
+			unresolvedIDs = append(unresolvedIDs, p.id)
 			continue
 		}
 		var crewName string
@@ -207,7 +228,11 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 		// the deferred tx.Rollback) means pages that DID resolve are not
 		// transferred either; the erasure has to be retried after a human
 		// fixes the unresolved ones.
-		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved}
+		outputs, err := pageOwnershipRows(ctx, tx, wsID, userID, "")
+		if err != nil {
+			return nil, err
+		}
+		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved, PageIDs: unresolvedIDs, OutputPages: outputs}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -331,21 +356,23 @@ func insertPageOwnerTransferNotice(ctx context.Context, tx *sql.Tx, wsID, fromUs
 // logged loudly by the Emitter itself; this package holds no logger of its
 // own here, matching the other post-commit journal call sites in Pages.
 func emitPageOwnerTransferJournal(ctx context.Context, j journal.Emitter, wsID, actorID, fromUserID string, res pageOwnerTransferResult) {
+	target := "crew " + res.ToCrewName
+	if res.ToUserID != "" {
+		target = "human " + res.ToUserID
+	}
+	summary := fmt.Sprintf("page %s transferred to %s (%s)", res.PageSlug, target, res.Reason)
+	payload := map[string]any{
+		"page_id": res.PageID, "page_slug": res.PageSlug, "from_user_id": fromUserID,
+		"to_crew_id": res.ToCrewID, "to_crew_name": res.ToCrewName, "to_user_id": res.ToUserID, "reason": res.Reason,
+	}
+	if res.Reason == "explicit_human_transfer" {
+		// Journal List/Get/SSE are workspace-visible, not Page-authorized. Keep
+		// private output slugs/names in the administrator-only custody surface.
+		summary = "Private output ownership transferred"
+		payload = map[string]any{"page_id": res.PageID, "from_user_id": fromUserID, "to_user_id": res.ToUserID, "reason": res.Reason}
+	}
 	_, _ = j.Emit(ctx, journal.Entry{
-		WorkspaceID: wsID,
-		Type:        entryPageOwnerTransferred,
-		Severity:    journal.SeverityInfo,
-		ActorType:   journal.ActorUser,
-		ActorID:     actorID,
-		Summary: fmt.Sprintf("page %s transferred to crew %s after owner departure (%s)",
-			res.PageSlug, res.ToCrewName, res.Reason),
-		Payload: map[string]any{
-			"page_id":      res.PageID,
-			"page_slug":    res.PageSlug,
-			"from_user_id": fromUserID,
-			"to_crew_id":   res.ToCrewID,
-			"to_crew_name": res.ToCrewName,
-			"reason":       res.Reason,
-		},
+		WorkspaceID: wsID, Type: entryPageOwnerTransferred, Severity: journal.SeverityInfo,
+		ActorType: journal.ActorUser, ActorID: actorID, Summary: summary, Payload: payload,
 	})
 }
