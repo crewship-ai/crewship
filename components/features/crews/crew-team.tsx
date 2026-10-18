@@ -10,8 +10,10 @@ import { adapterLabel } from "@/lib/credentials/provider-logins"
 import { getModelLabel } from "@/lib/cli-adapters"
 import { effectiveStatus, latestHireReason } from "@/lib/agent-ephemeral"
 import { entityHref } from "@/lib/entity-links"
+import { cn } from "@/lib/utils"
 
 import { CrCard, CrLine, CrNote, LeadMark } from "./cr-card"
+import { formatSpend } from "./crew-spend"
 import { AUTONOMY_LABEL } from "./crew-header"
 import { orderAgents, tempHireLabel } from "./crews-panel-model"
 import type { AgentSummary } from "./crew-canvas-tabs/types"
@@ -45,6 +47,17 @@ export interface CrewTeamProps {
   onHire: () => void
   onApprove: (agent: AgentSummary) => void
   onRehire: (agent: AgentSummary) => void
+  /**
+   * Give a live hire more time (POST /agents/{id}/rehire on a live agent
+   * extends it). Absent for a reader who may not hire: no button.
+   */
+  onExtend?: (agent: AgentSummary) => void
+  /**
+   * Cost over 30 days per agent id (GET /paymaster/spend/by-agent/{crewId}).
+   * Null or absent = unknown or not for this reader: the column is left out
+   * rather than showing zeros.
+   */
+  costByAgent?: ReadonlyMap<string, number> | null
   busyAgentId?: string | null
   now?: number
 }
@@ -64,6 +77,8 @@ export function CrewTeam({
   onHire,
   onApprove,
   onRehire,
+  onExtend,
+  costByAgent = null,
   busyAgentId = null,
   now = Date.now(),
 }: CrewTeamProps) {
@@ -93,7 +108,8 @@ export function CrewTeam({
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium max-md:hidden">Skills</th>
                   <th className="px-3 py-2 font-medium max-md:hidden">Credentials</th>
-                  <th className="px-4 py-2 text-right font-medium max-sm:hidden">Runs · 30 d</th>
+                  <th className={cn("py-2 text-right font-medium max-sm:hidden", costByAgent ? "px-3" : "px-4")}>Runs · 30 d</th>
+                  {costByAgent && <th className="px-4 py-2 text-right font-medium max-md:hidden">Cost · 30 d</th>}
                 </tr>
               </thead>
               <tbody>
@@ -126,7 +142,8 @@ export function CrewTeam({
                       <td className="px-3 py-2 max-md:hidden">
                         {creds == null ? "—" : creds === 0 ? <span className="text-chip-warn-fg">none</span> : <span className="font-mono tabular-nums">{creds}</span>}
                       </td>
-                      <td className="px-4 py-2 text-right font-mono tabular-nums max-sm:hidden">{runsByAgent ? runsByAgent.get(a.id) ?? 0 : "—"}</td>
+                      <td className={cn("py-2 text-right font-mono tabular-nums max-sm:hidden", costByAgent ? "px-3" : "px-4")}>{runsByAgent ? runsByAgent.get(a.id) ?? 0 : "—"}</td>
+                      {costByAgent && <td className="px-4 py-2 text-right font-mono tabular-nums max-md:hidden">{formatSpend(costByAgent.get(a.id) ?? 0)}</td>}
                     </tr>
                   )
                 })}
@@ -172,6 +189,8 @@ export function CrewTeam({
                   </>
                 ) : state === "expired" ? (
                   <Button variant="outline" size="sm" onClick={() => onRehire(a)}><RotateCcw className="size-3.5" aria-hidden /> Rehire</Button>
+                ) : onExtend ? (
+                  <Button variant="outline" size="sm" onClick={() => onExtend(a)}><Clock className="size-3.5" aria-hidden /> Extend</Button>
                 ) : null
               }
             />

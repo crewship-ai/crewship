@@ -141,12 +141,17 @@ export function HireDialog({ open, onOpenChange, workspaceId, crew, autonomy, in
   )
 }
 
-/** D-CRREHIRE: bring an expired hire back with its notes. */
-export function RehireDialog({ open, onOpenChange, workspaceId, agent, onRehired }: {
+/**
+ * D-CRREHIRE: bring an expired hire back with its notes. `extend` is the same
+ * call on a hire that is still live (the server resets its lifetime from now),
+ * so only the words change.
+ */
+export function RehireDialog({ open, onOpenChange, workspaceId, agent, extend = false, onRehired }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   workspaceId: string
   agent: { id: string; name: string } | null
+  extend?: boolean
   onRehired: () => void
 }) {
   const [minutes, setMinutes] = useState(30)
@@ -164,11 +169,12 @@ export function RehireDialog({ open, onOpenChange, workspaceId, agent, onRehired
         body: JSON.stringify({ ttl_minutes: minutes, reason: reason.trim() }),
       })
       if (!res.ok) throw await toApiError(res, `Rehire was refused (${res.status}).`)
-      toast.success(`${agent.name} is back for ${HIRE_DURATIONS.find((d) => d.minutes === minutes)?.label ?? `${minutes} minutes`}`)
+      const length = HIRE_DURATIONS.find((d) => d.minutes === minutes)?.label ?? `${minutes} minutes`
+      toast.success(extend ? `${agent.name} now runs for ${length} from now` : `${agent.name} is back for ${length}`)
       onOpenChange(false)
       onRehired()
     } catch (e) {
-      toast.error(`Could not rehire ${agent.name}`, { description: e instanceof Error ? e.message : String(e) })
+      toast.error(`Could not ${extend ? "extend" : "rehire"} ${agent.name}`, { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setBusy(false)
     }
@@ -176,9 +182,9 @@ export function RehireDialog({ open, onOpenChange, workspaceId, agent, onRehired
 
   return (
     <CreateSurface open={open} onOpenChange={onOpenChange} size="sm" onSubmit={() => void submit()}>
-      <CreateSurfaceHeader concept="crews" title={`Rehire ${agent?.name ?? "agent"}`} description="Brings the same agent back with its notes." onClose={() => onOpenChange(false)} />
+      <CreateSurfaceHeader concept="crews" title={`${extend ? "Extend" : "Rehire"} ${agent?.name ?? "agent"}`} description={extend ? "Keeps the same agent working. The new time counts from now, not from the old end." : "Brings the same agent back with its notes."} onClose={() => onOpenChange(false)} />
       <CreateSurfaceBody className="space-y-4">
-        <CreateSurfaceField label="For how long" htmlFor="rehire-ttl" hint="30 minutes to 24 hours">
+        <CreateSurfaceField label="For how long" htmlFor="rehire-ttl" hint={extend ? "30 minutes to 24 hours, from now" : "30 minutes to 24 hours"}>
           <select id="rehire-ttl" className={FIELD} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
             {HIRE_DURATIONS.map((d) => <option key={d.minutes} value={d.minutes}>{d.label}</option>)}
           </select>
@@ -187,7 +193,7 @@ export function RehireDialog({ open, onOpenChange, workspaceId, agent, onRehired
           <textarea id="rehire-reason" rows={3} className={cn(FIELD, "h-auto py-2")} value={reason} onChange={(e) => setReason(e.target.value)} />
         </CreateSurfaceField>
       </CreateSurfaceBody>
-      <CreateSurfaceFooter onCancel={() => onOpenChange(false)} primaryLabel="Rehire" primaryDisabled={!reason.trim()} busy={busy} onPrimary={() => void submit()} />
+      <CreateSurfaceFooter onCancel={() => onOpenChange(false)} primaryLabel={extend ? "Extend" : "Rehire"} primaryDisabled={!reason.trim()} busy={busy} onPrimary={() => void submit()} />
     </CreateSurface>
   )
 }
