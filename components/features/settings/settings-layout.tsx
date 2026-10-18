@@ -232,7 +232,13 @@ function SettingsPage() {
   // rather than corrected in an effect: an effect would still flash the hidden
   // pane for a frame. While the role is loading nothing is judged, so an
   // OWNER's deep link survives the round trip.
-  const activeTab = wsLoading || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
+  //
+  // A section that MOVED to a page of its own is the exception: it is
+  // forwarded (below) whatever the role, and that page judges the role
+  // itself — /settings/audit says "You can't open Audit log" — so the old
+  // link ends on the same sentence instead of silently opening Profile.
+  const activeTab =
+    wsLoading || requestedTab in MOVED_SECTIONS || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
   useFocusSettingsCard(focusedCard, activeTab)
 
   // A section that moved forwards immediately — before the workspace fetch,
