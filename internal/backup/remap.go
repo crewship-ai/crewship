@@ -368,6 +368,12 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				}
 				row[rc.column] = rc.regenerate(oldVal)
 			}
+			// These IDs identify immutable operations/history within the remapped
+			// workspace/Page composite key. Reminting them breaks receipt digests
+			// and checkpoint references; the anchor FKs still remap in pass 2.
+			if table == "document_receipts" || table == "document_checkpoints" {
+				continue
+			}
 			oldID, ok := row["id"].(string)
 			if !ok || oldID == "" {
 				continue
