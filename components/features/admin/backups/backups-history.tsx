@@ -203,7 +203,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
         <div role="toolbar" aria-label="Change the selected runs" data-slot="runs-bulk"
           className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
             "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
-          <span className="px-1"><span className="font-mono font-semibold tabular-nums">{pickedRuns.length}</span><span className="max-sm:hidden"> selected</span></span>
+          <span className="px-1"><span className="font-semibold tabular-nums">{pickedRuns.length}</span><span className="max-sm:hidden"> selected</span></span>
           <Button type="button" size="sm" className={cn(selectionBarAction, "max-sm:px-2")} onClick={() => void pinAll(true)}><Pin />Pin</Button>
           <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={() => void pinAll(false)}><PinOff />Unpin</Button>
           <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={downloadAll}><Download />Download</Button>
@@ -249,7 +249,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
-      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro text-muted-foreground">{n}</span>
+      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-micro tabular-nums text-muted-foreground">{n}</span>
       <div className="min-w-0 flex-1">
         <div>{label}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>

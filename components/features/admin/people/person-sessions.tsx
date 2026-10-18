@@ -101,7 +101,7 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-label" title={g.ua ?? ""}>
                       {describeAgent(g.ua)}
-                      {g.ids.length > 1 && <span className="ml-1.5 font-mono text-micro text-muted-foreground">× {g.ids.length}</span>}
+                      {g.ids.length > 1 && <span className="ml-1.5 text-micro tabular-nums text-muted-foreground">× {g.ids.length}</span>}
                       {g.current && <span className="ml-1.5 text-label text-success">this session</span>}
                     </span>
                     <span className="block truncate text-label text-muted-foreground">last used {ago(g.last)}{g.ip ? ` · ${g.ip}` : ""}</span>

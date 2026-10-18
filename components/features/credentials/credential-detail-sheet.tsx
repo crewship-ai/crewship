@@ -848,7 +848,7 @@ export function CredentialDetailSheet({
                 <div role="radiogroup" aria-label="Keeper tier" className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
                   {[1, 2, 3, 4].map((n) => (
                     <button key={n} type="button" role="radio" aria-checked={tierLevel === n} disabled={tierSaving} onClick={() => setTier(n)}
-                      className={cn("kit-tap h-7 rounded px-2.5 font-mono text-label", tierLevel === n ? "bg-card font-semibold text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+                      className={cn("kit-tap h-7 rounded px-2.5 text-label tabular-nums", tierLevel === n ? "bg-card font-semibold text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
                       L{n}
                     </button>
                   ))}
@@ -980,7 +980,7 @@ export function CredentialDetailSheet({
                   {credential.account_label ? ` · ${credential.account_label}` : ""} · added {formatDate(credential.created_at)}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <StatusPill tone={state.tone} label={state.label} />
+                  <StatusPill className="font-sans tracking-normal" tone={state.tone} label={state.label} />
                   <span className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-label text-muted-foreground">
                     <Layers className="size-3" aria-hidden /> {credential.scope === "CREW" ? "Selected crews" : "Workspace"}
                   </span>

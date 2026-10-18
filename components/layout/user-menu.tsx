@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Badge } from "@/components/ui/badge"
 import { MenuSheet, MenuSheetItem, MenuSheetSeparator, MenuSheetSub } from "@/components/ui/menu-sheet"
-import { buildLabel } from "./sidebar-version"
+import { useSidebarOptional } from "@/components/ui/sidebar"
+import { buildLabel, editionName } from "./sidebar-version"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
 
@@ -67,6 +68,9 @@ export function UserMenu({ placement = "toolbar" }: {
   const canPair = accessMode !== "loading"
   const [open, setOpen] = useState(false)
   const [pairOpen, setPairOpen] = useState(false)
+  // v67 `pop-user`: above the user row at the sidebar's left edge while the
+  // sidebar is open; beside the rail when it is only a rail.
+  const sidebarOpen = useSidebarOptional()?.state !== "collapsed"
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
@@ -80,16 +84,23 @@ export function UserMenu({ placement = "toolbar" }: {
         open={open}
         onOpenChange={setOpen}
         label="User menu"
-        popoverAlign="end"
-        popoverSide={placement === "sidebar" ? "right" : placement === "row" ? "top" : "bottom"}
-        popoverOffset={placement === "sidebar" ? 8 : 4}
-        popoverClassName="w-72 p-0"
+        popoverAlign={placement === "sidebar" && sidebarOpen ? "start" : "end"}
+        popoverSide={placement === "sidebar" ? (sidebarOpen ? "top" : "right") : placement === "row" ? "top" : "bottom"}
+        popoverOffset={placement === "sidebar" ? (sidebarOpen ? 6 : 8) : 4}
+        popoverClassName="w-[300px] p-0"
         trigger={
           placement === "sidebar" ? (
             <button type="button" className="rail-user" aria-label="User menu">
-              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-6 shrink-0" textClassName="text-micro" />
+              <span className="relative shrink-0">
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-7" textClassName="text-micro" />
+                <span
+                  data-slot="presence-dot"
+                  aria-hidden
+                  className="absolute -bottom-px -right-px size-2 rounded-full border-2 border-sidebar bg-success"
+                />
+              </span>
               <span className="rail-label grid min-w-0 flex-1 leading-tight">
-                <span className="truncate text-label font-medium text-foreground">{userName}</span>
+                <span className="type-nav truncate font-semibold text-foreground">{userName}</span>
                 {workspaceRole && <span className="truncate text-micro text-muted-foreground-soft">{roleLabel(workspaceRole)}</span>}
               </span>
               <ChevronsUpDown className="rail-label size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
@@ -127,7 +138,7 @@ export function UserMenu({ placement = "toolbar" }: {
             </MenuSheetItem>
             <div className="flex items-center gap-1.5 px-2 pb-1.5">
               <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">
-                {workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}
+                {workspaceRole ? roleLabel(workspaceRole) : "Loading role…"}
               </Badge>
               {workspace?.name && (
                 <span className="truncate text-micro text-muted-foreground" title={workspace.name}>
@@ -169,7 +180,7 @@ export function UserMenu({ placement = "toolbar" }: {
             <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=sessions">
                 <MonitorSmartphone className={ICON} />
-                <span className="flex-1">Sessions &amp; CLI tokens</span>
+                <span className="flex-1 whitespace-nowrap">Sessions &amp; CLI tokens</span>
                 <ActiveSessionsCount />
               </Link>
             </MenuSheetItem>
@@ -311,8 +322,13 @@ function ActiveSessionsCount() {
  *  read and label as the rail's SidebarVersion. */
 function BuildFooter() {
   const [build, setBuild] = useState<{ label: string; update: string | null } | null>(null)
+  const [edition, setEdition] = useState<string | undefined>()
   useEffect(() => {
     let live = true
+    apiFetch("/api/v1/system/license")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((l) => { if (live && l?.edition) setEdition(l.edition) })
+      .catch(() => {})
     apiFetch("/api/v1/system/version")
       .then((r) => (r.ok ? r.json() : null))
       .then((b) => {
@@ -324,7 +340,7 @@ function BuildFooter() {
   if (!build) return null
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2" data-testid="user-menu-footer">
-      <span className="min-w-0 truncate font-mono text-micro text-muted-foreground-soft" data-testid="user-menu-build">{build.label}</span>
+      <span className="min-w-0 truncate text-micro text-muted-foreground-soft" data-testid="user-menu-build">{edition ? `${editionName(edition)} · ` : ""}{build.label}</span>
       {build.update && (
         <a href={build.update} target="_blank" rel="noopener noreferrer" className="shrink-0 text-micro font-medium text-primary hover:underline">
           Update available

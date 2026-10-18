@@ -234,7 +234,7 @@ function OrderTab({
           const name = a?.name ?? "Unavailable account"
           return (
             <li key={id} className="flex items-center gap-3 border-t border-border px-4 py-2.5 first:border-t-0">
-              <span className="inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted font-mono text-label text-muted-foreground">{i + 1}</span>
+              <span className="inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-label tabular-nums text-muted-foreground">{i + 1}</span>
               {a && <LoginBrandMark provider={a.login?.provider ?? a.provider} size="sm" />}
               <span className="grid min-w-0 flex-1 leading-tight">
                 <b className="truncate text-control font-medium text-foreground">{name}</b>

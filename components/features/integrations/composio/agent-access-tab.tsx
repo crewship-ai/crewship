@@ -59,7 +59,7 @@ export function AgentAccessTab({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <Bot className="h-3.5 w-3.5" /> Agent access
           <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
             · each agent lists only the apps it&apos;s granted

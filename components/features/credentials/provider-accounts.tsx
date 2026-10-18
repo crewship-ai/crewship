@@ -76,7 +76,7 @@ export function ProviderHealth({ counts, onOpen }: { counts: ProviderHealthCount
         const inner = (
           <>
             <Icon className={cn("size-4", t.count > 0 ? TONE[t.tone] : "text-muted-foreground-soft")} aria-hidden />
-            <b className="font-mono text-heading font-semibold tabular-nums text-foreground">{t.count}</b>
+            <b className="text-heading font-semibold tabular-nums text-foreground">{t.count}</b>
             <span className="col-span-2 min-w-0 text-label text-foreground/85">
               {t.label}
               <small className="block truncate text-micro text-muted-foreground">{t.hint}</small>
@@ -344,7 +344,7 @@ function GroupSection({ label, items, poolOf, onOpen }: { label: string; items: 
   return (
     <section aria-label={`${label} · ${items.length}`} className="flex flex-col gap-1.5">
       <h3 className="px-1 text-label font-semibold text-foreground">
-        {label} <span className="font-mono font-normal text-muted-foreground">· {items.length}</span>
+        {label} <span className="font-normal tabular-nums text-muted-foreground">· {items.length}</span>
       </h3>
       <AccountsTable rows={open ? items : items.slice(0, 5)} caption={label} groupOf={poolOf} onOpen={onOpen} />
       {items.length > 5 && !open && (

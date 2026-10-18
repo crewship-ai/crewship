@@ -90,7 +90,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
       </section>
 
       <SettingsCard icon={Building2} tint="var(--primary)" title="Workspace access" description="Where this person works, and as what"
-        actions={<span className="font-mono text-micro text-muted-foreground">{person.memberships.length} of {workspaces.length}</span>}>
+        actions={<span className="text-micro tabular-nums text-muted-foreground">{person.memberships.length} of {workspaces.length}</span>}>
         {person.memberships.length === 0 && (
           <p className="border-b border-border px-4 py-3 text-label text-muted-foreground">Not in any workspace. They can sign in but see nothing.</p>
         )}

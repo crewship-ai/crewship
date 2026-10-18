@@ -87,11 +87,17 @@ export function ToolsList({
   let body: React.ReactNode
   if (status.loading && allRows.length === 0) body = <PageLoading variant="cards" />
   else if (!status.configured)
+    // v67's one empty state. The key is the next step, so it is the one
+    // action here (the banner that used to sit above asked for the same).
     body = (
-      <>
-        <ComposioKeyBanner canManage={canManage} onAddKey={onAddKey} />
-        <PageEmpty icon={Plug} title="Nothing connected" description="Give agents tools in other apps. The catalog shows what Composio can connect." primary={{ label: "Open the catalog", onClick: () => onView("catalog") }} cli="crewship integration composio key set --key ak_…" />
-      </>
+      <PageEmpty
+        icon={Plug}
+        title="Nothing connected"
+        description={canManage ? "Give agents tools, start work from outside and reach people." : "Give agents tools, start work from outside and reach people. Ask an admin to add the workspace's Composio API key."}
+        primary={canManage ? { label: "Add Composio key", icon: KeyRound, onClick: onAddKey } : undefined}
+        secondary={{ label: "Open the catalog", onClick: () => onView("catalog") }}
+        cli="crewship integration composio key set --key ak_…"
+      />
     )
   else if (status.error && allRows.length === 0) body = <PageError title="Connected apps could not load" description="Triggers and Channels are not affected." onRetry={undefined} detail={status.error} />
   else if (allRows.length === 0)

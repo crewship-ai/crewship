@@ -22,7 +22,7 @@
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQueries } from "@tanstack/react-query"
-import { Key, Plus, ShieldCheck, Sparkles, TerminalSquare, Trash2, X } from "lucide-react"
+import { Key, Plus, ShieldCheck, Sparkles, Terminal, Trash2, X } from "lucide-react"
 
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
@@ -41,6 +41,7 @@ import { SecretsTable, type VaultSecret } from "@/components/features/credential
 import { VaultHealth, buildVaultHealth } from "@/components/features/credentials/vault-health"
 import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
 import { BulkDeleteDialog, BulkTierDialog } from "@/components/features/credentials/bulk-actions"
+import { VaultSpaceCrumb } from "@/components/features/credentials/vault-space-crumb"
 import { VaultCliDialog } from "@/components/features/credentials/vault-cli-dialog"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
 import {
@@ -561,7 +562,7 @@ export default function CredentialsPage() {
     : loginFilters.status !== "all" ? PROVIDER_VIEW_LABEL[loginFilters.status] ?? "AI providers" : "AI providers"
   const headerActions = (
     <>
-      <SubBarIconButton icon={TerminalSquare} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
+      <SubBarIconButton icon={Terminal} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
       {space === "providers" ? (
         <>
           {canManage && (
@@ -588,13 +589,19 @@ export default function CredentialsPage() {
     </>
   )
 
+  // v67: "Vault › Secrets ▾ › <view or secret>": the space is the chooser.
+  const crumbRest = detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : space === "providers" && (providerPage || loginFilters.status !== "all") ? providersTitle : undefined
   const subBar = (
     <SubBar
       icon={Key}
-      title={space === "providers" ? "AI providers" : "Secrets"}
-      section={detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : space === "providers" && (providerPage || loginFilters.status !== "all") ? providersTitle : undefined}
+      title="Vault"
+      section={
+        <>
+          <VaultSpaceCrumb space={space} onSpace={changeSpace} chooser={canBind} />
+          {crumbRest != null && <span className="font-normal text-muted-foreground"> › {crumbRest}</span>}
+        </>
+      }
       ariaLabel="Vault"
-      description={space === "providers" ? `${providerLogins.length} accounts` : `${secrets.length} secrets`}
       actions={headerActions}
       // The list and the secret page carry their own visible h1.
       heading={false}
