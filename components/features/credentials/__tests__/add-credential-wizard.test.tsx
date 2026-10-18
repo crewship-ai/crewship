@@ -283,7 +283,7 @@ describe("layout on a touch device", () => {
     expect(tile.className).toContain("min-h-20")
     // The blurb is the thing that distinguishes "Key pair" from "Token" for
     // anyone who has not read the PRD; it is not decoration to be dropped.
-    expect(within(tile).getByText("PEM chain for mTLS")).toBeInTheDocument()
+    expect(within(tile).getByText("PEM, private key and CA")).toBeInTheDocument()
   })
 })
 

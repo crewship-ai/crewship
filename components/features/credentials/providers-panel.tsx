@@ -49,7 +49,7 @@ const VIEW_ICON: Record<string, LucideIcon> = {
 }
 
 const meta = (n: number | undefined) => (
-  <span className="ml-auto font-mono text-label tabular-nums text-muted-foreground-soft">{n ?? 0}</span>
+  <span className="ml-auto text-label tabular-nums text-muted-foreground-soft">{n ?? 0}</span>
 )
 
 export type ProviderViewCounts = Record<"all" | "attention" | "unassigned" | "mine", number>

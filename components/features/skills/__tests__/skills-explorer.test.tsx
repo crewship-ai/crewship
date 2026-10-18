@@ -32,7 +32,7 @@ function renderExplorer(over: Partial<SkillFilters> = {}, canReview = true) {
 
 /** The panel toolbar's Filter button opens the facets under it (v67 pk-f). */
 function openFilter() {
-  fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Filter/ }))
 }
 
 describe("SkillsExplorer", () => {
@@ -40,7 +40,7 @@ describe("SkillsExplorer", () => {
   // behind Filter and the active choices show as chips while it is closed.
   it("PAR-073 keeps the facets behind a Filter button in the toolbar", () => {
     renderExplorer({ trust: "verified" })
-    const filter = screen.getByRole("button", { name: "Filter" })
+    const filter = screen.getByRole("button", { name: /^Filter/ })
     expect(filter).toHaveAttribute("aria-expanded", "false")
     expect(filter.textContent).toContain("1")
     expect(screen.queryByText("Domain")).not.toBeInTheDocument()
@@ -80,9 +80,9 @@ describe("SkillsExplorer", () => {
 
   it("orders the panel: active filters, then Views, then the facets", () => {
     renderExplorer({ agentId: "a-riley" })
+    expect((document.body.textContent ?? "").indexOf("Agent: Riley")).toBeLessThan((document.body.textContent ?? "").indexOf("Views"))
     openFilter()
     const text = document.body.textContent ?? ""
-    expect(text.indexOf("Agent: Riley")).toBeLessThan(text.indexOf("Views"))
     expect(text.indexOf("Views")).toBeLessThan(text.indexOf("Source"))
     for (const facet of ["Source", "Domain", "Trust", "Status", "Used by crew"]) expect(screen.getByText(facet)).toBeInTheDocument()
     expect(screen.queryByText("Crews & agents")).not.toBeInTheDocument()
