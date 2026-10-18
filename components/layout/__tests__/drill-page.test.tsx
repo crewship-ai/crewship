@@ -219,3 +219,17 @@ describe("DrillPage on a tablet (1024 px)", () => {
     expect(screen.getAllByRole("link", { name: "Back to Settings" })).toHaveLength(1)
   })
 })
+
+// ADM-08 (#3576): the shell's SidebarInset is the page's one <main>. A drill
+// page inside it must not add a second main landmark at any width.
+describe("DrillPage landmarks", () => {
+  for (const isMobile of [false, true]) {
+    it(`renders no <main> of its own (${isMobile ? "phone" : "desktop"})`, () => {
+      mobile = isMobile
+      renderPage()
+      expect(document.querySelectorAll("main")).toHaveLength(0)
+      expect(screen.queryAllByRole("main")).toHaveLength(0)
+      expect(screen.getByText("content")).toBeVisible()
+    })
+  }
+})
