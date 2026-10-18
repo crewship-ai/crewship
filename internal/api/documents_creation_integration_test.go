@@ -269,8 +269,16 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				if err != nil {
 					t.Fatalf("OWNER actual CLI %v: %v %s", args, err, out)
 				}
+				if len(args) > 1 && args[1] == "checkpoints" {
+					var history struct {
+						Checkpoints []json.RawMessage `json:"checkpoints"`
+					}
+					if json.Unmarshal(out, &history) != nil || history.Checkpoints == nil || len(history.Checkpoints) != 0 {
+						t.Fatalf("actual history list before checkpoint: %s", out)
+					}
+				}
 			} else if err == nil || !bytes.Contains(out, []byte("404")) || bytes.Contains(out, []byte("Launch plan")) {
-				t.Fatalf("%s disclosed private document via actual CLI %v: %v %s", role, args, err, out)
+				t.Fatalf("%s CLI %v did not return the required private 404: %v %s", role, args, err, out)
 			}
 		}
 		out, err := invoke("page", "list")
@@ -566,7 +574,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if err := os.WriteFile(historyConfig, []byte("server: "+host.URL+"\nworkspace: managed-private-cli\ntoken: "+human+"\nformat: json\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		readHistory := func(args ...string) []byte {
+		callHistory := func(args ...string) ([]byte, error) {
 			t.Helper()
 			command := exec.CommandContext(t.Context(), binary, append([]string{"doc"}, args...)...)
 			for _, entry := range os.Environ() {
@@ -575,7 +583,11 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				}
 			}
 			command.Env = append(command.Env, "CREWSHIP_CONFIG="+historyConfig, "CREWSHIP_NO_SLUG_CACHE=1")
-			out, err := command.CombinedOutput()
+			return command.CombinedOutput()
+		}
+		readHistory := func(args ...string) []byte {
+			t.Helper()
+			out, err := callHistory(args...)
 			if err != nil {
 				t.Fatalf("actual human history CLI: %v %s", err, out)
 			}
@@ -632,6 +644,16 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			return nil
 		}); err != nil {
 			t.Fatal(err)
+		}
+		// A formerly readable checkpoint cannot outlive its human credential.
+		if err := sessions.NewDBStore(h.db).Revoke(t.Context(), session.ID, "history reader revoked"); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"checkpoints", "@" + created.PageID}, {"checkpoint", "@" + created.PageID, packet.Checkpoint.ID}} {
+			out, err := callHistory(args...)
+			if err == nil || !bytes.Contains(out, []byte("401")) || bytes.Contains(out, []byte("CONFIRMED-A")) || bytes.Contains(out, []byte("Human intervening content")) {
+				t.Fatalf("revoked human credential still read history: %v %s", err, out)
+			}
 		}
 		t.Log("actual CLI+MCP draft: immutable original packet, semantic commit and pinned A, exact retries/conflict, B prepared but never committed, live human cursor fence, fresh-run denial, no copies/grants/storage publication; no model/container-interruption evidence")
 	}

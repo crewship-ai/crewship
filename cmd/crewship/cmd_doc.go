@@ -107,6 +107,7 @@ func newDocCommand() *cobra.Command {
 	root.AddCommand(newDocCreateCommand())
 	root.AddCommand(newDocDraftCommand())
 	root.AddCommand(newDocResultsCommand())
+	root.AddCommand(newDocHistoryCommands()...)
 	return root
 }
 
