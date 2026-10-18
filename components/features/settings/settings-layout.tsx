@@ -233,8 +233,10 @@ function SettingsPage() {
   // pane for a frame. While the role is loading nothing is judged, so an
   // OWNER's deep link survives the round trip.
   //
-  // A section that moved to a page of its own (Audit log) is not bounced: the
-  // jump below lands on that page, which says who may open it (ODCH-SET-10).
+  // A section that MOVED to a page of its own is the exception: it is
+  // forwarded (below) whatever the role, and that page judges the role
+  // itself — /settings/audit says "You can't open Audit log" — so the old
+  // link ends on the same sentence instead of silently opening Profile.
   const activeTab =
     wsLoading || requestedTab in MOVED_SECTIONS || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
   useFocusSettingsCard(focusedCard, activeTab)
