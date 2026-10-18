@@ -166,13 +166,13 @@ function AdminConsole() {
   }, [workspaceId])
 
   // An old ?tab= link (Users, Workspaces, Security, Reviews, Backups) moved to
-  // a nested page. It follows the move once the session is known, admin or
-  // not: the nested page then decides what this person may see there.
+  // a nested page. It follows the move straight away, admin or not, without
+  // waiting for the session: the nested page decides what this person may
+  // see there, so there is nothing to judge here.
   useEffect(() => {
-    if (wsLoading || instanceAdmin === null) return
     const moved = movedAdminTabHref(window.location.search)
     if (moved) router.replace(moved)
-  }, [wsLoading, instanceAdmin, router])
+  }, [router])
 
   // Lifted out of the effect so an action on a tab (creating a workspace,
   // adding a member) can ask for the same refresh the page does on mount —
