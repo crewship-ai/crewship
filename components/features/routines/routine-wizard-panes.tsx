@@ -166,6 +166,9 @@ export function BasicsPane({
   // Leaving for Import is a way out of the wizard: it asks before dropping typed input.
   const guardClose = useCreateSurfaceClose()
   const agentCount = (crewId: string) => agents.filter((a) => a.crew_id === crewId).length
+  // Only a crew with an agent can run a step, so only those are offered.
+  const runnable = (crews ?? []).filter((c) => agentCount(c.id) > 0)
+  const idle = (crews?.length ?? 0) - runnable.length
   const copyable = routines.filter((r) => (r.head_version ?? 0) > 0)
   const crewSlug = crews?.find((c) => c.id === state.crewId)?.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") ?? ""
 
@@ -258,6 +261,7 @@ export function BasicsPane({
               id={slugId}
               value={state.slug}
               onChange={(e) => onSlug(e.target.value)}
+              placeholder="competitor-price-watch"
               aria-describedby={slugStatus.state === "invalid" ? `${slugId}-error` : undefined}
               data-edited={slugEdited || undefined}
               className={cn(INPUT, "pr-28 font-mono")}
@@ -270,28 +274,42 @@ export function BasicsPane({
       <CreateSurfaceField label="Crew" hint="Every step runs as an agent of this crew, with its connections, files and credentials.">
         {crews == null ? (
           <p className="text-xs text-muted-foreground">Loading crews…</p>
-        ) : crews.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No crew yet. Create a crew with an agent first.</p>
+        ) : runnable.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {crews.length === 0 ? "No crew yet. Create a crew with an agent first." : "No crew has an agent yet. Add an agent to a crew first."}
+          </p>
         ) : (
-          <div role="radiogroup" aria-label="Crew" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {crews.map((c) => {
-              const n = agentCount(c.id)
-              return (
-                <CreateSurfaceTile
-                  key={c.id}
-                  role="radio"
-                  aria-checked={state.crewId === c.id}
-                  aria-pressed={undefined}
-                  selected={state.crewId === c.id}
-                  disabled={n === 0}
-                  title={c.name}
-                  description={n === 0 ? "No agent to run a step" : `${n} ${n === 1 ? "agent" : "agents"}`}
-                  leading={<CrewIcon icon={c.icon || "folder"} color={c.color} size="sm" />}
-                  onClick={() => set({ crewId: c.id })}
-                />
-              )
-            })}
-          </div>
+          <>
+            <div role="radiogroup" aria-label="Crew" className="flex flex-wrap gap-2">
+              {runnable.map((c) => {
+                const on = state.crewId === c.id
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => set({ crewId: c.id })}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-control transition-colors coarse:h-[44px]",
+                      on
+                        ? "border-primary/40 bg-primary/10 font-medium text-foreground"
+                        : "border-hairline text-muted-foreground hover:border-border hover:text-foreground",
+                    )}
+                  >
+                    <CrewIcon icon={c.icon || "folder"} color={c.color} size="sm" />
+                    {c.name}
+                    <span className="tabular-nums text-muted-foreground-soft">{agentCount(c.id)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {idle > 0 && (
+              <p className="mt-1.5 text-label text-muted-foreground-soft">
+                {idle} {idle === 1 ? "crew has" : "crews have"} no agent yet, so {idle === 1 ? "it" : "they"} cannot run a step.
+              </p>
+            )}
+          </>
         )}
       </CreateSurfaceField>
 
