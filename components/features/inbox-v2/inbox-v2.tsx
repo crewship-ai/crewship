@@ -20,6 +20,7 @@ import { useInbox, useInboxItem } from "@/hooks/use-inbox"
 import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
+import { fetchAllMissions } from "./inbox-v2-missions"
 import { inboxBulk } from "@/lib/api/inbox"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import type { Mission } from "@/lib/types/mission"
@@ -113,23 +114,7 @@ export function InboxV2() {
   })
   const missions = useQuery<Mission[]>({
     queryKey: ["inbox-v2-missions", workspaceId ?? ""],
-    queryFn: async ({ signal }) => {
-      const rows: Mission[] = []
-      const pageSize = 100
-      let offset = 0
-      do {
-        const res = await apiFetch(
-          `/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId!)}&limit=${pageSize}&offset=${offset}&include_tasks=true`,
-          { signal },
-        )
-        if (!res.ok) throw new Error(`mission signals: ${res.status}`)
-        const page = (await res.json()) as Mission[]
-        rows.push(...page)
-        if (page.length < pageSize) break
-        offset += page.length
-      } while (true)
-      return rows
-    },
+    queryFn: ({ signal }) => fetchAllMissions(workspaceId!, signal),
     enabled: Boolean(workspaceId),
     retry: false,
     refetchInterval: 30_000,
