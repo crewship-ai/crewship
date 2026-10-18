@@ -3,15 +3,19 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -100,7 +104,76 @@ func TestChatSourceBinaryReadsOriginalRoomMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default())
+	// The agent route uses the real JSONL store through a bounded Unix IPC
+	// fixture. This does not start a Crewship server or a provider/model run.
+	for _, q := range []string{
+		`INSERT INTO crews(id,workspace_id,name,slug,network_mode)VALUES('csourcecrew000000000001','csourceworkspace00000001','Sources','source-crew','free')`,
+		`INSERT INTO agents(id,crew_id,workspace_id,name,slug)VALUES('csourceagent00000000001','csourcecrew000000000001','csourceworkspace00000001','Source agent','source-agent')`,
+		`INSERT INTO chats(id,agent_id,workspace_id,created_by,title)VALUES('source-agent-chat','csourceagent00000000001','csourceworkspace00000001','source-owner','Source transcript')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transcriptDir := t.TempDir()
+	transcript := conversation.NewStore(transcriptDir, slog.Default())
+	t.Cleanup(transcript.Close)
+	original := conversation.Message{ID: "original-agent-message", AgentID: "csourceagent00000000001", Role: conversation.RoleAssistant, Content: "Original agent reply", Timestamp: time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC), Parts: []conversation.Part{{Type: "text", Content: "Original agent reply"}, {Type: "thinking", Content: "private legacy thinking fixture", Metadata: map[string]any{"private": "legacy metadata fixture"}}}}
+	if err := transcript.Append(t.Context(), "source-agent-chat", original); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(transcriptDir, "conversations", "source-agent-chat.jsonl")
+	beforeTranscript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipcDir, err := os.MkdirTemp("/tmp", "source-ipc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(ipcDir); err != nil {
+			t.Error(err)
+		}
+	})
+	socket := filepath.Join(ipcDir, "ipc.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ipcCalls atomic.Int64
+	ipc := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ipcCalls.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/chats/source-agent-chat/shared-messages" {
+			t.Error("unexpected IPC route")
+			http.NotFound(w, r)
+			return
+		}
+		rows, err := transcript.ReadShared(r.Context(), "source-agent-chat", 16<<20, 1000)
+		if err != nil {
+			t.Error("owned bounded transcript read failed")
+			http.Error(w, "Source unavailable", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"messages": rows}); err != nil {
+			t.Error("IPC response encoding failed")
+		}
+	})}
+	ipcDone := make(chan error, 1)
+	go func() { ipcDone <- ipc.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = ipc.Close()
+		select {
+		case err := <-ipcDone:
+			if err != nil && err != http.ErrServerClosed {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("owned IPC fixture did not stop")
+		}
+	})
+	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), api.WithSocketPath(socket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +204,49 @@ func TestChatSourceBinaryReadsOriginalRoomMessage(t *testing.T) {
 	if err := json.Unmarshal(output, &body); err != nil || body.Version != 1 || len(body.Messages) != 1 || body.Messages[0].Ref.ID != message.ID || body.Messages[0].Order.Sequence != message.Sequence {
 		t.Fatalf("original source identity lost: %v %s", err, output)
 	}
+	var runsBefore int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type LIKE 'run.%'`).Scan(&runsBefore); err != nil {
+		t.Fatal(err)
+	}
+	runAgent := func() ([]byte, error) {
+		command := exec.Command(binary, "chat", "source", "messages", "agent_session", "source-agent-chat")
+		command.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1")
+		return command.CombinedOutput()
+	}
+	t.Run("agent_session", func(t *testing.T) {
+		output, err := runAgent()
+		if err != nil {
+			t.Fatalf("real agent source CLI failed: %v", err)
+		}
+		var body conversation.SourceMessagesResponse
+		if err := json.Unmarshal(output, &body); err != nil {
+			t.Fatal("agent source CLI did not return JSON")
+		}
+		if body.ContractVersion != 1 || body.ConversationRef.WorkspaceID != workspace || body.ConversationRef.SourceKind != conversation.SourceAgentSession || body.ConversationRef.SourceID != "source-agent-chat" || len(body.Messages) != 1 || body.Messages[0].MessageRef == nil || body.Messages[0].MessageRef.SourceMessageID != original.ID || body.Messages[0].Order.SourcePosition == nil || *body.Messages[0].Order.SourcePosition != 0 || body.Messages[0].Order.SourceSequence != nil || body.SnapshotComplete == nil || !*body.SnapshotComplete {
+			t.Fatal("original agent identity or bounded snapshot contract lost")
+		}
+		if strings.Contains(string(output), "private legacy thinking fixture") || strings.Contains(string(output), "legacy metadata fixture") {
+			t.Fatal("agent source projection exposed legacy thinking")
+		}
+		if ipcCalls.Load() != 1 {
+			t.Fatal("agent source read did not use exactly one bounded IPC read")
+		}
+		if _, err := db.Exec(`DELETE FROM cli_tokens WHERE id='source-token'`); err != nil {
+			t.Fatal(err)
+		}
+		denied, err := runAgent()
+		if err == nil || strings.Contains(string(denied), original.Content) || ipcCalls.Load() != 1 {
+			t.Fatal("revoked current credential reached source transcript")
+		}
+		afterTranscript, err := os.ReadFile(transcriptPath)
+		if err != nil || string(beforeTranscript) != string(afterTranscript) {
+			t.Fatal("source read or denial rewrote the original transcript")
+		}
+		var runsAfter int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type LIKE 'run.%'`).Scan(&runsAfter); err != nil || runsAfter != runsBefore {
+			t.Fatal("source read created agent execution")
+		}
+	})
 	var jobs int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_conversation_agent_jobs WHERE conversation_id=?`, room.ID).Scan(&jobs); err != nil || jobs != 0 {
 		t.Fatal("source read created agent work")
