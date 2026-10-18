@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { extractVerdict, type RunVerdict, type RunVerdictOutcome } from "@/lib/run-activity"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, Pill } from "./_shared"
+import { Card, Pill } from "./_shared"
+import { EmptyState } from "@/components/layout/empty-state"
 import { RunTagChips } from "./routine-tag-chips"
 import { extractStepMeta, formatStepCost, formatStepDuration } from "./routine-cost-format"
 
@@ -193,6 +194,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
     return (
       <Card title="Run history">
         <EmptyState
+          size="inline"
           icon={Play}
           title="No runs yet"
           description="Trigger one with the Run button above, or invoke via agent / CLI / schedule. Each invocation appears here with the step-level waterfall."
