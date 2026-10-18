@@ -391,6 +391,22 @@ func (s *PendingRunStore) SetFiredRunID(ctx context.Context, id, runID string) e
 	return err
 }
 
+// retryUnstarted returns a capacity-rejected claim to the queue. The occurrence
+// stays unchanged, including its fire time (and therefore idempotency key), TTL,
+// inputs, version and authority. A claimed occurrence is already frozen: detach
+// its debounce key so a newer trigger can retain its own pending window without
+// either a unique-index conflict or coalescing new inputs into the retry.
+// Only the original, still-unstarted claim may be changed.
+func (s *PendingRunStore) retryUnstarted(ctx context.Context, pr PendingRun) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pending_runs SET status='pending', fired_run_id=NULL, debounce_key=NULL,
+    updated_at=datetime('now','subsec')
+WHERE id=? AND workspace_id=? AND pipeline_id=? AND fire_at=?
+  AND status='fired' AND fired_run_id=''`,
+		pr.ID, pr.WorkspaceID, pr.PipelineID, formatRFC3339(pr.FireAt))
+	return err
+}
+
 // Cancel removes a pending row before it fires.
 func (s *PendingRunStore) Cancel(ctx context.Context, workspaceID, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `

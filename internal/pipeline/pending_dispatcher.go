@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -269,6 +270,18 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),
 	})
 	if runErr != nil {
+		// The executor rejects capacity before running any steps and releases
+		// its idempotency reservation. Retry that same occurrence on a later
+		// sweep. Other errors may follow external effects and must not be
+		// retried automatically; a non-nil result also signals accepted work.
+		if res == nil && errors.Is(runErr, ErrConcurrencyLimitReached) {
+			if err := quiesce.Do(ctx, func(ctx context.Context) error {
+				return d.store.retryUnstarted(ctx, pr)
+			}); err != nil {
+				d.logger.Error("pending dispatcher: return capacity-rejected claim", "error", err, "pending_id", pr.ID)
+			}
+			return
+		}
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)
 		return
 	}
