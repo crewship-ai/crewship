@@ -19,9 +19,17 @@ describe("crewSpend30d", () => {
     expect(crewSpend30d({ rows: [] }, { rows: [] }, "c1")).toEqual({ costUsd: 0, calls: 0, byAgent: new Map() })
   })
 
+  it("rows: null is the server's empty list (a Go nil slice), so a crew with no agent spend reads zero", () => {
+    // What GET /paymaster/spend/by-agent/{crewId} answers for a crew whose
+    // agents made no calls: {"crew_id":"c1","rows":null} (seen on dev1, CR-11).
+    expect(crewSpend30d({ rows: null }, { crew_id: "c1", rows: null }, "c1")).toEqual({ costUsd: 0, calls: 0, byAgent: new Map() })
+    expect(crewSpend30d({ rows: [{ crew_id: "c1", cost_usd: 0.5, call_count: 2 }] }, { crew_id: "c1", rows: null }, "c1")).toEqual({ costUsd: 0.5, calls: 2, byAgent: new Map() })
+  })
+
   it("a malformed answer is unknown, never zero", () => {
     expect(crewSpend30d({ nope: true }, { rows: [] }, "c1")).toBeNull()
     expect(crewSpend30d({ rows: [] }, null, "c1")).toBeNull()
+    expect(crewSpend30d({ rows: "x" }, { rows: [] }, "c1")).toBeNull()
   })
 })
 
