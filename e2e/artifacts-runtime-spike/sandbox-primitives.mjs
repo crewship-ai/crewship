@@ -1,0 +1,158 @@
+// Run only through crewship-heavy, with an external timeout (README.md).
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const options = new Map();
+for (let i = 2; i < process.argv.length; i += 2) {
+  const name = process.argv[i], value = process.argv[i + 1];
+  if (!['--modules', '--firefox-executable', '--webkit-executable'].includes(name) || !value || options.has(name)) {
+    throw new Error('Expected --modules PATH and optional --firefox-executable PATH / --webkit-executable PATH');
+  }
+  options.set(name, value);
+}
+const require = createRequire(resolve(options.get('--modules') ?? resolve(root, 'node_modules'), '.spike-loader.cjs'));
+const playwright = require('playwright');
+const ts = require('typescript');
+const sourcePaths = ['internal/pagebuild/bootstrap.js', 'lib/pages/preview-runtime.ts', 'lib/pages/runtime-support.ts'];
+const sources = Object.fromEntries(await Promise.all(sourcePaths.map(async path => [path, await readFile(resolve(root, path), 'utf8')])));
+// Transpile the production module without bundling or changing its channel.
+// The theme import is unused by these channel-only tests; no snapshot normalizer is invoked.
+const channelJS = ts.transpileModule(sources['lib/pages/preview-runtime.ts'], {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText.replace(/^import .*from ["'].*["'];?\s*$/gm, '').replace(/\bexport /g, '') + '\nwindow.SpikeChannel = PreviewSnapshotChannel;';
+const report = {
+  format: 'crewship-artifacts-runtime-primitives-spike/v1',
+  sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+  sourceSHA256: Object.fromEntries(Object.entries(sources).map(([path, text]) => [path, createHash('sha256').update(text).digest('hex')])),
+  environment: { node: process.version, platform: process.platform, arch: process.arch, playwright: require('playwright/package.json').version },
+  scope: 'Local opaque-sandbox and MessagePort primitives only; not production App or runtime 1.1 acceptance',
+  browsers: [],
+};
+
+async function bootstrapChecks(page, bootstrap) {
+  return page.evaluate(async bootstrap => {
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const check = (value, message) => { if (!value) throw new Error(message); };
+    const events = [];
+    window.addEventListener('message', event => { if (event.data?.type === 'spike.self') events.push(event.data); });
+    const artifact = {
+      format: 'crewship-page-preview/v1', css: '',
+      javascript: `(() => {
+        let parentDenied = false, storageDenied = false;
+        try { parent.document.body; } catch { parentDenied = true; }
+        try { localStorage.getItem('spike'); } catch { storageDenied = true; }
+        let workerDenied = false;
+        try { new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))); } catch { workerDenied = true; }
+        fetch('data:text/plain,blocked').then(() => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:false}), () => window.__crewshipPagesPort.postMessage({type:'spike.network', blocked:true}));
+        window.__crewshipPagesPort.postMessage({type:'spike.booted', parentDenied, storageDenied, workerDenied});
+      })();`,
+    };
+    function frame(expectedParent, selfAttempt = false) {
+      const element = document.createElement('iframe');
+      element.sandbox = 'allow-scripts';
+      // No origins, hosts, servers, auth state or outgoing requests are used.
+      const selfScript = selfAttempt ? `const selfChannel=new MessageChannel();selfChannel.port1.onmessage=()=>parent.postMessage({type:'spike.self'},'*');window.postMessage({type:'crewship.pages.boot/v1',artifact:${JSON.stringify(artifact)}},'*',[selfChannel.port2]);` : '';
+      element.srcdoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-spike'; style-src 'unsafe-inline'; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><div id="root"></div><script nonce="spike">const expectedParent=${JSON.stringify(expectedParent)};const bootNonce='spike';${bootstrap}\n${selfScript}</script>`;
+      return new Promise(resolve => {
+        element.onload = () => resolve(element);
+        document.body.append(element);
+      });
+    }
+    function send(element, value, portCount = 1) {
+      const channels = Array.from({ length: portCount }, () => new MessageChannel());
+      const received = [];
+      for (const channel of channels) { channel.port1.onmessage = event => received.push(event.data); channel.port1.start(); }
+      element.contentWindow.postMessage(value, '*', channels.map(channel => channel.port2));
+      return { channels, received };
+    }
+    const child = await frame('null', true);
+    const boot = { type: 'crewship.pages.boot/v1', artifact };
+    const wrongType = send(child, { ...boot, type: 'invalid' });
+    const wrongCount = send(child, boot, 2);
+    const wrongFormat = send(child, { ...boot, artifact: { ...artifact, format: 'invalid' } });
+    const wrongOrigin = await frame('mismatching-origin');
+    const rejectedOrigin = send(wrongOrigin, boot);
+    await delay(150);
+    check(events.length === 0, 'bootstrap admitted a message from its own window instead of its parent');
+    for (const rejected of [wrongType, wrongCount, wrongFormat, rejectedOrigin]) check(rejected.received.length === 0, 'bootstrap admitted invalid handshake');
+    const admitted = send(child, boot);
+    const deadline = Date.now() + 3000;
+    while (admitted.received.length < 2 && Date.now() < deadline) await delay(10);
+    const proof = admitted.received.find(value => value.type === 'spike.booted');
+    check(proof?.parentDenied && proof.storageDenied && proof.workerDenied, 'sandbox permitted parent DOM/storage/worker access');
+    check(admitted.received.some(value => value.type === 'spike.network' && value.blocked), 'CSP permitted fetch');
+    const second = send(child, boot);
+    await delay(100);
+    check(second.received.length === 0, 'bootstrap admitted a second port');
+    for (const handshake of [wrongType, wrongCount, wrongFormat, rejectedOrigin, admitted, second]) {
+      for (const channel of handshake.channels) channel.port1.close();
+    }
+    child.remove(); wrongOrigin.remove();
+    return ['opaque-parent-dom-denied', 'opaque-storage-denied', 'csp-fetch-denied', 'csp-worker-denied', 'wrong-source-origin-shape-denied', 'single-port-admission'];
+  }, bootstrap);
+}
+
+async function channelChecks(page) {
+  await page.addScriptTag({ content: channelJS });
+  return page.evaluate(async () => {
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const check = (value, message) => { if (!value) throw new Error(message); };
+    const pair = new MessageChannel();
+    const received = []; pair.port2.onmessage = event => received.push(event.data); pair.port2.start();
+    let calls = 0, aborted = false, finish;
+    const pending = new Promise(resolve => finish = resolve);
+    const old = new window.SpikeChannel(pair.port1, async (_request, signal) => {
+      calls++; signal.addEventListener('abort', () => aborted = true); return pending;
+    });
+    const request = { type: 'crewship.pages.request/v1', id: 1, method: 'runAction', params: {} };
+    pair.port2.postMessage({ ...request, method: 'arbitraryTool' });
+    await delay(30);
+    check(calls === 0 && received.some(value => value.error), 'unknown capability entered host handler');
+    received.length = 0;
+    pair.port2.postMessage(request);
+    const deadline = Date.now() + 3000;
+    while (!calls && Date.now() < deadline) await delay(10);
+    check(calls === 1, 'known request never reached handler');
+    old.close(); check(aborted, 'channel close did not abort pending request');
+    const freshPair = new MessageChannel(); let freshCalls = 0;
+    const fresh = new window.SpikeChannel(freshPair.port1, async () => { freshCalls++; return 'fresh'; });
+    finish('late-old-response'); pair.port2.postMessage({ ...request, id: 2 });
+    await delay(100);
+    check(calls === 1 && freshCalls === 0 && received.length === 0, 'closed port or late response affected current channel');
+    fresh.close(); pair.port2.close(); freshPair.port2.close();
+    return ['unknown-rpc-denied', 'close-aborts-pending-handler', 'closed-port-request-ignored', 'late-old-response-suppressed'];
+  });
+}
+
+let failed = false;
+for (const name of ['firefox', 'webkit']) {
+  const result = { browser: name, executable: options.get(`--${name}-executable`) ?? playwright[name].executablePath(), checks: [], status: 'not-run' };
+  report.browsers.push(result);
+  let browser;
+  try {
+    browser = await playwright[name].launch({ headless: true, ...(options.has(`--${name}-executable`) ? { executablePath: options.get(`--${name}-executable`) } : {}) });
+    result.browserVersion = browser.version();
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] }, serviceWorkers: 'block' });
+    const requests = [];
+    await context.route('**/*', route => { requests.push(route.request().url()); return route.abort(); });
+    const page = await context.newPage(); page.setDefaultTimeout(5000);
+    result.userAgent = await page.evaluate(() => navigator.userAgent);
+    await page.setContent('<!doctype html><title>Isolated runtime primitive spike</title><body></body>');
+    result.checks.push(...await bootstrapChecks(page, sources['internal/pagebuild/bootstrap.js']));
+    result.checks.push(...await channelChecks(page));
+    assert.equal(requests.length, 0, 'fixture attempted a network request');
+    result.status = 'pass';
+  } catch (error) {
+    result.status = browser ? 'fail' : 'environment-blocked';
+    result.error = String(error.message).split('\nCall log:')[0];
+    failed = true;
+  } finally { await browser?.close(); }
+}
+console.log(JSON.stringify(report, null, 2));
+process.exitCode = failed ? 1 : 0;
