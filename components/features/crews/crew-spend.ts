@@ -13,9 +13,14 @@ export interface CrewSpend {
   byAgent: Map<string, number>
 }
 
-interface Rows<T> { rows: T[] }
-const isRows = (v: unknown): v is Rows<Record<string, unknown>> =>
-  typeof v === "object" && v !== null && Array.isArray((v as { rows?: unknown }).rows)
+interface Rows<T> { rows: T[] | null }
+// The server writes an empty list as `rows: null` (a Go nil slice); that is
+// "no rows", not an unknown answer. Anything else without a rows array is.
+const isRows = (v: unknown): v is Rows<Record<string, unknown>> => {
+  if (typeof v !== "object" || v === null || !("rows" in v)) return false
+  const rows = (v as { rows?: unknown }).rows
+  return rows === null || Array.isArray(rows)
+}
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
 /**
@@ -26,9 +31,9 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0
  */
 export function crewSpend30d(byCrew: unknown, byAgent: unknown, crewId: string): CrewSpend | null {
   if (!isRows(byCrew) || !isRows(byAgent)) return null
-  const own = byCrew.rows.find((r) => r.crew_id === crewId)
+  const own = (byCrew.rows ?? []).find((r) => r.crew_id === crewId)
   const agents = new Map<string, number>()
-  for (const r of byAgent.rows) if (typeof r.agent_id === "string") agents.set(r.agent_id, num(r.cost_usd))
+  for (const r of byAgent.rows ?? []) if (typeof r.agent_id === "string") agents.set(r.agent_id, num(r.cost_usd))
   return { costUsd: num(own?.cost_usd), calls: num(own?.call_count), byAgent: agents }
 }
 
