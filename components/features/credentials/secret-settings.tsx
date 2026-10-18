@@ -132,7 +132,10 @@ function DetailsCard({
   const key = JSON.stringify(draftOf(credential))
   React.useEffect(() => { setDraft(draftOf(credential)) }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patch = settingsPatch(credential, draft, { isLogin })
+  // A tag still in the field counts as typed: Save keeps it (#2428).
+  const pending = tagDraft.trim().toLowerCase()
+  const withPending = pending && !draft.tags.includes(pending) && draft.tags.length < 8 ? { ...draft, tags: [...draft.tags, pending] } : draft
+  const patch = settingsPatch(credential, withPending, { isLogin })
   const count = Object.keys(patch).filter((k) => k !== "crew_ids").length
   const valid = draft.name.trim().length > 0 && (draft.scope === "WORKSPACE" || draft.crewIds.length > 0)
   const set = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }))
@@ -150,6 +153,7 @@ function DetailsCard({
         // The save bar turns a rejection into its sticky error toast; the draft stays.
         throw new Error(typeof data?.error === "string" ? data.error : `The server refused (HTTP ${res.status}).`)
       }
+      setTagDraft("")
       onSaved()
     } finally {
       setSaving(false)
@@ -200,7 +204,7 @@ function DetailsCard({
           {!ro && draft.tags.length < 8 && (
             <span className="inline-flex items-center gap-1">
               <Input id="secret-tag" list="secret-known-tags" value={tagDraft} placeholder="Add a tag" className="h-7 w-32 text-label"
-                onChange={(e) => setTagDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag() } }} />
+                onChange={(e) => setTagDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag() } }} onBlur={() => { if (tagDraft.trim()) addTag() }} />
               <datalist id="secret-known-tags">{knownTags.map((t) => <option key={t} value={t} />)}</datalist>
               <Button type="button" size="icon-xs" variant="ghost" aria-label="Add tag" onClick={addTag}><Plus className="size-3.5" /></Button>
             </span>
