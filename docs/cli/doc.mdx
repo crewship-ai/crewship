@@ -15,6 +15,10 @@ saving. Scoped credentials need `pages:read` for reads and both `pages:read` and
 `pages:write` for editing; `pages:*` covers both. These scopes do not grant access
 to somebody else's document.
 
+A reader refuses unsupported saved document schemas, including initialization
+retries, without returning their content. Use a compatible document service;
+confirmed data stays retained rather than being silently replaced.
+
 ## `crewship doc create --file <request.json>`
 
 Create a populated document during a run admitted for one human's creation
