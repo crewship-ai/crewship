@@ -880,7 +880,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// BEFORE registerRoutes so every handler constructed there holds the
 	// decorated store. authMw keeps the raw store — it only reads
 	// (Get/TouchLastUsed) and never revokes.
-	notifiers := make([]SessionRevocationNotifier, 0, len(r.revokeNotifiers)+1)
+	notifiers := []SessionRevocationNotifier{r.authMw.streams}
+	if r.hub != nil {
+		r.hub.SetStreamAuthenticator(r.authMw.authenticateStream)
+	}
 	if r.hub != nil {
 		notifiers = append(notifiers, r.hub)
 	}

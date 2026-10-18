@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -34,6 +35,7 @@ type InstanceAdminHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
+	streams  *auth.StreamCredentials
 	journal  journal.Emitter
 	hub      *wshub.Hub
 }
@@ -349,6 +351,9 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "suspend: commit", err)
 		return
+	}
+	if h.streams != nil {
+		h.streams.NotifyAccountRevoked(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user_id": id, "suspended_at": now, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,

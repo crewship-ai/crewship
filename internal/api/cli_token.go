@@ -35,6 +35,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth"
 )
 
 const (
@@ -124,8 +126,9 @@ func hashAdmin(token string, key []byte) string {
 
 // CLITokenHandler provides endpoints for creating, listing, validating, and revoking CLI authentication tokens.
 type CLITokenHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	streams *auth.StreamCredentials
 }
 
 // NewCLITokenHandler creates a CLITokenHandler with the given database and logger.
@@ -554,6 +557,9 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.streams != nil {
+		h.streams.NotifyTokenRevoked(tokenID)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
@@ -586,10 +592,12 @@ func IsCLIToken(token string) bool {
 // three identity strings — scopes ride alongside without breaking
 // callers that don't care.
 type ValidateCLITokenResult struct {
-	UserID string
-	Email  string
-	Name   string
-	Scopes stringSet // nil = unrestricted token (pre-v100 or no scopes set)
+	TokenID   string
+	ExpiresAt time.Time
+	UserID    string
+	Email     string
+	Name      string
+	Scopes    stringSet // nil = unrestricted token (pre-v100 or no scopes set)
 }
 
 // errInvalidCLIToken is the sentinel every genuinely-invalid-token path
@@ -607,7 +615,7 @@ var errInvalidCLIToken = errors.New("invalid CLI token")
 // effects on top) and IsValidCLIToken (a side-effect-free validity check for
 // the rate limiter's exemption decision, #1333) call this so the
 // security-sensitive hash/tier/expiry logic lives in exactly one place.
-func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, userID, email, name, tier string, scopes stringSet, err error) {
+func lookupCLIToken(ctx context.Context, db *sql.DB, token string, expiryOut ...*time.Time) (tokenID, userID, email, name, tier string, scopes stringSet, err error) {
 	var (
 		tokenHash    string
 		expectedTier string
@@ -665,7 +673,13 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 	}
 	if expiresAt.Valid {
 		t, perr := time.Parse(time.RFC3339, expiresAt.String)
-		if perr == nil && time.Now().UTC().After(t) {
+		if perr != nil {
+			return "", "", "", "", "", nil, errInvalidCLIToken
+		}
+		if len(expiryOut) > 0 {
+			*expiryOut[0] = t
+		}
+		if !time.Now().UTC().Before(t) {
 			return "", "", "", "", "", nil, errInvalidCLIToken
 		}
 	}
@@ -695,7 +709,8 @@ func IsValidCLIToken(ctx context.Context, db *sql.DB, token string) bool {
 // three-string signature for callers that don't care about scopes;
 // it now delegates to this one.
 func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit ValidateAuditContext) (ValidateCLITokenResult, error) {
-	tokenID, userID, email, name, dbTier, scopes, err := lookupCLIToken(ctx, db, token)
+	var expiry time.Time
+	tokenID, userID, email, name, dbTier, scopes, err := lookupCLIToken(ctx, db, token, &expiry)
 	if err != nil {
 		return ValidateCLITokenResult{}, err
 	}
@@ -746,6 +761,7 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	}(tokenID)
 
 	return ValidateCLITokenResult{
+		TokenID: tokenID, ExpiresAt: expiry,
 		UserID: userID,
 		Email:  email,
 		Name:   name,
