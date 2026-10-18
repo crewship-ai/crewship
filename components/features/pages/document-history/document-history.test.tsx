@@ -48,7 +48,7 @@ it("shows unknown schemas and malformed content unavailable without normalizing"
   for(const data of [{schema:99,content},{schema:3,content:{type:"doc",content:[{type:"script",text:"Private unsafe text"}]}}]) {
     const p=props();const {unmount}=render(<DocumentHistory {...p} list={{status:"ready",scopeKey:p.scopeKey,data:{checkpoints:[{...row,schema:data.schema}]}}} snapshot={{status:"ready",scopeKey:p.scopeKey,data:{page_id:p.pageId,id:row.id,rev:row.rev,...data}}}/>)
     expect(screen.queryByText("Confirmed historical text")).toBeNull()
-    expect(screen.getByRole("status")).toHaveTextContent("Snapshot unavailable")
+    expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
     expect(document.querySelector("script")).toBeNull()
     unmount()
   }
@@ -86,7 +86,7 @@ it("rejects executable link targets without rendering links or fallback text",()
   render(<DocumentHistory {...p} snapshot={{status:"ready",scopeKey:p.scopeKey,data:{page_id:p.pageId,id:row.id,rev:row.rev,schema:3,content:unsafe}}}/>)
   expect(screen.queryByRole("link")).toBeNull()
   expect(screen.queryByText("Unsafe label")).toBeNull()
-  expect(screen.getByRole("status")).toHaveTextContent("Snapshot unavailable")
+  expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
 })
 
 it.each([2,3])("refuses a non-document root in schema %s without exposing its text",schema=>{

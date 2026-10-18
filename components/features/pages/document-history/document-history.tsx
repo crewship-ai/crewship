@@ -1,39 +1,20 @@
 "use client"
 
-import { useMemo } from "react"
-import { DOMSerializer } from "@tiptap/pm/model"
 import { Button } from "@/components/ui/button"
 import { formatDateTime } from "@/lib/time"
-import { documentSchema } from "@/lib/documents/schema"
+import { DocumentReadonly } from "../document-readonly/document-readonly"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
 
-function supported(schema: number) { return schema === 2 || schema === 3 }
+function supported(schema: number): schema is 2 | 3 { return schema === 2 || schema === 3 }
 function when(value: string) {
   return Number.isFinite(Date.parse(value)) ? formatDateTime(value) : "Date unavailable"
 }
 
 /** Separate immutable view: never binds to or dispatches into the live editor. */
 function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }) {
-  const confirmed = useMemo(() => {
-    if (!supported(snapshot.schema)) return null
-    try {
-      const schema = documentSchema.schemaFor(snapshot.schema)
-      documentSchema.validateJSON(snapshot.content, snapshot.schema)
-      const node = schema.nodeFromJSON(snapshot.content)
-      node.check()
-      return { schema, node }
-    } catch { return null }
-  }, [snapshot.schema, snapshot.content])
-  if (!confirmed) return <p role="status">Snapshot unavailable. This content cannot be displayed by this reader.</p>
-  return <div
-    role="region"
-    aria-label={`Confirmed revision ${snapshot.rev}`}
-    className="min-w-0 break-words rounded-md border p-4 [&_p]:my-2 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_ul]:list-disc [&_ol]:list-decimal [&_li]:ml-5 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_pre]:whitespace-pre-wrap"
-    ref={element => {
-      if (element) element.replaceChildren(DOMSerializer.fromSchema(confirmed.schema).serializeFragment(confirmed.node.content))
-    }}
-  />
+  if (!supported(snapshot.schema)) return <p role="status">Snapshot unavailable. This content cannot be displayed by this reader.</p>
+  return <DocumentReadonly schema={snapshot.schema} content={snapshot.content} accessibleLabel={`Confirmed revision ${snapshot.rev}`} />
 }
 
 export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose }: DocumentHistoryProps) {
