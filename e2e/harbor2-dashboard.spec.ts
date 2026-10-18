@@ -233,3 +233,59 @@ test.describe("offline", () => {
     await expect(page.locator(".page-stale")).toHaveCount(0)
   })
 })
+
+// PAR-011/012/013/014/018 (#3577): the dashboard matches v67 card by card.
+// Run volume and the Pages (v67: Artifacts) card ARE in v67, below the KPI
+// strip; the audit screenshot was cut before them.
+test.describe("v67 parity", () => {
+  test.describe("desktop 1440", () => {
+    test.use({ viewport: { width: 1440, height: 900 } })
+
+    test("cards: Up next has the Calendar glyph, Your crews lists at most six, Run volume and Pages follow the KPIs", async ({ page }) => {
+      await seed(page)
+      await routeAttention(page)
+      await page.goto("/")
+      const upNext = page.getByRole("region", { name: "Up next" })
+      await expect(upNext.locator("[data-slot=concept-tile] svg.lucide-calendar-days")).toBeVisible()
+      await expect(upNext.getByRole("link", { name: /Calendar/ })).toHaveAttribute("href", "/calendar")
+      const crews = page.getByTestId("dashboard-fleet-board")
+      expect(await crews.getByTestId("dashboard-fleet-card").count()).toBeLessThanOrEqual(6)
+      await expect(crews.getByText(/more in Crews/)).toHaveCount(0)
+      const kpisBottom = (await page.getByTestId("dashboard-kpis").boundingBox())!.y
+      const volume = page.getByRole("region", { name: /^Run volume/ })
+      await expect(volume).toBeVisible()
+      expect((await volume.boundingBox())!.y).toBeGreaterThan(kpisBottom)
+      await expect(page.getByRole("region", { name: "Pages" })).toBeVisible()
+    })
+
+    test("card headers are 50 px with a 28 px tile and a 13 px semibold title", async ({ page }) => {
+      await seed(page)
+      await routeAttention(page)
+      await page.goto("/")
+      const header = page.getByRole("region", { name: "Up next" }).locator("header")
+      expect(Math.round((await header.boundingBox())!.height)).toBe(50)
+      const tile = header.locator("[data-slot=concept-tile]")
+      expect(Math.round((await tile.boundingBox())!.width)).toBe(28)
+      const title = await header.locator("h2").evaluate((el) => getComputedStyle(el).fontSize + "/" + getComputedStyle(el).fontWeight)
+      expect(title).toBe("13px/600")
+    })
+  })
+
+  for (const [name, viewport] of [["tablet", { width: 1024, height: 900 }], ["phone", { width: 390, height: 844 }]] as const) {
+    test.describe(name, () => {
+      test.use({ viewport, hasTouch: viewport.width < 768, isMobile: viewport.width < 768 })
+
+      test(`${name}: a card header keeps its 50 px under a coarse pointer and the link stays a 44 px target`, async ({ page }) => {
+        await seed(page)
+        await routeAttention(page)
+        await page.goto("/")
+        const card = page.getByRole("region", { name: "Up next" })
+        await expect(card).toBeVisible()
+        expect(Math.round((await card.locator("header").boundingBox())!.height)).toBeLessThanOrEqual(52)
+        if (viewport.width < 768) {
+          expect((await card.getByRole("link", { name: /Calendar/ }).boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        }
+      })
+    })
+  }
+})
