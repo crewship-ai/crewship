@@ -340,7 +340,7 @@ function SystemStatusPanel({
           <StatusRow
             label="Agents"
             value={
-              <span className="font-mono text-micro font-normal tabular-nums">
+              <span className="text-micro font-normal tabular-nums">
                 {crews.total} total · {crews.running} running · {crews.idle} idle
                 {crews.queued > 0 ? ` · ${crews.queued} queued` : ""}
               </span>

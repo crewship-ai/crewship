@@ -193,7 +193,7 @@ function ProvisioningRow({
         >
           {crew.name}
         </Link>
-        <span className={`text-[10px] uppercase tracking-wide shrink-0 ${recentCompleted ? "text-success" : "text-muted-foreground"}`}>
+        <span className={`text-[10px] shrink-0 ${recentCompleted ? "text-success" : "text-muted-foreground"}`}>
           {statusLabel}
         </span>
         {(recentCompleted || crew.status === "failed") && onAcknowledge && (

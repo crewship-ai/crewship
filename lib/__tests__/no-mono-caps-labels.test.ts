@@ -52,9 +52,6 @@ const BASELINE: Record<string, number> = {
   "components/features/settings/members/members-page.tsx": 1,
   "components/features/settings/members/people-table.tsx": 3,
   "components/features/settings/sections/crew-audit-section.tsx": 1,
-  "components/layout/drill-page.tsx": 1,
-  "components/layout/sidebar-kit.tsx": 2,
-  "components/layout/sub-bar.tsx": 1,
 }
 
 const STRING_LITERAL = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g
