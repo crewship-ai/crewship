@@ -1,0 +1,129 @@
+import { describe, it, expect, vi, afterEach } from "vitest"
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react"
+
+import { CrewMemoryReview } from "@/components/features/crews/crew-memory-review"
+
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+const item = (id: string, proposal: string) => ({
+  id, kind: "memory_consolidation", state: "unread", source_id: proposal, workspace_id: "ws1",
+  title: "Memory consolidation: 3 rules pending review", created_at: "2026-10-17T09:00:00Z",
+  payload: { proposal_id: proposal, rules_count: 3, entries_scanned: 40 },
+})
+const explain = (proposal: string, crew: string, status = "pending") => ({
+  proposal_id: proposal, crew_id: crew, status, rules_count: 3, entries_scanned: 40, created_at: "2026-10-17T09:00:00Z",
+})
+
+type Call = { url: string; method: string; body: unknown }
+function server(opts: { inbox?: unknown[]; explain?: Record<string, unknown>; inboxStatus?: number; diff?: unknown } = {}) {
+  const calls: Call[] = []
+  let rows = opts.inbox ?? [item("i1", "mp_1"), item("i2", "mp_2")]
+  vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input)
+    const method = init?.method ?? "GET"
+    calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    if (url.includes("/api/v1/inbox") && method === "GET") {
+      if (opts.inboxStatus) return new Response("{}", { status: opts.inboxStatus })
+      return new Response(JSON.stringify({ rows }))
+    }
+    if (url.includes("/explain")) {
+      const id = /proposed\/([^/]+)\/explain/.exec(url)![1]
+      const e = (opts.explain ?? { mp_1: explain("mp_1", "c1"), mp_2: explain("mp_2", "c2") })[id]
+      return e ? new Response(JSON.stringify(e)) : new Response("{}", { status: 404 })
+    }
+    if (url.includes("/diff")) return new Response(JSON.stringify(opts.diff ?? { diff: "+- Use the EU price when both are shown", stats: { additions: 1, deletions: 0 } }))
+    if (method === "POST") { rows = rows.filter((r) => (r as { source_id: string }).source_id !== /proposed\/([^/]+)\//.exec(url)![1]); return new Response("{}") }
+    if (method === "PATCH") return new Response("{}")
+    return new Response("{}", { status: 404 })
+  })
+  return calls
+}
+
+function view(canDecide = true) {
+  render(<CrewMemoryReview workspaceId="ws1" crewId="c1" canDecide={canDecide} />)
+}
+
+describe("Memory › Waiting for review", () => {
+  it("lists this crew's pending proposals and not another crew's", async () => {
+    const calls = server()
+    view()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    expect(within(card).getByText(/3 rules/)).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes("/api/v1/inbox") && c.url.includes("kind=memory_consolidation"))).toBe(true)
+  })
+
+  it("leaves a proposal out once it is no longer pending", async () => {
+    server({ explain: { mp_1: explain("mp_1", "c1", "approved"), mp_2: explain("mp_2", "c2") } })
+    view()
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 30))
+    expect(screen.queryByRole("region", { name: /Waiting for review/ })).toBeNull()
+  })
+
+  it("is not on the page at all when nothing waits (proposals exist only with HITL on)", async () => {
+    server({ inbox: [] })
+    view()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(screen.queryByRole("region", { name: /Waiting for review/ })).toBeNull()
+    expect(screen.queryByText(/could not be loaded/i)).toBeNull()
+  })
+
+  it("says so when the list cannot be read, rather than showing an empty queue", async () => {
+    server({ inboxStatus: 500 })
+    view()
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i)
+  })
+
+  it("Accept approves the proposal, resolves its inbox item and drops the row", async () => {
+    const calls = server()
+    view()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }))
+    await waitFor(() => expect(screen.queryByRole("region", { name: /Waiting for review/ })).toBeNull())
+    const post = calls.find((c) => c.method === "POST")!
+    expect(post.url).toContain("/api/v1/consolidate/proposed/mp_1/approve")
+    const patch = calls.find((c) => c.method === "PATCH")!
+    expect(patch.url).toContain("/api/v1/inbox/i1")
+    expect(patch.body).toEqual({ state: "resolved", resolved_action: "approved" })
+  })
+
+  it("Reject rejects it", async () => {
+    const calls = server()
+    view()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Reject" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.includes("/mp_1/reject"))).toBe(true))
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ state: "resolved", resolved_action: "rejected" })
+  })
+
+  it("a refused decision keeps the row and says why", async () => {
+    const calls = server()
+    const base = vi.mocked(global.fetch).getMockImplementation()!
+    vi.mocked(global.fetch).mockImplementation(async (input, init) =>
+      init?.method === "POST" ? new Response(JSON.stringify({ error: "memory proposal already decided" }), { status: 409 }) : base(input, init))
+    view()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }))
+    expect(await screen.findByText(/already decided/)).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Waiting for review · 1" })).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+  })
+
+  it("View changes loads the diff of what Accept would append", async () => {
+    server()
+    view()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: /View changes/ }))
+    expect(await screen.findByText(/Use the EU price when both are shown/)).toBeInTheDocument()
+  })
+
+  it("only owners and admins decide: others get the Inbox link and no buttons", async () => {
+    server()
+    view(false)
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    expect(within(card).queryByRole("button", { name: "Accept" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: "Reject" })).toBeNull()
+    expect(within(card).getByText(/owners and admins/i)).toBeInTheDocument()
+    expect(within(card).getByRole("link", { name: /Inbox/ })).toHaveAttribute("href", expect.stringContaining("/inbox"))
+  })
+})
