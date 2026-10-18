@@ -770,14 +770,16 @@ describe("settings tab save bar saves name/tags/tier", () => {
     expect(JSON.parse((patch[1] as { body: string }).body)).toEqual({ tags: ["production"] })
   })
 
-  it("the save bar stays in view: it sticks to the pane, not to the end of a long Settings tab", async () => {
+  it("the save bar stays in view: it is fixed to the window, not to the end of a long Settings tab", async () => {
     // page-save-bar.tsx: "The bar is always in view". Absolutely positioned
-    // inside the Settings column it sat below the Danger zone, off screen.
+    // inside the Settings column it sat below the Danger zone, off screen;
+    // sticky still sat below the visible pane (its scroller is taller than
+    // the framed page), so it is fixed, as on Integrations.
     h.role = "OWNER"
     render(<Harness workspaceId="ws1" credential={credential as never} open tab="settings" onOpenChange={() => {}} onRefresh={() => {}} onRotate={() => {}} />)
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } })
     const bar = await screen.findByRole("region", { name: /unsaved changes/i })
-    expect(bar.className.split(/\s+/)).toContain("sticky")
+    expect(bar.className.split(/\s+/)).toContain("fixed")
     expect(bar.className.split(/\s+/)).not.toContain("absolute")
   })
 
