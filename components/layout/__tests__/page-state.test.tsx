@@ -72,6 +72,17 @@ describe("page states", () => {
     expect(screen.getByRole("link", { name: "Back to Issues" })).toHaveAttribute("href", "/issues")
   })
 
+  it("not found takes an optional icon; the default is unchanged", () => {
+    const Custom = (props: object) => <svg data-testid="custom-icon" {...props} />
+    const { container, unmount } = render(<PageNotFound what="page" />)
+    expect(screen.queryByTestId("custom-icon")).toBeNull()
+    const defaultMarkup = container.querySelector(".page-tile")!.innerHTML
+    expect(defaultMarkup).toContain("<svg")
+    unmount()
+    const second = render(<PageNotFound what="page" icon={Custom as never} />)
+    expect(second.container.querySelector(".page-tile [data-testid=custom-icon]")).not.toBeNull()
+  })
+
   it("offline is one banner and the data under it is dimmed and inert", () => {
     render(<><OfflineBanner since="14:02" /><StaleData stale><button type="button">Open</button></StaleData></>)
     expect(screen.getByRole("status")).toHaveTextContent("You see data from 14:02.")

@@ -35,4 +35,22 @@ describe("routine empty states use the layout EmptyState", () => {
       expect(src, f).not.toMatch(/import\s*\{[^}]*\bEmptyState\b[^}]*\}\s*from\s*"\.\/_shared"/)
     }
   })
+
+  // RT-10: compact size + the kit `action` prop, not "inline" + children.
+  it("the webhooks empty state is compact and its Add webhook button is the EmptyState action", () => {
+    render(<RoutineWebhooksTab workspaceId="ws-1" pipelineId="p-1" slug="nightly" />)
+    const root = screen.getByRole("heading", { name: "No webhooks yet" }).closest("[data-slot=empty-state]")!
+    expect(root).toHaveAttribute("data-size", "compact")
+    const add = screen.getByRole("button", { name: "Add webhook" })
+    expect(add.closest("[data-slot=empty-state-action]")).not.toBeNull()
+  })
+
+  it("no routine tab uses the stopgap size=inline", () => {
+    const dir = resolve(__dirname, "..")
+    for (const f of ["routine-webhooks-tab.tsx", "routine-runs-tab.tsx"]) {
+      const src = readFileSync(resolve(dir, f), "utf8")
+      expect(src, f).not.toMatch(/size="inline"/)
+      expect(src, f).toMatch(/size="compact"/)
+    }
+  })
 })

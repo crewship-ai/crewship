@@ -58,4 +58,56 @@ describe("Peek", () => {
     expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(false)
     outside.remove()
   })
+
+  // Kit `returnFocus`: a Peek has no trigger, so Radix would drop focus to the
+  // page on close. With the option it goes back to what opened it.
+  describe("returnFocus", () => {
+    function Harness({ returnFocus }: { returnFocus?: boolean }) {
+      const [open, setOpen] = React.useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>row</button>
+          <Peek open={open} onOpenChange={setOpen} title="Item" initialFocus="content" returnFocus={returnFocus}><p>Body</p></Peek>
+        </>
+      )
+    }
+    async function openAndClose() {
+      render(<Harness returnFocus />)
+      const opener = screen.getByRole("button", { name: "row" })
+      opener.focus()
+      fireEvent.click(opener)
+      expect(document.activeElement).toBe(screen.getByRole("dialog"))
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+      await waitFor(() => expect(document.activeElement).toBe(opener))
+    }
+
+    it("puts focus back on the element that opened it, on close", async () => {
+      await openAndClose()
+    })
+
+    it("does the same as the phone bottom sheet (390 px, useIsMobile true): focuses the sheet on open, returns on close", async () => {
+      mobile = true
+      try {
+        await openAndClose()
+      } finally {
+        mobile = false
+      }
+    })
+
+    it("does not move focus if the person has moved it elsewhere meanwhile", async () => {
+      render(<Harness returnFocus />)
+      const opener = screen.getByRole("button", { name: "row" })
+      opener.focus()
+      fireEvent.click(opener)
+      const other = document.createElement("input")
+      document.body.appendChild(other)
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+      other.focus()
+      await new Promise((r) => setTimeout(r, 10))
+      expect(document.activeElement).toBe(other)
+      other.remove()
+    })
+  })
 })
