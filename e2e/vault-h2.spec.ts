@@ -311,3 +311,41 @@ for (const [space, label] of [["secrets", "Filter secrets"], ["providers", "Filt
     await expect(panel.getByRole("group", { name: label })).toHaveCount(0)
   })
 }
+
+// ── v67 parity (PAR-075, 079, 080, 149) ──────────────────────────────────────
+test("PAR-075/079 header: the space is a chooser and the CLI button is >_", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page)
+  await page.goto("/credentials")
+  const crumb = page.getByTestId("vault-space-crumb")
+  await expect(crumb).toHaveText("Secrets")
+  await expect(page.getByRole("button", { name: "Command line" }).locator("svg.lucide-terminal")).toHaveCount(1)
+  await crumb.click()
+  await expect(page.getByRole("menuitemradio", { name: "AI providers" })).toBeVisible()
+})
+
+test("PAR-080 table: state pill is sans, tier L1/L2 is a grey sans chip, Last used stays mono", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page)
+  await page.goto("/credentials")
+  const row = table(page).locator("tbody tr").first()
+  await expect(row.locator("[data-slot=status-pill]")).not.toHaveCSS("font-family", /mono/i)
+  const tier = table(page).locator("tbody tr").filter({ hasText: "GitHub token" }).getByText("L2", { exact: true })
+  await expect(tier).not.toHaveCSS("font-family", /mono/i)
+  await expect(tier).not.toHaveClass(/text-info/)
+})
+
+test("PAR-149 Add secret step 1: v67 copy, Continue, AI provider hint, recognition banner", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page)
+  await page.goto("/credentials")
+  await page.getByRole("button", { name: "Add secret", exact: true }).first().click()
+  const grid = page.getByTestId("shape-grid")
+  await expect(grid.getByRole("button")).toHaveCount(6)
+  await expect(grid.getByRole("button", { name: /^API key or token/ })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByTestId("ai-provider-hint")).toContainText("That is an AI provider")
+  await page.getByLabel(/paste the value/i).fill("sk_live_" + "x".repeat(24))
+  await expect(page.getByTestId("paste-recognised")).toContainText("Looks like a Stripe secret key")
+  await page.getByTestId("wizard-footer").getByRole("button", { name: "Continue" }).click()
+  await expect(page.locator("#cred-name")).toHaveValue("Stripe secret key")
+})

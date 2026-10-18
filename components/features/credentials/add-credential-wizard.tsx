@@ -13,7 +13,7 @@ import { CredentialFileInput } from "./credential-file-input"
 import * as React from "react"
 import {
   Check, ChevronLeft, ChevronsUpDown, CreditCard, FileText, KeyRound,
-  Plus, ShieldCheck, Tag, Terminal, User, Users, X,
+  Plus, ShieldCheck, Sparkles, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -104,6 +104,16 @@ const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>
  */
 const FIELD = "h-10 sm:h-9"
 /** …and a field that opts down to 12px mono has to opt back up below sm. */
+/** Step 1's type cards as v67 words them (the item-type table keeps its shorter names for the lists). */
+const STEP1_COPY = {
+  TOKEN: { label: "API key or token", blurb: "One value: a key, token or PAT" },
+  LOGIN: { label: "Login", blurb: "Username and password" },
+  KEYPAIR: { label: "Key pair", blurb: "Access key id, secret and region (AWS style)" },
+  SSH_KEY: { label: "SSH key", blurb: "Private key, passphrase, public key" },
+  FILE: { label: "File", blurb: "A whole file: kubeconfig, service account JSON, .env" },
+  CERTIFICATE: { label: "Certificate", blurb: "PEM, private key and CA" },
+} as const
+
 const MONO_AREA = "font-mono text-xs coarse:text-base"
 
 interface Crew { id: string; name: string }
@@ -283,10 +293,10 @@ export function AddCredentialWizard({
     setAttempted(false)
     setStep("values")
   }
+  // v67: a recognised value is announced on this step and Continue takes it;
+  // the step does not move by itself.
   function onPaste(value: string) {
-    const det = detectPastedValue(value)
-    if (det && !det.aiProvider) takePasted(value)
-    else setPasteDraft(value)
+    setPasteDraft(value)
   }
 
   function changeInput(action: () => void) {
@@ -648,7 +658,14 @@ export function AddCredentialWizard({
    */
   function primaryAction() {
     if (submitting) return
-    if (step === "type") return
+    if (step === "type") {
+      if (login) return
+      // v67 Continue: a pasted value starts a token with the name it suggests;
+      // otherwise the selected type opens its own details.
+      if (pasteDraft.trim()) { takePasted(pasteDraft); return }
+      setChosenType(true); setAttempted(false); setStep("values")
+      return
+    }
     if (step === "scope" || (step === "values" && initial?.credentialId && !blocker && !valueError)) {
       void submit()
       return
@@ -729,11 +746,15 @@ export function AddCredentialWizard({
                 {onAddProvider && <Button size="sm" variant="outline" onClick={onAddProvider}>Add as AI provider</Button>}
                 <Button size="sm" variant="ghost" onClick={() => takePasted(pasteDraft)}>Store as a secret</Button>
               </div>
-            ) : pasteDraft.trim().length >= 8 ? (
-              <div className="flex items-center gap-2">
-                <span className="type-meta flex-1 text-muted-foreground">Not recognised. Store it as one value, or pick the type below.</span>
-                <Button size="sm" variant="outline" onClick={() => takePasted(pasteDraft)}>Continue as API key or token</Button>
+            ) : pasteDetection ? (
+              <div role="status" data-testid="paste-recognised" className="flex items-center gap-2.5 rounded-lg bg-chip-ok-bg px-3 py-2 text-chip-ok-fg">
+                <span className="grid min-w-0">
+                  <b className="type-row font-semibold">Looks like {/^[aeiou]/i.test(pasteDetection.suggestedName) ? "an" : "a"} {pasteDetection.suggestedName}</b>
+                  <small className="type-meta">Name, type and the variable {pasteDetection.envVar} are filled in for you</small>
+                </span>
               </div>
+            ) : pasteDraft.trim().length >= 8 ? (
+              <p className="type-meta text-muted-foreground">Not recognised. Continue to store it as one value, or pick the type below.</p>
             ) : null}
             {/* Two-up on a phone: six tiles in one column is four thumb-swipes
                 to reach Certificate, and three-up leaves 110px of tile for a
@@ -741,7 +762,8 @@ export function AddCredentialWizard({
             <div data-testid="shape-grid" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {CREDENTIAL_ITEM_TYPES.filter((t) => t.key !== "PROVIDER_LOGIN").map((t) => {
                 const Icon = TYPE_ICON[t.key]
-                const selected = chosenType && t.key === itemTypeKey
+                const selected = t.key === itemTypeKey
+                const copy = STEP1_COPY[t.key as keyof typeof STEP1_COPY]
                 const tone = SHAPE_ACCENT[t.key] ?? ACCENT.slate
                 return (
                   <button
@@ -749,11 +771,12 @@ export function AddCredentialWizard({
                     type="button"
                     aria-pressed={selected}
                     onClick={() => {
+                      // v67: a card selects, Continue goes on.
                       const select = () => {
-                        if (t.key !== itemTypeKey) { setPrimaryValue(""); setExtras({}); setCustom([]) }
-                        setItemTypeKey(t.key); setChosenType(true); setStep("values"); setAttempted(false)
+                        setPrimaryValue(""); setExtras({}); setCustom([])
+                        setItemTypeKey(t.key); setChosenType(true)
                       }
-                      if (t.key !== itemTypeKey) changeInput(select); else select()
+                      if (t.key !== itemTypeKey) changeInput(select)
                     }}
                     className={cn(
                       "flex min-h-20 flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors",
@@ -777,12 +800,22 @@ export function AddCredentialWizard({
                     >
                       <Icon className={cn("h-4 w-4", tone.fg)} />
                     </span>
-                    <span className="type-row font-medium leading-tight text-foreground">{t.label}</span>
-                    <span className="type-meta leading-snug text-muted-foreground">{t.blurb}</span>
+                    <span className="type-row font-medium leading-tight text-foreground">{copy?.label ?? t.label}</span>
+                    <span className="type-meta leading-snug text-muted-foreground">{copy?.blurb ?? t.blurb}</span>
                   </button>
                 )
               })}
             </div>
+            {!pasteDetection?.aiProvider && (
+              <div className="flex items-start gap-2 rounded-lg bg-primary/[0.07] px-3 py-2 type-meta text-foreground/85" data-testid="ai-provider-hint">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary-hover" aria-hidden />
+                <span className="min-w-0">
+                  Pasting <span className="font-mono">sk-ant-…</span>, <span className="font-mono">sk-proj-…</span> or a Gemini key? That is an <b>AI provider</b>; add it there so agents can pay with it.{" "}
+                  {onAddProvider && <button type="button" onClick={onAddProvider} className="text-primary-hover underline-offset-2 hover:underline">Add as AI provider</button>}
+                </span>
+              </div>
+            )}
+            <p className="type-meta text-muted-foreground">Connected apps (OAuth for Slack, Notion, Google Drive…) are added from Integrations and land in the folder “From integrations”.</p>
             </>}
 
           </>
@@ -1302,7 +1335,7 @@ export function AddCredentialWizard({
               </CreateSurfaceSecondaryAction>
             )
           }
-          primaryLabel={initial?.credentialId ? "Update login" : step === "type" ? undefined : uncertainSave ? "Check credential list" : savedId ? "Retry missing parts" : step === "scope" ? (deviceCredentialId ? "Finish setup" : assignNow ? "Save & assign" : login ? "Save provider" : "Save secret") : "Continue"}
+          primaryLabel={initial?.credentialId ? "Update login" : step === "type" ? (login ? undefined : "Continue") : uncertainSave ? "Check credential list" : savedId ? "Retry missing parts" : step === "scope" ? (deviceCredentialId ? "Finish setup" : assignNow ? "Save & assign" : login ? "Save provider" : "Save secret") : "Continue"}
           onPrimary={uncertainSave ? () => onSuccess() : primaryAction}
           primaryDisabled={Boolean(pendingChange) || (step === "values" && deviceBusy)}
           busy={submitting}

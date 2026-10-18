@@ -30,7 +30,27 @@ function renderExplorer(over: Partial<SkillFilters> = {}, canReview = true) {
   return onChange
 }
 
+/** The panel toolbar's Filter button opens the facets under it (v67 pk-f). */
+function openFilter() {
+  fireEvent.click(screen.getByRole("button", { name: /^Filter/ }))
+}
+
 describe("SkillsExplorer", () => {
+  // PAR-073: v67's panel toolbar is search + Filter + collapse; the facets sit
+  // behind Filter and the active choices show as chips while it is closed.
+  it("PAR-073 keeps the facets behind a Filter button in the toolbar", () => {
+    renderExplorer({ trust: "verified" })
+    const filter = screen.getByRole("button", { name: /^Filter/ })
+    expect(filter).toHaveAttribute("aria-expanded", "false")
+    expect(filter.textContent).toContain("1")
+    expect(screen.queryByText("Domain")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Remove filter Verified" })).toBeInTheDocument()
+    fireEvent.click(filter)
+    expect(filter).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("Domain")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove filter Verified" })).not.toBeInTheDocument()
+  })
+
   it("lists the v67 views with counts, Proposed only for reviewers", () => {
     renderExplorer()
     const views = screen.getByRole("navigation", { name: "Skill views" })
@@ -60,8 +80,9 @@ describe("SkillsExplorer", () => {
 
   it("orders the panel: active filters, then Views, then the facets", () => {
     renderExplorer({ agentId: "a-riley" })
+    expect((document.body.textContent ?? "").indexOf("Agent: Riley")).toBeLessThan((document.body.textContent ?? "").indexOf("Views"))
+    openFilter()
     const text = document.body.textContent ?? ""
-    expect(text.indexOf("Agent: Riley")).toBeLessThan(text.indexOf("Views"))
     expect(text.indexOf("Views")).toBeLessThan(text.indexOf("Source"))
     for (const facet of ["Source", "Domain", "Trust", "Status", "Used by crew"]) expect(screen.getByText(facet)).toBeInTheDocument()
     expect(screen.queryByText("Crews & agents")).not.toBeInTheDocument()
@@ -76,6 +97,7 @@ describe("SkillsExplorer", () => {
 
   it("a facet picks one value and picking it again clears it", () => {
     const onChange = renderExplorer({ crewId: "c-ops" })
+    openFilter()
     // A facet with a pick starts open.
     fireEvent.click(screen.getByTestId("skills-crew-ops"))
     expect(onChange).toHaveBeenLastCalledWith({ crewId: null })
@@ -85,8 +107,9 @@ describe("SkillsExplorer", () => {
 
   it("Source shows where skills come from", () => {
     renderExplorer({ source: "acme/skills" })
-    // The facet row and the active chip.
-    expect(screen.getAllByText("acme/skills")).toHaveLength(2)
+    openFilter()
+    // The facet row; the active chip gives way to the open block (v67).
+    expect(screen.getAllByText("acme/skills")).toHaveLength(1)
     expect(screen.getByText("Crewship built-in")).toBeInTheDocument()
   })
 })
