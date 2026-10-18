@@ -378,3 +378,69 @@ test.describe("RT-06 phone 390", () => {
     await expect(page.getByRole("list", { name: "Steps of this run" })).toBeVisible()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Finish pass (#3525): COM-12, COM-14, COM-15, RT-07, RT-10.
+
+test("COM-12 the routine's actions sit in the top bar's own slot, with no hand-off node", async ({ page }) => {
+  await openFirstRoutine(page)
+  const slot = page.locator('[data-slot="sub-bar-actions"]').first()
+  await expect(slot.getByRole("button").first()).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.locator('[data-slot="routine-page-actions"]')).toHaveCount(0)
+})
+
+test("COM-14 the save bar on a routine editor says Save as draft", async ({ page }) => {
+  await openFirstRoutine(page)
+  await page.getByRole("tab", { name: /^Settings/ }).click()
+  const name = page.locator("#routine-edit-name")
+  await expect(name).toBeEnabled({ timeout: TIMEOUT })
+  await name.fill(`${await name.inputValue()} (edited)`)
+  const bar = page.getByRole("region", { name: "Unsaved changes" })
+  await expect(bar.getByRole("button", { name: "Save as draft" })).toBeVisible()
+  await bar.getByRole("button", { name: "Discard" }).click()
+})
+
+test("COM-15 the open view in the panel is marked current", async ({ page }) => {
+  await page.goto("/routines?view=runs")
+  const views = routinesPanel(page).getByRole("group", { name: "Views" })
+  await expect(views.locator('[aria-current="page"]')).toHaveText(/^All runs/, { timeout: TIMEOUT })
+})
+
+test("RT-07 Activity: a routine run row opens the routine run peek with version and cost", async ({ page }) => {
+  await page.goto("/activity?lens=routines")
+  const row = page.getByRole("region", { name: "Latest runs" }).getByRole("button").first()
+  test.skip(!(await row.isVisible({ timeout: TIMEOUT }).catch(() => false)), "no runs in this workspace")
+  await row.click()
+  const peek = page.getByTestId("run-peek")
+  await expect(peek).toBeVisible()
+  await expect(peek.getByText("Version")).toBeVisible()
+  await expect(peek.getByText("Cost")).toBeVisible()
+  await page.getByRole("button", { name: "Open run" }).click()
+  await expect(peek).toHaveCount(0)
+})
+
+test.describe("RT-07 / COM-12 tablet 1024", () => {
+  test.use({ viewport: { width: 1024, height: 900 } })
+  test("the run peek from Activity fits the viewport", async ({ page }) => {
+    await page.goto("/activity")
+    const row = page.getByRole("region", { name: "Latest runs" }).getByRole("button").first()
+    test.skip(!(await row.isVisible({ timeout: TIMEOUT }).catch(() => false)), "no runs in this workspace")
+    await row.click()
+    const box = await page.getByRole("dialog").first().boundingBox()
+    expect(box!.x + box!.width).toBeLessThanOrEqual(1024)
+  })
+})
+
+test.describe("RT-07 phone 390", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  test("the run peek from Activity is a bottom sheet within the width", async ({ page }) => {
+    await page.goto("/activity")
+    const row = page.getByRole("region", { name: "Latest runs" }).getByRole("button").first()
+    test.skip(!(await row.isVisible({ timeout: TIMEOUT }).catch(() => false)), "no runs in this workspace")
+    await row.click()
+    const box = await page.getByRole("dialog").first().boundingBox()
+    expect(box!.width).toBeLessThanOrEqual(390)
+    await expect(page.getByTestId("run-peek")).toBeVisible()
+  })
+})
+

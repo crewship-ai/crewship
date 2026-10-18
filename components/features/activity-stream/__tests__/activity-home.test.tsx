@@ -25,7 +25,7 @@ const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString()
 const runs = [
   { id: "r_live", pipeline_slug: "check", pipeline_name: "Check deliveries", status: "running", started_at: ago(1), duration_ms: 0, current_step_id: "query" },
   { id: "r_fail", pipeline_slug: "repair", pipeline_name: "Repair demo delivery", status: "failed", started_at: ago(22), duration_ms: 12000, error_message: "HTTP 502 Bad Gateway", failed_at_step: "post", triggered_via: "webhook" },
-  { id: "r_ok", pipeline_slug: "telemetry", pipeline_name: "Refresh telemetry", status: "completed", started_at: ago(120), duration_ms: 4700, triggered_via: "schedule" },
+  { id: "r_ok", pipeline_slug: "telemetry", pipeline_name: "Refresh telemetry", status: "completed", started_at: ago(120), duration_ms: 4700, triggered_via: "schedule", cost_usd: 0.12, pipeline_version: 3 },
 ]
 const groups = [
   { fingerprint: "now", count: 9, pipeline_slug: "repair", failed_at_step: "post", sample_error: "HTTP 502 Bad Gateway", run_ids: ["r_fail"] },
@@ -115,5 +115,19 @@ describe("ActivityHome", () => {
     expect(within(latest).queryByText("HTTP 502 Bad Gateway")).toBeNull()
     // The waiting ask belongs to a run outside the scope.
     expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("Nothing is waiting for you.")).toBeInTheDocument()
+  })
+
+  // RT-07: the Latest runs rows open the routine run peek, not the page.
+  it("a Latest runs row opens the routine run peek with version and cost; Open run goes to the page", async () => {
+    const onOpenRun = vi.fn()
+    mount({ onOpenRun })
+    const latest = await screen.findByRole("region", { name: "Latest runs" })
+    fireEvent.click(await within(latest).findByRole("button", { name: /Refresh telemetry/ }))
+    expect(onOpenRun).not.toHaveBeenCalled()
+    const peek = screen.getByTestId("run-peek")
+    expect(within(peek).getByText("Version").nextElementSibling).toHaveTextContent("v3")
+    expect(within(peek).getByText("Cost").nextElementSibling).toHaveTextContent("$0.12")
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
+    expect(onOpenRun).toHaveBeenCalledWith("r_ok")
   })
 })

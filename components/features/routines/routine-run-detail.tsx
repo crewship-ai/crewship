@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { RoutineRunSteps } from "./routine-run-steps"
 import { Segmented } from "@/components/ui/segmented"
-import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
@@ -20,7 +19,7 @@ import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-director
 import { canKillRoutine, roleAtLeast, routinePermissions } from "@/lib/routine-governance"
 import { runTraceMarkdown, timelineBars } from "@/lib/routine-page"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
-import { SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SubBarActions, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { RoutinePreviousRuns, RoutineRunPeek } from "./routine-run-peek"
 import { RoutineRunTimeline } from "./routine-run-timeline"
 import { useTrace } from "@/hooks/use-trace"
@@ -80,14 +79,15 @@ interface RoutineRunDetailProps {
   workspaceId: string
   runId: string
   /** The top bar's action slot (Routines); the actions sit in the header without one (Activity). */
-  actionsTarget?: HTMLElement | null
+  /** Put the actions in the page's SubBar (SubBarActions); in the header without one. */
+  actionsInBar?: boolean
   /** Back to the routine. */
   onClose?: () => void
   /** Opens another run of the same routine (from the peek). */
   onOpenRun?: (runId: string) => void
 }
 
-export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, onOpenRun }: RoutineRunDetailProps) {
+export function RoutineRunDetail({ workspaceId, runId, actionsInBar, onClose, onOpenRun }: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
   const { records: siblings } = usePipelineRunRecords(run?.pipeline_slug ? workspaceId : null, run?.pipeline_slug ?? null)
   const [peek, setPeek] = useState<string | null>(null)
@@ -495,12 +495,12 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         <span aria-hidden>›</span>
         <span>Run</span>
       </nav>
-      {actionsTarget && createPortal(runActions, actionsTarget)}
+      {actionsInBar && <SubBarActions>{runActions}</SubBarActions>}
       <RoutineIdentityHeader
         routine={identity}
         workspaceId={workspaceId}
         onChanged={() => setIdentityRevision((v) => v + 1)}
-        actions={actionsTarget ? undefined : runActions}
+        actions={actionsInBar ? undefined : runActions}
       >
         <StatusPill size="md" tone={toStatusTone(presentation.tone)} label={presentation.label} />
         {/* The facts of this run as one sentence: what used to be a four-cell
