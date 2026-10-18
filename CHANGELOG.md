@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Inbox totals come from the server.** `GET /api/v1/inbox/counts` and `crewship inbox counts` return the items you can see per space (to handle, updates, history) and per kind in one request, with the list's visibility, so a client no longer walks every page just to label its tabs.
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
 ### Fixed

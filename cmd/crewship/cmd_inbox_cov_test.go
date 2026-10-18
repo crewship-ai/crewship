@@ -670,3 +670,53 @@ func TestInboxGetRunE_JSON_CarriesAttentionContract(t *testing.T) {
 		t.Errorf("attention contract dropped: %v", item)
 	}
 }
+
+// ─── inbox counts ────────────────────────────────────────────────────────
+
+func TestInboxCountsRunE(t *testing.T) {
+	payload := map[string]any{
+		"total": 5, "unread": 3,
+		"spaces": map[string]int{"action": 2, "updates": 2, "history": 1},
+		"by_kind": map[string]any{
+			"waitpoint":  map[string]int{"action": 2, "updates": 0, "history": 0},
+			"failed_run": map[string]int{"action": 0, "updates": 2, "history": 1},
+		},
+	}
+	t.Run("table", func(t *testing.T) {
+		stub := covSetupCli5(t)
+		stub.OnGet("/api/v1/inbox/counts", clitest.JSONResponse(200, payload))
+		var err error
+		out := covCaptureStdoutCli5(t, func() { err = inboxCountsCmd.RunE(inboxCountsCmd, nil) })
+		if err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		for _, want := range []string{"5 items · 3 unread", "to handle", "all kinds", "waitpoint", "failed_run"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q:\n%s", want, out)
+			}
+		}
+		if strings.Index(out, "failed_run") > strings.Index(out, "waitpoint") {
+			t.Errorf("kinds should be sorted:\n%s", out)
+		}
+	})
+	t.Run("json", func(t *testing.T) {
+		stub := covSetupCli5(t)
+		flagFormat = "json"
+		stub.OnGet("/api/v1/inbox/counts", clitest.JSONResponse(200, payload))
+		var err error
+		out := covCaptureStdoutCli5(t, func() { err = inboxCountsCmd.RunE(inboxCountsCmd, nil) })
+		if err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		if !strings.Contains(out, `"total": 5`) || !strings.Contains(out, `"by_kind"`) {
+			t.Errorf("JSON output = %q", out)
+		}
+	})
+	t.Run("server error", func(t *testing.T) {
+		stub := covSetupCli5(t)
+		stub.OnGet("/api/v1/inbox/counts", clitest.ErrorResponse(500, "counts failed"))
+		if err := inboxCountsCmd.RunE(inboxCountsCmd, nil); err == nil || !strings.Contains(err.Error(), "counts failed") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
