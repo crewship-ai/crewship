@@ -482,7 +482,9 @@ for (const width of [390, 1024, 1440]) {
       await page.goto("/routines")
       const card = page.getByTestId("routines-health")
       await expect(card).toBeVisible({ timeout: TIMEOUT })
-      await expect(card).not.toContainText(/30 ?d/)
+      // Spend is the last 30 days when the aggregate answers, this month before; a healthy row stays quiet.
+      await expect(card).toContainText(/last 20 runs|newest runs loaded/)
+      await expect(card).not.toContainText("$0.00")
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow).toBeLessThanOrEqual(0)
     })
