@@ -1,0 +1,217 @@
+import * as React from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import fixture from "@/testdata/slides-schema-v1.json"
+import type { SlideDeck } from "@/lib/slides/model"
+import { createFixtureSaveClient } from "@/lib/slides/save-fixture"
+import type { SlidesSaveClient } from "@/lib/slides/save-client"
+import { SlidesEditor } from "../slides-editor"
+import { SlidesWorkspace } from "../slides-workspace"
+
+const sample = () => structuredClone(fixture.deck) as SlideDeck
+const realWidth = window.innerWidth
+afterEach(() => { cleanup(); Object.defineProperty(window, "innerWidth", { configurable: true, value: realWidth }); vi.restoreAllMocks() })
+
+function Editor({ start = sample() }: { start?: SlideDeck }) {
+  const [deck, setDeck] = React.useState(start)
+  return <><SlidesEditor deck={deck} onChange={setDeck} /><output data-testid="deck">{JSON.stringify(deck)}</output></>
+}
+const current = () => JSON.parse(screen.getByTestId("deck").textContent!) as SlideDeck
+const first = () => current().slides.find(slide => slide.id === "slide_b")!
+const canvasElement = (name: string) => screen.getByRole("button", { name })
+const keys = (target: Element, key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(target, { key, ...init })
+
+describe("elements, selection and keyboard", () => {
+  it("selects on the canvas, nudges with arrows and deletes with Delete", () => {
+    render(<Editor />)
+    const title = canvasElement("text 1")
+    fireEvent.pointerDown(title)
+    expect(title.getAttribute("aria-pressed")).toBe("true")
+    keys(title, "ArrowRight"); keys(title, "ArrowDown", { shiftKey: true })
+    expect(first().elements[0]).toMatchObject({ x: 25, y: 34 })
+    keys(title, "ArrowLeft", { altKey: true })
+    expect(first().elements[0].width).toBe(879)
+    keys(title, "Delete")
+    expect(first().elements.map(element => element.id)).toEqual(["shape_b"])
+    expect(screen.getByText(/Select an element/)).toBeTruthy()
+  })
+  it("multi-selects with Shift and moves the group together; plain arrows do nothing without selection", () => {
+    render(<Editor />)
+    keys(canvasElement("text 1"), "ArrowRight")
+    expect(first().elements[0].x).toBe(24)
+    fireEvent.pointerDown(canvasElement("text 1"))
+    fireEvent.pointerDown(canvasElement("shape 2"), { shiftKey: true })
+    expect(screen.getByText(/2 elements selected/)).toBeTruthy()
+    keys(canvasElement("shape 2"), "ArrowRight", { shiftKey: true })
+    expect(first().elements.map(element => element.x)).toEqual([34, 34])
+    fireEvent.click(screen.getByRole("button", { name: "Delete 2 elements" }))
+    expect(first().elements).toEqual([])
+    expect(screen.getByText("This slide is empty. Add text, a shape or a table to start.")).toBeTruthy()
+  })
+  it("selects from the element list with Shift for several", () => {
+    render(<Editor />)
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Select shape 2" }), { shiftKey: true })
+    expect(screen.getByText(/2 elements selected/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Select shape 2" }), { shiftKey: true })
+    expect(screen.getByText("Selected text")).toBeTruthy()
+    expect(screen.queryByText(/2 elements selected/)).toBeNull()
+  })
+  it("changes layer order with the four commands and explains disabled ones", () => {
+    render(<Editor />)
+    const layer = screen.getByRole("group", { name: "Layer order" })
+    expect(within(layer).getByRole("button", { name: "Bring to front" }).hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    fireEvent.click(within(layer).getByRole("button", { name: "Bring to front" }))
+    expect(first().elements.map(element => element.id)).toEqual(["shape_b", "title_b"])
+    expect(within(layer).getByRole("button", { name: "Bring forward" }).hasAttribute("disabled")).toBe(true)
+    fireEvent.click(within(layer).getByRole("button", { name: "Send backward" }))
+    expect(first().elements.map(element => element.id)).toEqual(["title_b", "shape_b"])
+    fireEvent.click(within(layer).getByRole("button", { name: "Bring forward" }))
+    fireEvent.click(within(layer).getByRole("button", { name: "Send to back" }))
+    expect(first().elements.map(element => element.id)).toEqual(["title_b", "shape_b"])
+  })
+  it("undoes and redoes local edits, coalescing typing into one step", () => {
+    render(<Editor />)
+    const undo = screen.getByRole("button", { name: "Undo" }), redo = screen.getByRole("button", { name: "Redo" })
+    expect(undo.hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    const text = screen.getByLabelText("Text", { selector: "textarea" })
+    fireEvent.change(text, { target: { value: "A" } }); fireEvent.change(text, { target: { value: "AB" } })
+    fireEvent.click(canvasElement("text 1")); keys(canvasElement("text 1"), "ArrowRight")
+    expect(first().elements[0]).toMatchObject({ x: 25 })
+    fireEvent.click(undo)
+    expect(first().elements[0]).toMatchObject({ x: 24 })
+    keys(screen.getByLabelText("Speaker notes").closest("section")!, "z", { ctrlKey: true })
+    expect((first().elements[0] as { text: { value: string } }).text.value).toContain("Příliš")
+    keys(canvasElement("text 1"), "y", { ctrlKey: true })
+    expect((first().elements[0] as { text: { value: string } }).text.value).toBe("AB")
+    expect(redo.hasAttribute("disabled")).toBe(false)
+    keys(canvasElement("text 1"), "z", { ctrlKey: true, shiftKey: true })
+    expect(redo.hasAttribute("disabled")).toBe(true)
+  })
+  it("leaves native text undo alone while typing in a field", () => {
+    render(<Editor />)
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    const text = screen.getByLabelText("Text", { selector: "textarea" })
+    fireEvent.change(text, { target: { value: "Changed" } })
+    expect(fireEvent.keyDown(text, { key: "z", ctrlKey: true })).toBe(true)
+    expect((first().elements[0] as { text: { value: string } }).text.value).toBe("Changed")
+  })
+  it("drops local history when the parent replaces the deck", () => {
+    const deck = sample(), { rerender } = render(<SlidesEditor deck={deck} onChange={vi.fn()} />)
+    rerender(<SlidesEditor deck={deck} onChange={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Undo" }).hasAttribute("disabled")).toBe(true)
+  })
+  it("moves by dragging and resizes with the handle, one undo step each", () => {
+    render(<Editor />)
+    const svg = screen.getByRole("group", { name: "Slide 1" })
+    vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({ width: 480, height: 270, x: 0, y: 0, top: 0, left: 0, right: 480, bottom: 270, toJSON: () => ({}) })
+    const shape = canvasElement("shape 2")
+    fireEvent.pointerDown(shape, { clientX: 10, clientY: 10, pointerId: 1 })
+    fireEvent.pointerMove(shape, { clientX: 30, clientY: 20, pointerId: 1 })
+    fireEvent.pointerUp(shape, { pointerId: 1 })
+    expect(first().elements[1]).toMatchObject({ x: 64, y: 160 })
+    const handle = svg.querySelector("[data-resize-handle]")!
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientX: 110, clientY: 105, pointerId: 1 })
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    expect(first().elements[1]).toMatchObject({ width: 120, height: 110 })
+    fireEvent.click(screen.getByRole("button", { name: "Undo" })); fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+    expect(first().elements[1]).toMatchObject({ x: 24, y: 140, width: 100, height: 100 })
+  })
+  it("shows a visible focus ring on the focused element", () => {
+    render(<Editor />)
+    const title = canvasElement("text 1")
+    expect(title.tabIndex).toBe(0)
+    fireEvent.focus(title)
+    expect(title.querySelector("[data-focus-ring]")).not.toBeNull()
+    fireEvent.blur(title)
+    expect(title.querySelector("[data-focus-ring]")).toBeNull()
+  })
+  it("is a read-only preview at phone width", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    render(<Editor />)
+    expect(screen.getByText(/read-only preview/)).toBeTruthy()
+    expect(screen.getByRole("img", { name: "Slide 1" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "text 1" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Add text" }).hasAttribute("disabled")).toBe(true)
+    expect(screen.getByRole("button", { name: "Present" }).hasAttribute("disabled")).toBe(false)
+  })
+})
+
+describe("workspace states", () => {
+  const snapshot = () => ({ deck: sample(), rev: 3, orderVersion: 1 })
+  const editNotes = (text: string) => fireEvent.change(screen.getByLabelText("Speaker notes"), { target: { value: text } })
+  it("shows loading, then the deck", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    expect(screen.getByRole("status").textContent).toContain("Loading")
+    expect(await screen.findByLabelText("Speaker notes")).toBeTruthy()
+    expect(screen.queryByText(/Loading presentation/)).toBeNull()
+  })
+  it.each([["unavailable", "not available"], ["error", "Boom"]] as const)("shows the %s state and retries", async (kind, text) => {
+    const load = vi.fn().mockResolvedValueOnce(kind === "unavailable" ? { status: "unavailable", reason: "not_found" } : { status: "error", retryable: true, message: "Boom" }).mockResolvedValue(snapshot())
+    const client: SlidesSaveClient = { load, patch: vi.fn() }
+    render(<SlidesWorkspace pageId="fixture_page" client={client} saveEnabled />)
+    expect((await screen.findByRole("alert")).textContent).toContain(text)
+    if (kind === "error") { fireEvent.click(screen.getByRole("button", { name: "Try again" })); await screen.findByLabelText("Speaker notes") }
+    else expect(screen.queryByRole("button")).toBeNull()
+  })
+  it("saves a draft through the operation layer and reports the new revision", async () => {
+    const server = createFixtureSaveClient(snapshot()), patch = vi.spyOn(server, "patch")
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(true)
+    editNotes("Hotovo")
+    expect(screen.getByRole("status").textContent).toContain("Unsaved changes")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Saved as revision 4"))
+    expect(patch.mock.calls[0][0]).toMatchObject({ base_rev: 3, operations: [{ op: "set_notes", notes: "Hotovo" }] })
+    expect(server.head().deck.slides[0].notes).toBe("Hotovo")
+  })
+  it("blocks saving a layer change and says why, without dropping it", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Bring to front" }))
+    expect(screen.getByRole("status").textContent).toContain("layer order cannot be saved yet")
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(true)
+  })
+  it("keeps the draft on conflict and only loads the latest after an explicit choice", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    editNotes("Moje poznámka")
+    const other = sample(); other.slides[0].notes = "Cizí změna"
+    server.advance({ deck: other, rev: 4, orderVersion: 1 })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toContain("revision 4")
+    expect(server.head().deck.slides[0].notes).toBe("Cizí změna")
+    expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Moje poznámka")
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Load latest and discard my draft" }))
+    expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Cizí změna")
+    expect(screen.getByRole("button", { name: "Undo" }).hasAttribute("disabled")).toBe(true)
+  })
+  it("keeps the draft and reuses the mutation id when saving fails offline", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    const patch = vi.fn().mockResolvedValueOnce({ status: "error", retryable: true, message: "offline" }).mockImplementation(server.patch)
+    render(<SlidesWorkspace pageId="fixture_page" client={{ load: server.load, patch }} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    editNotes("Offline")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    expect((await screen.findByRole("alert")).textContent).toContain("Your draft is kept")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Saved as revision"))
+    expect(patch.mock.calls[1][0].mutation_id).toBe(patch.mock.calls[0][0].mutation_id)
+  })
+  it("offers no save while the flag is off", async () => {
+    render(<SlidesWorkspace pageId="fixture_page" client={createFixtureSaveClient(snapshot())} saveEnabled={false} />)
+    await screen.findByLabelText("Speaker notes")
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
+    expect(screen.getByRole("status").textContent).toContain("Saving is not available yet")
+  })
+})

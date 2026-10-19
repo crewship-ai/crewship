@@ -57,3 +57,22 @@ the save button must stay disabled for them. `lib/slides/save-client.ts` defines
 the proposed save interface behind `NEXT_PUBLIC_SLIDES_EDITOR_SAVE`;
 `save-fixture.ts` is an in-memory stand-in used by tests. JSON integers cannot be
 told from `24.0` in JavaScript, so that one Go rejection is not mirrored.
+
+## Editing interactions
+
+`SlidesEditor` selects with click or Enter/Space (Shift adds or removes), drags to
+move, resizes with the corner handle (single selection), and supports: arrows
+nudge by 1 (Shift 10, Alt resizes), Delete/Backspace remove, Escape clears,
+Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo (not while typing in a field).
+Layer commands act on the selection as a block. Undo history is local only: a deck
+the editor did not emit (reload after a conflict) clears it, so undo never
+reverts someone else's confirmed change. Elements are focusable with a visible
+dashed focus ring. Below 768 px the editor is a read-only preview (Present stays).
+
+`SlidesWorkspace` owns the saved snapshot, the draft and the loading, not
+available, error (retry), saving, conflict (load latest or keep editing locally,
+never overwritten) and offline (draft kept, same mutation id on retry) states. It
+saves through `diffToPatch` and a `SlidesSaveClient`; layer order, slide order and
+theme edits cannot be expressed by the current operations, so save is blocked with
+the reason while they remain in the draft. Save is off unless
+`NEXT_PUBLIC_SLIDES_EDITOR_SAVE=true`.
