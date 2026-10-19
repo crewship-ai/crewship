@@ -18,7 +18,8 @@
 // vocabulary moved: widen the allowlist in agents_avatar.go if the new
 // elements are inert, and think hard if they are not.
 //
-// Keep the style list in sync with AVATAR_STYLES in lib/agent-avatar.ts.
+// Keep the style list in sync with AVATAR_STYLES in lib/agent-avatar.ts (the
+// 9.4 styles here; the DiceBear 10 voxel styles below).
 
 import { writeFileSync, mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -57,3 +58,22 @@ for (const style of STYLES) {
 mkdirSync(dirname(OUT), { recursive: true })
 writeFileSync(OUT, JSON.stringify(fixtures, null, 1))
 console.log(`wrote ${Object.keys(fixtures).length} fixtures to ${OUT}`)
+
+// #3789: DiceBear 10's voxel styles, still and animated. These are NOT
+// storable — the Go test over them pins that the allowlist refuses them (an
+// XML comment, <use href>, <style>), which is why lib/agent-avatar-persist.ts
+// never sends them. If DiceBear 10 ever emits only allowlisted markup, that
+// test goes red and the decision can be revisited.
+const VOXEL_OUT = join(repoRoot, "internal", "api", "testdata", "dicebear10_voxel_avatars.json")
+const v10 = await import("@dicebear/core-v10")
+const voxel = {}
+for (const style of ["voxel-bot", "voxel-art"]) {
+  const { default: definition } = await import(`@dicebear/styles-v10/${style}.json`, { with: { type: "json" } })
+  const s = new v10.Style(definition)
+  for (const seed of SEEDS) {
+    voxel[`${style}:${seed}`] = new v10.Avatar(s, { seed, size: 128, animationVariant: "none" }).toString()
+    voxel[`${style}:${seed}:animated`] = new v10.Avatar(s, { seed, size: 128, animationVariant: "slow" }).toString()
+  }
+}
+writeFileSync(VOXEL_OUT, JSON.stringify(voxel, null, 1))
+console.log(`wrote ${Object.keys(voxel).length} fixtures to ${VOXEL_OUT}`)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -36,6 +37,9 @@ Examples:
 		}
 		if !reset && style == "" {
 			return fmt.Errorf("either --style or --reset is required")
+		}
+		if !avatarstyle.Valid(style) {
+			return fmt.Errorf("%s", avatarstyle.Problem(style))
 		}
 
 		crewID, err := resolveCrewID(client, args[0])
@@ -75,7 +79,7 @@ Examples:
 }
 
 func init() {
-	crewApplyAvatarStyleCmd.Flags().String("style", "", "Avatar style: bottts-neutral|adventurer|fun-emoji|pixel-art|micah|notionists|thumbs|lorelei|big-smile|avataaars")
+	crewApplyAvatarStyleCmd.Flags().String("style", "", "Avatar style: "+avatarstyle.List())
 	crewApplyAvatarStyleCmd.Flags().Bool("reset", false, "Clear avatar_style overrides for every agent in the crew")
 	crewCmd.AddCommand(crewApplyAvatarStyleCmd)
 }

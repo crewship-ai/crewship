@@ -2073,6 +2073,13 @@ END;
 	{version: 20260908142800, name: "private_service_configuration", fn: migrationPrivateServices, restoreBackfill: migrationPrivateServices},
 	// Verify native old-writer fields and exact SHA256 before one-time capture.
 	{version: 20261018024840, name: "legacy_pipeline_current_heads", fn: migrationLegacyPipelineCurrentHeads},
+	// The default avatar style moves to Voxel Bot (#3789): pin every agent
+	// that draws with the old default to it by name, so no face changes. Here
+	// rather than in migrations/ for its restore hook: a backup from before
+	// this migration restores un-pinned rows. See
+	// migrate_consts_pin_legacy_avatar_style.go.
+	{version: 20261019194500, name: "pin_legacy_avatar_style", sql: migrationPinLegacyAvatarStyle,
+		restoreBackfill: restoreBackfillPinLegacyAvatarStyle},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
