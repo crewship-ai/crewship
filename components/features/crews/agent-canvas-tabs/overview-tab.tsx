@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import {
-  AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Plus, Share2, Webhook, Workflow, XCircle,
+  AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Share2, Webhook, Workflow, XCircle,
 } from "lucide-react"
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
@@ -319,18 +319,9 @@ export function OverviewTab({
             { id: "off", label: "Disabled" },
           ]}
           items={skillItems}
-          headerAction={
-            <button
-              type="button"
-              onClick={() => setSkillPickerOpen(true)}
-              className="type-meta inline-flex h-6 items-center gap-1 rounded-md px-2 font-medium text-primary hover:bg-primary/10 coarse:min-h-[44px]"
-            >
-              <Plus className="h-3 w-3" aria-hidden />
-              Add skill
-            </button>
-          }
           footerLabel="Manage skills"
           footerOnClick={() => setManager("skills")}
+          addAction={{ label: "Add skill", onClick: () => setSkillPickerOpen(true) }}
         />
         <DetailCell
           order={5}

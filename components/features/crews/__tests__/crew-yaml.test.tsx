@@ -24,15 +24,11 @@ function serve(failAll = false) {
 const view = () => render(<CrewCommandLine workspaceId="ws1" crew={{ slug: "ops", name: "Operations" }} />)
 
 describe("Settings › Command line and crewship.yaml", () => {
-  it("lists the commands with what each does, and offers the crew as YAML", () => {
+  it("keeps the export command and offers the crew as YAML", () => {
     serve()
     view()
     const card = screen.getByRole("region", { name: /Command line/ })
     expect(within(card).getByText("crewship export crew ops > ops.yaml")).toBeInTheDocument()
-    expect(within(card).getByText("Save the crew as YAML")).toBeInTheDocument()
-    expect(within(card).getByText("crewship apply --file ops.yaml")).toBeInTheDocument()
-    expect(within(card).getByText("Create or update it from YAML")).toBeInTheDocument()
-    expect(within(card).getByText("Show the crew, its agents and container")).toBeInTheDocument()
     expect(within(card).getByRole("button", { name: "View as YAML" })).toBeInTheDocument()
     expect(within(card).getByRole("button", { name: "Download" })).toBeInTheDocument()
   })

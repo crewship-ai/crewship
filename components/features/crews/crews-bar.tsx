@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Activity, ChevronRight, Code2, Copy, Download, Link2, MessageSquare, MoreHorizontal, RotateCcw, Square, SquareTerminal, Trash2 } from "lucide-react"
+import { Activity, ChevronRight, Code, Copy, Download, Link2, MessageSquare, MoreHorizontal, RotateCcw, Square, SquareTerminal, Trash2 } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -85,7 +85,7 @@ export function CrewPageBar({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               {onRestartAgents && <DropdownMenuItem onSelect={onRestartAgents}><RotateCcw /> Restart agents</DropdownMenuItem>}
-              {onViewYaml && <DropdownMenuItem onSelect={onViewYaml}><Code2 /> View as YAML</DropdownMenuItem>}
+              {onViewYaml && <DropdownMenuItem onSelect={onViewYaml}><Code /> View as YAML</DropdownMenuItem>}
               {onDownloadYaml && <DropdownMenuItem onSelect={onDownloadYaml}><Download /> Download crewship.yaml</DropdownMenuItem>}
               <DropdownMenuItem onSelect={() => void copy(`crewship crew get ${crew.slug}`, "CLI command")}><Copy /> Copy CLI command</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copy(`${window.location.origin}/crews?crew=${encodeURIComponent(crew.slug)}`, "Link")}><Link2 /> Copy link</DropdownMenuItem>

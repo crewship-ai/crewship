@@ -17,8 +17,6 @@ import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 
 import { CanvasShell, CanvasTabPanel, CanvasTabs, useEntityFetch, usePatchEntity } from "./canvas-base"
 import { CrewPageBar } from "./crews-bar"
-import { useCrewYaml } from "./crew-yaml"
-import { crewDeleteSummary } from "./crew-delete-summary"
 import { useCrewsCreate } from "./crews-create"
 import { CREW_TABS, type AgentTab, type CrewTab } from "./crews-tabs"
 import { crewStatus } from "./crews-panel-model"
@@ -28,6 +26,8 @@ import { CrewTeam, hireState } from "./crew-team"
 import { CrewTools } from "./crew-tools"
 import { CrewEnvironment } from "./crew-environment"
 import { CrewSettings } from "./crew-settings"
+import { CrewDeleteDialog } from "./crew-delete-dialog"
+import { useCrewYaml } from "./crew-yaml"
 import { HireDialog, RehireDialog } from "./crew-hire-dialog"
 import { useCrewSpend } from "./crew-spend"
 import { MemoryWorkspace } from "./memory-workspace"
@@ -121,23 +121,6 @@ export function CrewCanvas({
   const spend = useCrewSpend(workspaceId, crewId, isAdmin)
 
   useRealtimeEvent("crew.updated", useCallback(() => setTick((n) => n + 1), []))
-  // The routines the crew published, counted for the Delete crew dialog only
-  // while it is open (null = not answered, so the line leaves it out).
-  const [routineCount, setRoutineCount] = useState<number | null>(null)
-  useEffect(() => {
-    if (!confirmDelete || !crewId) return
-    let cancelled = false
-    setRoutineCount(null)
-    apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines?author_crew_id=${encodeURIComponent(crewId)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((rows: unknown) => { if (!cancelled && Array.isArray(rows)) setRoutineCount(rows.length) })
-      .catch(() => undefined)
-    return () => { cancelled = true }
-  }, [confirmDelete, crewId, workspaceId])
-
-  // The crew options menu offers the same YAML as Settings > Command line.
-  const menuYaml = useCrewYaml(workspaceId, { slug: crew?.slug ?? "", name: crew?.name ?? "" })
-
   // Everything the head, Overview and Health read, per crew. A failed call
   // contributes nothing rather than a false "all fine".
   useEffect(() => {
@@ -270,6 +253,8 @@ export function CrewCanvas({
     setTick((n) => n + 1)
   }, [crew, ws])
 
+  const yaml = useCrewYaml(workspaceId, { slug: crew?.slug ?? crewSlug, name: crew?.name ?? crewSlug })
+
   const handleDelete = useCallback(async () => {
     if (!crew) return
     const res = await apiFetch(`/api/v1/crews/${crew.id}?workspace_id=${ws}`, { method: "DELETE" })
@@ -298,10 +283,11 @@ export function CrewCanvas({
         onTerminal={onOpenTerminal}
         onHire={canUpdate ? () => setHireOpen(true) : undefined}
         onRestartAgents={canUpdate ? () => setConfirmRestart(true) : undefined}
-        onViewYaml={menuYaml.view}
-        onDownloadYaml={() => void menuYaml.download()}
+        onViewYaml={yaml.view}
+        onDownloadYaml={() => void yaml.download()}
         onDelete={isAdmin ? () => setConfirmDelete(true) : undefined}
       />
+      {yaml.dialog}
       <CanvasShell loading={false} error={null} notLoadedLabel="">
         <CrewHeader
           crew={crew}
@@ -432,7 +418,6 @@ export function CrewCanvas({
         extend={extendingHire}
         onRehired={() => { void roster.refresh(); onCrewChanged() }}
       />
-      {menuYaml.surface}
       <ConfirmDialog
         open={confirmRestart}
         onOpenChange={setConfirmRestart}
@@ -455,28 +440,13 @@ export function CrewCanvas({
         confirmLabel={avatarConfirm?.reset ? "Reset avatars" : "Apply style"}
         onConfirm={() => applyAvatarStyle(avatarConfirm?.reset ?? false)}
       />
-      <ConfirmDialog
+      <CrewDeleteDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete crew ${crew.name}?`}
-        summary={{
-          name: crew.name,
-          detail: crewDeleteSummary({
-            agents: agents.length,
-            routines: routineCount,
-            container: containers === null ? undefined : (runtime?.status ?? null),
-          }),
-        }}
-        description="This deletes the crew and its agents. Background cleanup removes runtimes whose ownership is verified; older runtimes may need manual cleanup. Removing a runtime stops its processes and discards files stored only in its container writable layer."
-        consequences={[
-          { tone: "lost", text: `${agents.length === 1 ? "1 agent is" : `${agents.length} agents are`} deleted along with the crew` },
-          { tone: "lost", text: "Declared sidecar containers and their data volumes are also deleted" },
-          { tone: "lost", text: "Crew issues are deleted" },
-          { tone: "kept", text: "Background runtime cleanup preserves mounted volumes, host data and shared images" },
-        ]}
-        confirmLabel="Delete crew"
-        destructive
-        typeToConfirm={crew.slug}
+        workspaceId={workspaceId}
+        crew={crew}
+        agents={agents}
+        containers={containers}
         onConfirm={handleDelete}
       />
     </PageSaveProvider>
