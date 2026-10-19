@@ -10,8 +10,9 @@ export interface ConversationLink {
   accessible: boolean
 }
 
+/** JSON tuple: ids containing separators cannot collide. */
 export const targetKey = (target: LinkedViewerTarget) =>
-  target.mode === "revision" ? `${target.workspaceId}/${target.pageId}@${target.revision}` : `${target.workspaceId}/${target.pageId}@latest`
+  JSON.stringify([target.workspaceId, target.pageId, target.mode === "revision" ? target.revision : "latest"])
 
 export function validLinkedTarget(target: LinkedViewerTarget): boolean {
   if (!target.workspaceId || !target.pageId) return false

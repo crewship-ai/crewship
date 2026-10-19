@@ -19,6 +19,9 @@ export type WorkProblem =
   | "missing_runtime"
   | "broken_preview"
 
+/** Whether the card's own data is loaded. "denied" is an auth refusal and drops cached content; "unavailable" is a temporary failure and does not. */
+export type WorkCardLoad = "ready" | "loading" | "unavailable" | "denied"
+
 export type WorkCardAccess =
   /** The title is a projection of the current reader's authorization. */
   | { status: "readable"; title: string; typeLabel: string }
@@ -27,7 +30,7 @@ export type WorkCardAccess =
 
 export type WorkCardActionId =
   | "open" | "compare" | "cancel" | "retry"
-  | "reconnect" | "check_result" | "change_executor" | "retry_preview" | "dismiss"
+  | "reconnect" | "refresh" | "check_result" | "change_executor" | "retry_preview" | "dismiss"
 
 export interface WorkCardModel {
   /** Stable server id; Retry and Check result reuse it, never a new request id. */
@@ -36,6 +39,7 @@ export interface WorkCardModel {
   saved: SavedContent
   freshness: Freshness
   problem: WorkProblem | null
+  load: WorkCardLoad
   access: WorkCardAccess
   executor: string
   requester: "you" | "collaborator"
@@ -46,6 +50,11 @@ export interface WorkCardModel {
 export interface WorkCardAction { id: WorkCardActionId; label: string }
 export interface WorkCardView {
   title: string
+  /** True when no name, type, owner or state detail may be shown. Decided from the model, never from the title text. */
+  restricted: boolean
+  /** True while the state can still change; only then is the card a live region. */
+  live: boolean
+  busy: boolean
   headline: string
   runLabel: string
   contentLabel: string
