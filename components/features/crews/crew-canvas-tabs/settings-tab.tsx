@@ -5,7 +5,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewPolicyControls } from "@/components/features/crews/crew-policy-controls"
-import { AVATAR_STYLES } from "@/lib/agent-avatar"
+import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, isAnimatableAvatarStyle, resolveAvatarStyle } from "@/lib/agent-avatar"
 import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
 
@@ -77,7 +77,7 @@ export function SettingsTab({
           <Row label="Avatar style">
             <div className="flex items-center gap-2 flex-wrap">
               <EditableField
-                value={crew.avatar_style ?? "bottts-neutral"}
+                value={crew.avatar_style ?? DEFAULT_AVATAR_STYLE}
                 onSave={async (v) => {
                   await patch({ avatar_style: v })
                   // The server drops the renders of agents that inherit the
@@ -107,7 +107,9 @@ export function SettingsTab({
                   >
                     Reset overrides
                   </button>
-                  {canEditRuntime && agentsForCrew.some((a) => !a.avatar_url) && (
+                  {/* Voxel avatars are drawn live and never stored (#3789), so
+                      they are not "missing" a render. */}
+                  {canEditRuntime && agentsForCrew.some((a) => !a.avatar_url && !isAnimatableAvatarStyle(resolveAvatarStyle(a.avatar_style || crew.avatar_style))) && (
                     <AvatarBackfillButton workspaceId={workspaceId} crewId={crew.id} className="h-6 text-[10px]" />
                   )}
                 </>

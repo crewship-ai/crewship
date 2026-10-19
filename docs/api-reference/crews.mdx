@@ -140,7 +140,7 @@ context where supported, or `X-Workspace-ID` as described above.
 | `description` | string? | Crew description |
 | `color` | string? | Palette color ID |
 | `icon` | string? | Lucide icon name |
-| `avatar_style` | string? | Avatar style for agents (e.g., `"bottts"`) |
+| `avatar_style` | string? | Avatar style for agents that have none of their own (e.g., `"voxel-bot"`); `null` means the default, Voxel Bot. See [Avatar styles](/api-reference/agents#avatar-styles). |
 | `container_memory_mb` | integer | Container memory limit in MB |
 | `container_cpus` | number | Container CPU limit |
 | `container_ttl_hours` | integer? | Container idle TTL in hours. `null` = never configured, so the server default (4 hours) applies; `0` = never stop |
@@ -689,7 +689,7 @@ This also clears any [stored avatar renders](/api-reference/agents#agent-avatars
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `avatar_style` | string | Conditional | Style to apply (required unless `reset_overrides` is `true`) |
+| `avatar_style` | string | Conditional | Style slug to apply (required unless `reset_overrides` is `true`); one of the [avatar styles](/api-reference/agents#avatar-styles), else `400` |
 | `reset_overrides` | boolean | No | When `true`, clears `avatar_style` on every agent (ignores `avatar_style`) |
 
 **Response:** `200 OK`

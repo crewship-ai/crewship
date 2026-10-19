@@ -16,12 +16,14 @@ import {
   type StyleState,
 } from "@/lib/theme/appearance-style"
 import {
+  DEFAULT_AVATAR_ANIMATION,
   DEFAULT_DENSITY,
   DEFAULT_MOTION,
   DEFAULT_SIDEBAR,
   DEFAULT_TEXT_SIZE,
   isThemeChoice,
   readAccent,
+  readAvatarAnimation,
   readDensity,
   readMotion,
   readSidebar,
@@ -29,12 +31,14 @@ import {
   readSyncEnabled,
   emitAppearanceChange,
   setAccentChoice,
+  setAvatarAnimation,
   setDensity,
   setMotion,
   setSidebarChoice,
   setTextSize,
   setSyncEnabled,
   subscribeAppearance,
+  type AvatarAnimationChoice,
   type Density,
   type MotionChoice,
   type SidebarChoice,
@@ -53,6 +57,7 @@ const serverMotion = () => DEFAULT_MOTION
 const serverTextSize = () => DEFAULT_TEXT_SIZE
 const serverSidebar = () => DEFAULT_SIDEBAR
 const serverSync = () => true
+const serverAvatarAnimation = () => DEFAULT_AVATAR_ANIMATION
 
 export function useAccentChoice(): AccentChoice {
   return useSyncExternalStore(subscribeAppearance, readAccent, serverAccent)
@@ -68,6 +73,9 @@ export function useTextSize(): TextSize {
 }
 export function useSidebarChoice(): SidebarChoice {
   return useSyncExternalStore(subscribeAppearance, readSidebar, serverSidebar)
+}
+export function useAvatarAnimation(): AvatarAnimationChoice {
+  return useSyncExternalStore(subscribeAppearance, readAvatarAnimation, serverAvatarAnimation)
 }
 export function useAppearanceSyncEnabled(): boolean {
   return useSyncExternalStore(subscribeAppearance, readSyncEnabled, serverSync)
@@ -93,6 +101,8 @@ export interface AppearanceState {
   motion: MotionChoice
   textSize: TextSize
   sidebar: SidebarChoice
+  /** "Animated avatars" (#3789). */
+  avatarAnimation: AvatarAnimationChoice
   syncEnabled: boolean
   /** The stored style and knobs; null while Harbor is simply the default. */
   style: StyleState | null
@@ -107,6 +117,7 @@ export interface AppearanceState {
   setMotion: (m: MotionChoice) => void
   setTextSize: (t: TextSize) => void
   setSidebar: (m: SidebarChoice) => void
+  setAvatarAnimation: (a: AvatarAnimationChoice) => void
   setSyncEnabled: (on: boolean) => void
 }
 
@@ -157,6 +168,7 @@ export function useAppearance(): AppearanceState {
     motion: useMotionChoice(),
     textSize: useTextSize(),
     sidebar: useSidebarChoice(),
+    avatarAnimation: useAvatarAnimation(),
     syncEnabled: useAppearanceSyncEnabled(),
     setTheme,
     setAccent: setAccentChoice,
@@ -164,6 +176,7 @@ export function useAppearance(): AppearanceState {
     setMotion,
     setTextSize,
     setSidebar: setSidebarChoice,
+    setAvatarAnimation,
     setSyncEnabled,
   }
 }

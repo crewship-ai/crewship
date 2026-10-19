@@ -11,6 +11,16 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
+const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
+
+/** useSyncExternalStore subscribe for the OS reduced-motion setting. */
+export function subscribeReducedMotion(listener: () => void): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mq = window.matchMedia(REDUCE_QUERY);
+  mq.addEventListener?.("change", listener);
+  return () => mq.removeEventListener?.("change", listener);
+}
+
 export const spring = {
   snappy: { type: "spring", stiffness: 600, damping: 40 } satisfies Transition,
   smooth: { type: "spring", stiffness: 280, damping: 32 } satisfies Transition,

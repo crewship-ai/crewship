@@ -5,7 +5,7 @@ import { useTheme } from "next-themes"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { useAppearance } from "@/hooks/use-appearance"
-import { APPEARANCE_PREFERENCE_KEY, emitAppearanceChange, parseAppearance, subscribeAppearance, type Appearance } from "@/lib/theme/appearance"
+import { APPEARANCE_PREFERENCE_KEY, DEFAULT_AVATAR_ANIMATION, emitAppearanceChange, parseAppearance, subscribeAppearance, type Appearance } from "@/lib/theme/appearance"
 import {
   STYLE_PREFERENCE_KEY,
   parseStyleState,
@@ -97,12 +97,16 @@ function readStyleRaw(): string | null {
  * send them.
  */
 export function useAppearanceSync(enabled: boolean): void {
-  const { theme, accent, density, motion, textSize, sidebar, syncEnabled, setTheme, setAccent, setDensity, setMotion, setTextSize, setSidebar } = useAppearance()
+  const { theme, accent, density, motion, textSize, sidebar, avatarAnimation, syncEnabled, setTheme, setAccent, setDensity, setMotion, setTextSize, setSidebar, setAvatarAnimation } = useAppearance()
   const { resolvedTheme } = useTheme()
   const active = enabled && syncEnabled
 
   // The look as it would be stored; null until next-themes knows the theme.
-  const current: Appearance | null = theme ? { theme, accent, density, motion, textSize, sidebar } : null
+  // Animated avatars is written only when it is off (#3789): the default
+  // leaves the stored value exactly as builds before it wrote it.
+  const current: Appearance | null = theme
+    ? { theme, accent, density, motion, textSize, sidebar, ...(avatarAnimation !== DEFAULT_AVATAR_ANIMATION ? { avatarAnimation } : {}) }
+    : null
   const serialized = current ? JSON.stringify(current) : null
   const currentRef = useRef(current)
   currentRef.current = current
@@ -176,9 +180,14 @@ export function useAppearanceSync(enabled: boolean): void {
           // sent back. A partial one (an older build, or a field this build
           // rejected) is left unmarked: the push effect then writes the
           // completed value — server fields plus local ones — back up.
-          const { theme: t, accent: a, density: d, motion: m, textSize: ts, sidebar: sb } = remote
-          lastSentRef.current = t && a && d && m && ts && sb
-            ? JSON.stringify({ theme: t, accent: a, density: d, motion: m, textSize: ts, sidebar: sb })
+          const { theme: t, accent: a, density: d, motion: m, textSize: ts, sidebar: sb, avatarAnimation: av } = remote
+          const complete = Boolean(t && a && d && m && ts && sb)
+          // Absent means the default, but only in a complete value: a partial
+          // one is completed from local below, never reset.
+          const remoteAvatars = av ?? (complete ? DEFAULT_AVATAR_ANIMATION : undefined)
+          if (remoteAvatars && remoteAvatars !== (local?.avatarAnimation ?? DEFAULT_AVATAR_ANIMATION)) setAvatarAnimation(remoteAvatars)
+          lastSentRef.current = complete
+            ? JSON.stringify({ theme: t, accent: a, density: d, motion: m, textSize: ts, sidebar: sb, ...(remoteAvatars && remoteAvatars !== DEFAULT_AVATAR_ANIMATION ? { avatarAnimation: remoteAvatars } : {}) })
             : null
         } else {
           // Nothing on the server yet: leaving lastSent empty makes the push

@@ -50,7 +50,11 @@ export function AvatarBackfillButton({
 export function reportBackfill(result: AvatarBackfillResult) {
   const skipped = result.refused + result.failed
   if (result.stored === 0 && skipped === 0) {
-    toast.success("Every agent already has a stored avatar")
+    // Voxel avatars (#3789) are drawn live and never stored, so they are
+    // not "missing" one.
+    toast.success(result.live
+      ? `Nothing to store — ${result.live} voxel avatar${result.live === 1 ? " is" : "s are"} drawn live`
+      : "Every agent already has a stored avatar")
     return
   }
   const stored = `Stored ${result.stored} avatar${result.stored === 1 ? "" : "s"}`
