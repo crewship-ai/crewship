@@ -125,7 +125,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
-  const { pages, loading, error } = usePages(workspaceId)
+  const { pages, loading, error } = usePages(workspaceId, personalSpace ? "personal" : undefined)
   const detail = usePage(workspaceId, selectedSlug)
   const selectedRailSlug = selectedSlug?.startsWith("@") ? detail.page?.slug ?? selectedSlug : selectedSlug
 
