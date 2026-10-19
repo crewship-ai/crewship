@@ -838,59 +838,11 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Concurrency pre-check, synchronous — and it MUST come before the
-	// idempotency reservation below. An over-limit delivery answers
-	// 429 + Retry-After like the old synchronous handler did; a 202
-	// here would hand the sender a run_id for a run that dies on
-	// ErrConcurrencyLimitReached before any pipeline_runs row exists —
-	// the sender treats 202 as accepted and never retries, so the
-	// event would be permanently lost. Checking before the reservation
-	// also means a 429'd delivery never touches the idempotency store,
-	// so the sender's retry of the same key executes as a fresh run.
-	//
-	// PrecheckConcurrency reads the same run registry (same key render,
-	// same count-vs-max) the executor's Acquire enforces — same source
-	// of truth, evaluated early. It cannot RESERVE the slot, though, so
-	// a small TOCTOU window remains; the background goroutine below
-	// handles a residual ErrConcurrencyLimitReached explicitly. Other
-	// precheck errors remain authoritative in the executor and are
-	// surfaced through the retained delivery receipt.
-	if h.runs != nil {
-		if cerr := h.runs.PrecheckConcurrency(r.Context(), targetDSL, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
-			// Record the throttled attempt (parity with the old
-			// synchronous handler, which stamped FAILED before
-			// answering 429).
-			h.alertWebhookFireFailure(r.Context(), wh, "", "concurrency limit reached before a run could start")
-			w.Header().Set("Retry-After", "5")
-			replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
-			return
-		}
-	}
-
-	// Idempotency reservation, synchronous — replays must resolve to
-	// the ORIGINAL run id in the 202, not mint a dangling handle.
-	//
-	// Idempotency cascade (audit A17.2 chain follow-up):
-	//   1. Explicit header from the sender (Idempotency-Key /
-	//      X-Crewship-Event-ID) takes precedence -- this is the
-	//      semantic id the sender wants to dedupe on.
-	//   2. Falls back to a synthetic key derived from
-	//      sha256(token + body + signature). Same wire bytes
-	//      from the same webhook within the
-	//      DefaultIdempotencyTTL window deduplicate
-	//      automatically, regardless of whether the sender opted
-	//      in to a header. Closes the replay-attack vector LIVE-
-	//      verified in audit H-iter5-A17.2 (a captured POST
-	//      replayed mid-window used to re-fire the pipeline).
-	// The synthetic key is salted by the webhook token so two
-	// webhooks happening to receive the same body don't collide.
-	//
-	// The run id is pre-allocated HERE so the 202 can hand the sender
-	// a pollable handle before the run starts; RunIDOverride below
-	// makes the executor journal under the same id.
+	// Capacity is enforced by the durable dispatcher: acceptance must not
+	// race an in-memory slot or lose an already acknowledged delivery.
 	runID := pipeline.NewRunID()
 
-	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, bodySHA, len(body))
+	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, bodySHA, len(body), inputs, target.Slug)
 	if acceptErr != nil {
 		switch {
 		case errors.Is(acceptErr, work.ErrDeliveryConflict):
@@ -915,119 +867,16 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Async dispatch. The run context derives from the server
-	// lifecycle (NOT r.Context()) so the sender closing its connection
-	// cannot cancel the run; the WaitGroup lets graceful shutdown
-	// drain in-flight runs (same pattern as assignments_run.go).
-	//
-	// IdempotencyKey is deliberately NOT passed to the executor: the
-	// reservation above already maps idemKey → runID, and a second
-	// LookupOrReserve inside exec.Run would see its own reservation as
-	// a duplicate and short-circuit the run to DEDUPED.
-	// Record delivery identity before starting direct pipeline execution.
+	pipeline.NotifyPendingRuns(h.db)
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"run_id":      runID,
-		"status":      "PENDING",
-		"deduped":     false,
-		"delivery_id": receipt.DeliveryID,
-		"duplicate":   false,
+		"run_id": runID, "status": "PENDING", "deduped": false, "delivery_id": receipt.DeliveryID, "pending_id": receipt.PendingID, "duplicate": false,
 	})
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-
-	exec := h.newExecutor()
-	dispatchCtx := h.webhookDispatchContext()
-	h.webhookDispatchWG.Add(1)
-	finish := beginBackgroundWork()
-	barrier := h.webhookDispatchBarrier
-	go func() {
-		defer finish()
-		defer h.webhookDispatchWG.Done()
-		if barrier != nil {
-			<-barrier
-		}
-		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
-			PipelineID: wh.TargetPipelineID,
-			// Honour the pin: a webhook with target_pipeline_version
-			// set executes that immutable version, not head. The
-			// synchronous pre-check above already 409'd a missing
-			// version; the executor re-verifies authoritatively.
-			PinnedVersion: wh.TargetPipelineVersion,
-			WorkspaceID:   wh.WorkspaceID,
-			Inputs:        inputs,
-			Mode:          pipeline.ModeRun,
-			RunIDOverride: runID,
-			// TriggeredVia marks this run as webhook-originated so the
-			// audit trail is accurate AND so the executor's egress/fence
-			// hardening (#1416 items 1 & 3) engages: agent_run prompts
-			// fence the request-derived inputs, and http-step egress is
-			// held to the crew's 'restricted' floor regardless of the
-			// crew's own network_mode.
-			TriggeredVia: pipeline.TriggeredViaWebhook,
-		})
-		status := "FAILED"
-		firedRunID := ""
-		if res != nil {
-			firedRunID = res.RunID
-			if runErr == nil {
-				// Record the executor's verdict verbatim — COMPLETED,
-				// FAILED, CANCELLED, or WAITING (run parked on a
-				// `wait: approval` step; resolving the waitpoint
-				// resumes it to a terminal state).
-				status = res.Status
-			}
-		}
-		if runErr != nil {
-			// Nothing is deleted here any more. The delivery ledger records
-			// that this delivery was accepted and what it produced, and a
-			// delivery is never removed on failure — a redelivery resolves to the same run. A deliberate rerun
-			// belongs to the pipeline API, not work replay. Deleting
-			// the dedup key was what made a redelivery repeat effects that had
-			// already happened once.
-			reason := "run dispatch failed: " + truncate(runErr.Error(), 200)
-			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
-				// Residual TOCTOU race: the synchronous pre-check above
-				// saw a free slot, but another dispatch Acquire'd it
-				// between our 202 and this run's Acquire (the pre-check
-				// reads the registry without reserving). The sender
-				// already holds a 202 it won't retry on, so make the
-				// loss recoverable and loud: the fire records FAILED
-				// below with this reason in the log, and the Forget
-				// above released the idempotency key so a sender/
-				// operator retry executes instead of DEDUPE-ing onto a
-				// run that never happened.
-				reason = "concurrency limit reached (race after the synchronous pre-check)"
-				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, receipt retained; operator must inspect the pipeline run",
-					"webhook_id", wh.ID, "run_id", runID, "delivery_id", receipt.DeliveryID)
-			} else {
-				h.logger.Warn("webhook fire (async run)", "error", runErr,
-					"webhook_id", wh.ID, "run_id", runID)
-			}
-			// This is the "fire never became a run" case exec.Run itself
-			// reported (as opposed to a run that started and whose ROUTINE
-			// then failed — see the res.Status == "FAILED" branch below,
-			// which already gets full journal coverage from the executor's
-			// own EntryPipelineRunFailed and is deliberately NOT routed
-			// through the fire-failure alert). Bookkeeping runs on a fresh
-			// context: at shutdown dispatchCtx is already cancelled when
-			// the run winds down, and the terminal record must still land.
-			h.alertWebhookFireFailure(context.Background(), wh, firedRunID, reason)
-			return
-		}
-		// Retain the receipt after failure: sender redelivery must not repeat
-		// effects. Any deliberate rerun goes through the pipeline API.
-		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
-		// already cancelled when the run winds down, and the terminal
-		// record must still land.
-		_, _ = h.webhooks.RecordFire(context.Background(), wh.ID, firedRunID, status)
-	}()
 }
 
-// routineReceipt records deduplication identity only. Pipeline runs own their
-// lifecycle; this receipt does not promise dispatch recovery or work-item cancel.
+// routineReceipt identifies accepted work whose pending start committed with it.
 type routineReceipt struct {
 	DeliveryID string
+	PendingID  string
 	RunID      string
 	Duplicate  bool
 }
@@ -1048,16 +897,19 @@ func lookupRoutineReceipt(
 ) (*routineReceipt, error) {
 	var rec routineReceipt
 	var recordedSHA string
-	query := `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
+	pendingIDQuery := `(SELECT p.id FROM pending_runs p WHERE p.workspace_id=routine_webhook_receipts.workspace_id AND p.run_id=routine_webhook_receipts.run_id LIMIT 1)`
+	query := `SELECT id, run_id, body_sha256, ` + pendingIDQuery + ` FROM routine_webhook_receipts
       WHERE workspace_id = ? AND endpoint_id = ? AND source_delivery_id = ?`
 	args := []any{wh.WorkspaceID, wh.ID, sourceDeliveryID}
 	if isGitHubRoutine(ctx) {
-		query = `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
+		query = `SELECT id, run_id, body_sha256, ` + pendingIDQuery + ` FROM routine_webhook_receipts
           WHERE workspace_id = ? AND endpoint_id = ? AND (source_delivery_id = ? OR (profile = 'github' AND body_sha256 = ?))
           ORDER BY (source_delivery_id = ?) DESC LIMIT 1`
 		args = append(args, bodySHA, sourceDeliveryID)
 	}
-	err := q.QueryRowContext(ctx, query, args...).Scan(&rec.DeliveryID, &rec.RunID, &recordedSHA)
+	var pendingID sql.NullString
+	err := q.QueryRowContext(ctx, query, args...).Scan(&rec.DeliveryID, &rec.RunID, &recordedSHA, &pendingID)
+	rec.PendingID = pendingID.String
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1081,6 +933,7 @@ func (h *PipelineHandler) answerRoutineDuplicate(w http.ResponseWriter, r *http.
 		"status":      "DEDUPED",
 		"deduped":     true,
 		"delivery_id": receipt.DeliveryID,
+		"pending_id":  receipt.PendingID,
 		"duplicate":   true,
 	})
 }
@@ -1100,9 +953,10 @@ func routineDeliveryProfile(r *http.Request) string {
 }
 
 func (h *PipelineHandler) acceptRoutineDelivery(
-	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID, bodySHA string, bodyBytes int,
+	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID, bodySHA string, bodyBytes int, inputs map[string]any, pipelineSlug string,
 ) (routineReceipt, error) {
 	receipt := routineReceipt{DeliveryID: generateCUID(), RunID: runID}
+	receipt.PendingID = receipt.DeliveryID
 	receivedAt := time.Now().UTC()
 	acceptor := &mainHandleAcceptor{db: h.db, budget: work.DefaultAcceptanceBudget}
 	err := acceptor.Do(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
@@ -1126,7 +980,21 @@ func (h *PipelineHandler) acceptRoutineDelivery(
 			return err
 		}
 		if n == 1 {
-			return nil
+			expiresAt := receivedAt.Add(defaultCapacityQueueTTL)
+			raw, err := json.Marshal(inputs)
+			if err != nil {
+				return err
+			}
+			_, _, err = pipeline.NewPendingRunStoreTx(tx).Enqueue(ctx, pipeline.PendingRun{
+				ID: receipt.DeliveryID, WorkspaceID: wh.WorkspaceID, PipelineID: wh.TargetPipelineID, PipelineSlug: pipelineSlug,
+				RunID: runID, IdempotencyKey: "routine-delivery:" + receipt.DeliveryID, InputsJSON: string(raw), FireAt: receivedAt, ExpiresAt: &expiresAt,
+				PinnedVersion: wh.TargetPipelineVersion, TriggeredVia: pipeline.TriggeredViaWebhook, TriggeredByID: wh.ID,
+			})
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, `UPDATE pending_runs SET reason_code='scheduled' WHERE id=?`, receipt.DeliveryID)
+			return err
 		}
 		existing, err := lookupRoutineReceipt(ctx, tx, wh, sourceDeliveryID, bodySHA)
 		if err != nil {

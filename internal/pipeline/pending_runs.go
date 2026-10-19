@@ -13,6 +13,9 @@ import (
 // due rows (FireAt <= now), highest Priority first, and expires rows
 // past ExpiresAt.
 type PendingRun struct {
+	RunID            string // Planned durable identity; FiredRunID is only a confirmed link.
+	IdempotencyKey   string
+	DueAt            *time.Time
 	ChatOriginID     string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	PinnedVersion    *int   // nil is the legacy live-at-dispatch policy
 	ReasonCode       string // Stable public classification; empty legacy rows project as unknown.
@@ -166,15 +169,15 @@ func (s *PendingRunStore) EnqueueChecked(ctx context.Context, pr PendingRun, adm
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at, reason_code,
-    invoking_user_id, invocation_authority, chat_origin_id, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, invocation_authority, chat_origin_id, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, run_id, idempotency_key, due_at, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 			pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 			orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 			nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 			formatRFC3339(pr.FireAt), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt), pendingEnqueueReason(pr),
 			nullableStr(pr.InvokingUserID), pr.InvocationAuthority, nullableStr(pr.ChatOriginID),
 			nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
-			nullableStr(pr.ChainOrigin), pr.PinnedVersion)
+			nullableStr(pr.ChainOrigin), pr.PinnedVersion, nullableStr(pr.RunID), nullableStr(pr.IdempotencyKey), nullableTime(pr.DueAt))
 		if err != nil {
 			// Debounce race: a concurrent trigger with the same key inserted
 			// first, so the partial-unique index rejects this one. Both
@@ -185,6 +188,7 @@ INSERT INTO pending_runs (
 			}
 			return EnqueueResult{}, fmt.Errorf("pending_runs: insert: %w", err)
 		}
+		s.notify()
 		return EnqueueResult{ID: pr.ID, PinnedVersion: pr.PinnedVersion, FireAt: pr.FireAt}, nil
 	}
 	return EnqueueResult{}, fmt.Errorf("pending_runs: debounce row for %s/%s kept moving after %d attempts", pr.PipelineID, pr.DebounceKey, attempts)
@@ -296,7 +300,7 @@ WHERE id = ? AND status = 'pending' AND dispatch_attempts = 0 AND pinned_version
 func (s *PendingRunStore) ClaimDue(ctx context.Context, id string, now time.Time) (*PendingRun, error) {
 	var pr PendingRun
 	var fireAt string
-	var expiresAt sql.NullString
+	var expiresAt, dueAt sql.NullString
 	at := formatRFC3339(now)
 	err := s.db.QueryRowContext(ctx, `
 UPDATE pending_runs
@@ -307,11 +311,11 @@ WHERE id=? AND status='pending' AND fire_at<=?
 RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority, COALESCE(chat_origin_id,''),
     COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
-    COALESCE(chain_origin,''), pinned_version, fire_at, expires_at, dispatch_attempts`, id, at, at, at).Scan(
+    COALESCE(chain_origin,''), pinned_version, fire_at, expires_at, dispatch_attempts, COALESCE(run_id,''), COALESCE(idempotency_key,''), due_at`, id, at, at, at).Scan(
 		&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 		&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
 		&pr.InvokingUserID, &pr.InvocationAuthority, &pr.ChatOriginID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
-		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt, &expiresAt, &pr.DispatchAttempts)
+		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt, &expiresAt, &pr.DispatchAttempts, &pr.RunID, &pr.IdempotencyKey, &dueAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -328,6 +332,13 @@ RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, 
 			return nil, fmt.Errorf("pending_runs: parse expires_at: %w", perr)
 		}
 		pr.ExpiresAt = &at
+	}
+	if dueAt.Valid {
+		due, err := time.Parse(time.RFC3339Nano, dueAt.String) // tsformat:allow: parsing a persisted timestamp
+		if err != nil {
+			return nil, err
+		}
+		pr.DueAt = &due
 	}
 	return &pr, nil
 }
@@ -439,17 +450,17 @@ func (s *PendingRunStore) ListPending(ctx context.Context, workspaceID string, l
 
 const pendingReceiptColumns = `id, workspace_id, pipeline_id, pipeline_slug,
     COALESCE(debounce_key,''), priority, fire_at, expires_at, pinned_version, inputs_json,
-    status, COALESCE(fired_run_id,''), dispatch_attempts, last_error, next_attempt_at, COALESCE(reason_code,'unknown')`
+    status, COALESCE(fired_run_id,''), dispatch_attempts, last_error, next_attempt_at, COALESCE(run_id,''), COALESCE(idempotency_key,''), due_at, COALESCE(reason_code,'unknown')`
 
 type pendingScanner interface{ Scan(...any) error }
 
 func scanPendingReceipt(row pendingScanner) (PendingRun, error) {
 	var pr PendingRun
 	var fireAt string
-	var expiresAt, nextAt sql.NullString
+	var expiresAt, nextAt, dueAt sql.NullString
 	if err := row.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 		&pr.DebounceKey, &pr.Priority, &fireAt, &expiresAt, &pr.PinnedVersion, &pr.InputsJSON,
-		&pr.Status, &pr.FiredRunID, &pr.DispatchAttempts, &pr.LastError, &nextAt, &pr.ReasonCode); err != nil {
+		&pr.Status, &pr.FiredRunID, &pr.DispatchAttempts, &pr.LastError, &nextAt, &pr.RunID, &pr.IdempotencyKey, &dueAt, &pr.ReasonCode); err != nil {
 		return pr, err
 	}
 	var err error
@@ -460,7 +471,7 @@ func scanPendingReceipt(row pendingScanner) (PendingRun, error) {
 	for _, field := range []struct {
 		raw  sql.NullString
 		dest **time.Time
-	}{{expiresAt, &pr.ExpiresAt}, {nextAt, &pr.NextAttemptAt}} {
+	}{{expiresAt, &pr.ExpiresAt}, {nextAt, &pr.NextAttemptAt}, {dueAt, &pr.DueAt}} {
 		if field.raw.Valid {
 			at, perr := time.Parse(time.RFC3339Nano, field.raw.String)
 			if perr != nil {

@@ -103,7 +103,7 @@ func TestGolden13_DuplicateDelivery_ProducesExactlyOneRun(t *testing.T) {
 			req1 := goldenSignedRequest(t, wh.Token, "real-secret", body, tc.headers)
 			rr1 := httptest.NewRecorder()
 			h.FireWebhook(rr1, req1)
-			h.WaitWebhookDispatches()
+			waitPendingWebhookDispatches(t, h)
 			if rr1.Code != http.StatusAccepted {
 				t.Fatalf("first delivery: status = %d, want 202; body=%s", rr1.Code, rr1.Body.String())
 			}
@@ -128,7 +128,7 @@ func TestGolden13_DuplicateDelivery_ProducesExactlyOneRun(t *testing.T) {
 			req2 := goldenSignedRequest(t, wh.Token, "real-secret", body, tc.headers)
 			rr2 := httptest.NewRecorder()
 			h.FireWebhook(rr2, req2)
-			h.WaitWebhookDispatches()
+			waitPendingWebhookDispatches(t, h)
 			if rr2.Code != http.StatusAccepted {
 				t.Fatalf("second delivery: status = %d, want 202; body=%s", rr2.Code, rr2.Body.String())
 			}
@@ -167,7 +167,7 @@ func TestGolden13_DistinctDeliveries_EachProduceARun(t *testing.T) {
 		req := goldenSignedRequest(t, wh.Token, "real-secret", body, nil)
 		rr := httptest.NewRecorder()
 		h.FireWebhook(rr, req)
-		h.WaitWebhookDispatches()
+		waitPendingWebhookDispatches(t, h)
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("delivery %d: status = %d, want 202; body=%s", i, rr.Code, rr.Body.String())
 		}
@@ -191,7 +191,7 @@ func TestGolden13_HMACSignatureMismatch_Rejected_NoRunCreated(t *testing.T) {
 	req.Header.Set("X-Crewship-Signature", "0000000000000000000000000000000000000000000000000000000000000000")
 	rr := httptest.NewRecorder()
 	h.FireWebhook(rr, req)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
@@ -229,7 +229,7 @@ func TestGolden13_TimestampTolerance(t *testing.T) {
 		req.Header.Set("X-Crewship-Timestamp", ts)
 		rr := httptest.NewRecorder()
 		h.FireWebhook(rr, req)
-		h.WaitWebhookDispatches()
+		waitPendingWebhookDispatches(t, h)
 
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
@@ -253,7 +253,7 @@ func TestGolden13_TimestampTolerance(t *testing.T) {
 		req.Header.Set("X-Crewship-Timestamp", ts)
 		rr := httptest.NewRecorder()
 		h.FireWebhook(rr, req)
-		h.WaitWebhookDispatches()
+		waitPendingWebhookDispatches(t, h)
 
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())

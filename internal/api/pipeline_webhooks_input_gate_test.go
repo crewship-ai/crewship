@@ -21,7 +21,7 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	wh := seedWebhookRow(t, db, wsID, "pln_form", "fixture-signing-key", true)
-	t.Cleanup(func() { h.webhookDispatchWG.Wait() })
+	t.Cleanup(func() { waitPendingWebhookDispatches(t, h) })
 	fire := func() *httptest.ResponseRecorder {
 		body := `{"qty":9}`
 		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
@@ -38,7 +38,7 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 		}
 		rr := fire()
 		if rr.Code != http.StatusBadRequest {
-			h.webhookDispatchWG.Wait()
+			waitPendingWebhookDispatches(t, h)
 			t.Fatalf("invalid inputs %s: status = %d, want 400", invalid, rr.Code)
 		}
 		if strings.Contains(rr.Body.String(), "run_id") {
@@ -70,7 +70,7 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil || accepted.RunID == "" || accepted.Deduped {
 		t.Fatalf("corrected delivery not newly accepted: %s", rr.Body.String())
 	}
-	h.webhookDispatchWG.Wait()
+	waitPendingWebhookDispatches(t, h)
 	var output, status string
 	if err := db.QueryRow(`SELECT output, status FROM pipeline_runs WHERE id=?`, accepted.RunID).Scan(&output, &status); err != nil {
 		t.Fatalf("accepted run was not persisted: %v", err)
@@ -97,7 +97,7 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance_MalformedTarget(t *testing.
 		t.Fatal(err)
 	}
 	wh := seedWebhookRow(t, db, wsID, "pln_broken", "fixture-signing-key", true)
-	t.Cleanup(func() { h.webhookDispatchWG.Wait() })
+	t.Cleanup(func() { waitPendingWebhookDispatches(t, h) })
 	body := `{}`
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
 	req.SetPathValue("token", wh.Token)
