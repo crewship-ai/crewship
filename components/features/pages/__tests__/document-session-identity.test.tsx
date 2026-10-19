@@ -10,6 +10,7 @@ const account = vi.hoisted(() => ({ user: "human-A" as string | null, status: "a
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: account.status, data: account.user ? { user: { id: account.user } } : null }) }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: true, isPending: false }) }))
+vi.mock("@/lib/document-queue", async importOriginal => ({...await importOriginal<typeof import("@/lib/document-queue")>(),openDocumentDrafts:async()=>({load:async()=>[],put:async()=>{},remove:async()=>{},close:()=>{}})}))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
 afterEach(() => { cleanup(); request.mockReset(); account.user = "human-A"; account.status = "authenticated" })
 
