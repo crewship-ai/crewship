@@ -1128,6 +1128,9 @@ body {
        x = 18); a second 8 px here pushed everything 7 px right. */
     padding-inline: 0 !important;
   }
+  /* That inset in px: p-2 follows --spacing (0.23rem), which drew it 6.8 px
+     in the built app and put the axis at x = 26.8 instead of 28. */
+  [data-variant="inset"] > [data-slot="sidebar-container"] { padding: 8px !important; }
   .rail-row {
     height: 36px !important;
     padding: 0 6px !important;

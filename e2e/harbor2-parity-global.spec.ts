@@ -9,6 +9,10 @@ import { test, expect } from "@playwright/test"
 // avatar share one axis, 28 px from the sidebar's left edge, open or folded;
 // icons are 18 px and the three identities 28 px.
 async function expectOnAxis(page: import("@playwright/test").Page) {
+  // Measure only once the rail has rendered (evaluate does not auto-wait).
+  for (const sel of ["[data-slot=sidebar-container]", ".rail-ws", ".rail-brand", ".rail-user [data-slot=presence-dot]", 'a[href="/inbox"] [data-slot=rail-tile]']) {
+    await page.locator(sel).first().waitFor({ state: "attached" })
+  }
   const r = await page.evaluate(() => {
     const sb = document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect()
     const centre = (el: Element | null) => { if (!el) return null; const q = el.getBoundingClientRect(); return { c: q.left - sb.left + q.width / 2, w: q.width } }
