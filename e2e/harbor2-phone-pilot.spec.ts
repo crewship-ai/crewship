@@ -1,14 +1,20 @@
-import { test, expect, type Locator, type Page } from "@playwright/test"
+import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test"
 
 // Phone pilot: Inbox + Settings (MOBIL-DOPORUCENI-2026-10-19 §2a,
 // PILOT-TELEFON-STAV). Whole user flows on a narrow and a common phone
 // (360 × 740, 390 × 844, touch), and the same screens at 1024 and 1440 as a
-// regression check. Data: the ui-tour demo (Acme Company).
+// regression check.
 //
-// Writes: opening an unread Inbox row marks it read and "Mark unread" puts it
-// back, so the Inbox flows run only with E2E_ALLOW_WRITES=1 on a disposable
-// environment. The approval detail's layout is checked on a pending copy of a
-// decided approval served by a route mock (read-only). Appearance is set with
+// Data: the Inbox is served by a stateful route mock (serveInbox below), not
+// read from the environment. The Inbox rows come from routine runs, mission
+// reviews and agent replies, which only a run with a model produces; the CI
+// seed (`crewship seed --offline-demo --with-users`) starts no run, so its
+// Inbox is empty, and a spec that needs rows cannot depend on them being
+// there (same reason harbor2-inbox.spec.ts serves its feed). Sessions, roles,
+// the shell and every other API stay real. Opening a row marks it read and
+// "Mark unread" puts it back in the mock, so nothing is written to the server
+// and the spec needs no E2E_ALLOW_WRITES. The approval detail's layout is
+// checked on the mock's approval served as pending. Appearance is set with
 // sync off, so it stays in this browser.
 //
 // The on-screen keyboard cannot be opened in Playwright (visualViewport does
@@ -24,7 +30,109 @@ const DESKTOPS = [
   { name: "1440", viewport: { width: 1440, height: 900 } },
 ] as const
 
-const writes = Boolean(process.env.E2E_ALLOW_WRITES)
+type Row = Record<string, unknown> & { id: string; kind: string; state: string; title: string; created_at: string }
+
+const NOW = Date.now()
+const minutesAgo = (n: number) => new Date(NOW - n * 60_000).toISOString()
+
+/** [title, body, sender] of the digest messages routines and the mission engine leave in the Inbox. */
+const MESSAGES: [string, string, string][] = [
+  ["ENG-4 ready for review", "Follow up on the Brightwell Hotels trial order", "Mission engine"],
+  ["QUA-8 ready for review", "Plan the autumn newsletter", "Mission engine"],
+  ["Operations health digest", "All connected services answered in the last hour.", "operations-health-digest"],
+  ["Operations health digest", "One integration needs a new token.", "operations-health-digest"],
+  ["Low stock: Oak storage box, large", "4 left, the weekly average is 9.", "low-stock-watch"],
+  ["Week in sales: EUR 12,480", "Up 8 % on the week before.", "weekly-sales-summary"],
+  ["26 new newsletter sign-ups", "26 people signed up since yesterday.", "newsletter-signup-digest"],
+  ["31 new newsletter sign-ups", "31 people signed up since yesterday.", "newsletter-signup-digest"],
+  ["Payment reminders sent", "3 reminders went out, EUR 1,840 outstanding.", "overdue-invoice-reminders"],
+  ...Array.from({ length: 12 }, (_, i): [string, string, string] => [`Orders overnight: ${9 + i} new`, `${9 + i} orders came in since 18:00.`, "morning-order-digest"]),
+]
+
+/**
+ * The Inbox feed, served from memory for every page of `context`: the list
+ * (with the server's state / space / q filters), the counts, one row, and the
+ * state PATCH that opening a row and "Mark unread" send. `approvalPending`
+ * turns the one approval from decided into waiting.
+ */
+async function serveInbox(context: BrowserContext) {
+  const ws = { id: "" }
+  const feed = { approvalPending: false }
+  const rows: Row[] = MESSAGES.map(([title, body, sender], i) => ({
+    id: `ibx_pilot_message_${i}`, kind: "message", source_id: `pilot_message_${i}`, target_role: "MANAGER",
+    title, body_md: body, sender_type: sender === "Mission engine" ? "system" : "agent", sender_name: sender,
+    state: "unread", priority: "medium", blocking: false, payload: {},
+    created_at: minutesAgo(10 + i * 7), updated_at: minutesAgo(10 + i * 7),
+  } as Row))
+  const approval: Row = {
+    id: "ibx_pilot_waitpoint_0", kind: "waitpoint", source_id: "pilot_waitpoint_0", target_role: "MANAGER",
+    title: "Send 3 payment reminders",
+    body_md: "3 invoices overdue, EUR 1,840 in total. The oldest is INV-2041 from Marlow & Finch, 21 days late.\n\nApprove to send a friendly reminder to each customer.",
+    sender_type: "pipeline", sender_name: "Approval required", state: "resolved", priority: "high", blocking: true,
+    payload: {
+      decision_form: { actions: [{ approved: true, id: "approve", label: "Approve" }, { approved: false, id: "hold", label: "Not now" }], fields: [] },
+      invoking_crew_id: "", pipeline_run_id: "run_pilot_0", risk_level: "normal", step_id: "approve",
+      timeout_at: new Date(NOW + 7 * 86_400_000).toISOString(), trust_offer: { eligible: false }, who_can_act: ["role:MANAGER"],
+    },
+    resolved_at: minutesAgo(300), resolved_by_user_id: "pilot-user", resolved_action: "denied", read_at: minutesAgo(310),
+    created_at: minutesAgo(320), updated_at: minutesAgo(300),
+  } as Row
+  const all = (): Row[] => {
+    const a = { ...approval, workspace_id: ws.id }
+    if (feed.approvalPending) Object.assign(a, { state: "unread", resolved_at: null, resolved_action: null, resolved_by_user_id: null, read_at: null })
+    return [a, ...rows.map((r) => ({ ...r, workspace_id: ws.id }))] as Row[]
+  }
+  const space = (r: Row) => (r.state === "resolved" ? "history" : r.kind === "message" ? "updates" : "action")
+
+  await context.route(/\/api\/v1\/inbox(\/[^/?]*)?(\?|$)/, async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const tail = url.pathname.replace(/^\/api\/v1\/inbox\/?/, "")
+    ws.id = url.searchParams.get("workspace_id") ?? ws.id
+    if (tail === "counts") {
+      const spaces = { action: 0, updates: 0, history: 0 }
+      const by_kind: Record<string, Record<string, number>> = {}
+      for (const r of all()) {
+        spaces[space(r) as keyof typeof spaces]++
+        by_kind[r.kind] ??= { action: 0, updates: 0, history: 0 }
+        by_kind[r.kind][space(r)]++
+      }
+      const decisions = all().filter((r) => r.kind === "waitpoint" && r.state !== "resolved").length
+      return route.fulfill({
+        json: {
+          total: all().length, unread: all().filter((r) => r.state === "unread").length, spaces, by_kind,
+          by_attention: { decision: decisions, input: 0, repair: 0, review: 0 }, by_deadline: { hour: 0, none: all().length, soon: 0, today: 0 },
+        },
+      })
+    }
+    if (tail === "count") return route.fulfill({ json: { unread_count: all().filter((r) => r.state === "unread").length } })
+    if (tail === "") {
+      if (req.method() !== "GET") return route.continue()
+      const state = url.searchParams.get("state") ?? "all"
+      const sp = url.searchParams.get("space")
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase()
+      const out = all().filter((r) => {
+        if (state === "active" ? r.state === "resolved" : state !== "all" && r.state !== state) return false
+        if (sp && space(r) !== sp) return false
+        return !q || `${r.title} ${r.body_md ?? ""} ${r.sender_name ?? ""}`.toLowerCase().includes(q)
+      })
+      return route.fulfill({ json: { rows: out, count: out.length, unread_count: out.filter((r) => r.state === "unread").length, has_more: false, decision_count: out.filter((r) => r.kind === "waitpoint" && r.state !== "resolved").length } })
+    }
+    if (tail.includes("/")) return route.continue() // /act and the like are not used here
+    const id = decodeURIComponent(tail)
+    const row = all().find((r) => r.id === id)
+    if (!row) return route.fulfill({ status: 404, json: { error: "not found" } })
+    if (req.method() === "GET") return route.fulfill({ json: row })
+    if (req.method() === "PATCH") {
+      const target = rows.find((r) => r.id === id)
+      const { state } = req.postDataJSON() as { state: string }
+      if (target) Object.assign(target, { state, read_at: state === "read" ? new Date().toISOString() : target.read_at })
+      return route.fulfill({ json: { ok: true } })
+    }
+    return route.continue()
+  })
+  return feed
+}
 
 async function seed(page: Page) {
   await page.addInitScript(() => {
@@ -70,11 +178,10 @@ async function expectHits(target: Locator) {
 for (const phone of PHONES) {
   test.describe(`phone ${phone.name}`, () => {
     test.use({ viewport: phone.viewport, isMobile: true, hasTouch: true })
-    test.beforeEach(async ({ page }) => { await seed(page) })
+    let feed: Awaited<ReturnType<typeof serveInbox>>
+    test.beforeEach(async ({ page, context }) => { feed = await serveInbox(context); await seed(page) })
 
     test.describe("Inbox", () => {
-      test.skip(!writes, "opening a row marks it read; set E2E_ALLOW_WRITES=1 on a disposable environment")
-
       test("find → open → act → Back to the same filtered list", async ({ page }) => {
         await openUpdates(page)
         // The list header: sail, the area's name, global search; no tile.
@@ -210,37 +317,19 @@ for (const phone of PHONES) {
       await expect(inboxSearch(page)).toHaveValue("")
     })
 
-    test.describe("Inbox approval detail (pending copy, read-only)", () => {
-      async function pendingApproval(page: Page): Promise<boolean> {
-        let id: string | null = null
-        await page.route(/\/api\/v1\/inbox(\/[^/?]+)?(\?|$)/, async (route) => {
-          const url = route.request().url()
-          if (route.request().method() !== "GET" || url.includes("/counts")) return route.continue()
-          const res = await route.fetch()
-          const body = await res.json()
-          const pend = (it: Record<string, unknown>) => {
-            if (it?.kind === "waitpoint" && it.state === "resolved" && (id === null || it.id === id)) {
-              id = String(it.id)
-              Object.assign(it, { state: "unread", resolved_at: null, resolved_action: null, resolved_by_user_id: null, read_at: null })
-            }
-          }
-          if (Array.isArray(body?.rows)) body.rows.forEach(pend)
-          else pend(body)
-          await route.fulfill({ response: res, json: body })
-        })
+    test.describe("Inbox approval detail (pending approval)", () => {
+      // The mock's approval, waiting for a decision.
+      async function pendingApproval(page: Page) {
+        feed.approvalPending = true
         await page.goto("/inbox?view=action")
-        const row = rows(page).first()
-        await row.waitFor({ timeout: 60_000 }).catch(() => {})
-        if (!(await row.isVisible())) return false
-        await row.click()
+        await rows(page).first().click({ timeout: 60_000 })
         await expect(page.getByTestId("decision-card")).toBeVisible()
-        return true
       }
 
       for (const size of ["default", "large"] as const) {
         test(`no horizontal overflow, header inside the screen (text ${size})`, async ({ page }) => {
           if (size === "large") await page.addInitScript(() => document.documentElement.setAttribute("data-text-size", "large"))
-          test.skip(!(await pendingApproval(page)), "no decided approval in the demo data to copy")
+          await pendingApproval(page)
           await page.waitForTimeout(1500) // the run's steps load
           const wide = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, w: window.innerWidth }))
           expect(wide.sw).toBeLessThanOrEqual(wide.w)
@@ -256,7 +345,7 @@ for (const phone of PHONES) {
       }
 
       test("decision dock: the note above, the buttons side by side, Approve last", async ({ page }) => {
-        test.skip(!(await pendingApproval(page)), "no decided approval in the demo data to copy")
+        await pendingApproval(page)
         const dock = page.getByTestId("decision-dock")
         const buttons = dock.getByRole("button")
         const names = await buttons.allInnerTexts()
@@ -349,10 +438,9 @@ for (const phone of PHONES) {
 for (const desk of DESKTOPS) {
   test.describe(`regression ${desk.name}`, () => {
     test.use({ viewport: desk.viewport })
-    test.beforeEach(async ({ page }) => { await seed(page) })
+    test.beforeEach(async ({ page, context }) => { await serveInbox(context); await seed(page) })
 
     test("Inbox detail keeps its desktop header and the list beside it", async ({ page }) => {
-      test.skip(!writes, "opening a row marks it read; set E2E_ALLOW_WRITES=1 on a disposable environment")
       await openUpdates(page)
       await rows(page).first().click()
       await expect(page).toHaveURL(/item=/)
