@@ -92,8 +92,8 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `delegate_id` | string | -- | Filter by agent delegate |
 | `work_mode` | string | -- | Who holds the work: `agent` or `human`; anything else is `400` |
 | `mine` | string | -- | `1`: My work, open issues the caller owns or holds as the worker |
-| `working` | string | -- | `1`: Agents working, an agent holds the issue and one of its sessions is `active` |
-| `needs` | string | -- | `reply`: open issues the caller owns where an agent session is `awaiting_input`. `review`: issues in `REVIEW` the caller owns. Anything else is `400` |
+| `working` | string | -- | `1`: Agents working, open issues an agent holds whose session is `active` or `stale` |
+| `needs` | string | -- | `reply`: open issues the caller owns or holds where a person is wanted: a session is `awaiting_input` or `error`, or the active execution is `needs_human`. `review`: issues in `REVIEW` with client acceptance on (`client_review_required`) that the caller requested (`created_by`; the owner when an agent created the issue). Anything else is `400` |
 | `blocked` | string | -- | `1`: Blocked, an open issue blocks it (`blocks` / `blocked_by` relation) |
 | `label` | string | -- | Filter by label name |
 | `q` | string | -- | Search in title or identifier (LIKE match), on the server |
@@ -291,6 +291,8 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `status` | string | No | `"BACKLOG"` | Starting status. Validated like a transition from `BACKLOG`, so only `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED` or `DUPLICATE` are accepted; a terminal start stamps `completed_at` |
 | `assignee_type` | string | No | `null` | `"user"` or `"agent"`. Decides which typed slot `assignee_id` fills: `user` writes the human **owner** (`owner_user_id`), `agent` writes the agent **delegate** (`delegate_agent_id`). Required when `assignee_id` is set |
 | `assignee_id` | string | No | `null` | A workspace member's user ID (`user`) or an agent ID (`agent`) in this workspace; anything else is `400` |
+| `owner_user_id` | string | No | `null` | The accountable person: a user ID of a member of this workspace. Sets the human owner. Can be sent together with `delegate_agent_id`; refused (`400`) together with `assignee_id` |
+| `delegate_agent_id` | string | No | `null` | The agent that does the work: an agent ID in this workspace. Sets the delegate, so the agent holds the work. Can be sent together with `owner_user_id`; refused (`400`) together with `assignee_id` |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
 | `project_id` | string | No | `null` | Parent project ID |
 | `estimate` | integer | No | `null` | Effort/points estimate |

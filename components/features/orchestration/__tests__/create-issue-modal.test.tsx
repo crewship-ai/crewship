@@ -523,7 +523,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
       expect(screen.getByRole("button", { name: "Select crew" })).toHaveTextContent("DES")
     })
 
-    fireEvent.click(screen.getByText("Assignee"))
+    fireEvent.click(screen.getByText("Delegate"))
     await waitFor(() => expect(screen.getByText("Morgan")).toBeInTheDocument())
   })
 
@@ -533,7 +533,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     render(<CreateIssueModal {...defaultProps} crews={allEmpty} />)
 
-    fireEvent.click(screen.getByText("Assignee"))
+    fireEvent.click(screen.getByText("Delegate"))
 
     // Names the crew, so "there is nobody here" cannot be mistaken for
     // "the list failed to arrive".
@@ -548,7 +548,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
 
-    fireEvent.click(screen.getByText("Assignee"))
+    fireEvent.click(screen.getByText("Delegate"))
 
     await waitFor(() => expect(screen.getByText(/Agents could not be loaded/i)).toBeInTheDocument())
     expect(screen.queryByText(/no agents/i)).toBeNull()
@@ -560,7 +560,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     ) as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
-    fireEvent.click(screen.getByText("Assignee"))
+    fireEvent.click(screen.getByText("Delegate"))
     await screen.findByText(/Agents could not be loaded/i)
 
     // The retry has to be a control. Re-picking the crew that is already
@@ -591,7 +591,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
 
-    fireEvent.click(screen.getByText("Assignee"))
+    fireEvent.click(screen.getByText("Delegate"))
 
     // One retried assertion, not "find the name, then go looking for its row".
     // The second form resolves a node and queries from it a tick later, which
@@ -1000,5 +1000,99 @@ describe("CreateIssueModal — making a label from the picker", () => {
       await waitFor(() => expect(defaultProps.onCreated).toHaveBeenCalled())
       expect(calls.some((c) => /review-policy/.test(c.url))).toBe(false)
     })
+  })
+})
+
+// ── Owner and Delegate (wireframe v67 composer) ───────────────────────────
+//
+// An issue has a person who is accountable (owner) and an agent that does the
+// work (delegate). They are two pickers and two fields on the create request,
+// not one "Assignee" that can hold only one of them.
+describe("CreateIssueModal — owner and delegate", () => {
+  const originalFetch = global.fetch
+
+  function stubDirectory() {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      void init
+      if (url.includes("/members")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([{ user_id: "user-ada", user: { full_name: "Ada Lovelace" } }]),
+        })
+      }
+      const m = /crew_id=([^&]+)/.exec(url)
+      if (url.startsWith("/api/v1/agents") && m) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(m[1] === "crew-2" ? [morgan] : []) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  const postBody = (fetchMock: ReturnType<typeof stubDirectory>) => {
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === "POST")
+    return post ? JSON.parse(post[1]!.body as string) : null
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  afterAll(() => {
+    global.fetch = originalFetch
+  })
+
+  it("has an Owner picker and a Delegate picker and no Assignee", async () => {
+    stubDirectory()
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+    expect(screen.getByText("Owner")).toBeInTheDocument()
+    expect(screen.getByText("Delegate")).toBeInTheDocument()
+    expect(screen.queryByText("Assignee")).toBeNull()
+  })
+
+  it("sends the owner and the delegate together on one create", async () => {
+    const fetchMock = stubDirectory()
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Both set" } })
+
+    fireEvent.click(screen.getByText("Owner"))
+    fireEvent.click(await screen.findByText("Ada Lovelace"))
+
+    fireEvent.click(await screen.findByText("Delegate"))
+    fireEvent.click(await screen.findByText("Morgan"))
+
+    fireEvent.click(screen.getByText("Create"))
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    const body = postBody(fetchMock)
+    expect(body.owner_user_id).toBe("user-ada")
+    expect(body.delegate_agent_id).toBe("agent-morgan")
+    expect(body.assignee_id).toBeUndefined()
+    expect(body.assignee_type).toBeUndefined()
+  })
+
+  it("sends only the owner when no delegate is picked", async () => {
+    const fetchMock = stubDirectory()
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Owner only" } })
+    fireEvent.click(screen.getByText("Owner"))
+    fireEvent.click(await screen.findByText("Ada Lovelace"))
+    fireEvent.click(screen.getByText("Create"))
+
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    const body = postBody(fetchMock)
+    expect(body.owner_user_id).toBe("user-ada")
+    expect(body.delegate_agent_id).toBeUndefined()
+  })
+
+  it("keeps people out of the Delegate list and agents out of the Owner list", async () => {
+    stubDirectory()
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.click(screen.getByText("Delegate"))
+    await screen.findByText("Morgan")
+    expect(screen.queryByText("Ada Lovelace")).toBeNull()
   })
 })

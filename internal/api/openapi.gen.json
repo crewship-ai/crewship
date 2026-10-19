@@ -3931,6 +3931,10 @@
             "nullable": true,
             "type": "string"
           },
+          "delegate_agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
           "description": {
             "nullable": true,
             "type": "string"
@@ -3950,6 +3954,10 @@
             "type": "array"
           },
           "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner_user_id": {
             "nullable": true,
             "type": "string"
           },

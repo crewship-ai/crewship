@@ -154,8 +154,10 @@ export function CreateIssueModal({
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState<IssuePriority>("none")
-  const [assigneeType, setAssigneeType] = useState<"user" | "agent" | null>(null)
-  const [assigneeId, setAssigneeId] = useState<string | null>(null)
+  // Owner (the accountable person) and delegate (the agent doing the work)
+  // are separate fields; either, both or neither may be set.
+  const [ownerId, setOwnerId] = useState<string | null>(null)
+  const [delegateId, setDelegateId] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
@@ -189,7 +191,8 @@ export function CreateIssueModal({
   // Popover states
   const [crewOpen, setCrewOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
-  const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [ownerOpen, setOwnerOpen] = useState(false)
+  const [delegateOpen, setDelegateOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [labelQuery, setLabelQuery] = useState("")
@@ -319,8 +322,7 @@ export function CreateIssueModal({
   // picker showing the same empty list a genuinely empty crew shows. A refused
   // or dropped request now says so.
   useEffect(() => {
-    setAssigneeType(null)
-    setAssigneeId(null)
+    setDelegateId(null)
     if (!crewId) { setAgents([]); setAgentLoad("idle"); return }
     let cancelled = false
     setAgents([])
@@ -420,8 +422,8 @@ export function CreateIssueModal({
     setTitle("")
     setDescription("")
     setPriority("none")
-    setAssigneeType(null)
-    setAssigneeId(null)
+    setOwnerId(null)
+    setDelegateId(null)
     setProjectId(initialProjectId)
     setSelectedLabels([])
     setRoutineId(null)
@@ -439,7 +441,8 @@ export function CreateIssueModal({
     title.trim() !== "" ||
     description.trim() !== "" ||
     priority !== "none" ||
-    assigneeId !== null ||
+    ownerId !== null ||
+    delegateId !== null ||
     projectId !== initialProjectId ||
     dueDate !== "" ||
     estimate !== null ||
@@ -452,8 +455,8 @@ export function CreateIssueModal({
   const crewPrefix = selectedCrew?.slug?.toUpperCase().slice(0, 3) ?? "CRE"
   const selectedProject = projects.find((p) => p.id === projectId)
   const selectedRoutine = routines.find((r) => r.id === routineId)
-  const selectedAgent = assigneeId ? agents.find((a) => a.id === assigneeId) ?? null : null
-  const assigneeName = assigneeType === "user" ? people.find((person) => person.id === assigneeId)?.name : selectedAgent?.name ?? null
+  const selectedAgent = delegateId ? agents.find((a) => a.id === delegateId) ?? null : null
+  const ownerName = ownerId ? people.find((person) => person.id === ownerId)?.name ?? null : null
   const selectedMilestone = milestoneId ? milestones.find((m) => m.id === milestoneId) ?? null : null
   const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
@@ -478,8 +481,8 @@ export function CreateIssueModal({
             // Absent = BACKLOG on the server, so the default stays off the wire.
             status: startStatus !== "BACKLOG" ? startStatus : undefined,
             labels: selectedLabels.length > 0 ? selectedLabels : undefined,
-            assignee_type: assigneeType ?? undefined,
-            assignee_id: assigneeId ?? undefined,
+            owner_user_id: ownerId ?? undefined,
+            delegate_agent_id: delegateId ?? undefined,
             project_id: projectId ?? undefined,
             routine_id: routineId ?? undefined,
             // Where a value is optional, absent must stay absent on the wire —
@@ -556,7 +559,7 @@ export function CreateIssueModal({
       setSaving(false)
       submittingRef.current = false
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus, needsAcceptance])
+  }, [crewId, title, description, priority, selectedLabels, ownerId, delegateId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus, needsAcceptance])
 
   const handleSubmit = useCallback(() => submit(false), [submit])
 
@@ -681,12 +684,48 @@ export function CreateIssueModal({
           </PopoverContent>
         </Popover>
 
-        {/* Assignee */}
+        {/* Owner: the person who is accountable for the result */}
+        <Popover open={ownerOpen} onOpenChange={setOwnerOpen} modal>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={User} accent="purple" set={ownerId !== null}>
+              <span>{ownerName ?? "Owner"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search people..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setOwnerId(null); setOwnerOpen(false) }}>
+                    <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs">No owner</span>
+                    {!ownerId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {peopleError && <p role="alert" className="px-3 py-2 text-xs text-destructive">People could not be loaded.</p>}
+                {people.length > 0 && (
+                  <CommandGroup heading="People">
+                    {people.map((person) => (
+                      <CommandItem key={person.id} value={`person ${person.name}`} onSelect={() => { setOwnerId(person.id); setOwnerOpen(false) }}>
+                        <User className="mr-2 h-3.5 w-3.5" />
+                        <span className="text-xs">{person.name}</span>
+                        {ownerId === person.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* Delegate: the agent that does the work */}
         {crewId && (
-          <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen} modal>
+          <Popover open={delegateOpen} onOpenChange={setDelegateOpen} modal>
             <PopoverTrigger asChild>
               <CreateSurfacePill
-                icon={assigneeType === "agent" ? Bot : User}
+                icon={Bot}
                 // The pill is the picker's face when it is shut, so it wears
                 // the agent's, not a generic robot.
                 leading={
@@ -700,21 +739,21 @@ export function CreateIssueModal({
                   ) : undefined
                 }
                 accent="purple"
-                set={assigneeId !== null}
+                set={delegateId !== null}
               >
-                <span>{assigneeName ?? "Assignee"}</span>
+                <span>{selectedAgent?.name ?? "Delegate"}</span>
               </CreateSurfacePill>
             </PopoverTrigger>
             <PopoverContent className="w-[220px] p-0" align="start">
               <Command>
-                <CommandInput placeholder="Search assignee..." className="h-8 text-xs" />
+                <CommandInput placeholder="Search agents..." className="h-8 text-xs" />
                 <CommandList>
                   <CommandEmpty>No results found.</CommandEmpty>
                   <CommandGroup>
-                    <CommandItem onSelect={() => { setAssigneeType(null); setAssigneeId(null); setAssigneeOpen(false) }}>
+                    <CommandItem onSelect={() => { setDelegateId(null); setDelegateOpen(false) }}>
                       <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-xs">Unassigned</span>
-                      {!assigneeId && <Check className="ml-auto h-3.5 w-3.5" />}
+                      <span className="text-xs">No delegate</span>
+                      {!delegateId && <Check className="ml-auto h-3.5 w-3.5" />}
                     </CommandItem>
                   </CommandGroup>
                   {/* Three ways to have no agents to list, and they are not the
@@ -749,17 +788,15 @@ export function CreateIssueModal({
                   {agentLoad === "ready" && agents.length === 0 && (
                     <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
                       No agents in {selectedCrew?.name ?? "this crew"} — pick another crew in the
-                      header to assign someone.
+                      header to delegate to someone.
                     </p>
                   )}
-                  {peopleError && <p role="alert" className="px-3 py-2 text-xs text-destructive">People could not be loaded.</p>}
-                  {people.length > 0 && <CommandGroup heading="People">{people.map((person) => <CommandItem key={person.id} value={`person ${person.name}`} onSelect={() => { setAssigneeType("user"); setAssigneeId(person.id); setAssigneeOpen(false) }}><User className="mr-2 h-3.5 w-3.5" /><span className="text-xs">{person.name}</span>{assigneeId === person.id && <Check className="ml-auto h-3.5 w-3.5" />}</CommandItem>)}</CommandGroup>}
                   {agents.length > 0 && (
                     <CommandGroup heading="Agents">
                       {agents.map((agent) => (
                         <CommandItem
                           key={agent.id}
-                          onSelect={() => { setAssigneeType("agent"); setAssigneeId(agent.id); setAssigneeOpen(false) }}
+                          onSelect={() => { setDelegateId(agent.id); setDelegateOpen(false) }}
                         >
                           {/* Exactly what crews-explorer.tsx and agent-canvas.tsx
                               pass. Every agent in this database has a NULL
@@ -772,7 +809,7 @@ export function CreateIssueModal({
                             className="mr-2 h-4 w-4 shrink-0"
                           />
                           <span className="text-xs">{agent.name}</span>
-                          {assigneeId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                          {delegateId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
                         </CommandItem>
                       ))}
                     </CommandGroup>
