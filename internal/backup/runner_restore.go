@@ -477,6 +477,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 
+	// Reject replacement before dry-run success or any service/file effects.
+	// ReplaceWorkspaceContents repeats this under its deleting transaction.
+	if opts.Replace && !opts.FilesOnly && extracted.DBDump != nil {
+		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump)); err != nil {
+			return nil, err
+		}
+	}
+
 	// #2009: snapshot the payload's row counts HERE, before anything below
 	// gets a chance to touch extracted.DBDump. This is what
 	// payloadMismatches (below, near the dry-run short-circuit) compares

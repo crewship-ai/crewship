@@ -71,6 +71,13 @@ func (s *Store) AppendDocumentCreation(ctx context.Context, session string, msg 
 	if err != nil || current == nil || *current != *receipt {
 		return errors.New("document creation human authority changed")
 	}
+	// Ordinary operator visibility is not consent to create private output
+	// inside another human's conversation. Fence the original author in the
+	// same writer transaction that persists the before-run audience seal.
+	var author string
+	if err = tx.QueryRowContext(ctx, `SELECT created_by FROM chats WHERE id=? AND workspace_id=? AND agent_id=? AND visibility='private'`, session, receipt.WorkspaceID, receipt.AgentID).Scan(&author); err != nil || author != receipt.UserID {
+		return errors.New("document creation requires the private conversation author")
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO conversation_messages(id,session_id,agent_id,role,content,tool_summary,ts,author_user_id,run_id) VALUES(?,?,?,?,?,?,?,?,?)`, msg.ID, session, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary, msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), msg.AuthorUserID, msg.RunID); err != nil {
 		return fmt.Errorf("insert document creation message: %w", err)
 	}
