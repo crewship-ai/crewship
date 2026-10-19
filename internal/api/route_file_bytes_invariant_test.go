@@ -62,7 +62,7 @@ var fileBytesFunnelHandlers = map[string]string{
 // source, not assumed from its name.
 var fileBytesExemptHandlers = map[string]string{
 	"PipelineHandler.RoutineCalendarICS": "renders the calendar events from the database (schedules, pending starts, run rows) as text/calendar; it reads no file from crew or agent storage",
-	"PipelineHandler.RunArtifacts": "reads an immutable workspace-scoped content-addressed blob; original file snapshots are confined to crew shared storage using os.Root",
+	"PipelineHandler.RunArtifacts":       "reads an immutable workspace-scoped content-addressed blob; original file snapshots are confined to crew shared storage using os.Root",
 	"AttachmentHandler.Download": "reads a content-addressed blob keyed by workspace_id+sha256 " +
 		"(readAttachmentBlob, attachments.go) — never touches the crew/agent output tree at all",
 	"MemoryPortabilityHandler.Export": "reads through memport.ReadSource(FormatCrewship); readCrewship " +
