@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useRoutineBudget } from "@/hooks/use-routine-budget"
+import { COST_HIDDEN_NOTE, isCostShown } from "@/lib/cost-visibility"
 
 // RoutineBudgetCard — spent-this-month-vs-cap meter for the routine
 // detail page (#1422 item 3). Distinct from the routine's DSL
@@ -35,8 +36,23 @@ export function RoutineBudgetCard({
 
   if (loading && !budget) return null
 
+  // Below ADMIN the server sends the state without the amounts (#3590):
+  // say over / within / none, never "$0.00", and offer no editor (setting
+  // a cap is OWNER/ADMIN on the server too).
+  if (budget && !isCostShown(budget.spent_usd)) {
+    const state = !budget.has_budget ? "No budget set" : budget.over_budget ? "Over budget this month" : "Within budget this month"
+    return (
+      <Card title="Budget" subtitle={budget.month} icon={Wallet} tone={budget.over_budget ? "warn" : "default"}>
+        <div className="px-3 py-3 text-xs text-muted-foreground" data-testid="routine-budget-state">
+          <span className={cn(budget.over_budget && "font-medium text-destructive")}>{state}</span>
+          <span className="block">{COST_HIDDEN_NOTE}</span>
+        </div>
+      </Card>
+    )
+  }
+
   const startEdit = () => {
-    setDraft(budget?.has_budget ? String(budget.monthly_budget_usd) : "")
+    setDraft(budget?.has_budget && isCostShown(budget.monthly_budget_usd) ? String(budget.monthly_budget_usd) : "")
     setEditing(true)
   }
 
@@ -131,7 +147,7 @@ export function RoutineBudgetCard({
           />
           <div className="mt-1.5 flex items-center justify-between font-mono text-[11px] text-muted-foreground">
             <span className={cn(overBudget && "text-destructive font-medium")}>
-              ${spent.toFixed(2)} of ${budget.monthly_budget_usd.toFixed(2)}
+              ${spent.toFixed(2)} of ${(budget.monthly_budget_usd ?? 0).toFixed(2)}
             </span>
             <span className={cn(overBudget && "text-destructive font-medium")}>
               {pctUsed.toFixed(0)}%{overBudget ? " over" : ""}

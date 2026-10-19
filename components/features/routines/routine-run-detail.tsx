@@ -72,6 +72,7 @@ type RoutineDetailWithDraft = RoutineDetail & { draft?: RoutineDraftSummary | nu
 
 import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 import { REPORTED_USAGE_HINT, formatReportedUsage } from "./routine-cost-format"
+import { isCostShown } from "@/lib/cost-visibility"
 
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
@@ -601,7 +602,8 @@ export function RoutineRunDetail({ workspaceId, runId, actionsInBar, onClose, on
       </div>
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="run-kpis">
         <Kpi label="Duration" value={!active && run.duration_ms != null ? formatDurationMs(run.duration_ms) : active ? "running" : "—"} />
-        <Kpi label="Cost" value={formatReportedUsage(run.cost_usd)} note={cap != null ? `of $${cap.toFixed(2)} cap` : undefined} />
+        {/* Absent below ADMIN (#3590): no tile rather than "none reported". */}
+        {isCostShown(run.cost_usd) && <Kpi label="Cost" value={formatReportedUsage(run.cost_usd)} note={cap != null ? `of $${cap.toFixed(2)} cap` : undefined} />}
         <Kpi label="Steps" value={doneSteps != null && totalSteps ? `${doneSteps} / ${totalSteps}` : totalSteps ? `— / ${totalSteps}` : "—"} />
         <Kpi label="Produced" value={produced ? `${produced.count}${produced.more ? "+" : ""}` : "—"} note={produced && produced.count > 0 ? (produced.count === 1 && !produced.more ? "file" : "files") : undefined} />
       </dl>
@@ -892,8 +894,12 @@ export function RoutineRunDetail({ workspaceId, runId, actionsInBar, onClose, on
             <dd className="break-all font-mono">{run.id}</dd>
             <dt>Recipe hash</dt>
             <dd className="break-all font-mono">{run.definition_hash || "unavailable"}</dd>
-            <dt>Reported usage</dt>
-            <dd className="font-mono" title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)}</dd>
+            {isCostShown(run.cost_usd) && (
+              <>
+                <dt>Reported usage</dt>
+                <dd className="font-mono" title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)}</dd>
+              </>
+            )}
             <dt>Mode</dt>
             <dd>{run.mode}</dd>
             {run.failed_at_step && (

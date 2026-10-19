@@ -26,6 +26,7 @@ import { canApproveRoutine, canKillRoutine } from "@/lib/routine-governance"
 import { formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import { next24Hours, overviewNeeds, type OverviewNeed } from "@/lib/routines-overview-board"
 import { RoutineGlyph } from "./routine-glyph"
+import { isCostShown } from "@/lib/cost-visibility"
 
 const TONE: Record<OverviewNeed["kind"], { tone: "warn" | "purple" | "danger" | "muted"; label: string }> = {
   decision: { tone: "warn", label: "Waiting" },
@@ -91,11 +92,15 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
           value={String(p.kpis.total)}
           note={[p.kpis.successPct != null ? `${p.kpis.successPct} % completed` : null, p.coveredSince ? `newest runs since ${formatAgo(p.coveredSince, now.getTime())}` : null].filter(Boolean).join(" · ") || undefined}
         />
-        <Kpi
-          label={`Spend · ${month}`}
-          value={p.spend ? money(p.spend.total_spent_usd) : "—"}
-          note={p.spend ? (p.spend.total_budget_usd > 0 ? `of ${money(p.spend.total_budget_usd)} budget` : "no budget set") : undefined}
-        />
+        {/* Spend is OWNER/ADMIN: below that the summary arrives without
+            amounts (#3590) and the tile is left out rather than read "$0.00". */}
+        {(!p.spend || isCostShown(p.spend.total_spent_usd)) && (
+          <Kpi
+            label={`Spend · ${month}`}
+            value={p.spend && isCostShown(p.spend.total_spent_usd) ? money(p.spend.total_spent_usd) : "—"}
+            note={p.spend ? ((p.spend.total_budget_usd ?? 0) > 0 ? `of ${money(p.spend.total_budget_usd ?? 0)} budget` : "no budget set") : undefined}
+          />
+        )}
       </ul>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">

@@ -27,6 +27,7 @@ import { useTick } from "@/hooks/use-tick"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 import { runStatusLabel, runTone } from "@/lib/activity-run"
+import { isCostShown } from "@/lib/cost-visibility"
 
 // ActivityBell — the global "what's running now" surface in the toolbar, as the
 // v67 wireframe draws it (`H.POPS.actbell`, PAR-145):
@@ -156,7 +157,7 @@ export function completedToday(runs: PipelineRun[], now: Date = new Date()): { c
   const done = runs.filter((r) => runTone(r.status) === "done" && sameDay(r.ended_at || r.started_at, now))
   return {
     count: done.length,
-    costUsd: done.reduce((sum, r) => sum + (r.cost_usd > 0 ? r.cost_usd : 0), 0),
+    costUsd: done.reduce((sum, r) => sum + (isCostShown(r.cost_usd) && r.cost_usd > 0 ? r.cost_usd : 0), 0),
     more: runs.length >= TERMINAL_WINDOW && done.length >= TERMINAL_WINDOW,
   }
 }

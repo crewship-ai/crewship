@@ -37,7 +37,8 @@ export interface PipelineRun {
   // chat_id — the agent session this run was authored in, when the run
   // originated from a chat. Drives the "open session" Context link.
   chat_id?: string
-  cost_usd: number
+  /** Absent below ADMIN (#3590): never read a missing cost as $0. */
+  cost_usd?: number
   duration_ms: number
   triggered_via: "manual" | "schedule" | "webhook" | "call_pipeline" | "issue" | string
   triggered_by_id: string

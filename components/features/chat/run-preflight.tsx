@@ -2,13 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
+import { isCostShown } from "@/lib/cost-visibility"
 
 export interface ChatRunPreflight {
   scope: "configured_chat_agent"
   agent_id: string
   model: string
   payer: { state: string; category: string; label: string; provider?: string }
-  budgets: { id: string; scope: string; window: string; mode: string; limit_usd: number; spent_usd: number; remaining_usd: number; state: string }[]
+  // Amounts are absent below ADMIN (#3590); scope, window, mode and state stay.
+  budgets: { id: string; scope: string; window: string; mode: string; limit_usd?: number; spent_usd?: number; remaining_usd?: number; state: string }[]
   gate: { configured_mode: string; predicted_mode: string; rule_matches: boolean; blocking: boolean; reason: string }
   estimate_usd: number | null
   estimate_state: "unknown"
@@ -41,7 +43,7 @@ export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
     <summary className="cursor-pointer coarse:min-h-[44px]">Configured model · price unknown · {data.gate.blocking ? "approval predicted" : data.gate.predicted_mode === "async" && data.gate.rule_matches ? "nonblocking review predicted" : "no blocking gate predicted"}</summary>
     <div className="max-h-40 space-y-2 overflow-y-auto overscroll-contain pt-2 md:max-h-56" tabIndex={0} aria-label="Configured model budget details">
       <p>Payer: {data.payer.label || "Payer unknown"} ({data.payer.state}). Configured model: {data.model || "unknown"}.</p>
-      {data.budgets.length ? <ul className="list-disc pl-4">{data.budgets.map(budget => <li key={budget.id}>{budget.scope} · {money(budget.remaining_usd)} remaining / {money(budget.limit_usd)} per {budget.window} · {budget.mode} · {budget.state}</li>)}</ul> : <p>No configured budget cap was found.</p>}
+      {data.budgets.length ? <ul className="list-disc pl-4">{data.budgets.map(budget => <li key={budget.id}>{budget.scope} · {isCostShown(budget.remaining_usd) && isCostShown(budget.limit_usd) ? `${money(budget.remaining_usd)} remaining / ${money(budget.limit_usd)} per ${budget.window}` : `budget per ${budget.window}`} · {budget.mode} · {budget.state}</li>)}</ul> : <p>No configured budget cap was found.</p>}
       <p>Price before the run is unknown. Gate prediction: {data.gate.rule_matches && data.gate.predicted_mode !== "none" ? `${data.gate.predicted_mode} review` : "no matching whole-run gate"}. Actual approval appears separately if the run waits.</p>
       <ul className="list-disc pl-4">{data.constraints.map(constraint => <li key={constraint}>{constraint}</li>)}</ul>
       <button type="button" className="underline coarse:min-h-[44px]" disabled={query.isFetching} onClick={() => void query.refetch()}>Refresh budget and gate</button>

@@ -24,6 +24,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useTrace } from "@/hooks/use-trace"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
+import { isCostShown } from "@/lib/cost-visibility"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -219,7 +220,7 @@ function RunCard({
                 <span>{formatDurationDecimal(run.duration_ms)}</span>
               </>
             )}
-            {run.cost_usd > 0 && (
+            {isCostShown(run.cost_usd) && run.cost_usd > 0 && (
               <>
                 <span>·</span>
                 <span>${run.cost_usd.toFixed(4)}</span>
