@@ -35,6 +35,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
+- Scheduled routines wait in the durable queue when capacity is full, preserving each occurrence without false failure alerts or circuit-breaker trips.
+
 ### Added
 
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
