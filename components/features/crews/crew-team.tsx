@@ -53,6 +53,12 @@ export interface CrewTeamProps {
    */
   onExtend?: (agent: AgentSummary) => void
   /**
+   * End a live hire now (POST /agents/{id}/release): it becomes an expired
+   * hire, its runs and notes stay and Rehire brings it back. Absent for a
+   * reader who may not hire.
+   */
+  onRelease?: (agent: AgentSummary) => void
+  /**
    * Cost over 30 days per agent id (GET /paymaster/spend/by-agent/{crewId}).
    * Null or absent = unknown or not for this reader: the column stays (as in
    * the design) and shows a dash rather than zeros.
@@ -78,6 +84,7 @@ export function CrewTeam({
   onApprove,
   onRehire,
   onExtend,
+  onRelease,
   costByAgent = null,
   busyAgentId = null,
   now = Date.now(),
@@ -189,8 +196,11 @@ export function CrewTeam({
                   </>
                 ) : state === "expired" ? (
                   <Button variant="outline" size="sm" onClick={() => onRehire(a)}><RotateCcw className="size-3.5" aria-hidden /> Rehire</Button>
-                ) : onExtend ? (
-                  <Button variant="outline" size="sm" onClick={() => onExtend(a)}><Clock className="size-3.5" aria-hidden /> Extend</Button>
+                ) : onExtend || onRelease ? (
+                  <>
+                    {onRelease && <Button variant="ghost" size="sm" disabled={busyAgentId === a.id} onClick={() => onRelease(a)}>Release now</Button>}
+                    {onExtend && <Button variant="outline" size="sm" onClick={() => onExtend(a)}><Clock className="size-3.5" aria-hidden /> Extend</Button>}
+                  </>
                 ) : null
               }
             />

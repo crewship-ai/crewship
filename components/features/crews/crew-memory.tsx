@@ -20,13 +20,15 @@ interface Versions { entries?: Array<{ id: string; written_at: string; written_b
  * CrewMemoryReview, built from the inbox because the server has no list of
  * memory proposals (#3462); it is absent while none wait.
  */
-export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent, canDecideProposals = false }: {
+export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent, canDecideProposals = false, canReviewSkills = false }: {
   workspaceId: string
   crewId: string
   agents: Array<Pick<AgentSummary, "id" | "name" | "slug"> & { memory_enabled?: boolean }>
   onOpenAgent: (slug: string) => void
   /** OWNER / ADMIN: the only roles the server lets decide a memory proposal. */
   canDecideProposals?: boolean
+  /** MANAGER and above: the roles the server lets list and decide staged skills. */
+  canReviewSkills?: boolean
 }) {
   const ws = encodeURIComponent(workspaceId)
   const inventory = useWorkspaceResource<Inventory>(`/api/v1/crews/${crewId}/memory?workspace_id=${ws}`)
@@ -35,7 +37,7 @@ export function CrewMemoryCards({ workspaceId, crewId, agents, onOpenAgent, canD
 
   return (
     <div className="space-y-4">
-    <CrewMemoryReview workspaceId={workspaceId} crewId={crewId} canDecide={canDecideProposals} />
+    <CrewMemoryReview workspaceId={workspaceId} crewId={crewId} canDecide={canDecideProposals} canReviewSkills={canReviewSkills} />
     <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <CrewMdCard workspaceId={workspaceId} doc={crewMd} loading={!inventory.data && !inventory.error} failed={!!inventory.error} />
       <CrCard title="Shared notes and agent knowledge" concept="memory" count={agents.length || undefined}>

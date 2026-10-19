@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import {
-  AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Share2, Webhook, Workflow, XCircle,
+  AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Plus, Share2, Webhook, Workflow, XCircle,
 } from "lucide-react"
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
@@ -17,6 +17,7 @@ import { withReturnTo } from "@/lib/return-to"
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
 import { AppearStack } from "@/components/ui/detail"
 import { SkillsManager } from "../agent-canvas-managers"
+import { AgentSkillsPicker } from "../agent-skills-picker"
 import { AgentChannelsCard } from "../agent-channels-card"
 import { BlockingNotice, NowRunning } from "../canvas/detail-blocks"
 import { deriveTriggers, useAgentRelations } from "../canvas/use-agent-relations"
@@ -84,6 +85,7 @@ export function OverviewTab({
   // right-hand drawer: the drawer had to be 420px for a list and 760px for an
   // editor, which is how one pattern ended up with two widths.
   const [manager, setManager] = useState<"skills" | "tools" | "channels" | null>(null)
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const { issues, credentials, skills, pipelines, readiness, loading, error, refresh } = useAgentRelations(workspaceId, agent.id)
   const { toolkits, channels, error: reachError, refresh: refreshReach } = useAgentReach(workspaceId, agent.id)
 
@@ -317,6 +319,16 @@ export function OverviewTab({
             { id: "off", label: "Disabled" },
           ]}
           items={skillItems}
+          headerAction={
+            <button
+              type="button"
+              onClick={() => setSkillPickerOpen(true)}
+              className="type-meta inline-flex h-6 items-center gap-1 rounded-md px-2 font-medium text-primary hover:bg-primary/10 coarse:min-h-[44px]"
+            >
+              <Plus className="h-3 w-3" aria-hidden />
+              Add skill
+            </button>
+          }
           footerLabel="Manage skills"
           footerOnClick={() => setManager("skills")}
         />
@@ -414,6 +426,16 @@ export function OverviewTab({
           Assign an issue or start a conversation to give this agent work.
         </p>
       )}
+
+      <AgentSkillsPicker
+        open={skillPickerOpen}
+        agentId={agent.id}
+        agentName={agent.name}
+        workspaceId={workspaceId}
+        assigned={skills}
+        onClose={() => setSkillPickerOpen(false)}
+        onApplied={() => { refresh(); onAgentChanged() }}
+      />
 
       <ManagerDialog
         open={manager !== null}

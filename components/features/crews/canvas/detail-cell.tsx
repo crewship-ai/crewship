@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { motion } from "motion/react"
 import { ArrowUpRight, Search } from "lucide-react"
@@ -71,6 +71,8 @@ export interface DetailCellProps {
   footerHref?: string
   /** Used instead of `footerHref` when the destination is in-page. */
   footerOnClick?: () => void
+  /** A control in the header beside Search (the card's one main action, e.g. Add skill). */
+  headerAction?: ReactNode
   className?: string
   /** Position in the grid — drives the entrance stagger. */
   order?: number
@@ -80,7 +82,7 @@ const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
   title, icon, count, warn = false, filters, items, tall = false,
-  footerLabel, footerHref, footerOnClick, className, order = 0,
+  footerLabel, footerHref, footerOnClick, headerAction, className, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
   const [searchOpen, setSearchOpen] = useState(false)
@@ -116,6 +118,8 @@ export function DetailCell({
       tone={warn ? "warn" : "default"}
       className="flex w-full flex-col"
       action={
+        <>
+        {headerAction}
         <button
           type="button"
           onClick={toggleSearch}
@@ -129,6 +133,7 @@ export function DetailCell({
         >
           <Search className="h-3.5 w-3.5" />
         </button>
+        </>
       }
     >
       <span className="sr-only" data-testid="cell-badge" data-warn={warn ? "true" : "false"} />

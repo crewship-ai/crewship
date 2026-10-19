@@ -12,6 +12,9 @@ import { entityHref } from "@/lib/entity-links"
 
 import { CrCard, CrLine } from "./cr-card"
 
+interface ProposedSkill { file_name: string; name?: string; description?: string; category?: string }
+type SkillLoad = { state: "idle" | "loading" | "error" } | { state: "ready"; rows: ProposedSkill[] }
+
 interface Waiting { inboxId: string; proposalId: string; rules: number; entries: number }
 type Load = { state: "loading" } | { state: "error" } | { state: "ready"; waiting: Waiting[] }
 
@@ -32,14 +35,39 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
  * and whether it is still pending, and decides with the existing approve and
  * reject calls. Nothing waiting means no card at all, not an empty one.
  */
-export function CrewMemoryReview({ workspaceId, crewId, canDecide }: {
+export function CrewMemoryReview({ workspaceId, crewId, canDecide, canReviewSkills = false }: {
   workspaceId: string
   crewId: string
   /** The server lets only OWNER and ADMIN decide a proposal. */
   canDecide: boolean
+  /** MANAGER and above: the roles the server lets list and decide staged skills. */
+  canReviewSkills?: boolean
 }) {
   const ws = encodeURIComponent(workspaceId)
   const [load, setLoad] = useState<Load>({ state: "loading" })
+  const [skills, setSkills] = useState<SkillLoad>({ state: "idle" })
+
+  // Skills the crew's memory proposes (GET /skills/proposed): staged SKILL.md
+  // files waiting for a person. Separate from the memory notes so one failing
+  // never hides the other.
+  useEffect(() => {
+    if (!canReviewSkills) { setSkills({ state: "idle" }); return }
+    let cancelled = false
+    setSkills({ state: "loading" })
+    ;(async () => {
+      const res = await apiFetch(`/api/v1/skills/proposed?crew_id=${encodeURIComponent(crewId)}&workspace_id=${ws}`)
+      if (!res.ok) throw new Error(String(res.status))
+      const rows: unknown = await res.json().catch(() => null)
+      if (!Array.isArray(rows)) throw new Error("shape")
+      const proposals = rows.filter((r): r is ProposedSkill => !!r && typeof (r as ProposedSkill).file_name === "string")
+      if (!cancelled) setSkills({ state: "ready", rows: proposals })
+    })().catch(() => { if (!cancelled) setSkills({ state: "error" }) })
+    return () => { cancelled = true }
+  }, [canReviewSkills, crewId, ws])
+
+  const dropSkill = useCallback((fileName: string) => {
+    setSkills((s) => (s.state === "ready" ? { state: "ready", rows: s.rows.filter((r) => r.file_name !== fileName) } : s))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -77,13 +105,67 @@ export function CrewMemoryReview({ workspaceId, crewId, canDecide }: {
       </CrCard>
     )
   }
-  if (load.waiting.length === 0) return null
+  const skillRows = skills.state === "ready" ? skills.rows : []
+  const total = load.waiting.length + skillRows.length
+  if (total === 0 && skills.state !== "error") return null
   return (
-    <CrCard title={`Waiting for review · ${load.waiting.length}`} concept="memory" icon={Brain} data-testid="crew-memory-review">
+    <CrCard title={`Waiting for review · ${total}`} concept="memory" icon={Brain} data-testid="crew-memory-review">
       {load.waiting.map((w) => (
         <ProposalRow key={w.proposalId} w={w} workspaceId={workspaceId} canDecide={canDecide} onDecided={drop} />
       ))}
+      {skillRows.map((sk) => (
+        <SkillProposalRow key={sk.file_name} skill={sk} workspaceId={workspaceId} crewId={crewId} onDecided={dropSkill} />
+      ))}
+      {skills.state === "error" && <p role="alert" className="border-t border-border px-4 py-3 text-body text-chip-danger-fg">Skill proposals could not be loaded.</p>}
     </CrCard>
+  )
+}
+
+/** A skill the crew's memory proposes: a staged SKILL.md. Accept imports it, Reject discards it. */
+function SkillProposalRow({ skill, workspaceId, crewId, onDecided }: {
+  skill: ProposedSkill
+  workspaceId: string
+  crewId: string
+  onDecided: (fileName: string) => void
+}) {
+  const ws = encodeURIComponent(workspaceId)
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const label = skill.name || skill.file_name.replace(/^skill-/, "").replace(/\.md$/, "")
+
+  const decide = async (action: "approve" | "reject") => {
+    if (busy) return
+    setBusy(action)
+    setError(null)
+    try {
+      const res = await apiFetch(`/api/v1/skills/proposed/${action}?workspace_id=${ws}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ crew_id: crewId, file_name: skill.file_name }),
+      })
+      if (!res.ok) throw await toApiError(res, `The skill could not be ${action === "approve" ? "accepted" : "rejected"} (${res.status}).`)
+      onDecided(skill.file_name)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The decision failed.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div data-skill-proposal={skill.file_name}>
+      <CrLine
+        title={`Skill “${label}”`}
+        sub={[skill.description, "Proposed from memory · becomes a workspace skill once accepted"].filter(Boolean).join(" · ")}
+        right={
+          <>
+            <Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => void decide("reject")}>{busy === "reject" ? "Rejecting…" : "Reject"}</Button>
+            <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void decide("approve")}>{busy === "approve" ? "Accepting…" : "Accept"}</Button>
+          </>
+        }
+      />
+      {error && <p role="status" className="px-4 pb-2.5 text-label text-chip-danger-fg">{error}</p>}
+    </div>
   )
 }
 

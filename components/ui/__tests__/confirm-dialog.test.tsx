@@ -26,6 +26,26 @@ describe("ConfirmDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
+  it("names the object it is about to act on, above what is lost (v67 obj line)", () => {
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={() => {}}
+        title="Delete crew Research?"
+        summary={{ name: "Research", detail: "3 agents · 2 routines · container running" }}
+        consequences={[{ tone: "lost", text: "3 agents are deleted with the crew" }]}
+        confirmLabel="Delete crew"
+        destructive
+        onConfirm={() => {}}
+      />,
+    )
+    const summary = screen.getByTestId("confirm-summary")
+    expect(summary).toHaveTextContent("Research")
+    expect(summary).toHaveTextContent("3 agents · 2 routines · container running")
+    const list = screen.getByRole("list", { name: "What happens" })
+    expect(summary.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it("keeps the confirm button off until the name is typed back", () => {
     const onConfirm = vi.fn()
     render(

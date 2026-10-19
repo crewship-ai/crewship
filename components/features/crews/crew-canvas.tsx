@@ -18,6 +18,7 @@ import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { CanvasShell, CanvasTabPanel, CanvasTabs, useEntityFetch, usePatchEntity } from "./canvas-base"
 import { CrewPageBar } from "./crews-bar"
 import { useCrewYaml } from "./crew-yaml"
+import { crewDeleteSummary } from "./crew-delete-summary"
 import { useCrewsCreate } from "./crews-create"
 import { CREW_TABS, type AgentTab, type CrewTab } from "./crews-tabs"
 import { crewStatus } from "./crews-panel-model"
@@ -120,6 +121,20 @@ export function CrewCanvas({
   const spend = useCrewSpend(workspaceId, crewId, isAdmin)
 
   useRealtimeEvent("crew.updated", useCallback(() => setTick((n) => n + 1), []))
+  // The routines the crew published, counted for the Delete crew dialog only
+  // while it is open (null = not answered, so the line leaves it out).
+  const [routineCount, setRoutineCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!confirmDelete || !crewId) return
+    let cancelled = false
+    setRoutineCount(null)
+    apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines?author_crew_id=${encodeURIComponent(crewId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((rows: unknown) => { if (!cancelled && Array.isArray(rows)) setRoutineCount(rows.length) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [confirmDelete, crewId, workspaceId])
+
   // The crew options menu offers the same YAML as Settings > Command line.
   const menuYaml = useCrewYaml(workspaceId, { slug: crew?.slug ?? "", name: crew?.name ?? "" })
 
@@ -206,6 +221,21 @@ export function CrewCanvas({
       onCrewChanged()
     } catch (err) {
       toast.error(`Could not approve ${agent.name}`, { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBusyAgent(null)
+    }
+  }, [ws, roster, onCrewChanged])
+
+  const releaseHire = useCallback(async (agent: AgentSummary) => {
+    setBusyAgent(agent.id)
+    try {
+      const res = await apiFetch(`/api/v1/agents/${agent.id}/release?workspace_id=${ws}`, { method: "POST" })
+      if (!res.ok) throw await toApiError(res, `HTTP ${res.status}`)
+      toast.success(`${agent.name} released`, { description: "Its runs and notes stay. Rehire brings it back." })
+      void roster.refresh()
+      onCrewChanged()
+    } catch (err) {
+      toast.error(`Could not release ${agent.name}`, { description: err instanceof Error ? err.message : String(err) })
     } finally {
       setBusyAgent(null)
     }
@@ -329,6 +359,7 @@ export function CrewCanvas({
                 onApprove={(a) => void approveHire(a)}
                 onRehire={(a) => { setExtendingHire(false); setRehireAgent(a) }}
                 onExtend={canUpdate ? (a) => { setExtendingHire(true); setRehireAgent(a) } : undefined}
+                onRelease={canUpdate ? (a) => void releaseHire(a) : undefined}
                 costByAgent={spend?.byAgent ?? null}
                 busyAgentId={busyAgent}
               />
@@ -354,7 +385,7 @@ export function CrewCanvas({
           )}
           {tab === "memory" && (
             <>
-              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} canDecideProposals={isAdmin} />
+              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} canDecideProposals={isAdmin} canReviewSkills={canUpdate} />
               <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />
             </>
           )}
@@ -428,6 +459,14 @@ export function CrewCanvas({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={`Delete crew ${crew.name}?`}
+        summary={{
+          name: crew.name,
+          detail: crewDeleteSummary({
+            agents: agents.length,
+            routines: routineCount,
+            container: containers === null ? undefined : (runtime?.status ?? null),
+          }),
+        }}
         description="This deletes the crew and its agents. Background cleanup removes runtimes whose ownership is verified; older runtimes may need manual cleanup. Removing a runtime stops its processes and discards files stored only in its container writable layer."
         consequences={[
           { tone: "lost", text: `${agents.length === 1 ? "1 agent is" : `${agents.length} agents are`} deleted along with the crew` },

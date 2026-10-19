@@ -35,6 +35,8 @@ export interface ConfirmDialogProps {
   title: string
   /** One sentence: what this does. */
   description?: React.ReactNode
+  /** The thing being acted on, above what is lost: its name and one line about it. */
+  summary?: { name: React.ReactNode; detail?: React.ReactNode }
   /** What is lost, kept, or worth a warning — each its own line. */
   consequences?: Consequence[]
   /** Required unless `closeOnly`. */
@@ -72,6 +74,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
+  summary,
   consequences = [],
   confirmLabel,
   cancelLabel: cancelLabelProp,
@@ -104,6 +107,12 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
+        {summary && (
+          <div data-testid="confirm-summary" className="min-w-0 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <b className="block truncate text-body font-medium text-foreground">{summary.name}</b>
+            {summary.detail != null && summary.detail !== "" && <span className="block truncate text-label text-muted-foreground">{summary.detail}</span>}
+          </div>
+        )}
         <ConsequenceList items={consequences} />
         {children != null && <div className="flex flex-col gap-2" data-slot="confirm-field">{children}</div>}
         {typeToConfirm != null && !closeOnly && (
