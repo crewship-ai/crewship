@@ -35,6 +35,7 @@ export function MobileTabBar() {
   return (
     <nav
       aria-label="Primary"
+      data-slot="mobile-tab-bar"
       className={cn(
         "flex shrink-0 items-stretch border-t border-border bg-background",
         // The token already includes the home-indicator inset; padding by the

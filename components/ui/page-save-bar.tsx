@@ -384,7 +384,7 @@ export function usePageSave(entry: PageSaveEntry): boolean {
 /**
  * The floating bar. Place it once inside the page's content pane (a
  * `relative` box around the scroller); it docks to the phone tab bar below
- * `sm`. Leave ~6rem of bottom padding in the scroller so it never covers the
+ * `md` (768 px) and rides above the on-screen keyboard. Leave ~6rem of bottom padding in the scroller so it never covers the
  * last card.
  */
 export function PageSaveBar({
@@ -408,7 +408,10 @@ export function PageSaveBar({
       className={cn(
         "z-40 flex items-center gap-3 border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] text-xs text-[var(--save-bar-fg)]",
         "absolute bottom-6 left-1/2 -translate-x-1/2 rounded-xl py-1.5 pl-4 pr-1.5 whitespace-nowrap",
-        "max-sm:fixed max-sm:inset-x-0 max-sm:bottom-[var(--mobile-tab-bar-h)] max-sm:translate-x-0 max-sm:rounded-none max-sm:border-x-0 max-sm:border-b-0 max-sm:px-3 max-sm:py-2",
+        // Docked on every phone width (< 768, the app's phone breakpoint; it was
+        // 640, which left 640–767 floating over the tab bar), above the tab
+        // bar and above the on-screen keyboard (components/layout/phone-keyboard).
+        "max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(var(--mobile-tab-bar-h)+var(--keyboard-inset,0px))] max-md:translate-x-0 max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:px-3 max-md:py-2",
         done ? "shadow-[0_16px_40px_rgba(0,0,0,.45)]" : "save-bar-glow",
         className,
       )}

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
+import { PhoneKeyboard } from "@/components/layout/phone-keyboard"
 import { useAuth, useSession } from "@/hooks/use-auth"
 import { AppFrame } from "@/components/layout/app-frame"
 import { AppBannerProvider } from "@/components/layout/app-banners"
@@ -167,6 +168,7 @@ export default function DashboardLayout({
                 scroll container above it needs no compensating padding and
                 nothing can end up hidden underneath it. */}
             {isMobile && <MobileTabBar />}
+            {isMobile && <PhoneKeyboard />}
           </SidebarInset>
         </SidebarProvider>
         <RealtimeToasts />

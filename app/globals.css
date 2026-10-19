@@ -52,6 +52,20 @@
 }
 :root { --mobile-tab-bar-h: 0px; }
 @media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(62px + env(safe-area-inset-bottom)); } }
+/* Phone pilot (MOBIL-DOPORUCENI 2a §5): while a text field has focus on a
+ * phone (data-typing, components/layout/phone-keyboard) the tab bar steps
+ * aside, so it never sits between the field and the keyboard; the save bars
+ * then ride on the keyboard (--keyboard-inset). Toasts sit above whatever
+ * is docked at the bottom: tab bar, keyboard, save bar (--toast-lift). */
+:root { --toast-lift: 0px; }
+@media (max-width: 767px) {
+  :root[data-typing] { --mobile-tab-bar-h: 0px; }
+  :root[data-typing] [data-slot="mobile-tab-bar"] { display: none; }
+  :root { --toast-lift: calc(var(--mobile-tab-bar-h) + var(--keyboard-inset, 0px)); }
+  :root:has([data-slot="page-save-bar"], [data-slot="save-footer"]) {
+    --toast-lift: calc(var(--mobile-tab-bar-h) + var(--keyboard-inset, 0px) + 64px);
+  }
+}
 
 /* Reduced motion, covered once rather than per component.
  *
