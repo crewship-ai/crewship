@@ -561,15 +561,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		return nil, err
 	}
 
+	var privateViewer *pageViewer
 	for _, rec := range records {
 		if rec.PrivateAudience {
-			role, err := h.liveContentHumanRole(ctx, wsID, viewer.UserID)
-			if err != nil {
-				return nil, err
+			if viewer != nil {
+				privateViewer, err = h.livePrivatePageReader(ctx, wsID, viewer.UserID)
+				if err != nil {
+					return nil, err
+				}
 			}
-			copyViewer := *viewer
-			copyViewer.Role = role
-			viewer = &copyViewer
 			break
 		}
 	}
@@ -607,8 +607,12 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 	out := &pageIndex{folders: folders, acl: acl, rows: make([]pageIndexRow, 0, len(records))}
 	for i := range records {
 		rec := records[i]
-		if rec.PrivateAudience && !privatePageViewer(&rec, viewer) {
-			continue
+		rowViewer := viewer
+		if rec.PrivateAudience {
+			rowViewer = privateViewer
+			if !privatePageViewer(&rec, rowViewer) {
+				continue
+			}
 		}
 		panels := panelsByPage[rec.ID]
 		// Rendered the way ownerRef renders it: the slug when the crew row is
@@ -620,8 +624,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 				ownerCrewSlug = rec.OwnerCrewID
 			}
 		}
-		reach := h.pageReach(&rec, ownerCrewSlug, panels, viewer,
-			folderReachSlug(&rec, folders, acl, viewer),
+		reach := h.pageReach(&rec, ownerCrewSlug, panels, rowViewer,
+			folderReachSlug(&rec, folders, acl, rowViewer),
 			anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)))
 		if len(reach) == 0 {
 			if !scope.keepUnreached {
@@ -631,12 +635,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		}
 		// Mirror the folder mutation's two independent authorities, using
 		// the viewer and ACL already loaded in bulk. No per-page query.
-		owner := rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID
+		owner := rec.OwnerUserID != "" && rec.OwnerUserID == rowViewer.UserID
 		if rec.OwnerUserID == "" && rec.OwnerCrewID != "" {
-			owner = viewer.Crews[rec.OwnerCrewID]
+			owner = rowViewer.Crews[rec.OwnerCrewID]
 		}
-		canMove := owner || canRole(viewer.Role, "manage")
-		canRemove := rec.FolderID != "" && (canMove || folderACLReach(acl[rec.FolderID], viewer).write)
+		canMove := owner || canRole(rowViewer.Role, "manage")
+		canRemove := rec.FolderID != "" && (canMove || folderACLReach(acl[rec.FolderID], rowViewer).write)
+		if rec.PrivateAudience && rowViewer.Role == "" {
+			canMove, canRemove = false, false
+		}
 		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach, canMove: canMove, canRemoveFromFolder: canRemove})
 	}
 	return out, nil
@@ -721,7 +728,7 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
-	rec, err := h.loadPage(r.Context(), wsID, slug)
+	rec, err := h.loadPageForRead(r.Context(), wsID, slug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
@@ -1329,6 +1336,16 @@ func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRec
 var immutablePageReferenceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRecord, error) {
+	return h.loadPageWithPrivateAudience(ctx, wsID, slug, false)
+}
+
+// Only an explicit content reader may use custody without trusted workspace
+// authority. Mutation/configuration consumers retain loadPage's strict gate.
+func (h *PageHandler) loadPageForRead(ctx context.Context, wsID, slug string) (*pageRecord, error) {
+	return h.loadPageWithPrivateAudience(ctx, wsID, slug, true)
+}
+
+func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slug string, custodyRead bool) (*pageRecord, error) {
 	// @ cannot be a Page slug. Explicit immutable references never fall back
 	// to an address another object could reuse after deletion.
 	column := "slug"
@@ -1362,11 +1379,18 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 		if user == nil {
 			return nil, sql.ErrNoRows
 		}
-		role, err := h.liveContentHumanRole(ctx, wsID, user.ID)
+		var viewer *pageViewer
+		if custodyRead {
+			viewer, err = h.livePrivatePageReader(ctx, wsID, user.ID)
+		} else {
+			var role string
+			role, err = h.liveContentHumanRole(ctx, wsID, user.ID)
+			viewer = &pageViewer{UserID: user.ID, Role: role}
+		}
 		if err != nil {
 			return nil, err
 		}
-		if !privatePageViewer(&p, &pageViewer{UserID: user.ID, Role: role}) {
+		if !privatePageViewer(&p, viewer) {
 			return nil, sql.ErrNoRows
 		}
 	}
