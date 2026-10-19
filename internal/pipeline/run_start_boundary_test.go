@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -75,7 +76,8 @@ func TestRunStartBoundaryRejectsPersistenceBeforeEffects(t *testing.T) {
 func TestRunStartBoundaryBootInterruptsUncertainSetup(t *testing.T) {
 	recorder := newEffectRecorder()
 	server := recorder.server(t)
-	rig := newEffectRig(t, "uncertain-setup", effectDSL(server.URL, 0))
+	definition := fmt.Sprintf(`{"dsl_version":"1.0","name":"uncertain-setup","hooks":{"before_all":{"id":"before","type":"http","http":{"method":"POST","url":%q}}},"steps":[{"id":"apply","type":"http","http":{"method":"POST","url":%q}}]}`, server.URL+"/prepare", server.URL+"/apply")
+	rig := newEffectRig(t, "uncertain-setup", definition)
 	record := &RunRecord{ID: "setup-crash", WorkspaceID: "ws_test", PipelineID: rig.pipeline.ID, PipelineSlug: rig.pipeline.Slug, Status: RunStatusRunning, Mode: ModeRun, StartedAt: time.Now().Add(-time.Hour), InputsJSON: "{}"}
 	if err := rig.runStore.Insert(t.Context(), record); err != nil {
 		t.Fatal(err)
@@ -96,5 +98,50 @@ func TestRunStartBoundaryBootInterruptsUncertainSetup(t *testing.T) {
 	}
 	if recorder.count("/prepare") != 0 || recorder.count("/apply") != 0 {
 		t.Fatal("uncertain setup continued body")
+	}
+}
+
+func TestRunStartBoundaryBodyResumeSkipsSetup(t *testing.T) {
+	recorder := newEffectRecorder()
+	server := recorder.server(t)
+	definition := fmt.Sprintf(`{"dsl_version":"1.0","name":"body-resume","hooks":{"before_all":{"id":"before","type":"http","http":{"method":"POST","url":%q}}},"steps":[{"id":"apply","type":"http","http":{"method":"POST","url":%q}}]}`, server.URL+"/prepare", server.URL+"/apply")
+	rig := newEffectRig(t, "body-resume", definition)
+	record := &RunRecord{ID: "body-crash", WorkspaceID: "ws_test", PipelineID: rig.pipeline.ID, PipelineSlug: rig.pipeline.Slug, Status: RunStatusRunning, Mode: ModeRun, StartedAt: time.Now().Add(-time.Hour), DefinitionHash: rig.pipeline.DefinitionHash}
+	if err := rig.runStore.insertBeforeHooks(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.runStore.enterBody(t.Context(), record.ID); err != nil {
+		t.Fatal(err)
+	}
+	plan, reason := rig.exec.buildResumePlan(t.Context(), record)
+	if plan == nil {
+		t.Fatalf("body must remain resumable: %s", reason)
+	}
+	rig.exec.runResumedRun(t.Context(), plan, slog.Default())
+	actual, err := rig.runStore.Get(t.Context(), record.ID)
+	if err != nil || actual.Status != RunStatusCompleted {
+		t.Fatalf("resume: %+v %v", actual, err)
+	}
+	if recorder.count("/prepare") != 0 || recorder.count("/apply") != 1 {
+		t.Fatal("resume must skip setup and execute body")
+	}
+}
+
+func TestRunStartBoundaryHookFailureIsDurable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
+	defer srv.Close()
+	definition := fmt.Sprintf(`{"dsl_version":"1.0","name":"setup-fails","hooks":{"before_all":{"id":"before","type":"http","http":{"method":"POST","url":%q}}},"steps":[{"id":"done","type":"transform","transform":{"input":"ok","expression":"."}}]}`, srv.URL)
+	rig := newEffectRig(t, "setup-fails", definition)
+	result, err := rig.exec.Run(t.Context(), RunInput{PipelineID: rig.pipeline.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil || result == nil {
+		t.Fatalf("run: %+v %v", result, err)
+	}
+	actual, err := rig.runStore.Get(t.Context(), result.RunID)
+	if err != nil || actual.Status != RunStatusFailed {
+		t.Fatalf("setup failure must be visible: %+v %v", actual, err)
+	}
+	phase, err := rig.runStore.startPhase(t.Context(), result.RunID)
+	if err != nil || phase != startPhasePreHooks {
+		t.Fatalf("failed setup phase=%q err=%v", phase, err)
 	}
 }

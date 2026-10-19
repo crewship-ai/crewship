@@ -983,6 +983,13 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		if rec.CurrentStepID != in.resumeCurrentStepID {
 			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, errResumePlanStale)
 		}
+		phase, phaseErr := e.runStore.startPhase(ctx, preallocRunID)
+		if phaseErr != nil {
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, phaseErr)
+		}
+		if phase == startPhasePreHooks {
+			return e.resumeAdmissionFailed(preallocRunID, in.PipelineID, fmt.Errorf("setup interrupted before body; external hook effects may have occurred"))
+		}
 		// Admission may have waited while another lifetime committed outputs.
 		// Restore again under the registry slot, never execute from a stale map.
 		outputs, err := e.runStore.GetStepOutputs(ctx, preallocRunID)
@@ -1004,7 +1011,21 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.pipeline != nil {
 		hookSlug = in.pipeline.Slug
 	}
+	startedAt := time.Now()
+	if in.Mode != ModeDryRun && !in.resume && e.runStore != nil {
+		in.startPrepared = true
+		if err := e.persistRunStart(ctx, in, preallocRunID, in.PipelineID, hookSlug, mergeInputs(in.Inputs, in.dsl), startedAt); err != nil {
+			return nil, err
+		}
+	}
+	bodyEntered := false
 	res, err := e.runHooksAround(ctx, in, preallocRunID, hookSlug, func() (*RunResult, error) {
+		if in.startPrepared {
+			if err := e.runStore.enterBody(ctx, preallocRunID); err != nil {
+				return &RunResult{RunID: preallocRunID, PipelineID: in.PipelineID, Status: "FAILED", ErrorMessage: err.Error()}, err
+			}
+		}
+		bodyEntered = true
 		return e.runDSL(ctx, in, 0)
 	})
 	// Translate context-cancellation into a CANCELLED status when
@@ -1018,6 +1039,9 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		if res.ErrorMessage == "" {
 			res.ErrorMessage = "run cancelled"
 		}
+	}
+	if in.startPrepared && !bodyEntered {
+		e.persistRunTerminal(ctx, preallocRunID, in, in.PipelineID, res, startedAt)
 	}
 	return res, err
 }
@@ -1218,6 +1242,8 @@ type RunInput struct {
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
 	// (waitpoint approved in-process). Set only by runResumedRun.
 	resumeReason string
+	// startPrepared means Run committed the pre-hooks row before entering runDSL.
+	startPrepared bool
 	// resumeAdmitted releases the sweeper's admission permit. The full Run
 	// lifetime remains tracked by its caller until Run returns.
 	resumeAdmitted func()
@@ -1478,16 +1504,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// resumed marker instead of a second run.started.
 			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps), in.resumeReason)
 		} else {
-			// Persist the run row alongside the journal event when
-			// the RunStore is wired. Top-level only — nested
-			// call_pipeline runs reuse the parent's row id rather
-			// than minting their own (the call_pipeline trace lives
-			// in journal_entries; tying nested runs into pipeline_runs
-			// would conflate "this run completed" with "this nested
-			// step completed"). Failure is non-fatal: best-effort
-			// projection alongside the canonical journal.
-			if startErr := e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt); startErr != nil {
-				return nil, startErr
+			// Run normally persists before setup; RunDefinition retains its direct path.
+			if !in.startPrepared {
+				if startErr := e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt); startErr != nil {
+					return nil, startErr
+				}
 			}
 			// Live consumers refetch immediately; publish only after the row is readable.
 			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
@@ -2612,12 +2633,9 @@ func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth in
 	}
 }
 
-// persistRunStart inserts a fresh pipeline_runs row at run boundary
-// when the RunStore is wired. Best-effort: failures log a warning
-// and the run continues — journal_entries is canonical for audit,
-// pipeline_runs is the query-optimized projection. Used only at
-// depth==0 (top-level run) and skipped for ModeDryRun (no run row
-// for previews).
+// persistRunStart records a durable start before any setup or body effects.
+// A wired RunStore must accept the row or execution fails closed. Used only
+// at depth==0 (top-level run) and skipped for ModeDryRun (no preview row).
 //
 // Skips entirely when pipelineID is empty — that's the unsaved-draft
 // path used by RunDefinition (dry-run validation of a draft DSL).
@@ -2682,11 +2700,13 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 	// buildResumePlan reads this back so a parked pinned run resumes
 	// against the same immutable definition.
 	rec.PipelineVersion = in.PinnedVersion
-	if err := e.runStore.Insert(ctx, rec); err != nil {
+	insert := e.runStore.Insert
+	if in.startPrepared {
+		insert = e.runStore.insertBeforeHooks
+	}
+	if err := insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
-		if e.executionStore != nil {
-			return err
-		}
+		return err
 	} else {
 		if e.executionStore != nil && in.dsl != nil {
 			raw, marshalErr := json.Marshal(in.dsl)
