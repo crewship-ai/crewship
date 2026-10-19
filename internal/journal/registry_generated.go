@@ -60,6 +60,7 @@ var AllEntryTypes = []EntryType{
 	EntryCredentialRevealed,
 	EntryCredentialSensitivityLowered,
 	EntryCrewAction,
+	EntryCrewMemberChanged,
 	EntryEscalationSourceClassified,
 	EntryEvalMetric,
 	EntryEvalRegression,

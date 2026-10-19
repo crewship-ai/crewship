@@ -160,6 +160,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "invitation.accepted",
     "member.access_changed",
     "member.capabilities_changed",
+    "crew.member_changed",
     "member.role_changed",
     "member.removed",
   // Memory (extended)
