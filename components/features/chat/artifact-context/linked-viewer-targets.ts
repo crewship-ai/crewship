@@ -1,7 +1,8 @@
 /** A conversation-linked item the side viewer can show. A reference, never a read grant. */
 export type LinkedViewerTarget =
   | { workspaceId: string; pageId: string; mode: "latest" }
-  | { workspaceId: string; pageId: string; mode: "revision"; revision: number }
+  /** A checkpoint id is not an arbitrary revision: an exact read needs the server-issued checkpoint that holds it. */
+  | { workspaceId: string; pageId: string; mode: "revision"; revision: number; checkpointId: string }
 
 export interface ConversationLink {
   target: LinkedViewerTarget
@@ -12,11 +13,11 @@ export interface ConversationLink {
 
 /** JSON tuple: ids containing separators cannot collide. */
 export const targetKey = (target: LinkedViewerTarget) =>
-  JSON.stringify([target.workspaceId, target.pageId, target.mode === "revision" ? target.revision : "latest"])
+  JSON.stringify([target.workspaceId, target.pageId, target.mode === "revision" ? [target.revision, target.checkpointId] : "latest"])
 
 export function validLinkedTarget(target: LinkedViewerTarget): boolean {
   if (!target.workspaceId || !target.pageId) return false
-  return target.mode === "latest" || (target.mode === "revision" && Number.isSafeInteger(target.revision) && target.revision >= 0)
+  return target.mode === "latest" || (target.mode === "revision" && Number.isSafeInteger(target.revision) && target.revision >= 0 && Boolean(target.checkpointId))
 }
 
 /** The header may switch only between accessible, valid links of this conversation, each once. */
