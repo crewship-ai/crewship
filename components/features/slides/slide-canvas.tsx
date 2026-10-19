@@ -39,7 +39,8 @@ export interface SlideCanvasProps {
 }
 
 type Drag = { kind: "move" | "resize"; id: string; startX: number; startY: number; dx: number; dy: number }
-const handle = 14
+// Handle edge in screen pixels (44 on coarse pointers); converted to deck units per render.
+const coarse = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)").matches)
 
 /** One native typed frame. Text is React text; source cannot supply DOM or CSS. */
 export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, onClearSelection, onMoveElements, onResizeElement, onOverflowChange }: SlideCanvasProps) {
@@ -88,6 +89,7 @@ export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, 
     if (drag.kind === "move") return selectedIds.includes(element.id) ? { ...element, x: element.x + drag.dx, y: element.y + drag.dy } : element
     return element.id === drag.id ? { ...element, width: Math.max(1, element.width + drag.dx), height: Math.max(1, element.height + drag.dy) } : element
   }
+  const handle = (coarse() ? 44 : 24) * scale()
   const only = selected.length === 1 ? shown(selected[0]) : undefined
   return <svg ref={root} role={editable ? "group" : "img"} aria-label={`Slide ${deck.slide_order.indexOf(slideId) + 1}`} viewBox={`0 0 ${deck.width} ${deck.height}`} width="100%" style={{ display: "block", aspectRatio: `${deck.width} / ${deck.height}`, overflow: "hidden", background: deck.theme.background, touchAction: editable ? "none" : undefined }}
     onPointerDown={editable ? event => { if (event.target === event.currentTarget) onClearSelection?.() } : undefined} onPointerMove={drag ? track : undefined} onPointerUp={drag ? finish : undefined} onPointerCancel={drag ? () => setDrag(undefined) : undefined}>

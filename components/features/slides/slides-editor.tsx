@@ -36,7 +36,11 @@ const HISTORY_LIMIT = 100
 
 function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDisabled, persistenceStatus }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const phone = useIsMobile()
-  const readOnly = parentReadOnly || phone
+  // Read-only until mounted so a phone never gets one editable frame before the width is known.
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => setMounted(true), [])
+  const section = React.useRef<HTMLElement>(null)
+  const readOnly = parentReadOnly || phone || !mounted
   const [slideId, setSlideId] = React.useState(deck.slide_order[0])
   const [selection, setSelection] = React.useState<string[]>([])
   const [present, setPresent] = React.useState(false)
@@ -84,24 +88,26 @@ function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDi
   }, `${elementId}:${field}`)
   const pick = (id: string, additive: boolean, keepGroup = false) => setSelection(value => additive ? (value.includes(id) ? value.filter(item => item !== id) : [...value, id]) : keepGroup && value.includes(id) ? value : [id])
   const nudge = (dx: number, dy: number) => { if (ids.length) changed(nudgeElements(deck, slideId, ids, dx, dy)) }
-  const remove = () => { if (ids.length && changed(removeElements(deck, slideId, ids))) setSelection([]) }
+  const remove = () => { if (ids.length && changed(removeElements(deck, slideId, ids))) { setSelection([]); section.current?.focus() } }
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (typing(event.target) || (event.target as HTMLElement).closest("[role=dialog]")) return
-    const mod = event.ctrlKey || event.metaKey, key = event.key.toLowerCase()
-    if (mod && (key === "z" || key === "y")) { event.preventDefault(); travel(key === "y" || event.shiftKey ? "redo" : "undo"); return }
-    if (readOnly) return
+    const target = event.target as HTMLElement
+    if (typing(target) || target.closest("[role=dialog]")) return
+    const mod = event.ctrlKey || event.metaKey
+    if (mod && (event.code === "KeyZ" || event.code === "KeyY")) { event.preventDefault(); travel(event.code === "KeyY" || event.shiftKey ? "redo" : "undo"); if (target.closest("svg")) section.current?.focus(); return }
+    // Element shortcuts belong to the canvas, not to toolbar or list buttons.
+    if (readOnly || target.closest("button, a")) return
     const step = event.shiftKey ? 10 : 1, arrows: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }
     if (event.key in arrows && ids.length) {
       event.preventDefault()
       const [dx, dy] = arrows[event.key]
-      if (event.altKey && element) changed(resizeElement(deck, slideId, element.id, { x: element.x, y: element.y, width: element.width + dx, height: element.height + dy }))
+      if (event.altKey) { if (element) changed(resizeElement(deck, slideId, element.id, { x: element.x, y: element.y, width: element.width + dx, height: element.height + dy })) }
       else nudge(dx, dy)
     } else if ((event.key === "Delete" || event.key === "Backspace") && ids.length) { event.preventDefault(); remove() }
     else if (event.key === "Escape" && ids.length) setSelection([])
   }
   const resize = (id: string, rect: Rect) => { changed(resizeElement(deck, slideId, id, rect)) }
   const position = deck.slide_order.indexOf(slideId)
-  return <section aria-label="Slides editor" className="space-y-3" onKeyDown={onKeyDown}>
+  return <section ref={section} tabIndex={-1} aria-label="Slides editor" className="space-y-3 outline-none" onKeyDown={onKeyDown}>
     <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} Images and comments are not available.{phone && " Editing is available on a larger screen; this is a read-only preview."}</p>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-2" aria-label="Slide actions">

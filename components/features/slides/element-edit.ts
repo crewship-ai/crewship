@@ -29,14 +29,16 @@ export function nudgeElements(deck: SlideDeck, slideId: string, ids: readonly st
   })
 }
 
+/** Resizes in place: the origin is clamped into the frame and the size stops at the edge. Non-finite input is ignored. */
 export function resizeElement(deck: SlideDeck, slideId: string, id: string, rect: Rect): SlideDeck {
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return deck
   return withElements(deck, slideId, elements => {
     const element = elements.find(value => value.id === id)
     if (!element) return
-    element.width = clamp(Math.round(rect.width), 1, deck.width)
-    element.height = clamp(Math.round(rect.height), 1, deck.height)
-    element.x = clamp(Math.round(rect.x), 0, deck.width - element.width)
-    element.y = clamp(Math.round(rect.y), 0, deck.height - element.height)
+    element.x = clamp(Math.round(rect.x), 0, deck.width - 1)
+    element.y = clamp(Math.round(rect.y), 0, deck.height - 1)
+    element.width = clamp(Math.round(rect.width), 1, deck.width - element.x)
+    element.height = clamp(Math.round(rect.height), 1, deck.height - element.y)
   })
 }
 
