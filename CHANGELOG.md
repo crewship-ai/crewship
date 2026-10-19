@@ -134,6 +134,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
+- Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
 
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 

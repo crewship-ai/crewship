@@ -335,6 +335,11 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Query().Has("projection") {
+		h.chatSourceMessages(w, r)
+		return
+	}
+
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
