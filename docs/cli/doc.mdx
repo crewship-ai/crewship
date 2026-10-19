@@ -33,8 +33,11 @@ Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
 {"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team and review feedback."}]}
 ```
 
-The result identifies the saved document and its link. Opening its chat card
-opens that saved identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
+The result identifies the saved document and its link. An ordinary card click
+opens its current saved content beside the trusted conversation, after checking
+your current read access. Closing the preview preserves your unsent chat message;
+on a phone, use Back to chat. Modified clicks and native links open that saved
+identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
 If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as

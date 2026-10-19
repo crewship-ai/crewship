@@ -66,6 +66,9 @@ import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
 import { RunPreflight } from "./run-preflight"
 import { DocumentResultCards } from "./document-result-cards"
+import { DocumentViewer, type ViewerTarget } from "./artifact-viewer/document-viewer"
+import { DocumentReadonly } from "../pages/document-readonly/document-readonly"
+import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
@@ -93,7 +96,7 @@ import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { visibleAgentText } from "@/lib/chat-text"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
-import { apiFetch } from "@/lib/api-fetch"
+import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
 import { emitChatEvent } from "@/lib/telemetry"
 
@@ -1000,6 +1003,31 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const accessMode = useAccessMode()
   const isMobile = useIsMobile()
   const verifiedChatReadScope = accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
+  // Saved Documents have human Page identity, never an agent file/store target.
+  const [documentPreview, setDocumentPreview] = useState<{ target: ViewerTarget; scope: string; activation: number } | null>(null)
+  const [documentExpanded, setDocumentExpanded] = useState(false)
+  const documentActivation = useRef(0)
+  const documentOpener = useRef<HTMLAnchorElement | null>(null)
+  const documentPreviewEnabled = verifiedChatReadScope && documentsAvailability.data === true
+  const documentTarget = documentPreviewEnabled && documentPreview?.scope === artifactScope ? documentPreview.target : null
+  useEffect(() => { setDocumentPreview(null) }, [artifactScope, mobilePanel])
+  const documentRead = useDocumentViewerRead({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", currentUserId,
+    activationKey: documentPreview ? String(documentPreview.activation) : "", target: documentTarget, enabled: documentPreviewEnabled })
+  const openSavedDocument = useCallback((target: ViewerTarget, opener: HTMLAnchorElement) => {
+    if (!documentPreviewEnabled || target.workspaceId !== workspaceId) return
+    documentOpener.current = opener
+    setDocumentExpanded(false)
+    setDocumentPreview({ target, scope: artifactScope, activation: ++documentActivation.current })
+  }, [documentPreviewEnabled, workspaceId, artifactScope])
+  useEffect(() => {
+    const clear = () => { ++documentActivation.current; setDocumentPreview(null) }
+    window.addEventListener(AUTH_EVENT, clear)
+    return () => window.removeEventListener(AUTH_EVENT, clear)
+  }, [])
+  const savedDocumentPanel = <DocumentViewer target={documentTarget} scopeKey={documentRead.scopeKey} read={documentRead.read}
+    layout={mobilePanel === "chat" ? "mobile" : "side"} expanded={documentExpanded} onExpandedChange={setDocumentExpanded}
+    onClose={() => setDocumentPreview(null)} openerRef={documentOpener}
+    renderBody={read => <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel="Saved document body" />} />
   const entities = useChatEntityRefs({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
     enabled: verifiedChatReadScope && canChat })
   const proposals = useChatE2Cards({ kind: "proposal", workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
@@ -1192,7 +1220,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // One conversation surface, rendered by both the mobile-chat and desktop
   // branches — the two copies had already drifted once; don't re-fork them.
   const documentResultCards = currentUserId && workspaceId && sessionId && documentsAvailability.data === true
-    ? <DocumentResultCards key={chatReadScope} workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} isStreaming={isStreaming} documentsEnabled />
+    ? <DocumentResultCards key={chatReadScope} workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} isStreaming={isStreaming} documentsEnabled onOpenDocument={documentPreviewEnabled ? openSavedDocument : undefined} />
     : null
   const conversationEl = useVirtualChat ? (
     <VirtualConversation
@@ -1310,6 +1338,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   if (mobilePanel === "chat") {
     return (
       <div className="relative flex flex-col h-full">
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: documentTarget ? "none" : undefined }} inert={Boolean(documentTarget)}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
         <ReconnectBanner status={connectionStatus} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
@@ -1402,6 +1431,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
+        </div>
+        <div className="absolute inset-0 z-20 min-h-0 bg-background" hidden={!documentTarget}>{savedDocumentPanel}</div>
       </div>
     )
   }
@@ -1410,7 +1441,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const pushOpen = drawerOpen && drawerMode === "push"
   return (
     <div className="relative flex h-full">
-      <div className={cn("flex flex-col overflow-hidden min-w-0", executionProfile === "trusted" && artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
+      <div className={cn("flex flex-col overflow-hidden min-w-0", (documentTarget ? documentExpanded : executionProfile === "trusted" && artifactFocus && artifactOpen) ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
@@ -1514,6 +1545,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
+      <aside aria-label={documentTarget ? "Saved document panel" : undefined} hidden={!documentTarget}
+        className={cn("min-h-0 min-w-0 shrink-0", documentExpanded ? "w-full" : "w-[45%] min-w-[20rem] max-w-full")}>{savedDocumentPanel}</aside>
+      <div style={{ display: documentTarget ? "none" : "contents" }} inert={Boolean(documentTarget)}>
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         {(drawerActiveTab === "work" ? decisionPanel ?? proposalPanel ?? issuePanel : null) ?? <RightPanel
@@ -1527,9 +1561,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         />
         }
       </RightDrawer>}
-      {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
+      </div>
+      {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}

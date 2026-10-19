@@ -21,7 +21,7 @@ vi.mock("../artifact/artifact-pane", () => ({ ArtifactPane: ({ onAskSelection }:
   return open ? <div data-testid="artifact-pane"><button onClick={() => onAskSelection?.("Selected source A2:B2")}>Ask about test selection</button></div> : null
 } }))
 vi.mock("../composer/slash-palette", () => ({ SlashPalette: () => null }))
-vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ contextRequest }: { contextRequest?: { text: string } }) => <output data-testid="composer-context">{contextRequest?.text}</output> }))
+vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ contextRequest }: { contextRequest?: { text: string } }) => <><output data-testid="composer-context">{contextRequest?.text}</output><textarea aria-label="Draft message" defaultValue="" /></> }))
 vi.mock("../right-panel", () => ({ RightPanel: ({ initialTab }: { initialTab: string }) => <div data-testid="context-tab">{initialTab}</div> }))
 vi.mock("../turn-renderer", () => ({ TurnRenderer: ({ onFileClick }: { onFileClick: (path: string) => void }) => <>
   <button onClick={() => onFileClick("reports/result.pdf")}>Preview generated PDF</button>
@@ -138,5 +138,54 @@ describe("chat artifact entry points", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Preview agent configuration" }))
     expect(useArtifactStore.getState().open).toBe(false)
     expect(toastError).toHaveBeenCalledWith("This file is not available in Artifacts")
+  })
+})
+
+
+describe("saved Document conversation preview", () => {
+  function savedDocumentResponses() {
+    chatStub.turns = [{ id: "saved-turn", role: "assistant", parts: [], timestamp: new Date() }]
+    const prior = global.fetch
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.includes("/documents/status")) return Promise.resolve(new Response(JSON.stringify({ enabled: true })))
+      if (path.includes("/document-results")) return Promise.resolve(new Response(JSON.stringify({ results: [{ page_id: "saved-document", type: "document", page_slug: "old-address", title: "Creation title", revision: 0, created_at: "2026-10-17T00:00:00Z", agent_id: "agent-1", agent_name: "Riley", run_id: "ended-run", on_behalf_of_user_id: "user-1" }] })))
+      if (path.startsWith("/api/v1/pages/%40saved-document/document?")) return Promise.resolve(new Response(JSON.stringify({ page_id: "saved-document", schema: 2, rev: 7, content: { type: "doc", content: [{ type: "paragraph", attrs: { id: "saved-body" }, content: [{ type: "text", text: "Saved current body" }] }] } })))
+      if (path.startsWith("/api/v1/pages/%40saved-document?")) return Promise.resolve(new Response(JSON.stringify({ id: "saved-document", name: "Current saved title", has_document: true })))
+      return prior(input, init)
+    }) as typeof fetch
+  }
+  it.each([undefined, "chat"] as const)("opens the saved human document and preserves the composer when closed (mobile=%s)", async mobilePanel => {
+    savedDocumentResponses()
+    render(<ChatPanel {...props} mobilePanel={mobilePanel} />)
+    const composer = await screen.findByRole("textbox", { name: "Draft message" })
+    fireEvent.change(composer, { target: { value: "Keep this unsent message" } })
+    fireEvent.click(await screen.findByRole("link", { name: "Open document Creation title" }))
+    expect(await screen.findByRole("region", { name: "Document preview" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Current saved title" })).toBeInTheDocument()
+    expect(screen.getByText("Saved current body")).toBeInTheDocument()
+    expect(screen.getByText("Current saved document")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: mobilePanel ? "Back to chat" : "Close document preview" }))
+    expect(screen.queryByRole("region", { name: "Document preview" })).not.toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Draft message" })).toBe(composer)
+    expect(composer).toHaveValue("Keep this unsent message")
+  })
+  it("hides the old document immediately when the conversation changes", async () => {
+    savedDocumentResponses()
+    const view = render(<ChatPanel {...props} />)
+    fireEvent.click(await screen.findByRole("link", { name: "Open document Creation title" }))
+    await screen.findByText("Saved current body")
+    view.rerender(<ChatPanel {...props} sessionId="another-conversation" />)
+    expect(screen.queryByText("Saved current body")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Current saved title" })).not.toBeInTheDocument()
+  })
+  it("clears an open preview when the current session expires", async () => {
+    savedDocumentResponses()
+    render(<ChatPanel {...props} />)
+    fireEvent.click(await screen.findByRole("link", { name: "Open document Creation title" }))
+    await screen.findByText("Saved current body")
+    act(() => window.dispatchEvent(new CustomEvent("auth:session-expired")))
+    expect(screen.queryByText("Saved current body")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Current saved title" })).not.toBeInTheDocument()
   })
 })
