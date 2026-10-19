@@ -91,6 +91,9 @@ func TestInboxHandler_Counts_SpacesAndKinds(t *testing.T) {
 			"failed_run":                       {Updates: 1, History: 1},
 			"message":                          {Updates: 1},
 		},
+		// entryAttention per active row; no row has a deadline, so all 18 are "none".
+		ByAttention: map[string]int{"decision": 3, "input": 1, "review": 4, "repair": 4},
+		ByDeadline:  map[string]int{"hour": 0, "today": 0, "soon": 0, "none": 18},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("counts = %+v\nwant   %+v", got, want)

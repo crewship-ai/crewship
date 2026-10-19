@@ -522,9 +522,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// one query instead of fanning out to four.
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
 	ih.SetJournal(r.Journal())
-	// openapi: query limit:integer offset:integer
+	// openapi: query limit:integer offset:integer cursor:string q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	// openapi: query q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string kind:string
 	r.mux.Handle("GET /api/v1/inbox/counts", authed(wsCtx(http.HandlerFunc(ih.Counts))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.authedMut("PATCH", "/api/v1/inbox/{id}", roleSelf, ih.PatchState)

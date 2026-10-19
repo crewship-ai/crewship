@@ -47,6 +47,8 @@ Examples:
   crewship inbox list --format json | jq    # script-friendly output
   crewship inbox list --all                 # walk every page, not just the first
   crewship inbox list --offset 50           # skip the first 50 rows
+  crewship inbox list --cursor <cursor>     # resume after the cursor a page printed
+  crewship inbox list --state all --query deploy --space action   # search on the server
   crewship inbox read <id>                  # mark as read
   crewship inbox resolve <id> --action acknowledged   # messages / failed runs
   crewship inbox unread <id>                # flip back to unread
@@ -83,9 +85,14 @@ var inboxListCmd = &cobra.Command{
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		fetchAll, _ := cmd.Flags().GetBool("all")
+		cursor, _ := cmd.Flags().GetString("cursor")
+		if cursor != "" && cmd.Flags().Changed("offset") {
+			return errors.New("--cursor and --offset cannot be combined")
+		}
 
 		q := url.Values{}
 		q.Set("workspace_id", cli.ResolveWorkspace(flagWorkspace, cliCfg))
+		setInboxFilterParams(cmd, q)
 		if state != "" && state != "all" {
 			q.Set("state", state)
 		} else if state == "all" {
@@ -140,6 +147,8 @@ var inboxListCmd = &cobra.Command{
 			Count       int  `json:"count" yaml:"count"`
 			UnreadCount int  `json:"unread_count" yaml:"unread_count"`
 			HasMore     bool `json:"has_more" yaml:"has_more"`
+			// NextCursor resumes the walk (--cursor); the server sets it with has_more.
+			NextCursor string `json:"next_cursor,omitempty" yaml:"next_cursor,omitempty"`
 		}
 
 		// The API grew offset/has_more pagination for the web inbox, which
@@ -148,14 +157,16 @@ var inboxListCmd = &cobra.Command{
 		// about what "the whole feed" is and a scripted triage job silently
 		// worked on a prefix.
 		//
-		// Offset paging is not stable across a mutating feed: a row that
-		// leaves the filter between two requests shifts the window and is
-		// never returned. --all is exact only on a quiet workspace; the real
-		// fix is keyset pagination, server-side.
+		// The walk is keyset-paged: each request resumes from the previous
+		// page's next_cursor, so a row that is added or resolved mid-walk
+		// cannot shift the window. --offset still works for a single page.
 		acc := body.Rows[:0]
 		unread := 0
+		nextCursor := ""
 		for {
-			if offset > 0 {
+			if cursor != "" {
+				q.Set("cursor", cursor)
+			} else if offset > 0 {
 				q.Set("offset", fmt.Sprintf("%d", offset))
 			}
 			resp, err := client.Get("/api/v1/inbox?" + q.Encode())
@@ -171,10 +182,17 @@ var inboxListCmd = &cobra.Command{
 			}
 			acc = append(acc, body.Rows...)
 			unread = body.UnreadCount
+			nextCursor = body.NextCursor
 			if !fetchAll || !body.HasMore || len(body.Rows) == 0 {
 				break
 			}
-			offset += len(body.Rows)
+			if body.NextCursor == "" {
+				// A server without cursors: fall back to the offset walk.
+				offset += len(body.Rows)
+				cursor = ""
+				continue
+			}
+			cursor = body.NextCursor
 		}
 		body.Rows = acc
 		body.Count = len(acc)
@@ -186,6 +204,11 @@ var inboxListCmd = &cobra.Command{
 		// + journal's behavior so cross-command UX stays consistent.
 		if f.Format == "quiet" {
 			return nil
+		}
+		// A single page says where to resume; on stderr so --format json
+		// stays the rows alone.
+		if !fetchAll && nextCursor != "" {
+			defer fmt.Fprintf(os.Stderr, "more items: resume with --cursor %s\n", nextCursor)
 		}
 		return f.AutoHuman(body.Rows, func() {
 			// Table output — color the STATE column so an unread waitpoint
@@ -804,6 +827,36 @@ type inboxCountsResponse struct {
 	Unread int                         `json:"unread" yaml:"unread"`
 	Spaces inboxSpaceCounts            `json:"spaces" yaml:"spaces"`
 	ByKind map[string]inboxSpaceCounts `json:"by_kind" yaml:"by_kind"`
+	// Facet counts over the same rows: active items per attention class, and
+	// items per deadline bucket (soon overlaps the others).
+	ByAttention map[string]int `json:"by_attention" yaml:"by_attention"`
+	ByDeadline  map[string]int `json:"by_deadline" yaml:"by_deadline"`
+}
+
+// inboxFilterFlags are the server-side search and filter flags shared by
+// `inbox list` and `inbox counts`: one vocabulary, so a count and the rows it
+// labels are asked the same question.
+func addInboxFilterFlags(c *cobra.Command) {
+	c.Flags().StringP("query", "q", "", "Search title, body, sender, kind and the crew/agent names")
+	c.Flags().String("space", "", "Only one space: action|updates|history")
+	c.Flags().Bool("unread", false, "Only items unread for you")
+	c.Flags().String("attention", "", "Only active items of one attention class: decision|input|review|repair")
+	c.Flags().String("deadline", "", "Only items by deadline: hour|today|soon|none")
+	c.Flags().String("crew", "", "Only items about one crew (id)")
+	c.Flags().String("agent", "", "Only items about one agent (id, slug or name)")
+}
+
+// setInboxFilterParams copies the filter flags that were set into q.
+func setInboxFilterParams(cmd *cobra.Command, q url.Values) {
+	for flag, param := range map[string]string{"query": "q", "space": "space", "attention": "attention",
+		"deadline": "deadline", "crew": "crew", "agent": "agent"} {
+		if v, _ := cmd.Flags().GetString(flag); v != "" {
+			q.Set(param, v)
+		}
+	}
+	if v, _ := cmd.Flags().GetBool("unread"); v {
+		q.Set("unread", "true")
+	}
 }
 
 type inboxSpaceCounts struct {
@@ -828,8 +881,14 @@ GET /api/v1/inbox/counts — one request, same visibility as 'inbox list'.
 Counts are inbox items only; approvals-queue rows and issue tasks that the web
 page merges in are not included.
 
+The same filters as 'inbox list' (--query, --space, --unread, --attention,
+--deadline, --crew, --agent, --kind) narrow the counts to the rows that list
+would return. With no filter, by_attention counts active items per attention
+class and by_deadline per deadline bucket.
+
 Examples:
   crewship inbox counts
+  crewship inbox counts --attention decision
   crewship inbox counts --format json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -839,7 +898,12 @@ Examples:
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/inbox/counts")
+		q := url.Values{}
+		setInboxFilterParams(cmd, q)
+		if kind, _ := cmd.Flags().GetString("kind"); kind != "" {
+			q.Set("kind", kind)
+		}
+		resp, err := client.Get("/api/v1/inbox/counts?" + q.Encode())
 		if err != nil {
 			return err
 		}
@@ -864,6 +928,18 @@ Examples:
 				c := body.ByKind[k]
 				fmt.Printf("%-34s %9d %9d %9d\n", k, c.Action, c.Updates, c.History)
 			}
+			printFacet := func(title string, keys []string, m map[string]int) {
+				if len(m) == 0 {
+					return
+				}
+				fmt.Printf("\n%s:", title)
+				for _, k := range keys {
+					fmt.Printf("  %s %d", k, m[k])
+				}
+				fmt.Println()
+			}
+			printFacet("attention", []string{"decision", "input", "review", "repair"}, body.ByAttention)
+			printFacet("deadline", []string{"hour", "today", "soon", "none"}, body.ByDeadline)
 		})
 	},
 }
@@ -1036,6 +1112,10 @@ func init() {
 	inboxListCmd.Flags().Int("limit", 50, "Max rows to return (server caps at 500)")
 	inboxListCmd.Flags().Int("offset", 0, "Skip this many rows (server-side offset pagination)")
 	inboxListCmd.Flags().Bool("all", false, "Walk every page until the server reports has_more=false")
+	inboxListCmd.Flags().String("cursor", "", "Resume after this cursor (printed after a page that has more; replaces --offset)")
+	addInboxFilterFlags(inboxListCmd)
+	addInboxFilterFlags(inboxCountsCmd)
+	inboxCountsCmd.Flags().String("kind", "", "Only one kind")
 
 	inboxResolveCmd.Flags().String("action", "", "Action recorded with resolution: approved|denied|retried|cancelled|acknowledged|dismissed")
 

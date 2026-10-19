@@ -41,8 +41,18 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `--state <enum>` | `unread` | Filter by state. One of `unread`, `read`, `resolved`, `all`. |
 | `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`, `memory_consolidation`, `schedule_missed`, `schedule_circuit_breaker_tripped`, `webhook_fire_failed`, `automation_enqueue_failed`, `run_needs_human` (a run's [outcome](/api-reference/issues#outcome) resolved to `NEEDS_HUMAN`, work package B6). |
 | `--limit <n>` | `50` | Max rows. Server caps at 500. |
-| `--offset <n>` | `0` | Skip this many rows (server-side offset pagination). |
-| `--all` | `false` | Keep requesting pages until the server reports `has_more: false`. Exact only on a quiet workspace: a row that leaves the filter mid-walk shifts the window and is never returned. |
+| `--offset <n>` | `0` | Skip this many rows (server-side offset pagination; not stable on a changing feed, prefer `--cursor`). |
+| `--cursor <c>` | (unset) | Resume after a page. A page that has more prints `more items: resume with --cursor <c>` on stderr (so `--format json` stays the rows alone). Cannot be combined with `--offset`. |
+| `--all` | `false` | Keep requesting pages, following the server's `next_cursor`, until `has_more` is false. Keyset paging, so a row added or resolved mid-walk does not shift the window. |
+| `-q, --query <text>` | (unset) | Search title, body, sender, kind and the crew/agent names, on the server. |
+| `--space <enum>` | (unset) | `action`, `updates` or `history`. |
+| `--unread` | `false` | Only items unread for you. |
+| `--attention <enum>` | (unset) | Active items of one class: `decision`, `input`, `review`, `repair`. |
+| `--deadline <enum>` | (unset) | `hour`, `today`, `soon` or `none`. |
+| `--crew <id>` | (unset) | Items about one crew. |
+| `--agent <ref>` | (unset) | Items about one agent (id, slug or name). |
+
+`inbox counts` accepts the same filters (and `--kind`), so a count is the number of rows `inbox list` returns for them.
 
 ### `inbox resolve`
 
@@ -133,7 +143,7 @@ crewship inbox counts
 crewship inbox counts --format json
 ```
 
-`inbox counts` hits `GET /api/v1/inbox/counts`: items you can see, split into *to handle* (a real action behind it), *updates* and *history* (resolved), overall and per kind. It counts inbox items only; approvals-queue rows and issue tasks that the web page merges in are not included.
+`inbox counts` hits `GET /api/v1/inbox/counts`: items you can see, split into *to handle* (a real action behind it), *updates* and *history* (resolved), overall and per kind, plus `by_attention` and `by_deadline` facet counts. It counts inbox items only; approvals-queue rows and issue tasks that the web page merges in are not included.
 
 ### Mark an item
 
