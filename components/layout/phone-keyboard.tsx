@@ -11,6 +11,9 @@ import { useEffect } from "react"
  *    sits between the field and the keyboard.
  *  - `--keyboard-inset`: how much of the layout viewport the keyboard covers
  *    (visualViewport), so the save bars and the toasts sit on top of it.
+ *  - A press that takes focus from a field (Save in the save bar) keeps
+ *    `data-typing` until it ends: dropping it on pointerdown brought the tab
+ *    bar back and moved the button before the click landed.
  */
 export function PhoneKeyboard() {
   useEffect(() => {
@@ -28,14 +31,25 @@ export function PhoneKeyboard() {
       if (typing(document.activeElement)) root.dataset.typing = ""
       else delete root.dataset.typing
     }
+    let pressing = false
     const onFocusIn = (e: FocusEvent) => {
       if (typing(e.target)) root.dataset.typing = ""
-      else delete root.dataset.typing
+      else if (!pressing) delete root.dataset.typing
     }
     // Focus may move nowhere (a tap on the page): check once it settled.
-    const onFocusOut = () => { window.setTimeout(sync, 0) }
+    const onFocusOut = () => { if (!pressing) window.setTimeout(sync, 0) }
+    const onPressStart = () => { pressing = true }
+    // The click follows pointerup in the same task, so the timeout runs after it.
+    const onPressEnd = () => {
+      if (!pressing) return
+      pressing = false
+      window.setTimeout(sync, 0)
+    }
     document.addEventListener("focusin", onFocusIn)
     document.addEventListener("focusout", onFocusOut)
+    document.addEventListener("pointerdown", onPressStart, true)
+    document.addEventListener("pointerup", onPressEnd, true)
+    document.addEventListener("pointercancel", onPressEnd, true)
     sync()
 
     const vv = window.visualViewport
@@ -49,6 +63,9 @@ export function PhoneKeyboard() {
     return () => {
       document.removeEventListener("focusin", onFocusIn)
       document.removeEventListener("focusout", onFocusOut)
+      document.removeEventListener("pointerdown", onPressStart, true)
+      document.removeEventListener("pointerup", onPressEnd, true)
+      document.removeEventListener("pointercancel", onPressEnd, true)
       vv?.removeEventListener("resize", inset)
       vv?.removeEventListener("scroll", inset)
       delete root.dataset.typing
