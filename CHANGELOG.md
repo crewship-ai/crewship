@@ -15,9 +15,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
+### Upgrade and recovery notes
+
+- Before downgrading across the durable routine-start migration, stop incoming triggers and drain queued and in-flight starts. Otherwise use a forward fix; downgrading with outstanding work and upgrading again can repeat accepted work.
+- Resuming a routine body provides at-least-once execution: an interrupted step can repeat external effects. This is not an exactly-once guarantee. An uncertain interrupted setup hook remains visible as interrupted rather than being automatically repeated.
+- If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
+
 ### Fixed
 
 - Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
+- Dispatch due manual backups reliably across fractional-second timestamp boundaries, while keeping future busy retries queued until their exact deadline.
 
 - Wait for provider sign-in recovery to release its database connection before server shutdown finishes.
 
@@ -43,7 +50,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
-- Scheduled routines wait in the durable queue when capacity is full, preserving each occurrence without false failure alerts or circuit-breaker trips.
+- Scheduled routines retain at most one waiting occurrence per schedule when capacity is full. Later capacity-blocked occurrences are recorded as skipped/missed, without failure alerts or circuit-breaker trips.
 
 ### Added
 
