@@ -55,6 +55,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+- Prepare scoped native Slides initialization with atomic receipts and caller-owned transactions; API and editor activation follow separately.
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
