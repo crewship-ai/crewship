@@ -53,6 +53,7 @@ var responseShapeContracts = []struct {
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "SlidesReceipt", pointer: "/components/schemas/SlidesReceipt", value: slides.Receipt{}},
 	{name: "SlidesRead", pointer: "/components/schemas/SlidesRead", value: SlidesReadResponse{}},
 	{name: "SlidesDeck", pointer: "/components/schemas/SlidesRead/properties/deck", value: slides.Deck{}},
 	{name: "SlidesTheme", pointer: "/components/schemas/SlidesRead/properties/deck/properties/theme", value: slides.Theme{}},

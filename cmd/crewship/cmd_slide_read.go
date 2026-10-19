@@ -5,7 +5,7 @@ package main
 import "github.com/spf13/cobra"
 
 func newSlideReadCommand() *cobra.Command {
-	group := &cobra.Command{Use: "slide", Short: "Read saved native Slides"}
+	group := &cobra.Command{Use: "slide", Short: "Read or initialize saved native Slides"}
 	group.AddCommand(&cobra.Command{Use: "read <slug|@ID>", Short: "Read the current saved native deck", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := pageClient()
 		if err != nil {
@@ -17,6 +17,7 @@ func newSlideReadCommand() *cobra.Command {
 		}
 		return printPageArtifactResponse(cmd, response)
 	}})
+	group.AddCommand(newSlideInitializeCommand())
 	return group
 }
 func init() { rootCmd.AddCommand(newSlideReadCommand()) }

@@ -49,6 +49,7 @@ func (r *Router) registerSlidesReadRoutes(enabled bool) {
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// openapi: responses 200,401,403,404,409,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides", slidesReadHeaders(authed(wsCtx(http.HandlerFunc(h.read)))))
+	h.registerInitialize(r)
 }
 func slidesReadHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,12 @@ func slidesReadHeaders(next http.Handler) http.Handler {
 }
 
 func (h *slidesHumanRead) page(r *http.Request, reference string) (*pageRecord, error) {
+	return h.pageForScope(r, reference, "pages:read")
+}
+
+// A write-only token may initialize its custodian's Page without acquiring read
+// scope. All human, live membership and content-type checks remain shared.
+func (h *slidesHumanRead) pageForScope(r *http.Request, reference, scope string) (*pageRecord, error) {
 	user := UserFromContext(r.Context())
 	agent, _ := pageGrantCallerIsAgent(r)
 	if user == nil || agent || projectAgentFrom(r.Context()) != nil || r.Context().Value(artifactRunKey{}) != nil {
@@ -65,7 +72,7 @@ func (h *slidesHumanRead) page(r *http.Request, reference string) (*pageRecord, 
 	}
 	ctx := r.Context()
 	reader := h.pages.pageAuthReader(ctx)
-	if err := validateContentHumanCredential(r, reader, "pages:read"); err != nil {
+	if err := validateContentHumanCredential(r, reader, scope); err != nil {
 		return nil, errors.Join(errSlidesCredential, err)
 	}
 	workspace := WorkspaceIDFromContext(ctx)

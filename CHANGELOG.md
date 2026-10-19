@@ -27,6 +27,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Initialize a native presentation on an existing human-owned Page through the public API and CLI, with actor-bound retry receipts and current write permissions.
+
 - Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.

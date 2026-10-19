@@ -1,6 +1,6 @@
 ---
 title: "Slides Commands"
-description: "Read the current saved native presentation with current Page permissions."
+description: "Read or initialize native presentations with current Page permissions."
 icon: "presentation"
 stability: experimental
 tag: Experimental
@@ -26,3 +26,17 @@ This reader supports schema 1. Image-bearing schema 2 and unknown versions retur
 a conflict without their deck or hash. Confirmed data remains unchanged. The
 command reads saved state only; it creates no Page, presentation or editing
 permission. Output is JSON by default and honors the standard `--format` option.
+
+## `crewship slide initialize <slug|@ID> --file <path|->`
+
+Initialize schema-1 Slides on an existing empty Page owned by the current human.
+The JSON request requires `page_id`, `schema_version: 1`, `base_rev: 0`,
+`mutation_id` and a valid native `deck` whose `deck_id` matches that Page.
+Use `--file -` to read stdin. Preserve the request and mutation ID when retrying;
+the native receipt reports whether the original mutation was already committed.
+The command never creates a Page, changes request identity or reads/rebases content.
+
+Native Slides must be enabled. A scoped CLI token needs `pages:write`; separate
+read permission is not required to initialize the caller's own Page. Other
+custodians, agent/internal credentials, mixed-content Pages and schema2/images
+are refused. Workspace OWNER visibility alone does not permit initialization.

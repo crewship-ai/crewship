@@ -2448,3 +2448,18 @@ credential; 403 human-only or missing scope; 404 unavailable Page/Slides;
 409 unsupported schema; 500 required audit failure; 503 persistence unavailable.
 Installed route responses, including errors, use `Cache-Control: no-store`.
 CLI: `crewship slide read`.
+
+### Initialize native Slides
+
+With `CREWSHIP_SLIDES_ENABLED=true`, `POST /api/v1/pages/{slug}/slides/initialize`
+initializes a presentation on an existing empty Page belonging to the current
+human. Scoped CLI credentials need `pages:write`. The closed request contains
+`page_id`, `schema_version: 1`, `base_rev: 0`, `mutation_id` and a schema-1 `deck`.
+The saved Page and deck IDs must agree. Use `@PageID` for immutable addressing.
+
+The 200 response contains `mutation_id`, `revision`, `order_version`, `content_hash`
+and `duplicate`. Exact actor-bound retries return the original receipt; changed
+payloads, stale initialization and another actor's receipt conflict. There is no
+implicit Page creation, agent delegation, image support or automatic retry.
+Current credentials and custody are checked again inside the writer transaction;
+a refusal rolls back the new native rows and receipt. Native history quota returns 429.

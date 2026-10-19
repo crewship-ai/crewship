@@ -29,8 +29,13 @@ func slidesSchemaComponents() map[string]any {
 	version := func() map[string]any { return map[string]any{"type": "integer", "enum": []int{1}} }
 	deck := obj(map[string]any{"schema_version": version(), "deck_id": str(), "width": integer(64), "height": integer(64), "theme": theme, "slide_order": arr(str()), "slides": arr(slide)}, "schema_version", "deck_id", "width", "height", "theme", "slide_order", "slides")
 	deck["description"] = "Native schema1: bounded geometry, text, element count and table-cell budgets are validated by the Go store. Unknown fields, images and future schemas are refused."
-	return map[string]any{"SlidesRead": obj(map[string]any{"page_id": str(), "schema_version": version(), "revision": integer(1), "order_version": integer(1), "content_hash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "deck": deck}, "page_id", "schema_version", "revision", "order_version", "content_hash", "deck")}
+	components := map[string]any{"SlidesRead": obj(map[string]any{"page_id": str(), "schema_version": version(), "revision": integer(1), "order_version": integer(1), "content_hash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "deck": deck}, "page_id", "schema_version", "revision", "order_version", "content_hash", "deck")}
+	components["SlidesInitialize"] = obj(map[string]any{"page_id": str(), "schema_version": version(), "base_rev": map[string]any{"type": "integer", "enum": []int{0}}, "mutation_id": str(), "deck": deck}, "page_id", "schema_version", "base_rev", "mutation_id", "deck")
+	components["SlidesReceipt"] = obj(map[string]any{"mutation_id": str(), "revision": integer(1), "order_version": integer(1), "content_hash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "duplicate": map[string]any{"type": "boolean"}}, "mutation_id", "revision", "order_version", "content_hash", "duplicate")
+	return components
 }
 func slidesSchemaCatalog() map[string]DomainSchema {
-	return map[string]DomainSchema{"GET /api/v1/pages/{slug}/slides": {Response: ref("SlidesRead"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500", "503"}}}
+	return map[string]DomainSchema{
+		"POST /api/v1/pages/{slug}/slides/initialize": {Request: ref("SlidesInitialize"), RequestRequired: true, Response: ref("SlidesReceipt"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "429", "503"}},
+		"GET /api/v1/pages/{slug}/slides":             {Response: ref("SlidesRead"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500", "503"}}}
 }
