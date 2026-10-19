@@ -16,15 +16,20 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
   const { data: session } = useSessionSafe()
   const human = session?.user?.id
   const { pages, loading, error } = usePages(workspaceId)
-  const own = human && workspaceId && !error ? pages.filter(page =>
-    page.privateAudience === true && page.ownerRef === `user/${human}` && page.hasDocument === true) : []
+  const ownedDocuments = human && workspaceId && !error ? pages.filter(page =>
+    page.ownerRef === `user/${human}` && page.hasDocument === true) : []
+  const own = ownedDocuments.filter(page => page.privateAudience === true)
+  const unknown = ownedDocuments.some(page => page.privateAudience === undefined)
   return <section aria-label="My space" className="space-y-3">
     <div className="px-6 pt-6"><h1 className="text-xl font-semibold">My space</h1>
       <p className="text-sm text-muted-foreground">Your private Documents in this workspace. Workspace OWNER access is audited.</p></div>
     {!human || !workspaceId ? <p role="status" className="px-6">Choose a workspace with a current account.</p>
       : loading ? <p role="status" className="px-6">Loading your Documents…</p>
       : error ? <p role="alert" className="px-6">Your Documents are unavailable.</p>
-      : own.length ? <DocumentCatalog pages={own} onSelect={onSelect} />
-      : <p role="status" className="px-6">No private Documents in your space.</p>}
+      : <>
+        {unknown && <p role="status" className="px-6">Document audience information is unavailable for some of your Documents.</p>}
+        {own.length > 0 && <DocumentCatalog pages={own} onSelect={onSelect} />}
+        {!own.length && !unknown && <p role="status" className="px-6">No private Documents in your space.</p>}
+      </>}
   </section>
 }
