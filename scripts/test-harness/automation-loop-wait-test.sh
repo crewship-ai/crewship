@@ -23,7 +23,8 @@ scenario,tick=sys.argv[1],int(sys.argv[2]); args=sys.argv[3:]
 late=tick<3 or scenario=='timeout'
 if args[:2]==['routine','records']:
     first=args[2]=='routine-a'
-    row={'id':'run-a' if first else 'run-b','status':'completed','chain_depth':8 if first else 7,'chain_origin':'root'}
+    row={'id':'run-a' if first else 'run-b','pipeline_slug':args[2],'status':'completed','chain_depth':8 if first else 7,'chain_origin':'root'}
+    if scenario=='foreign-record': row['pipeline_slug']='other'
     if late or scenario=='active' or (scenario=='late-active' and tick>=23): row['status']='running'
     if scenario=='depth': row['chain_depth']=9
     print(json.dumps([] if scenario=='empty' else [row]))
@@ -46,7 +47,7 @@ automation_loop_wait_for_cap "${args[@]}"
 [[ "$(changes_count mission)" == 9 ]]
 automation_loop_quiet mission 9 "${args[@]}"
 [[ "$SETTLED" == 9 && "$(automation_loop_now)" == 23 ]]
-for scenario in foreign foreign-routine foreign-origin unreadable active depth malformed error timeout empty; do
+for scenario in foreign foreign-routine foreign-record foreign-origin unreadable active depth malformed error timeout empty; do
   reset "$scenario"
   if automation_loop_wait_for_cap "${args[@]}"; then echo "accepted $scenario" >&2; exit 1; fi
   [[ "$(automation_loop_now)" == 5 ]] # Every unsuccessful wait is bounded.

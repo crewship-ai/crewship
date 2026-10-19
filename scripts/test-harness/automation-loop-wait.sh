@@ -16,10 +16,11 @@ try:
     entries=json.load(open(directory+'/cap-events.json'))
     if not isinstance(entries,list): raise ValueError()
     rows=[]
-    for group in groups:
+    for group,slug in zip(groups,(a,b)):
         if not isinstance(group,list) or not group or len(group)>=500: raise ValueError()
         for row in group:
             if not isinstance(row,dict) or not isinstance(row.get('id'),str) or not row['id']: raise ValueError()
+            if row.get('pipeline_slug')!=slug: raise ValueError()
             if row.get('status') not in ('completed','failed','cancelled'): raise ValueError()
             if type(row.get('chain_depth')) is not int or not 0<=row['chain_depth']<=limit: raise ValueError()
             if not isinstance(row.get('chain_origin'),str) or not row['chain_origin']: raise ValueError()
