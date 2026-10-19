@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { ConversationLibrary } from "../library/conversation-library"
 import { buildLibrary, type LibraryItem } from "../library/library-model"
 import { fileActions, previewKind } from "../preview/file-preview-kind"
 
-afterEach(cleanup)
+beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 const items: LibraryItem[] = [
   { status: "readable", linkId: "1", kind: "files", name: "data.csv", revisionKey: "f1@1" },
   { status: "readable", linkId: "2", kind: "files", name: "data.csv", revisionKey: "f1@1" },
@@ -37,9 +38,31 @@ it.each([
   ["text/plain", "notes.txt", "text"], ["text/plain", "main.go", "code"], ["application/json", "a.json", "code"],
   ["image/png", "a.png", "image"], ["image/svg+xml", "a.svg", "none"], ["application/pdf", "a.pdf", "pdf"],
   ["application/octet-stream", "a.bin", "none"],
+  ["text/javascript", "a.js", "code"], ["text/html", "a.html", "code"], ["text/css", "a.css", "code"], ["application/xml", "a.xml", "code"], ["application/x-yaml", "a.yml", "code"],
+  ["text/plain", "a.svg", "text"], ["image/png", "a.svg", "image"], ["image/svg+xml", "a.png", "none"],
 ] as const)("%s %s previews as %s", (mime, name, kind) => { expect(previewKind(mime, name)).toBe(kind) })
 it("offers only granted Open/Download", () => {
   expect(fileActions({ open: true }, "pdf")).toEqual({ open: true, download: false })
   expect(fileActions({ open: true, download: true }, "none")).toEqual({ open: false, download: true })
   expect(fileActions({}, "image")).toEqual({ open: false, download: false })
+})
+it("a restricted link is hidden under a kind filter and an empty kind says so", () => {
+  render(<ConversationLibrary items={items} filter="tools" onFilterChange={() => {}} onOpen={() => {}} />)
+  expect(screen.queryByText("Restricted item")).toBeNull()
+  expect(screen.getByRole("status").textContent).toMatch(/No linked items of this kind/)
+})
+it("shows loading and a temporary failure that is not a revoke, keeping loaded items", () => {
+  const onRetry = vi.fn()
+  const view = render(<ConversationLibrary items={[]} filter="all" status="loading" onFilterChange={() => {}} onOpen={() => {}} />)
+  expect(screen.getByRole("status").textContent).toMatch(/Loading/)
+  view.unmount()
+  render(<ConversationLibrary items={items} filter="all" status="unavailable" onRetry={onRetry} onFilterChange={() => {}} onOpen={() => {}} />)
+  expect(screen.getByRole("alert").textContent).toMatch(/not a removal of access/)
+  expect(screen.getByRole("button", { name: "Plan" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+  expect(onRetry).toHaveBeenCalled()
+})
+it("renders nothing with the flag off", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "")
+  expect(render(<ConversationLibrary items={items} filter="all" onFilterChange={() => {}} onOpen={() => {}} />).container.innerHTML).toBe("")
 })
