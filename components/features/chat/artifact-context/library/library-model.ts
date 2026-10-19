@@ -1,7 +1,11 @@
 export type LibraryKind = "files" | "artifacts" | "tools" | "work"
 export type LibraryFilter = "all" | LibraryKind
 
-/** One explicit conversation link. Unlinked objects are never part of this list. */
+/**
+ * One explicit conversation link. Contract note: a "restricted" row is a link
+ * the reader may see exists. A private output that the reader may not know
+ * about is never sent at all; the server must omit it from rows and counts.
+ */
 export type LibraryItem =
   | { status: "readable"; linkId: string; kind: LibraryKind; name: string; revisionKey: string }
   | { status: "restricted"; linkId: string }

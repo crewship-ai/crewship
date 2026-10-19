@@ -2,6 +2,7 @@ export type PreviewKind = "table" | "text" | "code" | "image" | "pdf" | "none"
 
 const TABLE = new Set(["text/csv", "text/tab-separated-values"])
 const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"])
+const CODE_TYPES = new Set(["application/json", "application/javascript", "text/javascript", "text/html", "text/css", "application/xml", "text/xml", "application/x-yaml", "application/yaml", "text/yaml"])
 const CODE_EXT = /\.(ts|tsx|js|jsx|py|go|rs|java|rb|sh|sql|json|ya?ml|toml|css|html?|xml)$/i
 
 /** Chooses a preview from the server-verified MIME. SVG and unknown binaries are never rendered inline. */
@@ -11,7 +12,8 @@ export function previewKind(mime: string, name: string): PreviewKind {
   if (IMAGE.has(type)) return "image"
   if (type === "application/pdf") return "pdf"
   if (type === "text/plain" || type === "text/markdown") return CODE_EXT.test(name) ? "code" : "text"
-  if (type === "application/json" || type.startsWith("text/x-") || type === "application/javascript") return "code"
+  // Markup and script types are shown as source text, never rendered or executed.
+  if (CODE_TYPES.has(type) || type.startsWith("text/x-")) return "code"
   return "none"
 }
 
