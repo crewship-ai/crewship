@@ -120,6 +120,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
+- Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
