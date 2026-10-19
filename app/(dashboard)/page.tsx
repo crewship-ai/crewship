@@ -28,6 +28,7 @@ import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 import { useDashboardOffline } from "@/components/features/dashboard/use-dashboard-offline"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { roleAtLeast } from "@/lib/routine-governance"
 import { useIsInstanceAdmin, useSessionSafe } from "@/hooks/use-auth"
 import { dashboardLanding } from "@/lib/dashboard-landing"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
@@ -102,7 +103,7 @@ function totalsOf(data: { buckets: { series: Record<string, number> }[] } | null
 }
 
 export default function DashboardPage() {
-  const { workspaceId, loading: workspaceLoading } = useWorkspace()
+  const { workspaceId, role, loading: workspaceLoading } = useWorkspace()
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
@@ -152,8 +153,12 @@ export default function DashboardPage() {
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const successSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "success_rate"), [reportWindow]), queryOpts)
   const p95SeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "p95_duration_ms"), [reportWindow]), queryOpts)
-  const spendSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "cost_usd"), [reportWindow]), queryOpts)
-  const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
+  // The ledger read is OWNER/ADMIN on the server (#3590): other roles neither
+  // ask for it (nor for its sparkline) nor see the Spend tile.
+  const canSeeSpend = roleAtLeast(role, "ADMIN")
+  const spendOpts = { ...queryOpts, enabled: (queryOpts?.enabled ?? true) && canSeeSpend }
+  const spendSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "cost_usd"), [reportWindow]), spendOpts)
+  const spendQ = useCrewSpend(workspaceId, reportWindow, spendOpts)
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
   const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
@@ -368,6 +373,7 @@ export default function DashboardPage() {
               data={kpis}
               window={reportWindow}
               spendUsd={spendTotal}
+              showSpend={canSeeSpend}
               spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
               completedSeries={volumeFailed ? undefined : runsPerBucket}
               completedSeriesLabel={`Runs started per ${reportWindow === "24h" ? "hour" : "day"}`}

@@ -9,7 +9,7 @@ type Query<T> = { data: T | undefined | null; isPending: boolean; isError: boole
 const state = vi.hoisted(() => {
   const query = <T,>(): Query<T> => ({ data: undefined, isPending: false, isError: false, refetch: vi.fn() })
   return {
-    workspace: { workspaceId: "a" as string | null, loading: false }, admin: false as boolean | null,
+    workspace: { workspaceId: "a" as string | null, role: "ADMIN" as string | null, loading: false }, spendCalls: vi.fn(), admin: false as boolean | null,
     session: { data: { user: { name: "Pavel Srba" } } as { user: { name: string } } | null, status: "authenticated" },
     fetch: vi.fn(), events: new Map<string, () => void>(), invalidateA: vi.fn(), invalidateB: vi.fn(), volumeCalls: vi.fn(), insightsCalls: vi.fn(), agentCalls: vi.fn(), routineRefresh: vi.fn(),
     agents: query<AgentSummary[]>(), crews: query<CrewSummary[]>(), review: query<unknown[]>(), progress: query<unknown[]>(), completed: query<unknown[]>(), runs: query<unknown[]>(),
@@ -38,7 +38,7 @@ vi.mock("@/hooks/use-dashboard-data", () => ({
   useProvisioningSummary: () => state.provisioning,
   useDashboardCredentials: () => state.credentials,
   useMetricsTimeseries: (...args: unknown[]) => { state.volumeCalls(...args); return state.volume },
-  useCrewSpend: () => state.spend,
+  useCrewSpend: (...args: unknown[]) => { state.spendCalls(...args); return state.spend },
   useCrewServiceSummaries: () => ({ byCrew: new Map() }),
   useInvalidateDashboard: (ws: string) => ws === "a" ? state.invalidateA : state.invalidateB,
 }))
@@ -49,7 +49,7 @@ vi.mock("@/hooks/use-inbox", () => ({ useInbox: () => state.inbox }))
 vi.mock("@/components/features/dashboard/dashboard-overview", async (importActual) => ({
   ...await importActual<typeof import("@/components/features/dashboard/dashboard-overview")>(),
   AttentionTiles: ({ items }: { items: { id: string; label: string; detail: string }[] }) => <div data-testid="attention">{items.map((item) => <p key={item.id}>{item.label}: {item.detail}</p>)}</div>,
-  DashboardKpis: ({ spendUsd, spendPerRun }: { spendUsd: number | null | undefined; spendPerRun: number | null }) => <div data-testid="spend" data-per-run={String(spendPerRun)}>{spendUsd === undefined ? "pending" : spendUsd === null ? "unmetered" : String(spendUsd)}</div>,
+  DashboardKpis: ({ spendUsd, spendPerRun, showSpend }: { spendUsd: number | null | undefined; spendPerRun: number | null; showSpend?: boolean }) => <div data-testid="spend" data-per-run={String(spendPerRun)} data-show-spend={String(showSpend)}>{spendUsd === undefined ? "pending" : spendUsd === null ? "unmetered" : String(spendUsd)}</div>,
   DashboardUpNext: () => <div>Upcoming routines</div>,
 }))
 vi.mock("@/components/features/dashboard/fleet-board", async (importActual) => ({
@@ -69,7 +69,7 @@ vi.mock("@/components/features/dashboard/welcome-checklist", () => ({ WelcomeChe
 const crew = (id: string): CrewSummary => ({ id, name: `Crew ${id}`, slug: `${id}-slug`, color: "blue", icon: null })
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 beforeEach(() => {
-  state.workspace = { workspaceId: "a", loading: false }; state.admin = false; state.gaps = new Map(); state.events.clear()
+  state.workspace = { workspaceId: "a", role: "ADMIN", loading: false }; state.spendCalls.mockReset(); state.admin = false; state.gaps = new Map(); state.events.clear()
   state.session = { data: { user: { name: "Pavel Srba" } }, status: "authenticated" }
   state.inbox = { items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0, refresh: vi.fn() }
   state.schedules = []
@@ -213,6 +213,17 @@ it.each(["pending", "failed", "empty", "metered"])("distinguishes %s spend from 
   await loaded()
   expect(screen.getByTestId("spend")).toHaveTextContent(mode === "metered" ? "4" : mode === "empty" ? "unmetered" : "pending")
   expect(screen.getByTestId("spend")).toHaveAttribute("data-per-run", mode === "metered" ? "1" : "null")
+})
+
+// #3590: the ledger read is OWNER/ADMIN on the server. Below that the page
+// asks nothing and the Spend tile is not drawn.
+it.each([["OWNER", true], ["ADMIN", true], ["MANAGER", false], ["MEMBER", false], ["VIEWER", false], [null, false]] as const)("role %s: spend requested and shown = %s", async (role, allowed) => {
+  state.workspace = { workspaceId: "a", role, loading: false }
+  state.insights.data = { window: "24h", totals: { total: 4, succeeded: 3, failed: 1, running: 0 }, duration: { p50_ms: 10, p95_ms: 20 }, by_trigger: [], by_model: [], by_crew: [], top_agents: [], truncated: false }
+  render(<DashboardPage />)
+  await loaded()
+  expect(state.spendCalls).toHaveBeenLastCalledWith("a", "24h", expect.objectContaining({ enabled: allowed }))
+  expect(screen.getByTestId("spend")).toHaveAttribute("data-show-spend", String(allowed))
 })
 
 it("part failure replaces only that card", async () => {
