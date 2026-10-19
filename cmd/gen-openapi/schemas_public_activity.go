@@ -81,6 +81,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"signing_secret_set": boolean(), "signing_secret": str(), "inputs_template": anyObject(),
 		"enabled": boolean(), "rate_limit_per_min": integer(), "last_fired_at": nullable(str()),
 		"last_status": str(), "last_run_id": str(), "fire_count": integer(), "created_at": str(), "updated_at": str(),
+		// Set while a rotation's grace window is open (ODCH-INT-11).
+		"previous_secret_expires_at": str(),
 	})
 
 	// One line of GET /api/v1/chats/{chatId}/stream. `type` is either an agent
@@ -120,6 +122,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
 		"target_pipeline_version": nullable(integer()), "inputs_template": anyObject(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(), "rotate_secret": boolean(),
+		// How long the secret a rotation replaces stays valid; only with rotate_secret.
+		"rotate_grace_seconds": map[string]any{"type": "integer", "enum": []int{0, 3600, 86400, 604800}},
 	})
 
 	chatDomain := map[string]DomainSchema{
@@ -191,7 +195,14 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks":               {Response: array(webhook)},
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":              {Request: webhookRequest, Response: webhook},
 		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}": {Request: webhookUpdateRequest, Response: webhook},
-		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str()})},
+		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test": {
+			Request: object(map[string]any{"sample": anyObject(), "headers": map[string]any{"type": "object", "additionalProperties": str()}}),
+			Response: object(map[string]any{
+				"inputs": map[string]any{"type": "object", "additionalProperties": true}, "ignored_template_keys": array(str()),
+				"valid": boolean(), "problem": str(),
+			}, "inputs", "ignored_template_keys", "valid"),
+		},
+		"POST /api/v1/webhooks/{token}": {Response: object(map[string]any{"run_id": str(), "status": str()})},
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,

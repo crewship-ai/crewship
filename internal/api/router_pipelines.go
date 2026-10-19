@@ -258,6 +258,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// enabled / rate limit, with the token never rotating and the signing
 	// secret rotating only when the caller explicitly opts in.
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.UpdateWebhook)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test", roleCreate, pipes.DryRunWebhook)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
 	// Routine webhook receipts — what a routine delivery leaves behind:
 	// its identity, the body's fingerprint and the run it produced. Read

@@ -1897,6 +1897,7 @@ crewship routine webhooks update wh_abc123 \
 | `--inputs-template` | Replace the JSON template merged with the request body. |
 | `--enabled` / `--enabled=false` | Set enabled state — presence required, same convention as `schedules update`. |
 | `--pin-version` | Pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head. |
+| `--grace` | With `--rotate-secret`: keep the replaced secret valid for `none` (default), `1h`, `24h` or `7d`, so a sender can be switched over without a window of 401s. Refused without `--rotate-secret`. |
 | `--unpin` | Remove the version pin (fires track head again). Mutually exclusive with `--pin-version`; mentioning neither keeps the existing pin. |
 | `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
 
@@ -1948,6 +1949,22 @@ crewship routine webhooks delete wh_abc123 --yes
 <Warning>
 Existing senders using the deleted token will start getting 404s. `--yes` skips the confirmation prompt.
 </Warning>
+
+### `webhooks test <id>`
+
+Check a webhook's mapping without running anything. Give a sample of the JSON a sender would POST; the server builds the routine's inputs exactly as a real delivery would (request data under `event`, `raw` and `headers`, your inputs template layered on top), checks them against the routine's declared inputs and answers with the inputs and whether the routine would accept them. No run starts, no signature is needed and the secret is never shown.
+
+```bash
+crewship routine webhooks test wh_abc123 --sample '{"action":"opened"}'
+crewship routine webhooks test wh_abc123 --sample @pull_request.json --header X-GitHub-Event=pull_request
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--sample` | ✓ | The JSON a sender would POST: inline, `@file`, or `-` for stdin |
+| `--header` | | A request header the mapping reads, `NAME=value`; repeatable |
+
+Template keys that collide with `event`, `raw` or `headers` are dropped on a real call too, and are listed as ignored.
 
 ### `webhooks fire`
 

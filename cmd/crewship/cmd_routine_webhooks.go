@@ -45,6 +45,8 @@ type WebhookRow struct {
 	FireCount             int64                  `json:"fire_count" yaml:"fire_count"`
 	CreatedAt             string                 `json:"created_at" yaml:"created_at"`
 	UpdatedAt             string                 `json:"updated_at" yaml:"updated_at"`
+	// PreviousSecretExpiresAt is set while a rotation's grace window is open.
+	PreviousSecretExpiresAt *string `json:"previous_secret_expires_at,omitempty" yaml:"previous_secret_expires_at,omitempty"`
 }
 
 // webhookCreateResult is `routine webhooks create`'s machine payload: the
@@ -385,6 +387,17 @@ all — rotating the URL still requires delete + recreate.`,
 		if rotate {
 			body["rotate_secret"] = true
 		}
+		if cmd.Flags().Changed("grace") {
+			if !rotate {
+				return cli.WithExitCode(fmt.Errorf("--grace only applies together with --rotate-secret"), cli.ExitValidation)
+			}
+			raw, _ := cmd.Flags().GetString("grace")
+			seconds, ok := map[string]int{"none": 0, "0": 0, "1h": 3600, "24h": 86400, "7d": 604800}[strings.ToLower(strings.TrimSpace(raw))]
+			if !ok {
+				return cli.WithExitCode(fmt.Errorf("--grace %q: want none, 1h, 24h or 7d", raw), cli.ExitValidation)
+			}
+			body["rotate_grace_seconds"] = seconds
+		}
 		if len(body) == 0 {
 			return fmt.Errorf("at least one of --name / --slug / --rate-limit / --inputs-template / --enabled / --pin-version / --unpin / --rotate-secret required")
 		}
@@ -417,6 +430,9 @@ all — rotating the URL still requires delete + recreate.`,
 				fmt.Println()
 				fmt.Println("== New HMAC signing secret (shown once, copy now) ==")
 				fmt.Println(w.SigningSecret)
+				if w.PreviousSecretExpiresAt != nil {
+					fmt.Printf("The old secret keeps working until %s.\n", *w.PreviousSecretExpiresAt)
+				}
 			} else {
 				fmt.Println("  URL/secret: unchanged")
 			}
@@ -587,6 +603,7 @@ func init() {
 	routineWebhooksUpdateCmd.Flags().Bool("enabled", false, "set enabled state — explicit flag presence required (--enabled / --enabled=false)")
 	routineWebhooksUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head")
 	routineWebhooksUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
+	routineWebhooksUpdateCmd.Flags().String("grace", "", "with --rotate-secret: keep the replaced secret valid for none (default), 1h, 24h or 7d so a sender can be switched over without 401s")
 	routineWebhooksUpdateCmd.Flags().Bool("rotate-secret", false, "mint a new HMAC signing secret (shown once); the URL/token is NEVER rotated by this command regardless")
 
 	routineWebhooksUrlCmd.Flags().String("base-url", "", "override the public base URL")

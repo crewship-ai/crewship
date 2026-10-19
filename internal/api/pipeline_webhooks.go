@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,25 +76,28 @@ var reservedWebhookInputKeys = pipeline.WebhookUntrustedInputKeys
 // secret is NEVER returned post-create — the only path that reveals
 // it is the create response, mirroring how Stripe / GitHub do it.
 type webhookResponse struct {
-	IngressProfile        string         `json:"ingress_profile"`
-	ID                    string         `json:"id"`
-	WorkspaceID           string         `json:"workspace_id"`
-	Name                  string         `json:"name"`
-	TargetPipelineID      string         `json:"target_pipeline_id"`
-	TargetPipelineSlug    string         `json:"target_pipeline_slug,omitempty"`
-	TargetPipelineVersion *int           `json:"target_pipeline_version,omitempty"`
-	Token                 string         `json:"token"`
-	SigningSecretSet      bool           `json:"signing_secret_set"`
-	SigningSecret         string         `json:"signing_secret,omitempty"` // only on create
-	InputsTemplate        map[string]any `json:"inputs_template"`
-	Enabled               bool           `json:"enabled"`
-	RateLimitPerMin       int            `json:"rate_limit_per_min"`
-	LastFiredAt           *time.Time     `json:"last_fired_at,omitempty"`
-	LastStatus            string         `json:"last_status,omitempty"`
-	LastRunID             string         `json:"last_run_id,omitempty"`
-	FireCount             int64          `json:"fire_count"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	IngressProfile        string `json:"ingress_profile"`
+	ID                    string `json:"id"`
+	WorkspaceID           string `json:"workspace_id"`
+	Name                  string `json:"name"`
+	TargetPipelineID      string `json:"target_pipeline_id"`
+	TargetPipelineSlug    string `json:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int   `json:"target_pipeline_version,omitempty"`
+	Token                 string `json:"token"`
+	SigningSecretSet      bool   `json:"signing_secret_set"`
+	SigningSecret         string `json:"signing_secret,omitempty"` // only on create
+	// PreviousSecretExpiresAt is set while a rotation's grace window is open:
+	// the secret before the current one is still accepted until then.
+	PreviousSecretExpiresAt *time.Time     `json:"previous_secret_expires_at,omitempty"`
+	InputsTemplate          map[string]any `json:"inputs_template"`
+	Enabled                 bool           `json:"enabled"`
+	RateLimitPerMin         int            `json:"rate_limit_per_min"`
+	LastFiredAt             *time.Time     `json:"last_fired_at,omitempty"`
+	LastStatus              string         `json:"last_status,omitempty"`
+	LastRunID               string         `json:"last_run_id,omitempty"`
+	FireCount               int64          `json:"fire_count"`
+	CreatedAt               time.Time      `json:"created_at"`
+	UpdatedAt               time.Time      `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, includeSecret bool) webhookResponse {
@@ -124,6 +128,9 @@ func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, in
 		CreatedAt:             w.CreatedAt,
 		UpdatedAt:             w.UpdatedAt,
 	}
+	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && w.PreviousSecretExpiresAt.After(time.Now()) {
+		resp.PreviousSecretExpiresAt = w.PreviousSecretExpiresAt
+	}
 	if includeSecret {
 		resp.SigningSecret = w.SigningSecret
 	}
@@ -149,7 +156,14 @@ type webhookRequestBody struct {
 	// the webhook's public URL — never rotates through this endpoint at
 	// all; that still requires delete + recreate.
 	RotateSecret bool `json:"rotate_secret,omitempty"`
+	// RotateGraceSeconds keeps the secret a rotation replaces valid for this
+	// long (ODCH-INT-11): 0 (the default), 3600, 86400 or 604800, and only with
+	// rotate_secret. The response says when it stops, never what it was.
+	RotateGraceSeconds *int `json:"rotate_grace_seconds,omitempty"`
 }
+
+// webhookRotateGraceSeconds are the windows the rotate dialog offers.
+var webhookRotateGraceSeconds = map[int]bool{0: true, 3600: true, 86400: true, 604800: true}
 
 // CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
 func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +359,16 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 	// re-encrypt is a no-op change in content.
 	signingSecret := existing.SigningSecret
 	rotated := false
+	if body.RotateGraceSeconds != nil {
+		if !body.RotateSecret {
+			replyError(w, http.StatusBadRequest, "rotate_grace_seconds only applies together with rotate_secret")
+			return
+		}
+		if !webhookRotateGraceSeconds[*body.RotateGraceSeconds] {
+			replyError(w, http.StatusBadRequest, "rotate_grace_seconds must be 0, 3600, 86400 or 604800")
+			return
+		}
+	}
 	if body.RotateSecret {
 		gen, gerr := generateWebhookSigningSecret()
 		if gerr != nil {
@@ -381,6 +405,25 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		}
 		replyError(w, http.StatusInternalServerError, "failed to update webhook")
 		return
+	}
+	if rotated {
+		// The replaced secret keeps working for the requested window; no
+		// window (or none asked for) clears whatever an earlier rotation left.
+		var until *time.Time
+		prev := ""
+		if body.RotateGraceSeconds != nil && *body.RotateGraceSeconds > 0 && existing.SigningSecret != "" {
+			t := time.Now().UTC().Add(time.Duration(*body.RotateGraceSeconds) * time.Second)
+			until, prev = &t, existing.SigningSecret
+		}
+		if err := h.webhooks.SetPreviousSecret(r.Context(), webhookID, prev, until); err != nil {
+			// The new secret is already live; failing now would hide a
+			// rotation that happened. The old one simply stops now.
+			h.logger.Error("update pipeline webhook: record previous secret", "error", err, "webhook_id", webhookID)
+		}
+		if reloaded, rerr := h.webhooks.GetByID(r.Context(), webhookID); rerr == nil {
+			reloaded.Token = saved.Token
+			saved = reloaded
+		}
 	}
 	// Reveal the new secret only when this call minted one — same
 	// show-once contract CreateWebhook uses. An ordinary edit (no
@@ -647,7 +690,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// hasn't adopted the header falls back to the body-only scheme
 	// unchanged, so existing integrations keep working.
 	if isGitHubRoutine(r.Context()) {
-		verdict := profiles.Verify(profiles.VerifyRequest{Profile: profiles.ProfileGitHub, Header: r.Header, RawBody: body, Keys: []profiles.Key{{ID: wh.ID, Secret: []byte(wh.SigningSecret)}}, Now: time.Now()})
+		verdict := profiles.Verify(profiles.VerifyRequest{Profile: profiles.ProfileGitHub, Header: r.Header, RawBody: body, Keys: githubVerifyKeys(wh, time.Now()), Now: time.Now()})
 		if !verdict.OK {
 			replyError(w, http.StatusUnauthorized, "invalid GitHub webhook")
 			return
@@ -760,29 +803,14 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// three request-derived keys: if a template includes them,
 	// drop the template's value (request bytes win). The template
 	// is still useful for layering NEW keys onto the input shape.
-	inputs := map[string]any{
-		"event":   tryParseJSON(body),
-		"raw":     string(body),
-		"headers": flattenHeaders(r.Header),
-	}
-	if strings.TrimSpace(wh.InputsTemplateJSON) != "" && wh.InputsTemplateJSON != "{}" {
-		var tmpl map[string]any
-		if err := json.Unmarshal([]byte(wh.InputsTemplateJSON), &tmpl); err == nil {
-			for k, v := range tmpl {
-				if _, reserved := reservedWebhookInputKeys[k]; reserved {
-					// Operator template tried to override a
-					// request-derived field. Log once + skip --
-					// don't fail the request (legacy templates
-					// in production might lean on the old shape;
-					// surface the warning so the operator can
-					// clean up).
-					h.logger.Warn("webhook inputs_template tried to override reserved key",
-						"webhook_id", wh.ID, "key", k)
-					continue
-				}
-				inputs[k] = v
-			}
-		}
+	inputs, droppedKeys := buildWebhookInputs(wh.InputsTemplateJSON, body, r.Header)
+	for _, k := range droppedKeys {
+		// Operator template tried to override a request-derived field.
+		// Log and skip -- don't fail the request (legacy templates in
+		// production might lean on the old shape; surface the warning so
+		// the operator can clean up).
+		h.logger.Warn("webhook inputs_template tried to override reserved key",
+			"webhook_id", wh.ID, "key", k)
 	}
 
 	// Governance pre-check, synchronous. The executor re-checks at run
@@ -1246,4 +1274,140 @@ func isGitHubRoutine(ctx context.Context) bool {
 // It does not publish reviews or change the repository's review configuration.
 func (h *PipelineHandler) FireGitHubPullRequest(w http.ResponseWriter, r *http.Request) {
 	h.FireWebhook(w, r.WithContext(context.WithValue(r.Context(), githubRoutineContextKey{}, true)))
+}
+
+// buildWebhookInputs is the inputs map a delivery hands the routine: the
+// request-derived keys (event, raw, headers) with the webhook's inputs_template
+// layered on top. A template key that collides with a request-derived one is
+// dropped and returned so the caller can say so. Shared by FireWebhook and
+// DryRunWebhook so "Test mapping" can never disagree with a real call.
+func buildWebhookInputs(templateJSON string, body []byte, header http.Header) (map[string]any, []string) {
+	inputs := map[string]any{
+		"event":   tryParseJSON(body),
+		"raw":     string(body),
+		"headers": flattenHeaders(header),
+	}
+	var dropped []string
+	if strings.TrimSpace(templateJSON) != "" && templateJSON != "{}" {
+		var tmpl map[string]any
+		if err := json.Unmarshal([]byte(templateJSON), &tmpl); err == nil {
+			keys := make([]string, 0, len(tmpl))
+			for k := range tmpl {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if _, reserved := reservedWebhookInputKeys[k]; reserved {
+					dropped = append(dropped, k)
+					continue
+				}
+				inputs[k] = tmpl[k]
+			}
+		}
+	}
+	return inputs, dropped
+}
+
+// webhookDryRunRequest is a sample call: the JSON the sender would POST, and
+// any headers the mapping reads.
+type webhookDryRunRequest struct {
+	Sample  json.RawMessage   `json:"sample"`
+	Headers map[string]string `json:"headers"`
+}
+
+type webhookDryRunResponse struct {
+	// Inputs is what the routine would receive for this sample.
+	Inputs map[string]any `json:"inputs"`
+	// IgnoredTemplateKeys are template keys dropped because they collide with
+	// request-derived ones (event, raw, headers).
+	IgnoredTemplateKeys []string `json:"ignored_template_keys"`
+	// Valid is whether the routine would accept those inputs; Problem says why not.
+	Valid   bool   `json:"valid"`
+	Problem string `json:"problem,omitempty"`
+}
+
+// DryRunWebhook POST /workspaces/{wsId}/pipeline-webhooks/{webhookId}/test
+//
+// ODCH-INT-09: shows what a sample call would hand the routine, using the same
+// builder and the same input gate as FireWebhook, and starts nothing: no run,
+// no idempotency reservation, no fire count. It needs no signature, because it
+// never leaves the server's own process and returns no secret.
+func (h *PipelineHandler) DryRunWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		return
+	}
+	if !canRole(RoleFromContext(r.Context()), "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	wh, err := h.webhooks.GetByID(r.Context(), r.PathValue("webhookId"))
+	if err != nil || wh.WorkspaceID != WorkspaceIDFromContext(r.Context()) {
+		if err == nil || errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "failed to load webhook")
+		return
+	}
+	var req webhookDryRunRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&req); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	sample := []byte(req.Sample)
+	if len(sample) == 0 {
+		sample = []byte("{}")
+	}
+	header := http.Header{}
+	for k, v := range req.Headers {
+		header.Set(k, v)
+	}
+	inputs, dropped := buildWebhookInputs(wh.InputsTemplateJSON, sample, header)
+
+	out := webhookDryRunResponse{Inputs: inputs, IgnoredTemplateKeys: dropped}
+	if out.IgnoredTemplateKeys == nil {
+		out.IgnoredTemplateKeys = []string{}
+	}
+	target, err := h.store.GetByID(r.Context(), wh.TargetPipelineID)
+	switch {
+	case err != nil:
+		out.Problem = "the target routine could not be loaded"
+	case !pipeline.StatusRunnable(target.Status):
+		out.Problem = "the routine is not active (awaiting approval or disabled)"
+	default:
+		definition := target.DefinitionJSON
+		if wh.TargetPipelineVersion != nil {
+			if ver, verr := h.store.GetVersion(r.Context(), wh.TargetPipelineID, *wh.TargetPipelineVersion); verr == nil {
+				definition = ver.DefinitionJSON
+			} else {
+				out.Problem = fmt.Sprintf("the pinned version %d no longer exists", *wh.TargetPipelineVersion)
+			}
+		}
+		if out.Problem == "" {
+			if dsl, perr := pipeline.Parse([]byte(definition)); perr != nil {
+				out.Problem = "the routine definition is invalid"
+			} else if ierr := pipeline.ValidateFormInputs(dsl, inputs); ierr != nil {
+				out.Problem = ierr.Error()
+			}
+		}
+	}
+	out.Valid = out.Problem == ""
+	writeJSON(w, http.StatusOK, out)
+}
+
+// githubVerifyKeys lists the secrets a GitHub-profile delivery may be signed
+// with: the current one, then the one a rotation replaced while its grace
+// window is open.
+func githubVerifyKeys(wh *pipeline.Webhook, now time.Time) []profiles.Key {
+	secrets := wh.AcceptedSecrets(now)
+	keys := make([]profiles.Key, 0, len(secrets))
+	for i, s := range secrets {
+		id := wh.ID
+		if i > 0 {
+			id += ":previous"
+		}
+		keys = append(keys, profiles.Key{ID: id, Secret: []byte(s)})
+	}
+	return keys
 }

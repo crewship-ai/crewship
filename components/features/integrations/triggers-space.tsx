@@ -6,12 +6,13 @@ import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ui/status-pill"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound } from "@/components/layout/page-state"
 import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, nativeSelect } from "@/components/features/settings/shared"
-import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
+import type { PipelineWebhook, WebhookDryRun } from "@/hooks/use-pipeline-webhooks"
 import { formatRelativeShort } from "@/lib/time"
 import { IncomingTargetAvatar } from "./incoming-target-avatar"
 import type { IncomingKind, IncomingTarget } from "./incoming-model"
@@ -167,7 +168,7 @@ export function TriggersList({
           label="Triggers at a glance"
           items={[
             { key: "n", tone: "ok", icon: Play, label: "Triggers", value: c.total, sub: `${allRows.filter((r) => r.kind === "routine").length} routine · ${allRows.filter((r) => r.kind === "agent").length} agent`, onClick: () => onView("all") },
-            { key: "calls", tone: "muted", icon: ArrowDownToLine, label: "Calls", value: c.calls, sub: "routine triggers only" },
+            { key: "calls", tone: "muted", icon: ArrowDownToLine, label: "Calls", value: c.calls, sub: "routine and agent triggers" },
             { key: "failing", tone: c.failing > 0 ? "bad" : "muted", icon: AlertTriangle, label: "Failing", value: c.failing, sub: "last call failed", onClick: () => onView("failing") },
             { key: "off", tone: "muted", icon: Circle, label: "Turned off", value: c.off, onClick: () => onView("off") },
           ]}
@@ -203,6 +204,9 @@ export function TriggerPage({
 }) {
   const [reveal, setReveal] = React.useState<Reveal | null>(null)
   const [confirm, setConfirm] = React.useState<"rotate" | "delete" | null>(null)
+  // How long a routine trigger's replaced secret keeps working (v67 vrotate).
+  const [grace, setGrace] = React.useState<(typeof ROTATE_GRACE)[number]["seconds"]>(0)
+  const graceWord = ROTATE_GRACE.find((g) => g.seconds === grace)?.words
   const [busy, setBusy] = React.useState(false)
   const [rate, setRate] = React.useState<string>("")
   React.useEffect(() => setRate(row?.endpoint?.routine ? String(row.endpoint.routine.rate_limit_per_min) : ""), [row])
@@ -235,7 +239,7 @@ export function TriggerPage({
 
   let body: React.ReactNode
   if (current === "mapping" && hook) {
-    body = <TriggerMapping key={hook.id} hook={hook} targetName={row.target.name} canEdit={canEdit} onSave={(t) => data.hooks.update(hook.id, { inputs_template: t })} />
+    body = <TriggerMapping key={hook.id} hook={hook} targetName={row.target.name} canEdit={canEdit} onSave={(t) => data.hooks.update(hook.id, { inputs_template: t })} onTest={(sample) => data.hooks.test(hook.id, sample)} />
   } else if (current === "calls") {
     body = <RecentReceipts workspaceId={workspaceId} target={row.target} rows={[e]} />
   } else if (current === "settings") {
@@ -379,17 +383,23 @@ export function TriggerPage({
       </ObjectPage>
       <ConfirmDialog
         open={confirm === "rotate"}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title="Rotate secret? The old one stops now."
+        onOpenChange={(o) => {
+          if (o) return
+          setConfirm(null)
+          setGrace(0)
+        }}
+        title={hook && grace > 0 ? `Rotate secret? The old one keeps working for ${graceWord}.` : "Rotate secret? The old one stops now."}
         consequences={[
-          { tone: "lost", text: "Senders that still use the old secret are refused from now on" },
+          hook && grace > 0
+            ? { tone: "warn", text: `Senders can still use the old secret for ${graceWord}; switch them over before then` }
+            : { tone: "lost", text: "Senders that still use the old secret are refused from now on" },
           { tone: "kept", text: "The URL stays the same" },
         ]}
         confirmLabel="Rotate secret"
         destructive
         onConfirm={async () => {
           if (hook) {
-            const result = await data.hooks.update(hook.id, { rotate_secret: true })
+            const result = await data.hooks.update(hook.id, { rotate_secret: true, ...(grace > 0 ? { rotate_grace_seconds: grace } : {}) })
             if (result?.signing_secret) setReveal({ secret: result.signing_secret, target: row.target })
           } else {
             const result = await incomingJSON<{ webhook_secret: string }>(`/api/v1/agents/${row.target.id}/webhook-secret/rotate?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
@@ -397,7 +407,20 @@ export function TriggerPage({
             data.refresh()
           }
         }}
-      />
+      >
+        {hook ? (
+            <label className="flex flex-col gap-1.5 text-label text-muted-foreground">
+              Old value keeps working for
+              <select className={nativeSelect} value={grace} onChange={(e) => setGrace(Number(e.target.value) as typeof grace)}>
+                {ROTATE_GRACE.map((g) => (
+                  <option key={g.seconds} value={g.seconds}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirm === "delete"}
         onOpenChange={(o) => !o && setConfirm(null)}
@@ -423,19 +446,22 @@ export function TriggerPage({
 /**
  * Mapping (routine triggers): routine input ← what it takes from the call.
  * A draft on the page's Save bar; one Save sends PATCH inputs_template.
- * Testing a mapping against a sample call is not drawn: the server has no
- * dry run for it yet.
+ * "Test mapping" posts a sample call to the server's dry run, which builds the
+ * inputs exactly as a real delivery would and starts nothing. It tests the
+ * SAVED mapping, so it waits while the draft has unsaved changes.
  */
 function TriggerMapping({
   hook,
   targetName,
   canEdit,
   onSave,
+  onTest,
 }: {
   hook: PipelineWebhook
   targetName: string
   canEdit: boolean
   onSave: (template: Record<string, unknown>) => Promise<PipelineWebhook | null>
+  onTest: (sample: unknown) => Promise<WebhookDryRun>
 }) {
   const saved = hook.inputs_template ?? {}
   const [rows, setRows] = React.useState<MappingRow[]>(() => mappingRows(saved))
@@ -463,6 +489,7 @@ function TriggerMapping({
           <span className="font-mono">event</span>, <span className="font-mono">raw</span> and <span className="font-mono">headers</span> are always there and cannot be overwritten. Agents get them fenced as untrusted text. Inputs come from routine {targetName}; a missing required one rejects the call with 422.
         </p>
       </InfoCard>
+      <SampleCall onTest={onTest} dirty={count > 0} />
       <SettingsSaveBar
         label="Mapping"
         count={canEdit ? count : 0}
@@ -476,3 +503,91 @@ function TriggerMapping({
     </>
   )
 }
+
+const SAMPLE_PLACEHOLDER = `{
+  "action": "opened",
+  "repository": { "full_name": "acme/web" }
+}`
+
+/** Paste a sample call, see what the routine would get. */
+function SampleCall({ onTest, dirty }: { onTest: (sample: unknown) => Promise<WebhookDryRun>; dirty: boolean }) {
+  const [text, setText] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [result, setResult] = React.useState<WebhookDryRun | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const run = async () => {
+    let sample: unknown
+    try {
+      sample = JSON.parse(text)
+    } catch {
+      setResult(null)
+      setError("The sample is not valid JSON.")
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      setResult(await onTest(sample))
+    } catch (e) {
+      setResult(null)
+      setError(e instanceof Error ? e.message : "The mapping could not be tested")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <InfoCard title="Sample call" icon={Play}>
+      <div className="grid gap-2 px-4 py-3">
+        <Textarea
+          aria-label="Sample call JSON"
+          className="min-h-28 font-mono text-label"
+          placeholder={SAMPLE_PLACEHOLDER}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          spellCheck={false}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={busy || dirty || text.trim() === ""} onClick={() => void run()}>
+            <Play className="size-3.5" aria-hidden />
+            Test mapping
+          </Button>
+          <span className="text-label text-muted-foreground">{dirty ? "Save the mapping first: the test uses the saved one." : "Nothing runs; this only shows what the routine would get."}</span>
+        </div>
+        {error && (
+          <p role="alert" className="text-label text-destructive">
+            {error}
+          </p>
+        )}
+        {result && (
+          <div className="grid gap-1.5" data-slot="mapping-test-result">
+            <p className={result.valid ? "text-body text-success" : "text-body text-destructive"} role="status">
+              {result.valid ? "The routine would accept this call." : `The routine would refuse this call: ${result.problem}`}
+            </p>
+            {result.ignored_template_keys.length > 0 && (
+              <p className="text-label text-muted-foreground">
+                Ignored (reserved for the call itself): <span className="font-mono">{result.ignored_template_keys.join(", ")}</span>
+              </p>
+            )}
+            <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,3fr)] gap-x-3 gap-y-1 text-label">
+              {Object.entries(result.inputs)
+                .filter(([k]) => k !== "event" && k !== "raw" && k !== "headers")
+                .map(([k, v]) => (
+                  <React.Fragment key={k}>
+                    <dt className="font-mono text-muted-foreground">{k}</dt>
+                    <dd className="min-w-0 break-words font-mono">{typeof v === "string" ? v : JSON.stringify(v)}</dd>
+                  </React.Fragment>
+                ))}
+            </dl>
+          </div>
+        )}
+      </div>
+    </InfoCard>
+  )
+}
+
+const ROTATE_GRACE = [
+  { seconds: 0, label: "No grace", words: "no time" },
+  { seconds: 3600, label: "1 hour", words: "1 hour" },
+  { seconds: 86400, label: "24 hours", words: "24 hours" },
+  { seconds: 604800, label: "7 days", words: "7 days" },
+] as const

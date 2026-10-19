@@ -302,18 +302,23 @@ type Webhook struct {
 	// stable. It is never read back from the database — see TokenHash.
 	Token string
 	// TokenHash is the at-rest digest the dispatch path looks up.
-	TokenHash          string
-	SigningSecret      string // empty = no HMAC verification
-	InputsTemplateJSON string
-	Enabled            bool
-	RateLimitPerMin    int
-	LastFiredAt        *time.Time
-	LastStatus         string
-	LastRunID          string
-	FireCount          int64
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
+	TokenHash     string
+	SigningSecret string // empty = no HMAC verification
+	// PreviousSigningSecret is the secret a rotation replaced, still accepted
+	// until PreviousSecretExpiresAt (ODCH-INT-11). Never serialised by a read
+	// endpoint.
+	PreviousSigningSecret   string
+	PreviousSecretExpiresAt *time.Time
+	InputsTemplateJSON      string
+	Enabled                 bool
+	RateLimitPerMin         int
+	LastFiredAt             *time.Time
+	LastStatus              string
+	LastRunID               string
+	FireCount               int64
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	DeletedAt               *time.Time
 }
 
 // SaveWebhookInput is the payload for WebhookStore.Save.
@@ -461,6 +466,29 @@ WHERE id = ? AND deleted_at IS NULL`,
 		return nil, fmt.Errorf("update webhook: %w", err)
 	}
 	return s.GetByID(ctx, in.ID)
+}
+
+// SetPreviousSecret records the secret a rotation just replaced and when it
+// stops being accepted (ODCH-INT-11). An empty secret clears it, which is what a
+// rotation with no grace window does. The secret is encrypted at rest like the
+// current one.
+func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string, expires *time.Time) error {
+	var stored string
+	var exp any
+	if secret != "" && expires != nil {
+		var err error
+		if stored, _, err = encryption.EncryptAtRest(secret); err != nil {
+			return fmt.Errorf("encrypt previous_signing_secret: %w", err)
+		}
+		exp = expires.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_webhooks SET previous_signing_secret = ?, previous_secret_expires_at = ? WHERE id = ? AND deleted_at IS NULL`,
+		nullStr(stored), exp, id)
+	if err != nil {
+		return fmt.Errorf("set previous secret: %w", err)
+	}
+	return nil
 }
 
 // GetByID returns a webhook by id, or ErrNotFound.
@@ -682,14 +710,34 @@ RETURNING consecutive_fire_failures`,
 // dispatch URL. Audit chain finding (A13.2 + A17.2): MEMBER creates
 // webhook → public URL fires pipeline → no auth.
 func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
-	if w.SigningSecret == "" {
-		// No secret on this row = no signature is verifiable. Treat
-		// the dispatch as unauthenticated rather than silently passing
-		// it. The webhook needs to be re-created (or have its secret
-		// rotated through whatever admin path lands) before it can
-		// fire again.
-		return false
+	for _, secret := range w.acceptedSecrets(time.Now()) {
+		if validateBodySignature(secret, body, providedHex) {
+			return true
+		}
 	}
+	// No secret on the row (or none that matched): no signature is verifiable.
+	// The dispatch is unauthenticated rather than silently passing; the webhook
+	// needs its secret rotated before it can fire again.
+	return false
+}
+
+// AcceptedSecrets lists the signing secrets a delivery may be signed with at
+// now: the current one, then the one a rotation replaced while its grace window
+// is open (ODCH-INT-11). Empty secrets are never listed.
+func (w *Webhook) AcceptedSecrets(now time.Time) []string { return w.acceptedSecrets(now) }
+
+func (w *Webhook) acceptedSecrets(now time.Time) []string {
+	var out []string
+	if w.SigningSecret != "" {
+		out = append(out, w.SigningSecret)
+	}
+	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && now.Before(*w.PreviousSecretExpiresAt) {
+		out = append(out, w.PreviousSigningSecret)
+	}
+	return out
+}
+
+func validateBodySignature(secret string, body []byte, providedHex string) bool {
 	// Senders are instructed (create handler + CLI output) to use the
 	// GitHub-style "sha256=<hex>" header form; bare hex is accepted too
 	// for backwards compatibility with pre-existing integrations.
@@ -697,7 +745,7 @@ func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
 	if providedHex == "" {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(w.SigningSecret))
+	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	// hmac.Equal does the constant-time work; we just have to feed
@@ -723,7 +771,8 @@ func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
 // (rather than reading time.Now internally) so callers/tests can pin a
 // deterministic clock; production callers pass time.Now().
 func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) bool {
-	if w.SigningSecret == "" {
+	secrets := w.acceptedSecrets(now)
+	if len(secrets) == 0 {
 		// Mirrors ValidateSignature: no secret on this row means no
 		// signature is verifiable, timestamped or not.
 		return false
@@ -748,11 +797,16 @@ func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex stri
 	if providedHex == "" {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(w.SigningSecret))
-	_, _ = mac.Write([]byte(ts + "."))
-	_, _ = mac.Write(body)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(expected), []byte(providedHex))
+	for _, secret := range secrets {
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write([]byte(ts + "."))
+		_, _ = mac.Write(body)
+		expected := hex.EncodeToString(mac.Sum(nil))
+		if hmac.Equal([]byte(expected), []byte(providedHex)) {
+			return true
+		}
+	}
+	return false
 }
 
 // rateLimiter is the in-memory throttle for webhooks. Per-token
@@ -839,7 +893,8 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(token_hash, ''), COALESCE(signing_secret, ''), inputs_template,
        enabled, rate_limit_per_min,
        last_fired_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
-       fire_count, created_at, updated_at, deleted_at, ingress_profile
+       fire_count, created_at, updated_at, deleted_at, ingress_profile,
+       COALESCE(previous_signing_secret, ''), previous_secret_expires_at
 FROM pipeline_webhooks`
 
 func scanWebhook(rs rowScanner) (*Webhook, error) {
@@ -848,6 +903,7 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 		targetVersion sql.NullInt64
 		lastFired     sql.NullString
 		deletedAt     sql.NullString
+		prevExpires   sql.NullString
 		enabled       int
 		createdAt     string
 		updatedAt     string
@@ -858,6 +914,7 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 		&enabled, &w.RateLimitPerMin,
 		&lastFired, &w.LastStatus, &w.LastRunID,
 		&w.FireCount, &createdAt, &updatedAt, &deletedAt, &w.IngressProfile,
+		&w.PreviousSigningSecret, &prevExpires,
 	)
 	if err != nil {
 		return nil, err
@@ -868,6 +925,8 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 	// (legacy/key-less) value passes through unchanged; on a decrypt error the
 	// raw value is kept, which just makes HMAC verification fail safely.
 	w.SigningSecret, _ = encryption.DecryptIfEncrypted(w.SigningSecret)
+	w.PreviousSigningSecret, _ = encryption.DecryptIfEncrypted(w.PreviousSigningSecret)
+	w.PreviousSecretExpiresAt = parseTimePtr(prevExpires.String)
 	w.Enabled = enabled != 0
 	if targetVersion.Valid {
 		v := int(targetVersion.Int64)
