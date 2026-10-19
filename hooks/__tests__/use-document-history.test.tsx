@@ -2,7 +2,7 @@ import React from "react"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { apiFetch } from "@/lib/api-fetch"
-import { useDocumentHistory, type DocumentHistoryScope } from "../use-document-history"
+import { useDocumentHistory, useDocumentHistoryRestore, type DocumentHistoryScope } from "../use-document-history"
 
 const events = vi.hoisted(() => new Map<string, Set<(event: unknown) => void>>())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
@@ -21,6 +21,49 @@ const ready = async (result: ReturnType<typeof setup>["result"]) => waitFor(() =
 const selected = async (result: ReturnType<typeof setup>["result"]) => { act(() => result.current.onSelect("pin")); await waitFor(() => expect(result.current.snapshot.status).toBe("ready")) }
 beforeEach(() => { fetchMock.mockReset(); events.clear() })
 afterEach(cleanup)
+
+const restoreInput = () => ({ ...scope, head: { page_id: "page", rev: 8, schema: 3, epoch: "original", can_write: true },
+  snapshot: { status: "ready" as const, scopeKey: "history", data: snapshot }, historyScopeKey: "history", blocked: false,
+  onStart: vi.fn(), onRestored: vi.fn(), onRefused: vi.fn() })
+describe("explicit human checkpoint restore", () => {
+  it("retries the identical uncertain packet despite a newer head and never double-submits", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("lost ACK")).mockImplementationOnce(async (_url, init) => {
+      const packet = JSON.parse(String(init?.body))
+      return response({ page_id: "page", id: packet.id, rev: 9, kind: "restore", epoch: "new" })
+    })
+    const input = restoreInput(), view = renderHook(props => useDocumentHistoryRestore(props), { initialProps: input })
+    act(() => { view.result.current.onConfirm(); view.result.current.onConfirm() })
+    await waitFor(() => expect(view.result.current.status).toBe("uncertain"))
+    expect(fetchMock).toHaveBeenCalledTimes(1); expect(input.onRestored).not.toHaveBeenCalled()
+    const packet = fetchMock.mock.calls[0][1]?.body
+    view.rerender({ ...input, head: { ...input.head, rev: 9, epoch: "new" }, blocked: true })
+    act(() => view.result.current.onRetry())
+    await waitFor(() => expect(input.onRestored).toHaveBeenCalledOnce())
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(packet)
+  })
+  it.each([true, false])("rejects local recovery or non-writer admission (%s)", blocked => {
+    const input = restoreInput()
+    const { result } = renderHook(() => useDocumentHistoryRestore({ ...input, blocked, head: { ...input.head, can_write: blocked } }))
+    act(() => result.current.onConfirm()); expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it("aborts and ignores late confirmation after a human/auth scope change", async () => {
+    const late = pending(); fetchMock.mockReturnValueOnce(late.promise)
+    const input = restoreInput(), view = renderHook(props => useDocumentHistoryRestore(props), { initialProps: input })
+    act(() => view.result.current.onConfirm())
+    const packet = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)), signal = fetchMock.mock.calls[0][1]?.signal
+    view.rerender({ ...input, activationKey: "different-login" })
+    expect(signal?.aborted).toBe(true)
+    await act(async () => late.resolve(response({ page_id: "page", id: packet.id, rev: 9, kind: "restore", epoch: "new" })))
+    expect(input.onRestored).not.toHaveBeenCalled(); expect(view.result.current.status).toBe("idle")
+  })
+  it.each([403, 409, 503])("never publishes returned receipt fields on HTTP %s", async status => {
+    fetchMock.mockResolvedValueOnce(response({ id: "ignored", rev: 9, epoch: "ignored" }, status))
+    const input = restoreInput(), { result } = renderHook(() => useDocumentHistoryRestore(input))
+    act(() => result.current.onConfirm())
+    await waitFor(() => expect(result.current.status).toBe(status === 403 ? "denied" : status === 409 ? "error" : "uncertain"))
+    expect(input.onRestored).not.toHaveBeenCalled()
+  })
+})
 
 describe("human Document history controller", () => {
   it.each([undefined, false])("requires explicit enable (%s)", enabled => {

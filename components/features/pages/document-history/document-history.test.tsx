@@ -41,6 +41,14 @@ it("does not offer restore while a local draft requires recovery",()=>{
   expect(screen.queryByRole("button",{name:"Restore selected checkpoint"})).toBeNull()
   expect(confirm).not.toHaveBeenCalled()
 })
+it("requires a new confirmation if the current saved base changes",()=>{
+  const p=props(),onConfirm=vi.fn(),onRetry=vi.fn()
+  const {rerender}=render(<DocumentHistory {...p} restore={{allowed:true,status:"idle",baseKey:"rev-8",onConfirm,onRetry}}/>)
+  fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+  rerender(<DocumentHistory {...p} restore={{allowed:true,status:"idle",baseKey:"rev-9",onConfirm,onRetry}}/>)
+  expect(screen.queryByRole("button",{name:"Confirm restore"})).toBeNull()
+  expect(onConfirm).not.toHaveBeenCalled()
+})
 it("uncertain confirmation offers only retry of the captured restore, never a new operation",()=>{
   const confirm=vi.fn(),retry=vi.fn()
   render(<DocumentHistory {...props()} {...{restore:{allowed:true,status:"uncertain",onConfirm:confirm,onRetry:retry}}}/>)
