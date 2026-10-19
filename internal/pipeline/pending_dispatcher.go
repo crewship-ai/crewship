@@ -313,17 +313,32 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		d.recordDispatchError(ctx, pr, errors.New("executor returned no run receipt"))
 		return
 	}
-	d.recordWebhookOutcome(ctx, pr, res.RunID, res.Status)
 	// Backfill the fired run id now that we have it (claim used "").
 	// The run has finished, so the busy probe no longer counts it: the
 	// backfill is its own writer, and waits out a window rather than landing
 	// inside one.
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
 	defer cancel()
+	unknown := false
 	if uerr := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		if res.Deduped {
+			var exists bool
+			if err := d.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipeline_runs WHERE id=? AND workspace_id=? AND pipeline_id=?)`, res.RunID, pr.WorkspaceID, pr.PipelineID).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				// A reservation is not proof of a start. Preserve uncertain
+				// work and its reservation without automatically retrying.
+				unknown = true
+				pr.ReasonCode = "recovery_unknown"
+				return d.store.FinishDispatchError(ctx, pr, "fired", "Reserved run does not exist in this scope; inspect before retrying.", nil)
+			}
+		}
 		return d.store.SetFiredRunID(ctx, pr, res.RunID)
 	}); uerr != nil {
 		d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
+	} else if !unknown {
+		d.recordWebhookOutcome(ctx, pr, res.RunID, res.Status)
 	}
 }
 

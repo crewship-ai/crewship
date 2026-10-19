@@ -96,6 +96,18 @@ func TestPipelineWebhooks_DurableReceiptAndQueueCommitBefore202(t *testing.T) {
 	if response.PendingID != response.DeliveryID || response.PendingID == "" || response.RunID == "" || planned != response.RunID || receiptRun != planned || origin != "webhook" || source != wh.ID || status != "pending" || fired.String != "" || pin != 1 {
 		t.Fatalf("invalid durable acceptance: response=%+v planned=%s receipt=%s origin=%s source=%s status=%s fired=%v", response, planned, receiptRun, origin, source, status, fired)
 	}
+	var acceptedAt, expiresAt string
+	if err := db.QueryRow(`SELECT fire_at,expires_at FROM pending_runs WHERE run_id=?`, planned).Scan(&acceptedAt, &expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	acceptedTime, err := time.Parse(time.RFC3339Nano, acceptedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiryTime, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil || expiryTime.Sub(acceptedTime) != 24*time.Hour {
+		t.Fatalf("webhook TTL is not 24h: accepted=%s expiry=%s err=%v", acceptedAt, expiresAt, err)
+	}
 	var runs int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE id=?`, planned).Scan(&runs); err != nil || runs != 0 {
 		t.Fatalf("run started without dispatcher: count=%d err=%v", runs, err)

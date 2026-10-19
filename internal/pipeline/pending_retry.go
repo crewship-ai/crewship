@@ -47,7 +47,7 @@ func (s *PendingRunStore) requeueUnstartedClaim(ctx context.Context, pr PendingR
 	}
 	key := pr.IdempotencyKey
 	if key == "" {
-		key = ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano))
+		key = ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)) // tsformat:allow: preserve historical idempotency identity; not a SQL time comparison
 	}
 	var owner string
 	lookupErr := tx.QueryRowContext(ctx, `SELECT run_id FROM pipeline_run_idempotency WHERE workspace_id=? AND pipeline_id=? AND idempotency_key=?`, pr.WorkspaceID, pr.PipelineID, key).Scan(&owner)

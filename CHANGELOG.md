@@ -17,7 +17,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart.
+- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
 
 - Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.

@@ -24,6 +24,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
+// Webhook senders stop retrying after acceptance; retain queued work for a day.
+const defaultWebhookQueueTTL = 24 * time.Hour
+
 // generateWebhookSigningSecret returns 32 bytes of urandom encoded as
 // 64 hex chars -- the canonical shape downstream code expects when it
 // HMAC-signs incoming webhook bodies. Used by CreateWebhook when the
@@ -980,7 +983,7 @@ func (h *PipelineHandler) acceptRoutineDelivery(
 			return err
 		}
 		if n == 1 {
-			expiresAt := receivedAt.Add(defaultCapacityQueueTTL)
+			expiresAt := receivedAt.Add(defaultWebhookQueueTTL)
 			raw, err := json.Marshal(inputs)
 			if err != nil {
 				return err
