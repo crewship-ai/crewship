@@ -40,9 +40,18 @@ data or fencing existing services; upgrade the source and create a fresh bundle.
 This also applies to dry-run validation. Instance recovery must complete the
 privacy backfill with the original vault key before discarding runtime consents.
 Retaining this classification never restores permission to execute a run.
+Workspace backup operations retain their OWNER requirement while classified
+private conversations remain, even after creation fails or a Document is deleted.
 Crew bundles without the classification also require source migration evidence
 that they predate Document creation; missing evidence is refused, not inferred
 from omitted tables. Protected bundles require a migrated target schema.
+
+A valid older bundle cannot remove newer private conversation classification
+from its target. Workspace `--replace` refuses a target with retained private
+artifact conversations. Offline `recover --force` checks the existing database
+before replacing it and refuses such a target too; recover into an empty data
+directory instead. These operations do not replace per-agent diagnostic logs,
+so the retained audience proof must remain available.
 
 ## Key concepts
 

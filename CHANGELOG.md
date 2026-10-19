@@ -17,9 +17,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Wait for provider sign-in recovery to release its database connection before server shutdown finishes.
+
 - Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
 
 - Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+- Keep private Document output private in its source conversation, live delivery and agent diagnostics; audit foreign OWNER inspection before returning copied data.
+- Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
+
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.

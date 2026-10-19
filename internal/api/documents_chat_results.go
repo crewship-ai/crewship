@@ -37,6 +37,7 @@ func (h *PageHandler) ListChatDocumentResults(w http.ResponseWriter, r *http.Req
 		return
 	}
 	workspace, chat := WorkspaceIDFromContext(r.Context()), r.PathValue("chatId")
+	publicRequest := r
 	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		replyInternalError(w, h.logger, "read chat Document results", err)
@@ -118,6 +119,7 @@ func (h *PageHandler) ListChatDocumentResults(w http.ResponseWriter, r *http.Req
 		return
 	}
 	results := make([]DocumentChatResult, 0, 20)
+	var privatePages []*pageRecord
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
 		if seen[candidate.pageID] {
@@ -140,9 +142,33 @@ func (h *PageHandler) ListChatDocumentResults(w http.ResponseWriter, r *http.Req
 		if !visible {
 			continue
 		}
+		if rec.PrivateAudience {
+			privatePages = append(privatePages, rec)
+		}
 		results = append(results, candidate.result)
 		if len(results) == 20 {
 			break
+		}
+	}
+	// Capture read custody inside the snapshot; release it before the durable
+	// inspection audits so a one-connection database cannot deadlock.
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "finish chat Document results", err)
+		return
+	}
+	r = publicRequest
+	allowed, err := chataudience.CanReadArtifactConversation(r.Context(), h.db, chat, user.ID, workspace, false)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit private Document results", err)
+		return
+	}
+	if !allowed {
+		replyError(w, 404, "chat not found")
+		return
+	}
+	for _, rec := range privatePages {
+		if !h.auditPrivateOwnerAccess(w, r, rec) {
+			return
 		}
 	}
 	writeJSON(w, 200, DocumentChatResultsResponse{Results: results})
