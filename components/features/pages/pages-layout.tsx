@@ -5,6 +5,7 @@ import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-
 import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
 import { DocumentCatalog } from "./document-catalog"
+import { PersonalDocumentSpace } from "./personal-document-space"
 import { NewDocumentDialog } from "./new-document-dialog"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 
@@ -45,7 +46,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { AppWindow, FilePlus2, LayoutGrid, MessageSquare, Pencil, Share2, Upload } from "lucide-react"
+import { AppWindow, FilePlus2, FolderUser, LayoutGrid, MessageSquare, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -87,6 +88,7 @@ export interface PagesLayoutProps {
 }
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
+  const [personalSpace, setPersonalSpace] = React.useState(false)
   const isMobile = useIsMobile()
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
@@ -320,6 +322,13 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Artifacts"
         actions={
           <>
+            {!selectedSlug && documentAvailability.data === true && <SubBarSecondary
+              icon={FolderUser}
+              aria-pressed={personalSpace}
+              className="coarse:min-h-12"
+              onClick={() => setPersonalSpace(value => !value)}
+              title="Show your private Documents in this workspace"
+            >My space</SubBarSecondary>}
             {selectedSlug && !editing && applicationAvailable && (
               <div
                 role="group"
@@ -516,6 +525,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
+                {personalSpace && documentAvailability.data === true ? <PersonalDocumentSpace
+                  key={`${workspaceId}:${currentUserId ?? ""}`}
+                  workspaceId={workspaceId}
+                  onSelect={openPage}
+                /> : <>
                 <DocumentCatalog pages={filtered} onSelect={openPage} />
                 {!loading && !error && pages.length > 0 && legacyPages.length === 0 && filtered.length === 0 && <p role="status" className="p-6 text-muted-foreground">No documents match these filters.</p>}
                 {(loading || error || legacyPages.length > 0 || pages.length === 0) && <PagesOverview
@@ -529,6 +543,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   }
                   now={now}
                 />}
+                </>}
               </motion.div>
             )}
           </AnimatePresence>
