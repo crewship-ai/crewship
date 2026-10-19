@@ -265,6 +265,7 @@ func NewAuthMiddleware(validator *auth.JWTValidator, sessionsStore sessions.Stor
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		epoch := m.streams.Epoch() // Capture BEFORE authoritative credential validation.
+		defer m.streams.ReleaseEpoch(epoch)
 		token := extractToken(r)
 		if token == "" {
 			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)

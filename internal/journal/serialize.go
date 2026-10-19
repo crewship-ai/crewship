@@ -1,7 +1,6 @@
 package journal
 
 import (
-	"maps"
 	"time"
 )
 
@@ -16,6 +15,7 @@ import (
 // it directly. Empty optional ids/maps are omitted rather than sent as ""
 // / {} to keep frames small and match the zod schema's optional fields.
 func SerializeEntry(e Entry) map[string]any {
+	e = PublicAuthorizationAudit(e)
 	row := map[string]any{
 		"id":           e.ID,
 		"workspace_id": e.WorkspaceID,
@@ -45,16 +45,7 @@ func SerializeEntry(e Entry) map[string]any {
 		// Run authority is durable host state, not workspace-wide feed data.
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
-		payload := maps.Clone(e.Payload)
-		if e.Type == EntryMemberAdded {
-			// Canonical role/initial resource rights are administrative audit data.
-			payload = map[string]any{}
-			for _, key := range []string{"member_id", "subject_user_id", "action"} {
-				if value, ok := e.Payload[key]; ok {
-					payload[key] = value
-				}
-			}
-		}
+		payload := e.Payload
 		_, receiptOrigin := payload["human_authority"]
 		_, delegatedOrigin := payload["chat_origin_id"]
 		if receiptOrigin || delegatedOrigin {
