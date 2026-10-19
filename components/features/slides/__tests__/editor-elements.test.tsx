@@ -19,7 +19,7 @@ function Editor({ start = sample() }: { start?: SlideDeck }) {
 const current = () => JSON.parse(screen.getByTestId("deck").textContent!) as SlideDeck
 const first = () => current().slides.find(slide => slide.id === "slide_b")!
 const canvasElement = (name: string) => screen.getByRole("button", { name })
-const keys = (target: Element, key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(target, { key, ...init })
+const keys = (target: Element, key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(target, { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, ...init })
 
 describe("elements, selection and keyboard", () => {
   it("selects on the canvas, nudges with arrows and deletes with Delete", () => {
@@ -129,6 +129,38 @@ describe("elements, selection and keyboard", () => {
     fireEvent.blur(title)
     expect(title.querySelector("[data-focus-ring]")).toBeNull()
   })
+  it("keeps focus inside the editor after Delete so undo still works from the keyboard", () => {
+    render(<Editor />)
+    const title = canvasElement("text 1")
+    fireEvent.pointerDown(title); title.focus()
+    keys(title, "Delete")
+    expect(screen.getByLabelText("Slides editor").contains(document.activeElement)).toBe(true)
+    keys(document.activeElement!, "z", { ctrlKey: true, code: "KeyZ" })
+    expect(first().elements).toHaveLength(2)
+  })
+  it("does not fire element shortcuts from toolbar buttons", () => {
+    render(<Editor />)
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    const button = screen.getByRole("button", { name: "Present" })
+    keys(button, "Delete"); keys(button, "ArrowRight")
+    expect(first().elements).toHaveLength(2)
+    expect(first().elements[0].x).toBe(24)
+  })
+  it("sizes the resize handle in screen pixels and larger for coarse pointers", () => {
+    const rect = { width: 480, height: 270, x: 0, y: 0, top: 0, left: 0, right: 480, bottom: 270, toJSON: () => ({}) }
+    const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect)
+    const size = () => Number(document.querySelector("[data-resize-handle]")!.getAttribute("width"))
+    const { unmount } = render(<Editor />)
+    fireEvent.pointerDown(canvasElement("shape 2"))
+    expect(size()).toBeGreaterThanOrEqual(48) // 24 px on a 2x downscaled deck
+    unmount(); spy.mockRestore()
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect)
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("coarse"), media: query, addEventListener: () => {}, removeEventListener: () => {} }))
+    render(<Editor />)
+    fireEvent.pointerDown(canvasElement("shape 2"))
+    expect(size()).toBeGreaterThanOrEqual(88)
+    vi.unstubAllGlobals()
+  })
   it("is a read-only preview at phone width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
     render(<Editor />)
@@ -195,6 +227,30 @@ describe("workspace states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load latest and discard my draft" }))
     expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Cizí změna")
     expect(screen.getByRole("button", { name: "Undo" }).hasAttribute("disabled")).toBe(true)
+  })
+  it("still offers Load latest after choosing to keep editing locally", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    editNotes("Moje")
+    const other = sample(); other.slides[0].notes = "Cizí"
+    server.advance({ deck: other, rev: 4, orderVersion: 1 })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    await screen.findByRole("alert")
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing locally" }))
+    expect(screen.getByText(/older revision/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Load latest and discard my draft" }))
+    expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Cizí")
+    expect(screen.queryByText(/older revision/)).toBeNull()
+  })
+  it("does not crash when the draft cannot be diffed", async () => {
+    const server = createFixtureSaveClient(snapshot())
+    render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    fireEvent.click(screen.getByRole("button", { name: "Select text 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Bring to front" }))
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(true)
   })
   it("keeps the draft and reuses the mutation id when saving fails offline", async () => {
     const server = createFixtureSaveClient(snapshot())

@@ -11,13 +11,19 @@ const reasons: Record<Unrepresentable, string> = {
   layer_order: "layer order",
   slide_order: "slide order",
   deck_frame: "theme or slide size",
+  deck_identity: "the deck identity or format",
+  identity_reuse: "an element moved between slides or a reused id",
+  order_version_missing: "slide structure (order version unknown)",
   operation_budget: "more than 100 changes at once",
+  unreproduced: "changes the save format cannot reproduce",
 }
 type Phase =
   | { name: "loading" }
   | { name: "unavailable" }
   | { name: "failed"; message: string }
   | { name: "ready"; snapshot: SlidesSnapshot; draft: SlideDeck; save: "idle" | "saving" | "saved" | "failed"; conflict?: SlidesSnapshot; stale?: boolean; message?: string }
+
+const randomId = () => globalThis.crypto?.randomUUID?.().replaceAll("-", "") ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
 
 export interface SlidesWorkspaceProps {
   pageId: string
@@ -43,6 +49,12 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
     return () => { active = false }
   }, [client, pageId, attempt])
 
+  const ready = phase.name === "ready" ? phase : undefined
+  const blocked = React.useMemo<Unrepresentable[]>(() => {
+    if (!ready || !saveEnabled || JSON.stringify(ready.draft) === JSON.stringify(ready.snapshot.deck)) return []
+    try { return diffToPatch(ready.snapshot.deck, ready.draft, { pageId, schemaVersion: ready.snapshot.deck.schema_version, baseRev: ready.snapshot.rev, orderVersion: ready.snapshot.orderVersion, mutationId: "preview" }).unrepresentable } catch { return ["unreproduced"] }
+  }, [ready?.draft, ready?.snapshot, saveEnabled, pageId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (phase.name === "loading") return <p role="status">Loading presentation…</p>
   if (phase.name === "unavailable") return <p role="alert">This presentation is not available.</p>
   if (phase.name === "failed") return <div role="alert" className="space-y-2"><p>{phase.message}</p><button className={control} onClick={() => setAttempt(value => value + 1)}>Try again</button></div>
@@ -51,13 +63,12 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
   const dirty = JSON.stringify(draft) !== JSON.stringify(snapshot.deck)
   const context = { pageId, schemaVersion: snapshot.deck.schema_version, baseRev: snapshot.rev, orderVersion: snapshot.orderVersion }
   const key = JSON.stringify(draft)
-  const request = () => {
-    if (mutation.current?.key !== key) mutation.current = { key, id: `m_${crypto.randomUUID().replaceAll("-", "")}` }
-    return diffToPatch(snapshot.deck, draft, { ...context, mutationId: mutation.current.id })
-  }
-  const blocked = dirty && saveEnabled ? request().unrepresentable : []
+  const loadLatest = (latest: SlidesSnapshot) => { mutation.current = undefined; setPhase({ name: "ready", snapshot: latest, draft: latest.deck, save: "idle" }) }
   const submit = async () => {
-    const { request: body } = request()
+    // The same draft keeps its mutation id across retries; a changed draft gets a new one.
+    if (mutation.current?.key !== key) mutation.current = { key, id: `m_${randomId()}` }
+    let body
+    try { body = diffToPatch(snapshot.deck, draft, { ...context, mutationId: mutation.current.id }).request } catch { body = null }
     if (!body) return
     setPhase({ ...phase, save: "saving", message: undefined })
     const result = await client.patch(body)
@@ -74,14 +85,17 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
     : blocked.length ? `Changes to ${blocked.map(reason => reasons[reason]).join(", ")} cannot be saved yet. They stay in this draft only.`
     : dirty ? "Unsaved changes." : save === "saved" ? `Saved as revision ${snapshot.rev}.` : `Revision ${snapshot.rev}.`
   return <div className="space-y-3">
-    {conflict && <div role="alert" className="space-y-2">
+    {conflict && !phase.stale && <div role="alert" className="space-y-2">
       <p>Someone else changed this presentation (now revision {conflict.rev}). Your draft was not saved and nothing was overwritten.</p>
       <div className="flex flex-wrap gap-2">
-        <button className={control} onClick={() => { mutation.current = undefined; setPhase({ name: "ready", snapshot: conflict, draft: conflict.deck, save: "idle" }) }}>Load latest and discard my draft</button>
-        <button className={control} onClick={() => setPhase({ ...phase, conflict: undefined, stale: true })}>Keep editing locally</button>
+        <button className={control} onClick={() => loadLatest(conflict)}>Load latest and discard my draft</button>
+        <button className={control} onClick={() => setPhase({ ...phase, stale: true })}>Keep editing locally</button>
       </div>
     </div>}
-    {phase.stale && <p role="status">You are editing a draft based on an older revision. Saving stays blocked until you load the latest version.</p>}
+    {phase.stale && conflict && <div role="status" className="space-y-2">
+      <p>You are editing a draft based on an older revision. Saving stays blocked until you load the latest version.</p>
+      <button className={control} onClick={() => loadLatest(conflict)}>Load latest and discard my draft</button>
+    </div>}
     {phase.message && <p role="alert">{phase.message}</p>}
     <SlidesEditor deck={draft} onChange={next => setPhase({ ...phase, draft: next, save: "idle", message: undefined })} disabled={save === "saving"} persistenceStatus={status}
       onSave={saveEnabled ? () => void submit() : undefined} saveDisabled={!dirty || blocked.length > 0 || save === "saving" || Boolean(conflict) || Boolean(phase.stale)} />

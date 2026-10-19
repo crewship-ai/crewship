@@ -27,8 +27,14 @@ describe("draft edits", () => {
   })
   it("resizes within bounds and keeps at least one pixel", () => {
     const deck = sample()
-    expect(resizeElement(deck, "slide_b", "shape_b", { x: 10, y: 10, width: 0, height: 99999 }).slides[0].elements[1]).toMatchObject({ x: 10, y: 0, width: 1, height: 540 })
+    expect(resizeElement(deck, "slide_b", "shape_b", { x: 10, y: 10, width: 0, height: 99999 }).slides[0].elements[1]).toMatchObject({ x: 10, y: 10, width: 1, height: 530 })
     expect(resizeElement(deck, "slide_b", "ghost", { x: 0, y: 0, width: 5, height: 5 })).toEqual(deck)
+  })
+  it("resize stops at the frame edge without moving the element and ignores NaN", () => {
+    const deck = sample()
+    deck.slides[0].elements[1] = { ...deck.slides[0].elements[1], x: 910, width: 50 }
+    expect(resizeElement(deck, "slide_b", "shape_b", { x: 910, y: 140, width: 51, height: 100 }).slides[0].elements[1]).toMatchObject({ x: 910, width: 50 })
+    expect(resizeElement(deck, "slide_b", "shape_b", { x: 910, y: 140, width: Number.NaN, height: 100 })).toEqual(deck)
   })
   it("adds and removes with fresh identities", () => {
     const { deck, id } = addElement(sample(), "slide_b", "text")
