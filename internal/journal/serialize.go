@@ -46,6 +46,12 @@ func SerializeEntry(e Entry) map[string]any {
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
 		payload := maps.Clone(e.Payload)
+		// Exact capability sets remain durable audit state. The shared feed
+		// is not an administrative capability-history API.
+		if e.Type == EntryMemberCapabilitiesChanged {
+			delete(payload, "previous_capabilities")
+			delete(payload, "capabilities")
+		}
 		_, receiptOrigin := payload["human_authority"]
 		_, delegatedOrigin := payload["chat_origin_id"]
 		if receiptOrigin || delegatedOrigin {
