@@ -18,7 +18,7 @@ import (
 )
 
 // The actual binary reaches migrated persistence and production Router auth.
-// Only Node preparation and transcript IPC are fixtures; no provider run.
+// Only Node preparation and transcript/log IPC are fixtures; no provider run.
 func TestPrivateArtifactConversationAudienceThroughBinary(t *testing.T) {
 	pages, workspace, author, _, create := documentCreationFixture(t)
 	execOrFatal(t, pages.db, `UPDATE workspaces SET slug='private-conversation-cli' WHERE id=?`, workspace)
