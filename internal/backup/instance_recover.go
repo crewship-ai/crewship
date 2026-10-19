@@ -688,6 +688,9 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				rep.Notes = append(rep.Notes, fmt.Sprintf("%d quota-service image(s) verified and staged; services remain in maintenance until their data are landed on the new host", count))
 			}
 		}
+		if err := preservePrivateArtifactContextProof(ctx, db.DB); err != nil {
+			return err
+		}
 		for _, r := range runtimeResets {
 			if len(serviceArgs) != 0 && serviceArgs[0].count > 0 && (r.table == "service_backup_fences" || r.table == "service_operation_leases") {
 				continue
