@@ -30,6 +30,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
@@ -97,6 +99,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Read-only resource-preset previews in the administrative API and CLI show exact managed changes, retained provenance, Results disclosure and independent destructive consequences. Confirmation digests bind live state without granting authority or changing permissions.
 
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
+
+- Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
 
 ### Added
 
