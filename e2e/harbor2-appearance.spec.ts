@@ -123,14 +123,16 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
   })
 })
 
+// The compact gallery (owner, 19 Oct): one live preview, category chips and a
+// grid of palettes that follows the card's width.
 for (const [label, viewport, minColumns, maxColumns] of [
-  ["phone 390", { width: 390, height: 844 }, 1, 1],
-  ["tablet 1024", { width: 1024, height: 768 }, 2, 3],
+  ["phone 390", { width: 390, height: 844 }, 2, 2],
+  ["tablet 1024", { width: 1024, height: 768 }, 3, 6],
 ] as const) {
   test.describe(`Style gallery at ${label}`, () => {
     test.use({ viewport })
 
-    test("the grid collapses, nothing overflows and every preview shows", async ({ page }) => {
+    test("the grid collapses, nothing overflows and the one preview shows", async ({ page }) => {
       await seed(page, "dark")
       await page.goto("/settings?tab=appearance")
       const gallery = page.getByRole("radiogroup", { name: "Style" })
@@ -138,17 +140,16 @@ for (const [label, viewport, minColumns, maxColumns] of [
       const tiles = gallery.getByRole("radio")
       expect(await tiles.count()).toBeGreaterThanOrEqual(13)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      const firstGrid = gallery.getByTestId("style-grid").first()
-      const lefts = await firstGrid.getByRole("radio").evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().left))).size)
+      const lefts = await tiles.evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().left))).size)
       expect(lefts).toBeGreaterThanOrEqual(minColumns)
       expect(lefts).toBeLessThanOrEqual(maxColumns)
-      for (const preview of await gallery.getByTestId("style-preview").all()) {
-        await preview.scrollIntoViewIfNeeded()
-        const box = await preview.boundingBox()
-        expect(box!.width).toBeGreaterThan(40)
-        expect(box!.height).toBeGreaterThan(24)
-        expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1)
-      }
+      const preview = page.getByTestId("style-preview")
+      await expect(preview).toHaveCount(1)
+      await preview.scrollIntoViewIfNeeded()
+      const box = await preview.boundingBox()
+      expect(box!.width).toBeGreaterThan(40)
+      expect(box!.height).toBeGreaterThan(24)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1)
     })
 
     test("picking works here too", async ({ page }) => {
