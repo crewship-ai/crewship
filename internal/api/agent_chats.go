@@ -572,6 +572,23 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Copies in agent diagnostics outlive this row. Until deletion can retain
+	// their audience independently, keep private-artifact provenance intact.
+	// Classify inside the deleting transaction so new consent cannot be
+	// admitted between this check and removal of the source chat.
+	privateContext, err := chataudience.ResolvePrivateArtifactContext(r.Context(), tx, workspaceID, chatID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	if errors.Is(err, chataudience.ErrPrivateArtifactContext) || (err == nil && privateContext.Sealed) {
+		replyError(w, http.StatusConflict, "Chat contains private artifact provenance and cannot be deleted while retained copies depend on it")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "delete chat: private artifact provenance", err)
+		return
+	}
 	for _, stmt := range []struct {
 		q    string
 		args []any

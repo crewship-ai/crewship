@@ -107,6 +107,14 @@ func TestPrivateArtifactConversationAudienceThroughBinary(t *testing.T) {
 				} else if err != nil || !strings.Contains(string(output), result.Title) {
 					t.Fatalf("authorized binary %v response: %v", args[:2], err)
 				}
+				if user == author && args[0] == "chat" {
+					deleteCmd := exec.CommandContext(ctx, binary, "chat", "delete", chat, "--agent", agentSlug, "--yes")
+					deleteCmd.Dir, deleteCmd.Env = dir, cmd.Env
+					deleteOutput, deleteErr := deleteCmd.CombinedOutput()
+					if deleteErr == nil || !strings.Contains(string(deleteOutput), "409") {
+						t.Fatalf("author binary chat deletion did not retain private provenance: exit=%v", deleteErr)
+					}
+				}
 				if user == admin && args[1] == "debug" {
 					// Actual SQL Page deletion/FK cascade, not HTTP-delete acceptance.
 					execOrFatal(t, pages.db, `DELETE FROM pages WHERE id=?`, result.PageID)

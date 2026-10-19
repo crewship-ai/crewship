@@ -172,6 +172,8 @@ Its stored tool results and live messages cannot expose the output to an ADMIN;
 OWNER inspection is audited before delivery. Existing transcript-sharing links
 cannot publish this protected conversation. Create new private documents from
 your own private conversation; administrative chat access is not creation consent.
+Deleting a protected source conversation currently returns 409: retained log
+copies still depend on its privacy record. Ordinary chat deletion is unaffected.
 
 The run creates a populated document and returns its saved link. Reopening a
 result does not grant a later run permission to edit it. Repeating an uncertain
