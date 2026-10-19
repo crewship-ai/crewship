@@ -88,7 +88,9 @@ DELETE /api/v1/workspaces/{workspaceId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/logo roleManage
 DELETE /api/v1/workspaces/{workspaceId}/members/{memberId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-folders/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-templates/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft roleCreate
@@ -143,6 +145,7 @@ PATCH /api/v1/workflow-templates/{id} roleCreate
 PATCH /api/v1/workspaces/{workspaceId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/members/{memberId} roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities roleManage
+PATCH /api/v1/workspaces/{workspaceId}/pipeline-folders/{id} roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
@@ -365,10 +368,14 @@ POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
 POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply roleManage
 POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview roleManage
 POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID} roleManage
+POST /api/v1/workspaces/{workspaceId}/pipeline-folders roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-folders/move roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules roleInline
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-templates roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/drafts roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test roleCreate

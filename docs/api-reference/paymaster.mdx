@@ -298,6 +298,7 @@ One rule for the whole API (#3590): workspace `OWNER` and `ADMIN` read money amo
 | `GET /workspaces/{ws}/pipelines/{slug}/runs` (journal rows) | `cost_usd`, `total_cost_usd` in `payload` |
 | `POST …/pipelines/{slug}/run` (sync result), `…/pipelines/{slug}/dry_run`, `…/pipelines/test_run`, `…/pipelines/{slug}/step_run`, `…/pipelines/runs/{runId}/replay` | `cost_usd`, `estimated_cost_usd` |
 | `GET /workspaces/{ws}/pipelines/{slug}/budget`, `…/pipelines/budget-summary` | `monthly_budget_usd`, `spent_usd`, `pct_used`, `total_budget_usd`, `total_spent_usd` — **`has_budget` and `over_budget` stay** |
+| `GET /workspaces/{ws}/pipeline-health` | `routines[].spend_usd` |
 | `GET /api/v1/journal`, `GET /api/v1/journal/{id}`, `GET /api/v1/journal/stream` (SSE) | cost keys in `payload` (`cost_usd`, `total_cost_usd`, `spent_usd`, `limit_usd`, `util_pct`, …) and amounts in `summary` |
 | `GET /api/v1/runs`, `GET /api/v1/runs/{id}`, `GET /api/v1/agents/{agentId}/runs` | `metadata.total_cost_usd`, `metadata.model_usage.*.costUSD` |
 | `GET /api/v1/chats/{chatId}/messages`, `GET /api/v1/chats/{chatId}/stream` (NDJSON) | `metadata.total_cost_usd`, `metadata.model_usage.*.costUSD` |

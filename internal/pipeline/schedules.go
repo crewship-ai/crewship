@@ -1344,6 +1344,18 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		return
 	}
 
+	// concurrency_policy "skip" (ODCH-RT-25): the previous run still holds the
+	// slot, so this occurrence is dropped on purpose. SKIPPED, like a
+	// non-active routine: no failure, no alert, no circuit-breaker tick.
+	if SkipsStartWhenBusy(pipeline.DefinitionJSON, runErr) {
+		s.logger.Info("pipeline scheduler: skipping start, the previous run is still going",
+			"schedule", sched.ID, "pipeline", pipeline.Slug)
+		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
+			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
+		}
+		return
+	}
+
 	status := "FAILED"
 	runID := ""
 	if res != nil {

@@ -5,9 +5,11 @@
 // running routine. Opened from the top bar (?view=intro) and shown under the
 // empty state of a workspace without routines.
 //
-// Left out on purpose (ODCH-RT-08): the template gallery (there is no
-// template catalogue), "In this workspace this week" (numbers an empty
-// workspace does not have) and the animated demo run (example data).
+// "In this workspace this week" (ODCH-RT-08) is shown only with real figures:
+// the runs of the last 7 days, the share that finished without help, and the
+// month's spend. Left out on purpose: the animated demo run (example data) and
+// the template gallery (routine templates exist as an API and CLI, no
+// gallery here yet).
 
 import { Hand, Lock, Play, Plus, Workflow } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -36,7 +38,26 @@ const HOW = [
   { title: "Publish", text: "Turn it on. Every run gets its own page: each step, what it produced, what it cost and where it stopped." },
 ]
 
-export function RoutinesIntro({ onNew, compact = false }: { onNew?: () => void; compact?: boolean }) {
+export interface IntroProof {
+  runs: number
+  /** Share of the finished runs that completed, or null when none finished. */
+  finishedPct: number | null
+  /** The month's spend, or null while unknown. */
+  spendUsd: number | null
+  month: string
+}
+
+export function RoutinesIntro({
+  onNew,
+  compact = false,
+  proof,
+  onOverview,
+}: {
+  onNew?: () => void
+  compact?: boolean
+  proof?: IntroProof | null
+  onOverview?: () => void
+}) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-6 md:px-6" data-testid="routines-intro">
       {!compact && (
@@ -98,6 +119,28 @@ export function RoutinesIntro({ onNew, compact = false }: { onNew?: () => void; 
           </p>
         )}
       </section>
+
+      {proof && proof.runs > 0 && (
+        <section aria-label="In this workspace this week" className="flex flex-col gap-3 rounded-lg border border-hairline bg-card p-4">
+          <h2 className="text-label font-medium text-muted-foreground">In this workspace this week</h2>
+          <div className="flex flex-wrap gap-x-8 gap-y-2">
+            <span className="flex flex-col"><b className="text-title font-bold tabular-nums text-foreground">{proof.runs}</b><span className="text-label text-muted-foreground">runs</span></span>
+            {proof.finishedPct !== null && (
+              <span className="flex flex-col"><b className="text-title font-bold tabular-nums text-foreground">{proof.finishedPct} %</b><span className="text-label text-muted-foreground">finished without help</span></span>
+            )}
+            {proof.spendUsd !== null && (
+              <span className="flex flex-col"><b className="text-title font-bold tabular-nums text-foreground">${proof.spendUsd.toFixed(2)}</b><span className="text-label text-muted-foreground">spent in {proof.month}</span></span>
+            )}
+          </div>
+          {onOverview && (
+            <div>
+              <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" onClick={onOverview}>
+                Open the overview
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

@@ -33,6 +33,7 @@ var Keys = map[string]struct{}{
 	"cost_30d_usd":         {},
 	"total_cost_24h":       {},
 	"spent_usd":            {},
+	"spend_usd":            {}, // routine Health rows (rolling-window spend)
 	"limit_usd":            {},
 	"remaining_usd":        {},
 	"monthly_budget_usd":   {},

@@ -82,7 +82,8 @@ spec:
 
   # ---- any other routine.v1.json field ----
   # Keys this page does not list ride through untouched — guardrails,
-  # integrations_required, concurrency_key, max_concurrent, outputs,
+  # integrations_required, concurrency_key, max_concurrent,
+  # concurrency_policy (queue | skip), outputs,
   # display_name, agentless, hooks, eval, resources, execution_tier,
   # parallelism. `schemas/routine.v1.json` is the full list; run
   # `crewship routine schema` to print it.

@@ -110,7 +110,7 @@ describe("routine health with spend withheld", () => {
       [],
       { month: "2026-10", routines: [{ slug: "weekly", has_budget: true }] },
     )
-    expect(rows[0].spentMonth).toBeNull()
+    expect(rows[0].spent).toBeNull()
   })
 })
 

@@ -103,6 +103,7 @@ func TestCostVisibility_EveryCostCarryingEndpoint(t *testing.T) {
 		{"routine run-records", false, "/api/v1/workspaces/" + wsID + "/pipelines/cv-pipe/run-records", map[string]string{"slug": "cv-pipe"}, pipes.ListRunRecords},
 		{"routine runs (journal)", false, "/api/v1/workspaces/" + wsID + "/pipelines/cv-pipe/runs", map[string]string{"slug": "cv-pipe"}, pipes.ListRuns},
 		{"routine budget", false, "/api/v1/workspaces/" + wsID + "/pipelines/cv-pipe/budget", map[string]string{"slug": "cv-pipe"}, pipes.GetBudget},
+		{"routine health", false, "/api/v1/workspaces/" + wsID + "/pipeline-health", nil, pipes.GetHealth},
 		{"routine budget summary", false, "/api/v1/workspaces/" + wsID + "/pipelines/budget-summary", nil, pipes.GetBudgetSummary},
 		{"journal list", false, "/api/v1/journal", nil, journalH.List},
 		{"journal entry", false, "/api/v1/journal/cv-cost", map[string]string{"id": "cv-cost"}, journalH.Get},

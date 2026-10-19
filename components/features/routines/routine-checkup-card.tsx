@@ -6,12 +6,14 @@ import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
+import { useRoutineCheckup } from "@/hooks/use-routine-checkup"
 import { checkupCounts, routineChecks, type Check, type CheckTone, type HealthRoutine, type HealthRun } from "@/lib/routine-health"
 
-// Checkup (Harbor 2 RT-06). Only checks the server's data can prove: the
-// routine's status and draft, its newest runs and the last failure. The agent,
-// connection, cost and egress checks of `crewship routine doctor` need a
-// server endpoint (#3468) and are not listed rather than faked.
+// Checkup (Harbor 2 RT-06). With a workspace the card shows the server's
+// checklist (GET .../checkup: agents, credentials, cost cap, failures in a
+// row, the schedule circuit breaker, untested changes). Until that answers, or
+// if it cannot, it shows only what the page can prove itself: the routine's
+// status and draft, its newest runs and the last failure.
 
 const ICON: Record<CheckTone, { Icon: typeof CheckCircle2; cls: string }> = {
   ok: { Icon: CheckCircle2, cls: "text-success" },
@@ -39,8 +41,10 @@ function CheckRow({ check, onTab }: { check: Check; onTab: (tab: Tab) => void })
   )
 }
 
-export function RoutineCheckupCard({ routine, runs, onTab }: { routine: HealthRoutine; runs: HealthRun[]; onTab: (tab: Tab) => void }) {
-  const checks = React.useMemo(() => routineChecks({ routine, runs }), [routine, runs])
+export function RoutineCheckupCard({ routine, runs, onTab, workspaceId }: { routine: HealthRoutine; runs: HealthRun[]; onTab: (tab: Tab) => void; workspaceId?: string }) {
+  const local = React.useMemo(() => routineChecks({ routine, runs }), [routine, runs])
+  const server = useRoutineCheckup(workspaceId, routine.slug, `${runs[0]?.id ?? ""}:${routine.status ?? ""}:${routine.draft?.revision ?? ""}`)
+  const checks = server && server.length > 0 ? server : local
   const n = checkupCounts(checks)
   const [showOk, setShowOk] = React.useState(false)
   const issues = checks.filter((c) => c.tone !== "ok")
@@ -59,7 +63,7 @@ export function RoutineCheckupCard({ routine, runs, onTab }: { routine: HealthRo
           </span>
           <span>
             <b className="block text-sm font-medium">{n.bad ? `${n.bad} to fix` : n.warn ? `${n.warn} to check` : "Everything looks right"}</b>
-            <small className="block text-xs text-muted-foreground">From what the server knows: status, changes and the latest runs.</small>
+            <small className="block text-xs text-muted-foreground">{server && server.length > 0 ? "Checked by the server, and again after every change and run." : "From what the page knows: status, changes and the latest runs."}</small>
           </span>
         </div>
         <ul className="divide-y divide-border/50">

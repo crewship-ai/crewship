@@ -31,6 +31,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"id": str(), "workspace_id": str(), "slug": str(), "revision": integer(),
 		"base_pipeline_id": str(), "base_revision": integer(), "document": anyObject(),
 		"updated_by": str(), "created_at": str(), "updated_at": str(),
+		"test_result": ref("RoutineTestResult"),
 	})
 	draft["required"] = []string{"id", "workspace_id", "slug", "revision", "base_pipeline_id", "base_revision", "document", "updated_by", "created_at", "updated_at"}
 	draftSave := obj(map[string]any{
@@ -158,9 +159,14 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	fixtureResult := obj(map[string]any{"execution_mode": str(), "step_id": str(), "step_type": str(), "definition_hash": str(), "fixture_hash": str(), "output_source": str(), "output": str(), "valid": boolean(), "validation_declared": boolean(), "validation_reason": str(), "limitations": arr(str())})
 	fixtureResult["required"] = []string{"execution_mode", "step_id", "step_type", "definition_hash", "fixture_hash", "output_source", "output", "valid", "validation_declared", "limitations"}
 	components := map[string]any{
-		"WorkflowFixtureTestRequest":  fixtureTest,
-		"RoutineFixtureResult":        fixtureResult,
-		"RoutineDraft":                draft,
+		"WorkflowFixtureTestRequest": fixtureTest,
+		"RoutineFixtureResult":       fixtureResult,
+		"RoutineDraft":               draft,
+		"RoutineTestResult": func() map[string]any {
+			t := obj(map[string]any{"passed": boolean(), "status": str(), "tested_at": str(), "tested_by": str()})
+			t["required"] = []string{"passed", "status", "tested_at"}
+			return t
+		}(),
 		"RoutineDraftSaveRequest":     draftSave,
 		"RoutineDraftRevisionRequest": draftRevision,
 		"RoutineDraftList":            arr(draftListEntry),

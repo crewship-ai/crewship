@@ -1,10 +1,8 @@
-// Routine checkup and Health rows (Harbor 2 RT-06, RT-07), composed in the
-// browser from data the server already returns: the routine's status and
-// draft, its newest runs, and GET /pipelines/budget-summary. No endpoint
-// exists for a checkup; a check the data cannot prove is not listed.
-// Remaining for the backend (#3468): GET .../pipelines/{slug}/checkup with the
-// agent / credential / egress / cost checks and a breaker counter, and a
-// per-routine 30-day aggregate.
+// Routine checkup and Health rows (Harbor 2 RT-06, RT-07). Health takes its
+// bars, success rate and 30-day spend from GET .../pipeline-health when the
+// page has it (ODCH-RT-07), and from the runs the page loaded and the monthly
+// budget summary when it does not. The checkup is composed from the routine's
+// status, draft and newest runs; a check the data cannot prove is not listed.
 
 import { runBarTone, type RunBarTone } from "@/lib/routine-page"
 import type { BudgetSummary } from "@/hooks/use-routine-budget"
@@ -86,6 +84,26 @@ export function checkupCounts(checks: Check[]) {
   }
 }
 
+/** One routine of GET .../pipeline-health. */
+export interface ServerRoutineHealth {
+  slug: string
+  /** Newest runs, oldest first. */
+  last_outcomes: string[]
+  finished: number
+  succeeded: number
+  success_pct?: number | null
+  runs: number
+  spend_usd?: number
+}
+
+const OUTCOME_BAR: Record<string, { tone: RunBarTone; label: string }> = {
+  completed: { tone: "ok", label: "Completed" },
+  failed: { tone: "bad", label: "Could not finish" },
+  stopped: { tone: "mut", label: "Stopped" },
+  waiting: { tone: "warn", label: "Waiting for a person" },
+  running: { tone: "info", label: "Running" },
+}
+
 export interface HealthBar {
   id: string
   tone: RunBarTone
@@ -101,25 +119,48 @@ export interface HealthRow {
   finished: number
   ok: number
   successPct: number | null
-  /** USD spent this calendar month, or null when the summary is unavailable. */
-  spentMonth: number | null
+  /** USD spent in `spentWindow`, or null when it is not known. */
+  spent: number | null
+  spentWindow: "30 days" | "this month"
   checkup: ReturnType<typeof checkupCounts>
 }
 
 /** One row per routine from the newest runs it has in `runs`. */
-export function routineHealthRows(routines: HealthRoutine[], runs: HealthRun[], spend: BudgetSummary | null, n = 20): HealthRow[] {
+export function routineHealthRows(
+  routines: HealthRoutine[],
+  runs: HealthRun[],
+  spend: BudgetSummary | null,
+  n = 20,
+  server?: ReadonlyMap<string, ServerRoutineHealth> | null,
+): HealthRow[] {
   const bySlug = new Map<string, HealthRun[]>()
   for (const r of newestFirst(runs)) {
     const l = bySlug.get(r.pipeline_slug) ?? []
     if (l.length < n) l.push(r)
     bySlug.set(r.pipeline_slug, l)
   }
-  // Below ADMIN the summary carries no amounts (#3590): spentMonth stays
+  // Below ADMIN the summary carries no amounts (#3590): spent stays
   // null ("not shown") instead of reading the missing field as $0.
   const amountsShown = (spend?.routines ?? []).every((s) => isCostShown(s.spent_usd))
   const spent = new Map((spend?.routines ?? []).map((s) => [s.slug, s.spent_usd ?? 0]))
   const rows = routines.map((routine): HealthRow => {
     const mine = bySlug.get(routine.slug) ?? []
+    if (server) {
+      // The aggregate is the whole history; a routine it does not list has not run.
+      const agg = server.get(routine.slug)
+      return {
+        slug: routine.slug,
+        name: routine.name || routine.slug,
+        bars: (agg?.last_outcomes ?? []).map((o, i) => ({ id: `${routine.slug}-${i}`, ...(OUTCOME_BAR[o] ?? OUTCOME_BAR.completed) })),
+        runCount: agg?.last_outcomes.length ?? 0,
+        finished: agg?.finished ?? 0,
+        ok: agg?.succeeded ?? 0,
+        successPct: agg?.success_pct ?? null,
+        spent: agg && isCostShown(agg.spend_usd) ? agg.spend_usd : null,
+        spentWindow: "30 days",
+        checkup: checkupCounts(routineChecks({ routine, runs: mine })),
+      }
+    }
     const done = mine.filter(isFinished).filter((r) => r.status !== "cancelled")
     const ok = done.filter((r) => !isFailed(r)).length
     return {
@@ -130,7 +171,8 @@ export function routineHealthRows(routines: HealthRoutine[], runs: HealthRun[], 
       finished: done.length,
       ok,
       successPct: done.length ? Math.round((ok / done.length) * 100) : null,
-      spentMonth: spend && amountsShown ? (spent.get(routine.slug) ?? 0) : null,
+      spent: spend && amountsShown ? (spent.get(routine.slug) ?? 0) : null,
+      spentWindow: "this month",
       checkup: checkupCounts(routineChecks({ routine, runs: mine })),
     }
   })

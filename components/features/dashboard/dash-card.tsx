@@ -56,7 +56,7 @@ export function DashCard({
         {(concept || icon) && (
           <ConceptIcon concept={concept} icon={icon} accent="blue" variant="chip" className="size-[1.8846rem] rounded-md" />
         )}
-        <h2 className="min-w-0 truncate text-control font-semibold text-foreground">{title}</h2>
+        <h2 className="shrink-0 text-control font-semibold text-foreground">{title}</h2>
         {meta != null && (
           <span data-slot="dashboard-card-hint" className="min-w-0 truncate text-label tabular-nums text-muted-foreground">
             {meta}

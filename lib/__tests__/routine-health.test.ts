@@ -80,14 +80,39 @@ describe("routineHealthRows", () => {
 
   it("shows spend as this month from the budget summary, never as 30 days", () => {
     const rows = routineHealthRows(routines, [], { month: "2026-10", routines: [{ slug: "weekly", monthly_budget_usd: 0, spent_usd: 4.5 }], total_budget_usd: 0, total_spent_usd: 4.5 })
-    expect(rows[0].spentMonth).toBe(4.5)
-    expect(rows[1].spentMonth).toBe(0)
-    expect(routineHealthRows(routines, [], null)[0].spentMonth).toBeNull()
+    expect(rows[0].spent).toBe(4.5)
+    expect(rows[1].spent).toBe(0)
+    expect(routineHealthRows(routines, [], null)[0].spent).toBeNull()
   })
 
   it("carries the checkup counts and sorts routines to fix first", () => {
     const rows = routineHealthRows([{ slug: "a", name: "A", status: "active" as const }, { slug: "b", name: "B", status: "proposed" as const }], [], null)
     expect(rows[0].slug).toBe("b")
     expect(rows[0].checkup.bad).toBe(1)
+  })
+})
+
+describe("routineHealthRows with the server's figures (ODCH-RT-07)", () => {
+  const routines = [{ slug: "weekly", name: "Weekly" }, { slug: "idle", name: "Idle" }]
+  const server = new Map([
+    ["weekly", { slug: "weekly", last_outcomes: ["completed", "completed", "failed", "stopped", "running"], finished: 3, succeeded: 2, success_pct: 67, runs: 40, spend_usd: 4.2 }],
+  ])
+
+  it("takes bars, success rate and 30-day spend from the aggregate, not from the loaded runs", () => {
+    const loaded = [{ id: "r1", pipeline_slug: "weekly", status: "failed", started_at: "2026-10-17T10:00:00Z" }]
+    const rows = routineHealthRows(routines, loaded, null, 20, server)
+    const weekly = rows.find((r) => r.slug === "weekly")!
+    expect(weekly.bars.map((b) => b.tone)).toEqual(["ok", "ok", "bad", "mut", "info"])
+    expect(weekly).toMatchObject({ runCount: 5, finished: 3, ok: 2, successPct: 67, spent: 4.2, spentWindow: "30 days" })
+  })
+
+  it("a routine the aggregate does not list has not run in that history", () => {
+    const idle = routineHealthRows(routines, [], null, 20, server).find((r) => r.slug === "idle")!
+    expect(idle).toMatchObject({ runCount: 0, successPct: null, spent: null })
+  })
+
+  it("without the aggregate it still says this month", () => {
+    const row = routineHealthRows(routines, [], { month: "2026-10", routines: [{ slug: "weekly", monthly_budget_usd: 0, spent_usd: 1 }], total_budget_usd: 0, total_spent_usd: 1 }, 20)[0]
+    expect(row).toMatchObject({ spent: 1, spentWindow: "this month" })
   })
 })

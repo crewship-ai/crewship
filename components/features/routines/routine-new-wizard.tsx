@@ -616,7 +616,26 @@ export function RoutineNewWizard({ open, onOpenChange, workspaceId, routines, on
                   onAppearance={() => setPicking(true)}
                 />
               )}
-              {step === 1 && <WhenPane state={state} set={set} cron={cron} next={next} />}
+              {step === 1 && (
+                <WhenPane
+                  state={state}
+                  set={set}
+                  cron={cron}
+                  next={next}
+                  onPhrase={async (phrase, tz) => {
+                    try {
+                      const params = new URLSearchParams({ phrase, count: "1" })
+                      if (tz) params.set("timezone", tz)
+                      const res = await apiFetch(`${base}/pipeline-schedules/preview?${params}`)
+                      const body = (await res.json().catch(() => ({}))) as { cron_expr?: string; error?: string }
+                      if (!res.ok || !body.cron_expr) return { error: body.error || "That is not a schedule Crewship understands." }
+                      return { cron: body.cron_expr }
+                    } catch {
+                      return { error: "Could not reach the server to read that." }
+                    }
+                  }}
+                />
+              )}
               {step === 2 && (
                 <StepsPane
                   state={state}
@@ -715,7 +734,7 @@ function Summary({
     [Users, "Crew", crew ? <span className="inline-flex items-center gap-1.5"><CrewIcon icon={crew.icon || "folder"} color={crew.color} size="sm" />{crew.name}</span> : "Not chosen"],
     [CalendarClock, "When", whenText(state.trigger), state.trigger.kind === "schedule" ? state.trigger.timezone : undefined],
     [List, "Steps", `${state.steps.length} ${state.steps.length === 1 ? "step" : "steps"}`, `${agentSteps} by agents · ${asks} ${asks === 1 ? "asks" : "ask"} you${calls ? ` · ${calls} web ${calls === 1 ? "call" : "calls"}` : ""}`],
-    [Gauge, "Limit", state.maxCost.trim() && cost > 0 ? `$${cost.toFixed(2)} per run` : "No cost limit", state.concurrency === "parallel" ? `${state.sideBySide} at a time` : "one at a time"],
+    [Gauge, "Limit", state.maxCost.trim() && cost > 0 ? `$${cost.toFixed(2)} per run` : "No cost limit", state.concurrency === "parallel" ? `${state.sideBySide} at a time` : state.concurrency === "skip" ? "one at a time, skips a new start" : "one at a time"],
     [Shield, "Goes live", review ? <span className="text-warn">After a Manager review</span> : "Right after the test"],
   ]
   return (
