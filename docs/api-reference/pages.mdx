@@ -2424,3 +2424,5 @@ hidden count. Results contain no document contents, transcript or execution
 credentials. A missing or inaccessible chat returns 404; invalid credentials
 return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
+
+Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
