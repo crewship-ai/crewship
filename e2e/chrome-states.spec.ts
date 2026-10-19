@@ -52,12 +52,21 @@ test.describe("phone", () => {
 
   test("offline 390: one banner, text wraps, Retry ≥ 44 px", async ({ page }) => {
     // Every realtime socket closes at once, so the shell loses its connection.
+    // #3783: Retry now is offered only once the ~2 min of fast retries are
+    // spent, so the page clock is run past them.
+    await page.clock.install()
     await page.routeWebSocket(/\/ws/, (ws) => { ws.close() })
     await page.goto("/issues")
-    const banner = page.locator('[data-state="offline"]')
-    await expect(banner).toBeVisible({ timeout: 15_000 })
+    const banner = page.locator('[data-testid="realtime-banner"]')
+    for (let i = 0; i < 12; i++) {
+      await page.clock.fastForward(31_000)
+      // Real time for the ticket request between attempts.
+      await page.waitForTimeout(250)
+      if (await banner.getAttribute("data-state").catch(() => null) === "unreachable") break
+    }
+    await expect(banner).toHaveAttribute("data-state", "unreachable", { timeout: 15_000 })
     await expect(banner).toHaveCount(1)
-    await expect(page.getByText(/Reconnecting…|Connection lost\./)).toHaveCount(1)
+    await expect(page.getByText(/Can't reach Crewship/)).toHaveCount(1)
     const retry = banner.getByRole("button", { name: "Retry now" })
     const box = await retry.boundingBox()
     expect(box!.height).toBeGreaterThanOrEqual(44)
@@ -85,7 +94,7 @@ test.describe("legacy links without JavaScript", () => {
 test("Dashboard offline shows one Reconnecting banner", async ({ page }) => {
   await page.routeWebSocket(/\/ws/, (ws) => { ws.close() })
   await page.goto("/")
-  await expect(page.locator('[data-state="offline"]').first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-testid="realtime-banner"]')).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1_000)
   await expect(page.getByText(/Reconnecting…/)).toHaveCount(1)
 })

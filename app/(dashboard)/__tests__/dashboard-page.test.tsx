@@ -17,7 +17,8 @@ const state = vi.hoisted(() => {
     gaps: new Map<string, { crewId: string }[]>(),
     inbox: { items: [] as unknown[], loading: false, error: null as string | null, activeByKind: {} as Record<string, number>, decisionCount: 0, refresh: vi.fn() },
     schedules: [] as unknown[],
-    realtime: "connected" as "connecting" | "connected" | "disconnected" | "error" | "unavailable",
+    realtime: "connected" as "connecting" | "connected" | "disconnected" | "offline" | "error" | "unavailable",
+    reason: null as null | "retrying" | "restart" | "unreachable" | "browser-offline",
   }
 })
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => state.workspace }))
@@ -25,7 +26,7 @@ vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => state.admin, useS
 vi.mock("@/lib/server-base", () => ({ serverFetch: (...args: unknown[]) => state.fetch(...args) }))
 vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeEvent: (event: string, callback: () => void) => { state.events.set(event, callback) },
-  useRealtime: () => ({ status: state.realtime, subscribe: () => () => {}, subscribeChannel: () => () => {} }),
+  useRealtime: () => ({ status: state.realtime, reason: state.reason, subscribe: () => () => {}, subscribeChannel: () => () => {} }),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/use-dashboard-data", () => ({
@@ -74,6 +75,7 @@ beforeEach(() => {
   state.inbox = { items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0, refresh: vi.fn() }
   state.schedules = []
   state.realtime = "connected"
+  state.reason = null
   for (const key of ["agents", "crews", "review", "progress", "completed", "runs", "insights", "capacity", "provisioning", "credentials", "spend", "volume"] as const) {
     state[key].data = undefined; state[key].isPending = false; state[key].isError = false; state[key].refetch.mockReset()
   }
@@ -372,15 +374,19 @@ it.each(["admin", "onboarding"])("redirects the %s landing without enabling dash
 
 // DSH-01 (#3483): offline = one "Reconnecting…" banner (kit OfflineBanner)
 // and the data under it dimmed and not clickable (kit StaleData), as v67
-// states.js draws the Offline state. A blip under 3 s is not offline — the
-// shell's realtime banner waits the same 3 s.
-it.each(["disconnected", "error"] as const)("offline (%s) for 3 s shows one Reconnecting banner and dims the data", async (status) => {
+// states.js draws the Offline state. A blip under 4 s is not offline — the
+// shell's realtime banner waits the same 4 s (#3783). A drop being retried
+// ("connecting" with a reason) is offline too; the first connect is not.
+it.each([
+  ["connecting", "retrying"], ["connecting", "restart"], ["offline", "unreachable"], ["offline", "browser-offline"], ["disconnected", null], ["error", null],
+] as const)("offline (%s/%s) for 4 s shows one Reconnecting banner and dims the data", async (status, reason) => {
   const view = render(<DashboardPage />)
   await loaded()
   vi.useFakeTimers({ now: new Date(2026, 9, 15, 14, 2) })
   state.realtime = status
+  state.reason = reason
   view.rerender(<DashboardPage />)
-  act(() => vi.advanceTimersByTime(2_999))
+  act(() => vi.advanceTimersByTime(3_999))
   expect(view.container.querySelector('[data-state="offline"]')).toBeNull()
   expect(view.container.querySelector(".page-stale")).toBeNull()
   act(() => vi.advanceTimersByTime(1))
@@ -402,12 +408,14 @@ it("Retry now reads the dashboard again; reconnecting lifts the dimming", async 
   const view = render(<DashboardPage />)
   await loaded()
   vi.useFakeTimers()
-  state.realtime = "disconnected"
+  state.realtime = "connecting"
+  state.reason = "retrying"
   view.rerender(<DashboardPage />)
-  act(() => vi.advanceTimersByTime(3_000))
+  act(() => vi.advanceTimersByTime(4_000))
   fireEvent.click(screen.getByRole("button", { name: "Retry now" }))
   expect(state.invalidateA).toHaveBeenCalledTimes(1)
   state.realtime = "connected"
+  state.reason = null
   view.rerender(<DashboardPage />)
   expect(view.container.querySelector('[data-state="offline"]')).toBeNull()
   expect(view.container.querySelector(".page-stale")).toBeNull()

@@ -187,8 +187,9 @@ test.describe("touch", () => {
   })
 })
 
-// DSH-01 (#3483): v67 Offline state — one "Reconnecting…" banner with the
-// time the data is from, and the data under it dimmed and not clickable.
+// DSH-01 (#3483): v67 Offline state — one "Reconnecting…" banner, and the
+// data under it dimmed and not clickable. The app's realtime banner holds the
+// one slot (#3783), so the page's own "You see data from" banner steps aside.
 // The realtime socket is cut in the browser (routeWebSocket), not the server.
 test.describe("offline", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
@@ -211,15 +212,14 @@ test.describe("offline", () => {
     )
     await page.goto("/")
     await expect(tiles(page)).toHaveCount(4)
-    await expect(page.locator('[data-state="offline"]')).toHaveCount(0)
+    await expect(page.locator('[data-testid="realtime-banner"], [data-state="offline"]')).toHaveCount(0)
 
     cut = true
     for (const ws of open.splice(0)) await ws.close()
 
-    const banner = page.locator('[data-state="offline"]')
+    const banner = page.locator('[data-testid="realtime-banner"], [data-state="offline"]')
     await expect(banner).toHaveCount(1, { timeout: 10_000 })
     await expect(banner).toContainText("Reconnecting…")
-    await expect(banner).toContainText(/You see data from \d{1,2}:\d{2}/)
     const stale = page.locator(".page-stale")
     await expect(stale).toHaveCount(1)
     await expect(stale).toHaveAttribute("inert", "")

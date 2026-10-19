@@ -24,7 +24,7 @@ One message in one tone, the worst state winning:
 | **N agent errors** (red) | At least one agent is in `ERROR` |
 | **N queued** (amber) | Assignments are waiting in the admission queue |
 | **No agents** (grey) | The workspace has no agents, so nothing can run |
-| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current |
+| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current. While the real-time channel is being retried (a restart, usually) the pill stays amber; it turns red only once Crewship cannot be reached. **Offline** is amber when the browser itself has no network |
 
 Clicking the pill opens **System status**: engine and real-time state separately, the agent breakdown (total, running, idle, queued) while it is current, and — when agents are in error — the agents themselves, each linking to `/crews?agent=<slug>`. Data comes from `GET /api/v1/agents/crews-status`; the errored list reads `GET /api/v1/agents` only while the popover is open.
 

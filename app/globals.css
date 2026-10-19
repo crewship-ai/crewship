@@ -1437,6 +1437,9 @@ body {
   .page-banner-ok > svg { color: var(--chip-ok-fg); }
   .page-banner-info { background: var(--chip-info-bg); }
   .page-banner-info > svg { color: var(--chip-info-fg); }
+  /* neutral: the app is coping, nothing to act on yet (Reconnecting…). */
+  .page-banner-neutral { background: var(--chip-neutral-bg); }
+  .page-banner-neutral > svg { color: var(--chip-neutral-fg); }
   /* bad: something failed and the page is incomplete (COM-03). */
   .page-banner-bad { background: var(--chip-danger-bg); }
   .page-banner-bad > svg { color: var(--chip-danger-fg); }

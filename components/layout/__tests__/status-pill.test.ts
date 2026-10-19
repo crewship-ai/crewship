@@ -156,3 +156,25 @@ describe("describeSystemStatus — what the pill itself shows", () => {
     })
   }
 })
+
+describe("describeSystemStatus — a restart does not turn the pill red (#3783)", () => {
+  it("says Reconnecting, in warn, while the realtime socket retries a drop", () => {
+    for (const engine of ["connected", "degraded", "disconnected"]) {
+      for (const reason of ["retrying", "restart"] as const) {
+        const s = describeSystemStatus(engine, "connecting", OK, reason)
+        expect(s.connection).toEqual({ label: "Reconnecting", tone: "warn" })
+        expect(s.display.tone).not.toBe("destructive")
+      }
+    }
+  })
+
+  it("keeps Connecting for the first connect", () => {
+    expect(describeSystemStatus("connected", "connecting", OK, null).connection.label).toBe("Connecting")
+  })
+
+  it("goes red only once Crewship cannot be reached", () => {
+    expect(describeSystemStatus("disconnected", "offline", OK, "unreachable").connection).toEqual({ label: "Offline", tone: "destructive" })
+    // The browser has no network: nothing is wrong with Crewship.
+    expect(describeSystemStatus("disconnected", "offline", OK, "browser-offline").connection).toEqual({ label: "Offline", tone: "warn" })
+  })
+})

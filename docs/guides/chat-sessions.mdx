@@ -599,7 +599,7 @@ There is no terminal or diff in the chat: what an agent is running is the [Crew 
 
 ## Presence and reconnect
 
-The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, a reconnect banner appears at the top of the chat ("Reconnecting…"), the composer disables sends, and queued user messages are flushed once the socket re-establishes.
+The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, the composer disables sends and queued user messages are flushed once the socket re-establishes. A drop shorter than 4 s shows nothing; after that a neutral bar at the top of the chat says "Reconnecting…" (or "Crewship is restarting · reconnecting…" during a planned restart, or "You're offline · Crewship will reconnect when you're back" when the browser has no network). After about two minutes of failed attempts it turns into a warning, "Can't reach Crewship · retrying every 30 s", with **Retry now**; Crewship keeps retrying on its own, and at once when the network returns, the tab becomes visible or the window regains focus. When the app-wide banner already says the same thing, the chat's bar steps aside, and the bar disappears without a "Reconnected" notice once the socket is back.
 
 Network blips do not lose messages. Sends that were in-flight at disconnect time are retried with the same client-generated `request_id`; the server idempotently dedupes by `request_id` so a retry never duplicates a turn.
 

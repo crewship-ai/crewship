@@ -10,9 +10,10 @@ import { apiFetch } from "@/lib/api-fetch"
 
 // Harbor 2 G09: the app has three banners — realtime, runtime, update — and
 // shows at most one at a time, highest priority first. A page's own offline
-// banner joins the same queue so "Reconnecting…" is never said twice.
+// banner joins the same queue so "Reconnecting…" is never said twice. The
+// realtime states themselves (#3783) are in realtime-reconnect-banners.test.tsx.
 
-const realtime = vi.hoisted(() => ({ status: "connected" as string, retry: vi.fn() }))
+const realtime = vi.hoisted(() => ({ status: "connected" as string, reason: null as string | null, retry: vi.fn() }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => realtime }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 const fetchMock = vi.mocked(apiFetch)
@@ -25,6 +26,7 @@ const flush = async () => { await act(async () => { await Promise.resolve(); awa
 beforeEach(() => {
   vi.useFakeTimers()
   realtime.status = "connected"
+  realtime.reason = null
   realtime.retry.mockReset()
   runtimeAvailable = true
   version = { current: "0.8.0", latest: "0.9.0", newer: true, url: "https://example.test/notes" }
@@ -71,18 +73,19 @@ describe("app banner queue", () => {
     expect(screen.queryByText(/is available/)).toBeNull()
 
     cleanup()
-    realtime.status = "disconnected"
+    realtime.status = "connecting"
+    realtime.reason = "retrying"
     const { rerender } = render(<Shell />)
     await flush()
-    act(() => { vi.advanceTimersByTime(3000) })
-    expect(shown()).toEqual(["offline"])
+    act(() => { vi.advanceTimersByTime(4000) })
+    expect(shown()).toEqual(["reconnecting"])
     expect(screen.getByText("Reconnecting…")).toBeInTheDocument()
 
     realtime.status = "connected"
+    realtime.reason = null
     rerender(<Shell />)
-    expect(shown()).toEqual(["reconnected"])
-    act(() => { vi.advanceTimersByTime(2000) })
-    // The realtime banner gives the slot back; the runtime warning returns.
+    // The realtime banner gives the slot back at once (no "Reconnected");
+    // the runtime warning returns.
     expect(shown()).toEqual(["runtime"])
   })
 
@@ -109,58 +112,53 @@ describe("app banner queue", () => {
   })
 
   it("a page's own offline banner steps aside while the app says the same", async () => {
-    realtime.status = "disconnected"
+    realtime.status = "connecting"
+    realtime.reason = "retrying"
     const page = <OfflineBanner since="14:02" onRetry={() => {}} />
     const { rerender } = render(<Shell page={page} />)
     await flush()
-    // Before the app's 3 s delay the page's banner is the only one.
+    // Before the app's 4 s grace the page's banner is the only one.
     expect(screen.getByText(/You see data from 14:02/)).toBeInTheDocument()
-    act(() => { vi.advanceTimersByTime(3000) })
+    act(() => { vi.advanceTimersByTime(4000) })
     expect(screen.queryByText(/You see data from 14:02/)).toBeNull()
     expect(screen.getAllByText("Reconnecting…")).toHaveLength(1)
 
     realtime.status = "connected"
+    realtime.reason = null
     rerender(<Shell page={page} />)
-    act(() => { vi.advanceTimersByTime(2000) })
     expect(screen.getByText(/You see data from 14:02/)).toBeInTheDocument()
   })
 
-  it("the realtime banner names when the data was live, offers Retry now and does not pulse", async () => {
-    vi.setSystemTime(new Date(2026, 9, 17, 14, 2))
-    realtime.status = "error"
+  it("the unreachable banner warns, offers Retry now and does not pulse", async () => {
+    realtime.status = "offline"
+    realtime.reason = "unreachable"
     render(<Shell />)
     await flush()
-    act(() => { vi.advanceTimersByTime(3000) })
+    act(() => { vi.advanceTimersByTime(4000) })
     const banner = screen.getByRole("status")
-    expect(banner).toHaveTextContent("Connection lost. Live updates are paused. You see data from")
-    expect(banner.textContent).toMatch(/14:02|2:02/)
+    expect(banner).toHaveTextContent("Can't reach Crewship · retrying every 30 s")
+    expect(banner).toHaveAttribute("data-tone", "warn")
     expect(banner.className).not.toMatch(/animate-pulse/)
     fireEvent.click(screen.getByRole("button", { name: "Retry now" }))
     expect(realtime.retry).toHaveBeenCalledOnce()
   })
 
-  it("holds steady through retry attempts and only says Reconnected after an outage it announced", async () => {
-    realtime.status = "disconnected"
+  it("holds steady through retry attempts and goes without a Reconnected", async () => {
+    realtime.status = "connecting"
+    realtime.reason = "retrying"
     const { rerender } = render(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
-    act(() => { vi.advanceTimersByTime(3000) })
-    expect(shown()).toEqual(["offline"])
-    for (const s of ["connecting", "disconnected", "connecting"]) {
-      realtime.status = s
-      rerender(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
-      expect(shown()).toEqual(["offline"])
-    }
-    realtime.status = "connected"
+    act(() => { vi.advanceTimersByTime(4000) })
+    expect(shown()).toEqual(["reconnecting"])
+    // From reconnecting to unreachable the bar changes its words, it does
+    // not wait another 4 s.
+    realtime.status = "offline"
+    realtime.reason = "unreachable"
     rerender(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
-    expect(shown()).toEqual(["reconnected"])
-    act(() => { vi.advanceTimersByTime(2000) })
+    expect(shown()).toEqual(["unreachable"])
+    realtime.status = "connected"
+    realtime.reason = null
+    rerender(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
     expect(shown()).toEqual([])
-
-    // A blip shorter than 3 s is never announced, so nothing comes back.
-    realtime.status = "disconnected"
-    rerender(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
-    act(() => { vi.advanceTimersByTime(1000) })
-    realtime.status = "connected"
-    rerender(<AppBannerProvider><RealtimeStatusBanner /></AppBannerProvider>)
     act(() => { vi.advanceTimersByTime(5000) })
     expect(shown()).toEqual([])
   })

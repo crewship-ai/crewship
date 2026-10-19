@@ -1,21 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
-// DSH-01: the dashboard dims after 3 s without live updates. While the socket
-// retries, the status goes disconnected → connecting → disconnected; the
-// shell's banner (realtime-status-banner.tsx) counts the outage from the
-// first loss until "connected", and the dimming must agree with it.
+// DSH-01: the dashboard dims after the reconnect grace (4 s) without live
+// updates. While the socket retries, the status is "connecting" with a reason
+// (#3783); the shell's banner (realtime-status-banner.tsx) counts the outage
+// from the first loss until "connected", and the dimming must agree with it.
 
 let status = "connected"
-vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status }) }))
+let reason: string | null = null
+vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status, reason }) }))
 
 import { useDashboardOffline, OFFLINE_AFTER_MS } from "../use-dashboard-offline"
 
-beforeEach(() => { vi.useFakeTimers(); status = "connected" })
+beforeEach(() => { vi.useFakeTimers(); status = "connected"; reason = null })
 afterEach(() => vi.useRealTimers())
 
 describe("useDashboardOffline", () => {
-  it("a blip shorter than 3 s never dims", () => {
+  it("a blip shorter than the grace never dims", () => {
     const { result, rerender } = renderHook(() => useDashboardOffline())
     status = "disconnected"; rerender()
     act(() => { vi.advanceTimersByTime(OFFLINE_AFTER_MS - 500) })
@@ -24,14 +25,14 @@ describe("useDashboardOffline", () => {
     expect(result.current.offline).toBe(false)
   })
 
-  it("reconnect attempts inside the outage do not restart the 3 s", () => {
+  it("reconnect attempts inside the outage do not restart the grace", () => {
     const { result, rerender } = renderHook(() => useDashboardOffline())
-    status = "disconnected"; rerender()
-    for (let i = 0; i < 4; i++) {
+    status = "connecting"; reason = "retrying"; rerender()
+    for (let i = 0; i < 5; i++) {
       act(() => { vi.advanceTimersByTime(900) })
-      status = "connecting"; rerender()
-      act(() => { vi.advanceTimersByTime(100) })
       status = "disconnected"; rerender()
+      act(() => { vi.advanceTimersByTime(100) })
+      status = "connecting"; rerender()
     }
     expect(result.current.offline).toBe(true)
     expect(result.current.since).toMatch(/^\d{1,2}:\d{2}$/)
@@ -42,9 +43,9 @@ describe("useDashboardOffline", () => {
     status = "disconnected"; rerender()
     act(() => { vi.advanceTimersByTime(OFFLINE_AFTER_MS + 10) })
     expect(result.current.offline).toBe(true)
-    status = "connecting"; rerender()
+    status = "connecting"; reason = "retrying"; rerender()
     expect(result.current.offline).toBe(true)
-    status = "connected"; rerender()
+    status = "connected"; reason = null; rerender()
     expect(result.current.offline).toBe(false)
   })
 

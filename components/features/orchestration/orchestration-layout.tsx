@@ -33,7 +33,8 @@ import { useQuickViewCounts } from "@/hooks/use-quick-view-counts"
 import { useIssueBoardRealtime } from "@/hooks/use-issue-board-realtime"
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import { useIssueFilters, activeFilterCount, filtersFromSavedView, savedViewPayload, NO_FILTERS } from "@/hooks/use-issue-filters"
-import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
+import { useRealtimeDownSafe } from "@/hooks/use-realtime"
+import { RECONNECT_GRACE_MS } from "@/components/layout/realtime-outage"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { usePipelines } from "@/hooks/use-pipelines"
@@ -361,16 +362,18 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   }, [filters, search, clearFacets, projects, savedViews, select])
 
   /* ------------------------------------------------------------ offline */
-  const ws = useRealtimeStatusSafe()
+  // Retrying a drop counts (#3783: the socket says "connecting" while it
+  // retries); the first connect does not. Same 4 s grace as the app banner.
+  const realtimeDown = useRealtimeDownSafe()
   const [offline, setOffline] = useState(false)
   useEffect(() => {
-    if (ws !== "disconnected" && ws !== "error") {
+    if (!realtimeDown) {
       setOffline(false)
       return
     }
-    const t = setTimeout(() => setOffline(true), 3000)
+    const t = setTimeout(() => setOffline(true), RECONNECT_GRACE_MS)
     return () => clearTimeout(t)
-  }, [ws])
+  }, [realtimeDown])
 
   /* ------------------------------------------------------------- render */
   const sectionTitle = selectedProject

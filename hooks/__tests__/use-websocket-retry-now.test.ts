@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
-// "Retry now" on the reconnecting banner (Harbor 2 G09). Same MockWebSocket as
-// the other use-websocket suites.
+// "Retry now" on the reconnecting banner (Harbor 2 G09; #3783). Same
+// MockWebSocket as the other use-websocket suites.
 let sockets: MockWebSocket[] = []
 
 class MockWebSocket {
@@ -26,7 +26,7 @@ import { useWebSocket } from "@/hooks/use-websocket"
 
 const URL = "ws://localhost:8080/ws"
 
-describe("useWebSocket retryNow", () => {
+describe("useWebSocket retry", () => {
   beforeEach(() => { sockets = []; vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWebSocket) })
   afterEach(() => { vi.useRealTimers(); vi.stubGlobal("WebSocket", undefined) })
 
@@ -37,36 +37,53 @@ describe("useWebSocket retryNow", () => {
     expect(sockets).toHaveLength(1)
     act(() => { sockets[0].open() })
     act(() => { sockets[0].close(1006) })
-    expect(result.current.status).toBe("disconnected")
+    expect(result.current.status).toBe("connecting")
     // A backoff timer is pending; nothing new yet.
     expect(sockets).toHaveLength(1)
-    await act(async () => { result.current.retryNow(); await Promise.resolve(); await Promise.resolve() })
+    await act(async () => { result.current.retry(); await Promise.resolve(); await Promise.resolve() })
     expect(sockets).toHaveLength(2)
     // The cancelled timer does not open a third socket later.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(sockets).toHaveLength(2)
   })
 
-  it("starts a fresh budget after the automatic loop gave up", async () => {
+  it("tries at once in the slow mode, says so, and goes back to offline if it fails", async () => {
     let failing = true
     const getToken = vi.fn(async () => { if (failing) throw new Error("backend down"); return "t" })
     const { result } = renderHook(() => useWebSocket({ url: URL, getToken }))
-    await act(async () => { await vi.runAllTimersAsync() })
-    expect(result.current.status).toBe("error")
+    await act(async () => { await vi.advanceTimersByTimeAsync(130_000) })
+    expect(result.current.status).toBe("offline")
     const calls = getToken.mock.calls.length
-    failing = false
-    await act(async () => { result.current.retryNow(); await Promise.resolve(); await Promise.resolve() })
+    // A failing manual attempt keeps the slow mode: "offline" again, not two
+    // more minutes of "Reconnecting…".
+    await act(async () => { result.current.retry(); await Promise.resolve(); await Promise.resolve() })
     expect(getToken).toHaveBeenCalledTimes(calls + 1)
+    expect(result.current.status).toBe("offline")
+    failing = false
+    await act(async () => { result.current.retry() })
+    expect(result.current.status).toBe("connecting")
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(getToken).toHaveBeenCalledTimes(calls + 2)
     expect(sockets).toHaveLength(1)
+  })
+
+  it("one retry wakes every socket in the tab", async () => {
+    const a = renderHook(() => useWebSocket({ url: URL, getToken: async () => "t" }))
+    renderHook(() => useWebSocket({ url: URL, getToken: async () => "t" }))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    act(() => { for (const s of [...sockets]) { s.open(); s.close(1006) } })
+    expect(sockets).toHaveLength(2)
+    await act(async () => { a.result.current.retry(); await Promise.resolve(); await Promise.resolve() })
+    expect(sockets).toHaveLength(4)
   })
 
   it("never opens a second socket while one is opening or open", async () => {
     const getToken = vi.fn(async () => "t")
     const { result } = renderHook(() => useWebSocket({ url: URL, getToken }))
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
-    act(() => { result.current.retryNow() })
+    act(() => { result.current.retry() })
     act(() => { sockets[0].open() })
-    act(() => { result.current.retryNow() })
+    act(() => { result.current.retry() })
     await act(async () => { await Promise.resolve() })
     expect(sockets).toHaveLength(1)
     expect(getToken).toHaveBeenCalledTimes(1)
@@ -77,7 +94,7 @@ describe("useWebSocket retryNow", () => {
     const { result } = renderHook(() => useWebSocket({ url: URL, getToken }))
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
     expect(result.current.status).toBe("error")
-    await act(async () => { result.current.retryNow(); await Promise.resolve() })
+    await act(async () => { result.current.retry(); await Promise.resolve() })
     expect(getToken).toHaveBeenCalledTimes(1)
   })
 })

@@ -191,11 +191,11 @@ describe("useWebSocket", () => {
     expect(mockInstances[1].url).not.toContain("token=")
   })
 
-  it("reconnect attempts capped — surfaces transport error, NOT session-expired", async () => {
-    // Backend down ≠ auth dead. The retry-cap branch must NOT fire
+  it("past the fast budget — offline and still retrying, NOT session-expired", async () => {
+    // Backend down ≠ auth dead. The end of the fast budget must NOT fire
     // auth:session-expired (which would bounce the user to /login on
-    // every restart-induced outage); status flips to "error" and we
-    // stop retrying.
+    // every restart-induced outage). #3783: nor does it stop — status is
+    // "offline" and the hook keeps trying every 30 s.
     const authHandler = vi.fn()
     addAuthHandler(authHandler)
 
@@ -213,7 +213,16 @@ describe("useWebSocket", () => {
     }
 
     expect(authHandler).not.toHaveBeenCalled()
-    expect(result.current.status).toBe("error")
+    expect(result.current.status).toBe("offline")
+    expect(result.current.reason).toBe("unreachable")
+    // The latest attempt fails too; the next one comes 30 s later.
+    const sockets = mockInstances.length
+    act(() => { mockInstances[sockets - 1].close(1006) })
+    expect(result.current.status).toBe("offline")
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000) })
+    expect(mockInstances.length).toBe(sockets)
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(mockInstances.length).toBe(sockets + 1)
   })
 
   it("getToken rejection schedules backoff retry, not termination", async () => {

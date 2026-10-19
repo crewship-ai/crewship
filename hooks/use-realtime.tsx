@@ -9,7 +9,7 @@ import {
   useMemo,
   useRef,
 } from "react"
-import { useWebSocket, WsUnavailableError, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
+import { isRealtimeDown, useWebSocket, WsUnavailableError, type WSMessage, type WSReason, type WSStatus } from "@/hooks/use-websocket"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
@@ -249,6 +249,8 @@ type EventCallback = (event: RealtimeEvent) => void
 
 interface RealtimeContextValue {
   status: WSStatus
+  /** Why the socket is not up (use-websocket.ts WSReason), or null. Optional so test doubles need not supply it. */
+  reason?: WSReason | null
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
   subscribeChannel: (channel: string) => () => void
   /** "Retry now": reconnect at once instead of waiting for the backoff (optional so test doubles need not supply it). */
@@ -478,7 +480,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     dispatchEvent("realtime.reconnected", {})
   }, [dispatchEvent])
 
-  const { status: socketStatus, send, retryNow } = useWebSocket({
+  const { status: socketStatus, reason: socketReason, send, retry } = useWebSocket({
     enabled: realtimeEnabled,
     url: getWsUrl(),
     getToken,
@@ -490,6 +492,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // mode decides what consumers see while it is off.
   const status: WSStatus =
     accessMode === "restricted" || workspaceUnavailable ? "unavailable" : accessMode === "loading" ? "connecting" : socketStatus
+  const reason = status === socketStatus ? socketReason : null
 
   useEffect(() => { statusRef.current = status }, [status])
 
@@ -545,8 +548,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   )
 
   const contextValue = useMemo(
-    () => ({ status, subscribe, subscribeChannel, retry: retryNow }),
-    [status, subscribe, subscribeChannel, retryNow],
+    () => ({ status, reason, subscribe, subscribeChannel, retry }),
+    [status, reason, subscribe, subscribeChannel, retry],
   )
 
   return (
@@ -572,12 +575,19 @@ export function useRealtime(): RealtimeContextValue {
  * connected" rather than "unknown, probably fine".
  *
  * Exists because a surface with NO poll backstop has to be able to say so:
- * `RealtimeStatusBanner` shows the app-wide outage after three seconds, but a
+ * `RealtimeStatusBanner` shows the app-wide outage after four seconds, but a
  * per-page indicator needs the same state without throwing outside the
  * provider (`components/features/pages/live-indicator.tsx`).
  */
 export function useRealtimeStatusSafe(): WSStatus | null {
   return useContext(RealtimeContext)?.status ?? null
+}
+
+/** Provider-tolerant "is the live connection down?" (`isRealtimeDown`): a
+ *  retrying drop counts, the first connect does not. False without a provider. */
+export function useRealtimeDownSafe(): boolean {
+  const ctx = useContext(RealtimeContext)
+  return ctx ? isRealtimeDown(ctx.status, ctx.reason) : false
 }
 
 /**
