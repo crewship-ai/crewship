@@ -4,7 +4,7 @@ import { SkillPage, type SkillPageProps } from "@/components/features/skills/ski
 import type { SkillAgentRef, SkillDetail, SkillsAgent, SkillsCrew } from "@/components/features/skills/skills-model"
 
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span /> }))
-vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
+vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...rest}>{children}</a> }))
 vi.mock("streamdown", () => ({ Streamdown: () => null }))
 vi.mock("@/hooks/use-journal-list", () => ({ useJournalList: () => ({ entries: [], loading: false, error: null }) }))
 
@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({ detail: null as unknown, mutate: (() => Promise.re
 vi.mock("@/hooks/use-skills", () => ({
   useSkillDetail: () => ({ data: h.detail, isLoading: false, isError: false, error: null, refetch: vi.fn() }),
   useDeleteSkill: () => ({ mutateAsync: vi.fn() }),
+  useSetSkillLifecycle: () => ({ mutateAsync: vi.fn() }),
   useSetSkillAssignment: () => ({ mutateAsync: (p: { agentId: string; on: boolean }) => h.mutate(p) }),
 }))
 

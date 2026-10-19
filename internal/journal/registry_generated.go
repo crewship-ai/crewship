@@ -115,7 +115,7 @@ var AllEntryTypes = []EntryType{
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:793:2
-	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:53:7
+	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:57:7
 	EntryPagePanelRecovered,
 	EntryPagePanelStale,
 	EntryPagePanelUpdated,
@@ -161,10 +161,12 @@ var AllEntryTypes = []EntryType{
 	EntryRunStarted,
 	EntryRunTimeout,
 	EntrySidecarStale,
+	EntrySkillArchived,
 	EntrySkillAssigned,
 	EntrySkillDeleted,
 	EntrySkillImported,
 	EntrySkillInvoked,
+	EntrySkillRestored,
 	EntrySkillUnassigned,
 	EntrySummaryGenerated,
 	EntrySystemCompaction,

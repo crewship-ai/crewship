@@ -335,6 +335,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"POST /api/v1/workspaces/{workspaceId}/skills/bulk-import",
 		"POST /api/v1/workspaces/{workspaceId}/skills/import",
 		"DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}",
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive",
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore",
 	} {
 		method, path, name := splitSchemaRouteName(route)
 		add(method, path, "Remaining"+name+"V1", action)

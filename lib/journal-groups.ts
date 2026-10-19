@@ -120,6 +120,8 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "skill.unassigned",
     "skill.imported",
     "skill.deleted",
+    "skill.archived",
+    "skill.restored",
     "skill.invoked",
   ],
   memory: [

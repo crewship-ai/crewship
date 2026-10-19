@@ -74,7 +74,7 @@ below loses its group or its place in either of the two maps that encode it.
 | Credentials | `keeper` | `credential.revealed`, `credential.reveal_policy_changed`, `credential.sensitivity_lowered`, `credential.lease_issued`, `credential.auto_assign_failed`, `credential.auto_assign_empty` |
 | Cost | `cost` | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
 | Memory | `memory` | `memory.updated`, `memory.consolidated`, `memory.consolidation_proposed`, `memory.priority_changed`, `memory.searched`, `memory.config_updated`, `memory.versions_swept`, `memory.write_rejected`, `memory.write_verifier_blocked`, `memory.skill_proposed/skill_approved/skill_rejected`, `summary.generated` |
-| Skills | `skill` | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
+| Skills | `skill` | `skill.imported`, `skill.deleted`, `skill.archived`, `skill.restored`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
 | Observability | `exec` / `network` / `file` / `container` | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
 | Presence | `container` | `agent.status_change` |
 | Provisioning | `provisioning` | `provisioning.queued/building/step/complete/failed/build_failed` (crew runtime container build), `sidecar.stale`, `image.stale` |

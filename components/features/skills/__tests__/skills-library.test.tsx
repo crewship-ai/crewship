@@ -36,7 +36,7 @@ describe("SkillsLibrary", () => {
 
   it("is a table with the v67 columns and no Cards toggle", () => {
     renderLib()
-    expect(screen.getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Select", "Skill", "Source", "Domain", "Trust", "Used by", "Uses · 7 d"])
+    expect(screen.getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Select", "Skill", "Source", "Domain", "Trust", "Used by", "Uses · 30 d"])
     expect(screen.queryByRole("button", { name: "Cards" })).not.toBeInTheDocument()
   })
 
@@ -52,9 +52,26 @@ describe("SkillsLibrary", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select skill-119" }))
     const bar = screen.getByRole("toolbar", { name: "Selected skills" })
     expect(bar.textContent).toContain("1 selected")
-    expect(bar.querySelectorAll("button")).toHaveLength(2)
+    expect(bar.querySelectorAll("button")).toHaveLength(2) // Give to crew and Clear; Archive only when the page can archive
     fireEvent.click(screen.getByRole("button", { name: "Give to crew" }))
     expect(p.onGiveToCrew).toHaveBeenCalledWith([expect.objectContaining({ id: "s119" })])
+  })
+
+  it("managers can archive the selection; in the Archived view the bar restores (ODCH-SK-07)", () => {
+    const onLifecycle = vi.fn()
+    renderLib({ onLifecycle })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select skill-119" }))
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }))
+    expect(onLifecycle).toHaveBeenCalledWith([expect.objectContaining({ id: "s119" })], "archive")
+    cleanup()
+    const archived = rows.map((r) => ({ ...r, lifecycle_state: "archived" }))
+    const again = vi.fn()
+    renderLib({ rows: archived, onLifecycle: again })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select skill-119" }))
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    expect(again).toHaveBeenCalledWith([expect.objectContaining({ id: "s119" })], "restore")
   })
 
   it("members see no checkboxes; a phone sees rows, not a table", () => {

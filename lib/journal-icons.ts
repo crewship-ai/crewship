@@ -29,6 +29,8 @@ import {
   Search,
   SkipForward,
   Trash2,
+  Archive,
+  ArchiveRestore,
   UserMinus,
   ClipboardCheck,
   ClipboardList,
@@ -250,6 +252,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // ── Skills ────────────────────────────────────────────────────────
   "skill.imported": PackageOpen,
   "skill.deleted": Trash2,
+  "skill.archived": Archive,
+  "skill.restored": ArchiveRestore,
   "skill.assigned": UserPlus,
   "skill.unassigned": UserMinus,
   "skill.invoked": Sparkles,

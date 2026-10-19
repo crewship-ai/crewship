@@ -105,8 +105,8 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"missing_credentials": stringArray(),
 	}, "agent_id", "agent_slug", "agent_name", "missing_credentials")
 	skillUsage := obj(map[string]any{
-		"uses_7d": integer(), "errors_7d": integer(), "uses_total": integer(), "last_used_at": nullable("string"),
-	}, "uses_7d", "errors_7d", "uses_total", "last_used_at")
+		"uses_7d": integer(), "uses_30d": integer(), "errors_7d": integer(), "errors_30d": integer(), "uses_total": integer(), "last_used_at": nullable("string"),
+	}, "uses_7d", "uses_30d", "errors_7d", "errors_30d", "uses_total", "last_used_at")
 	skill := obj(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable("string"),
 		"version": str(), "author": nullable("string"), "category": str(), "source": str(), "icon": nullable("string"),

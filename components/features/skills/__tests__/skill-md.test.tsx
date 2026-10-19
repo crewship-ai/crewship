@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({ detail: null as unknown }))
 vi.mock("@/hooks/use-skills", () => ({
   useSkillDetail: () => ({ data: h.detail, isLoading: false, isError: false, error: null, refetch: vi.fn() }),
   useDeleteSkill: () => ({ mutateAsync: vi.fn() }),
+  useSetSkillLifecycle: () => ({ mutateAsync: vi.fn() }),
   useSetSkillAssignment: () => ({ mutateAsync: vi.fn() }),
 }))
 

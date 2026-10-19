@@ -8,7 +8,8 @@ import { SubBar, SubBarIconButton, SubBarPrimary } from "@/components/layout/sub
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
-import { useProposedSkills, useReviewProposedSkill, useSkillsAgents, useSkillsCrews, useSkillsList } from "@/hooks/use-skills"
+import { useProposedSkills, useReviewProposedSkill, useSetSkillLifecycle, useSkillsAgents, useSkillsCrews, useSkillsList } from "@/hooks/use-skills"
+import { toast } from "@/lib/toast"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { AddSkillDialog } from "./add-skill-dialog"
 import { GiveToPicker } from "./give-to-picker"
@@ -75,6 +76,7 @@ export function SkillsLayout() {
   const crewIds = useMemo(() => (canReview ? crews.map((c) => c.id) : []), [crews, canReview])
   const { proposed } = useProposedSkills(workspaceId, crewIds)
   const review = useReviewProposedSkill(workspaceId)
+  const lifecycle = useSetSkillLifecycle(workspaceId)
 
   const [skillId, setSkillId] = useUrlSelection("skill")
   const [tabParam, setTabParam] = useUrlSelection("tab")
@@ -201,6 +203,15 @@ export function SkillsLayout() {
     }
   }
 
+  const onLifecycle = async (picked: SkillRow[], action: "archive" | "restore") => {
+    const results = await Promise.allSettled(picked.map((s) => lifecycle.mutateAsync({ skillId: s.id, action })))
+    const failed = results.flatMap((r, i) => (r.status === "rejected" ? [{ s: picked[i], e: r.reason }] : []))
+    const done = picked.length - failed.length
+    const noun = `${done} ${done === 1 ? "skill" : "skills"}`
+    if (failed.length === 0) toast.success(action === "archive" ? `Archived ${noun} · agents keep them until removed` : `Restored ${noun}`)
+    else toast.error(`${failed[0].e instanceof Error ? failed[0].e.message : "Could not change the skills"} (${failed.length} of ${picked.length} unchanged)`)
+  }
+
   const loading = list.isLoading || wsLoading
   const rows = useMemo(() => visibleSkills(skills, filters), [skills, filters.view, filters.agentId, filters.crewId, filters.domain, filters.source, filters.trust, filters.status, filters.query]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedRow = skillId ? skills.find((s) => s.id === skillId) : undefined
@@ -261,6 +272,7 @@ export function SkillsLayout() {
           }}
           canGive={canGive}
           onGiveToCrew={setGiveTo}
+          onLifecycle={canReview ? onLifecycle : undefined}
           phone={phone}
           empty={
             activeFilterCount(filters) > 0 || filters.query ? (

@@ -635,6 +635,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/import", roleInline, skills.Import)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive", roleManage, skills.Archive)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore", roleManage, skills.Restore)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
 	// /api/v1/internal/skills/generate adapter shares the instance

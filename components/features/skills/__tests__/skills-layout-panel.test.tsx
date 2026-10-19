@@ -24,6 +24,7 @@ vi.mock("@/hooks/use-skills", () => ({
   useSkillsCrews: () => ({ data: [] }),
   useProposedSkills: () => ({ proposed: [] }),
   useReviewProposedSkill: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetSkillLifecycle: () => ({ mutateAsync: vi.fn() }),
 }))
 vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>,
