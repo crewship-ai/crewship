@@ -20,6 +20,19 @@ type publicationDraftReference struct {
 	BaseRevision int    `json:"base_revision"`
 }
 
+type routinePublicationValidationResponse struct {
+	Valid        bool   `json:"valid"`
+	DraftID      string `json:"draft_id"`
+	Revision     int    `json:"revision"`
+	BaseRevision int    `json:"base_revision"`
+}
+
+type routinePublicationResponse struct {
+	ID                  string `json:"id"`
+	Version             int    `json:"version"`
+	PublicationRevision int    `json:"publication_revision"`
+}
+
 // Validation is a preview of the exact stored draft, never a test-run receipt
 // or execution capability. Publication must revalidate inside its own writer.
 func (r *Router) routinePublicationValidate(w http.ResponseWriter, req *http.Request) {
@@ -56,7 +69,7 @@ func (r *Router) routinePublicationValidate(w http.ResponseWriter, req *http.Req
 		replyError(w, 422, "Routine requires unsupported publication steps or resources")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"valid": true, "draft_id": draft.ID, "revision": draft.Revision, "base_revision": draft.BaseRevision})
+	writeJSON(w, 200, routinePublicationValidationResponse{Valid: true, DraftID: draft.ID, Revision: draft.Revision, BaseRevision: draft.BaseRevision})
 }
 
 // Both doors resolve identities and the exact reviewed snapshot on the host.
@@ -163,5 +176,5 @@ func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Requ
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 200, map[string]any{"id": draft.BasePipelineID, "version": version, "publication_revision": draft.BaseRevision + 1})
+	writeJSON(w, 200, routinePublicationResponse{ID: draft.BasePipelineID, Version: version, PublicationRevision: draft.BaseRevision + 1})
 }

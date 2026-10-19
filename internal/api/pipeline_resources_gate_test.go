@@ -244,8 +244,8 @@ func TestResourceGate_FailOpenWhenNoAuthorCrew(t *testing.T) {
 	h.SetRunner(&stubRunner{output: "ok"})
 	// No author crew on the routine → nothing to resolve "has" against → allow.
 	if _, err := h.db.Exec(`INSERT INTO pipelines
-		(id, workspace_id, slug, name, definition_json, definition_hash, author_crew_id, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, ?, 'hash', NULL, datetime('now'), datetime('now'), datetime('now'))`,
+		(id, workspace_id, slug, name, definition_json, definition_hash, head_version, author_crew_id, created_at, updated_at, last_test_run_at)
+		VALUES (?, ?, ?, ?, ?, 'hash', 0, NULL, datetime('now'), datetime('now'), datetime('now'))`,
 		"pipe_nocrew", wsID, "nocrew", "nocrew", resDef(pgRequire, "")); err != nil {
 		t.Fatalf("seed pipeline nocrew: %v", err)
 	}

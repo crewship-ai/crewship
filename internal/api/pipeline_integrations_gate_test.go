@@ -37,8 +37,8 @@ func seedComposioServer(t *testing.T, db *sql.DB, wsID, agentID, toolkit string)
 func seedPipelineWithAuthorCrew(t *testing.T, db *sql.DB, wsID, id, slug, def, crewID string) {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO pipelines
-		(id, workspace_id, slug, name, definition_json, definition_hash, author_crew_id, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, datetime('now'), datetime('now'), datetime('now'))`,
+		(id, workspace_id, slug, name, definition_json, definition_hash, head_version, author_crew_id, created_at, updated_at, last_test_run_at)
+		VALUES (?, ?, ?, ?, ?, 'hash', 0, ?, datetime('now'), datetime('now'), datetime('now'))`,
 		id, wsID, slug, slug, def, crewID); err != nil {
 		t.Fatalf("seed pipeline %s: %v", slug, err)
 	}

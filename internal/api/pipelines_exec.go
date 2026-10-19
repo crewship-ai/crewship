@@ -219,6 +219,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.CheckGenericRun(r.Context(), p, body.PinnedVersion); err != nil {
 		if errors.Is(err, pipeline.ErrPublicationGenericRun) {
 			replyError(w, http.StatusBadRequest, "publication requires bounded manual execution")
+		} else if errors.Is(err, pipeline.ErrPinnedVersionNotFound) {
+			replyError(w, http.StatusConflict, "recipe version no longer exists; reload before running")
 		} else if errors.Is(err, pipeline.ErrGenericRecipeChanged) {
 			replyError(w, http.StatusConflict, "recipe changed; reload before running")
 		} else {

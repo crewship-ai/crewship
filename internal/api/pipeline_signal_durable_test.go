@@ -44,8 +44,8 @@ func TestSignalRun_DeliversDurably_ResumesParkedRun(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES ('pln_evt', ?, 'event-wait', 'event-wait', ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, head_version, created_at, updated_at, last_test_run_at)
+		VALUES ('pln_evt', ?, 'event-wait', 'event-wait', ?, 'hash', 0, ?, ?, ?)`,
 		wsID, signalEventWaitDSL, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}
@@ -123,8 +123,8 @@ func TestSignalRun_NoWaitingRun_Returns404(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES ('pln_x', ?, 'x', 'x', '{"name":"x","steps":[]}', 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, head_version, created_at, updated_at, last_test_run_at)
+		VALUES ('pln_x', ?, 'x', 'x', '{"name":"x","steps":[]}', 'hash', 0, ?, ?, ?)`,
 		wsID, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}

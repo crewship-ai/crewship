@@ -35,7 +35,8 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	}
 	execOrFatal(t, db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('wf-key',?,'Key',?,'API_KEY','OPENAI',?)`, workspace, cipher, owner)
 	execOrFatal(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('wf-key-grant','wf-agent','wf-key','OPENAI_API_KEY')`)
-	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('wf-routine',?,'private-work','Private',?,'fixture-hash','wf-crew','active')`, workspace, privateRoutine)
+	// This fixture deliberately edits unversioned legacy definitions below.
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,head_version,author_crew_id,status) VALUES('wf-routine',?,'private-work','Private',?,'fixture-hash',0,'wf-crew','active')`, workspace, privateRoutine)
 	store := access.Store{DB: db}
 	tokens := map[string]string{}
 	const secret = "synthetic-workflow-router-secret-long-enough"
@@ -209,7 +210,7 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	if missing := request("wf-h1", http.MethodPost, pagePath, `{"inputs":{}}`); missing.Code != 400 {
 		t.Fatal("missing intent accepted", missing.Code)
 	}
-	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('wf-alt',?,'alternate-work','Alternate',?,'fixture-hash','wf-crew','active')`, workspace, privateRoutine)
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,head_version,author_crew_id,status) VALUES('wf-alt',?,'alternate-work','Alternate',?,'fixture-hash',0,'wf-crew','active')`, workspace, privateRoutine)
 	for _, changed := range []string{strings.Replace(spec, "PAGE_PRIVATE_CANARY", "CHANGED_FIXED", 1), strings.Replace(spec, `"routine":"private-work"`, `"routine":"alternate-work"`, 1)} {
 		execOrFatal(t, db, `UPDATE pages SET spec_json=? WHERE id='wf-page'`, changed)
 		if stale := request("wf-h1", http.MethodPost, pagePath, pageBody); stale.Code != 404 {

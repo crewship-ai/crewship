@@ -33,6 +33,7 @@ func TestRestrictedIssuePreflightAuthenticatedRouter(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('f-key',?,'Key',?,'API_KEY','OPENAI',?)`, workspace, cipher, owner)
 	execOrFatal(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('f-key-grant','f-agent','f-key','OPENAI_API_KEY')`)
 	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('f-routine',?,'private-work','Private',?,'fixture-hash','f-crew','active')`, workspace, privateRoutine)
+	archiveLegacyFixtureHead(t, db, "f-routine")
 	execOrFatal(t, db, `INSERT INTO budget_limits(id,workspace_id,scope_kind,scope_id,window,limit_usd,mode) VALUES('f-cap',?,'workspace',?,'month',100,'hard')`, workspace, workspace)
 	store := access.Store{DB: db}
 	tokens := map[string]string{}

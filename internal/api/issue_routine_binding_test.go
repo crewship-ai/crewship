@@ -22,10 +22,10 @@ func seedTestPipeline(t *testing.T, h *IssueHandler, wsID, slug string) string {
 	def := `{"name":"` + slug + `","steps":[{"id":"a","type":"agent_run","agent_slug":"lead","prompt":"hi"}]}`
 	_, err := h.db.ExecContext(context.Background(), `
 		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json,
-			definition_hash, ephemeral, workspace_visible,
+			definition_hash, head_version, ephemeral, workspace_visible,
 			author_crew_id, author_agent_id, authored_via,
 			last_test_run_at, last_test_run_passed, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, 1, NULL, NULL, 'user_api', ?, 1, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, 0, 0, 1, NULL, NULL, 'user_api', ?, 1, ?, ?)`,
 		id, wsID, slug, slug, def, "hash_"+slug, now, now, now)
 	if err != nil {
 		t.Fatalf("seed pipeline: %v", err)

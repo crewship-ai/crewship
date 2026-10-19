@@ -38,8 +38,8 @@ func seedTopicPipeline(t *testing.T, h *PipelineHandler, pipelineID, wsID string
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, 'topic-wait', 'topic-wait', ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, head_version, created_at, updated_at, last_test_run_at)
+		VALUES (?, ?, 'topic-wait', 'topic-wait', ?, 'hash', 0, ?, ?, ?)`,
 		pipelineID, wsID, topicEventWaitDSL, now, now, now); err != nil {
 		t.Fatalf("seed pipeline %s: %v", pipelineID, err)
 	}
