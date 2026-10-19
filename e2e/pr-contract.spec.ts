@@ -294,3 +294,83 @@ test.describe("PR browser contract subset — phone", () => {
 
   })
 })
+
+// Deterministic HTTP fixture, not a real model/M1a or backend ACL test. Keep
+// global-setup authentication and seeded workspace/agent discovery unmodified.
+// Actual file/context editor buffers are covered separately by lifecycle mocks;
+// this bounded browser cut does not introduce Files/CodeMirror fixtures.
+test.describe("PR browser contract subset: saved Document preview fixture", () => {
+  for (const phone of [false, true]) {
+    test(`current saved content preserves the ${phone ? "phone" : "desktop"} composer`, async ({ page }) => {
+      test.setTimeout(45_000)
+      await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1280, height: 900 })
+      const sessionResponse = await page.request.get("/api/auth/session")
+      expect(sessionResponse.ok()).toBeTruthy()
+      const humanId = (await sessionResponse.json()).user?.id
+      expect(typeof humanId).toBe("string")
+      const workspaceResponse = await page.request.get("/api/v1/workspaces")
+      expect(workspaceResponse.ok()).toBeTruthy()
+      const workspaceId = (await workspaceResponse.json())[0]?.id
+      expect(typeof workspaceId).toBe("string")
+      const agentResponse = await page.request.get(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+      expect(agentResponse.ok()).toBeTruthy()
+      const agent = (await agentResponse.json()).find((value: { id?: string; slug?: string; current_user_can_chat?: boolean }) => value.id && value.slug && value.current_user_can_chat !== false)
+      expect(agent?.id, "offline seed must contain a chat-capable agent").toBeTruthy()
+      const chatId = "document-preview-browser-chat", otherChatId = "document-preview-browser-other"
+      const pageId = "document-preview-browser-page", reads: string[] = []
+      let messageSubmissions = 0
+      await page.route("**/api/v1/**", async route => {
+        const request = route.request(), url = new URL(request.url()), path = url.pathname
+        let body: unknown
+        const fixtureChat = path.startsWith(`/api/v1/chats/${chatId}/`) || path.startsWith(`/api/v1/chats/${otherChatId}/`)
+        if (fixtureChat && request.method() !== "GET") {
+          if (path.endsWith("/messages")) messageSubmissions++
+          await route.fulfill({ status: 405, json: { error: "read-only browser fixture" } }); return
+        }
+        if (path === "/api/v1/documents/status") body = { enabled: true }
+        else if (path === `/api/v1/agents/${agent.id}/chats`) body = [chatId, otherChatId].map(id => ({ id, title: "Document preview fixture", mode: "CHAT", kind: "direct", origin: "UI", visibility: "private", created_by: humanId, status: "IDLE", message_count: 1, started_at: "2026-10-18T00:00:00Z" }))
+        else if (fixtureChat && path.endsWith("/execution-profile")) body = { mode: "trusted", audience: "private" }
+        else if (fixtureChat && path.endsWith("/messages")) body = { messages: [{ id: "fixture-reply", role: "assistant", content: "The saved document is ready.", ts: "2026-10-18T00:00:00Z" }] }
+        else if (fixtureChat && path.endsWith("/document-results")) body = { results: [{ page_id: pageId, type: "document", page_slug: "obsolete-address", title: "Creation fixture title", revision: 0, created_at: "2026-10-18T00:00:00Z", agent_id: agent.id, agent_name: agent.name, run_id: "ended-fixture-run", on_behalf_of_user_id: humanId }] }
+        else if (fixtureChat && path.endsWith("/participants")) body = { participants: [] }
+        else if (path === `/api/v1/pages/%40${pageId}` || path === `/api/v1/pages/%40${pageId}/document`) {
+          reads.push(request.url())
+          if (url.searchParams.get("workspace_id") !== workspaceId || request.method() !== "GET") { await route.fulfill({ status: 403, json: { error: "fixture scope mismatch" } }); return }
+          body = path.endsWith("/document")
+            ? { page_id: pageId, schema: 2, rev: 7, content: { type: "doc", content: [{ type: "paragraph", attrs: { id: "fixture-saved-text" }, content: [{ type: "text", text: "Current fixture saved body" }] }] } }
+            : { id: pageId, name: "Current fixture saved title", has_document: true }
+        } else { await route.continue(); return }
+        await route.fulfill({ status: 200, json: body })
+      })
+      await page.goto(`/chat/${encodeURIComponent(agent.slug)}?session=${chatId}`)
+      const card = page.getByRole("link", { name: "Open document Creation fixture title" })
+      await expect(card).toBeVisible({ timeout: 20_000 })
+      await expect(card).toHaveAttribute("href", `/pages?ref=${pageId}&workspace_id=${encodeURIComponent(workspaceId)}`)
+      const composer = page.getByPlaceholder(/^(Message .+|Send a message\.\.\.)$/).first()
+      await expect(composer).toBeVisible()
+      const original = await composer.elementHandle()
+      expect(original).toBeTruthy()
+      await composer.fill("Unsent browser draft stays intact")
+      await card.click()
+      await expect(page.getByRole("heading", { name: "Current fixture saved title" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Saved document body" })).toHaveText("Current fixture saved body")
+      await expect(page.getByText("Current saved document", { exact: true })).toBeVisible()
+      await page.getByRole("button", { name: phone ? "Back to chat" : "Close document preview", exact: true }).click()
+      await expect(page.getByRole("region", { name: "Document preview" })).toHaveCount(0)
+      await expect(composer).toHaveValue("Unsent browser draft stays intact")
+      expect(await composer.evaluate((node, old) => node === old, original!)).toBe(true)
+      await card.click()
+      await expect(page.getByText("Current fixture saved body", { exact: true })).toBeVisible()
+      if (phone) await page.evaluate(() => window.dispatchEvent(new CustomEvent("auth:session-expired")))
+      else await page.evaluate(next => {
+        const url = new URL(location.href); url.searchParams.set("session", next)
+        history.pushState({}, "", url); window.dispatchEvent(new PopStateEvent("popstate"))
+      }, otherChatId)
+      await expect(page.getByText("Current fixture saved body", { exact: true })).toHaveCount(0)
+      await expect(page.getByRole("heading", { name: "Current fixture saved title" })).toHaveCount(0)
+      expect(messageSubmissions).toBe(0)
+      expect(reads.length).toBeGreaterThanOrEqual(4)
+      expect(reads.every(value => new URL(value).pathname.startsWith(`/api/v1/pages/%40${pageId}`))).toBe(true)
+    })
+  }
+})
