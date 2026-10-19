@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ScheduleStartDialog, weeklyCronFor } from "../schedule-start-dialog"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -106,6 +106,31 @@ describe("schedule a start · repeating", () => {
     const [url, options] = posts()[0]
     expect(url).toBe("/api/v1/workspaces/ws/pipeline-schedules")
     expect(JSON.parse(options.body)).toMatchObject({ target_pipeline_slug: "recipe", cron_expr: "0 14 * * 5", enabled: true, inputs: {} })
+  })
+
+  it("marks the start that comes after a clock change in the schedule's zone", async () => {
+    // Two weeks of weekly starts in the zone the dialog opens with: Prague's
+    // spring change (31 Mar 2030) lies between the first and second.
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2030-03-22T00:00:00Z"))
+    const zone = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({ timeZone: "Europe/Prague" } as Intl.ResolvedDateTimeFormatOptions)
+    fetcher.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        String(url).includes("/preview")
+          ? { occurrences: ["2030-03-29T07:00:00Z", "2030-04-05T06:00:00Z", "2030-04-12T06:00:00Z"] }
+          : { definition: { inputs: [] } },
+    }))
+    render(<ScheduleStartDialog workspaceId="ws" routines={routines} date={new Date(2030, 0, 4, 14)} canRepeat onClose={vi.fn()} onScheduled={vi.fn()} />)
+    await screen.findByRole("button", { name: "Schedule" })
+    fireEvent.click(screen.getByRole("radio", { name: "Repeating" }))
+    const list = await screen.findByRole("list", { name: "Next 3 starts" }, { timeout: 2000 })
+    const items = within(list).getAllByRole("listitem")
+    expect(items[0]).not.toHaveTextContent("clock change")
+    expect(items[1]).toHaveTextContent("after the clock change")
+    expect(items[2]).not.toHaveTextContent("clock change")
+    zone.mockRestore()
+    vi.useRealTimers()
   })
 
   it("suggests the clicked slot's weekday and time", () => {

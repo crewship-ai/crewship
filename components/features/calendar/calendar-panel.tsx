@@ -1,6 +1,6 @@
 "use client"
 
-import { Building2, User, Users } from "lucide-react"
+import { Bot, Building2, User, Users } from "lucide-react"
 import {
   SidebarActiveChip,
   SidebarActiveChips,
@@ -11,11 +11,14 @@ import {
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
 import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
+import { CalendarSavedViews } from "./calendar-saved-views"
 import {
+  AGENT_FACETS,
   CALENDAR_SCOPE_LABELS,
   STATUS_FACETS,
   calendarCounts,
   type CalendarFilters,
+  type AgentFacet,
   type CalendarItem,
   type CalendarScope,
   type StatusFacet,
@@ -40,6 +43,8 @@ export function CalendarPanel({
   crews,
   onChange,
   onPicked,
+  workspaceId,
+  onApplyView,
 }: {
   items: CalendarItem[]
   filters: CalendarFilters
@@ -47,12 +52,18 @@ export function CalendarPanel({
   onChange: (patch: Partial<CalendarFilters>) => void
   /** Called after a pick that changes what the page shows (closes the phone sheet). */
   onPicked?: () => void
+  /** With these, the panel lists the workspace's saved calendar views. */
+  workspaceId?: string
+  onApplyView?: (filters: CalendarFilters) => void
 }) {
   const counts = calendarCounts(items, filters)
   const facets = useSidebarFacets()
   const toggleStatus = (id: StatusFacet) =>
     onChange({ statuses: filters.statuses.includes(id) ? filters.statuses.filter((s) => s !== id) : [...filters.statuses, id] })
+  const toggleAgentFacet = (id: AgentFacet) =>
+    onChange({ agentFacets: filters.agentFacets.includes(id) ? filters.agentFacets.filter((s) => s !== id) : [...filters.agentFacets, id] })
   const crewName = (id: string) => crews.find((c) => c.id === id)?.name ?? "Crew"
+  const activeFacets = filters.statuses.length + filters.agentFacets.length
   const scopeRow = (scope: CalendarScope, Icon: typeof User) => (
     <SidebarRow
       key={scope}
@@ -74,7 +85,7 @@ export function CalendarPanel({
         <div className="min-w-0 flex-1" data-calendar-search>
           <SidebarSearch value={filters.query} onValueChange={(query) => onChange({ query })} placeholder="Search dates, routines…" />
         </div>
-        <SidebarFilterButton activeCount={filters.statuses.length} {...facets.triggerProps} />
+        <SidebarFilterButton activeCount={activeFacets} {...facets.triggerProps} />
       </SidebarToolbar>
       <SidebarActiveChips>
         {filters.crewId && (
@@ -88,8 +99,13 @@ export function CalendarPanel({
             {f.label}
           </SidebarActiveChip>
         ))}
+        {!facets.open && AGENT_FACETS.filter((f) => filters.agentFacets.includes(f.id)).map((f) => (
+          <SidebarActiveChip key={f.id} label={f.label} onRemove={() => toggleAgentFacet(f.id)}>
+            {f.label}
+          </SidebarActiveChip>
+        ))}
       </SidebarActiveChips>
-      <SidebarFacetBlock {...facets.blockProps} label="Filter calendar" activeCount={filters.statuses.length} onClear={() => onChange({ statuses: [] })}>
+      <SidebarFacetBlock {...facets.blockProps} label="Filter calendar" activeCount={activeFacets} onClear={() => onChange({ statuses: [], agentFacets: [] })}>
         <SidebarInlineFacet
           label="Status"
           values={STATUS_FACETS.map((f) => ({ value: f.id, label: f.label, count: counts.statuses[f.id] }))}
@@ -97,11 +113,28 @@ export function CalendarPanel({
           onToggle={(id) => toggleStatus(id as StatusFacet)}
           onClear={() => onChange({ statuses: [] })}
         />
+        <SidebarInlineFacet
+          label="Agent"
+          values={AGENT_FACETS.map((f) => ({ value: f.id, label: f.label, count: counts.agentFacets[f.id] }))}
+          selected={filters.agentFacets}
+          onToggle={(id) => toggleAgentFacet(id as AgentFacet)}
+          onClear={() => onChange({ agentFacets: [] })}
+        />
       </SidebarFacetBlock>
       <SidebarSection label="Views">
         {scopeRow("mine", User)}
         {scopeRow("workspace", Building2)}
       </SidebarSection>
+      {workspaceId && onApplyView && (
+        <CalendarSavedViews
+          workspaceId={workspaceId}
+          filters={filters}
+          onApply={(f) => {
+            onApplyView(f)
+            onPicked?.()
+          }}
+        />
+      )}
       {crews.length > 0 && (
         <SidebarSection label="Crews" count={crews.length}>
           {crews.map((c) => (
@@ -117,6 +150,25 @@ export function CalendarPanel({
               <Users className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{c.name}</span>
               <span className="text-micro tabular-nums text-muted-foreground-soft">{counts.crews.get(c.id) ?? 0}</span>
+            </SidebarRow>
+          ))}
+        </SidebarSection>
+      )}
+      {counts.agents.size > 0 && (
+        <SidebarSection label="Agents" count={counts.agents.size}>
+          {[...counts.agents.values()].map(({ agent, count }) => (
+            <SidebarRow
+              key={agent.id}
+              as="div"
+              selected={filters.agentId === agent.id}
+              onSelect={() => {
+                onChange({ agentId: filters.agentId === agent.id ? null : agent.id })
+                onPicked?.()
+              }}
+            >
+              <Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+              <span className="text-micro tabular-nums text-muted-foreground-soft">{count}</span>
             </SidebarRow>
           ))}
         </SidebarSection>

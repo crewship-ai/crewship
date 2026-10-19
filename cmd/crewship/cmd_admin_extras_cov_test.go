@@ -602,7 +602,7 @@ func TestMetricsCmd_RunE(t *testing.T) {
 		covResetFlags(t, metricsCmd)
 		stub.OnGet("/api/v1/metrics/timeseries",
 			clitest.JSONResponse(200, map[string]any{"points": []int{1, 2}}))
-		covSetFlags(t, metricsCmd, map[string]string{"series": "active_runs", "range": "1h"})
+		covSetFlags(t, metricsCmd, map[string]string{"series": "success_rate", "window": "7d", "bucket": "1d"})
 		if err := metricsCmd.RunE(metricsCmd, nil); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
@@ -610,8 +610,27 @@ func TestMetricsCmd_RunE(t *testing.T) {
 		if len(calls) != 1 {
 			t.Fatalf("expected 1 GET, got %d", len(calls))
 		}
-		if !strings.Contains(calls[0].Query, "metric=active_runs") || !strings.Contains(calls[0].Query, "range=1h") {
-			t.Errorf("timeseries query wrong: %q", calls[0].Query)
+		// The endpoint reads window and bucket; the old --range sent a "range" it never read.
+		for _, want := range []string{"metric=success_rate", "window=7d", "bucket=1d"} {
+			if !strings.Contains(calls[0].Query, want) {
+				t.Errorf("timeseries query %q is missing %s", calls[0].Query, want)
+			}
+		}
+		if strings.Contains(calls[0].Query, "range=") {
+			t.Errorf("timeseries query still sends range: %q", calls[0].Query)
+		}
+	})
+
+	t.Run("--range still works as the window", func(t *testing.T) {
+		stub := covStub(t)
+		covResetFlags(t, metricsCmd)
+		stub.OnGet("/api/v1/metrics/timeseries", clitest.JSONResponse(200, map[string]any{"buckets": []int{}}))
+		covSetFlags(t, metricsCmd, map[string]string{"series": "runs_count", "range": "30d"})
+		if err := metricsCmd.RunE(metricsCmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		if q := stub.CallsFor("GET", "/api/v1/metrics/timeseries")[0].Query; !strings.Contains(q, "window=30d") {
+			t.Errorf("--range 30d should become window=30d, got %q", q)
 		}
 	})
 }

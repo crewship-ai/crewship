@@ -13,6 +13,7 @@ import {
   DashboardKpis,
   DashboardUpNext,
   buildAttentionItems,
+  expiringKeys,
   deriveFleetHealth,
   kpisFromInsights,
 } from "@/components/features/dashboard/dashboard-overview"
@@ -46,6 +47,7 @@ import {
   useRunsInsights,
   useRuntimeCapacity,
   useProvisioningSummary,
+  useDashboardCredentials,
   type TimeseriesParams,
 } from "@/hooks/use-dashboard-data"
 import type { DashboardWindow } from "./dashboard-types"
@@ -86,6 +88,17 @@ function runVolumeParams(window: DashboardWindow): TimeseriesParams {
     bucket: window === "24h" ? "1h" : "1d",
     group_by: "crew",
   }
+}
+
+/** The same window and bucket as run volume, one total per bucket, for the KPI sparklines. */
+function kpiSeriesParams(window: DashboardWindow, metric: string): TimeseriesParams {
+  return { metric, window, bucket: window === "24h" ? "1h" : "1d", group_by: "none" }
+}
+
+/** One value per bucket, oldest first; null where the server sent none (no run finished). */
+function totalsOf(data: { buckets: { series: Record<string, number> }[] } | null | undefined): (number | null)[] | undefined {
+  if (!data?.buckets) return undefined
+  return data.buckets.map((b) => (typeof b.series?.total === "number" ? b.series.total : null))
 }
 
 export default function DashboardPage() {
@@ -134,8 +147,12 @@ export default function DashboardPage() {
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
   const provisioningQ = useProvisioningSummary(workspaceId, queryOpts)
+  const credentialsQ = useDashboardCredentials(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
+  const successSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "success_rate"), [reportWindow]), queryOpts)
+  const p95SeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "p95_duration_ms"), [reportWindow]), queryOpts)
+  const spendSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "cost_usd"), [reportWindow]), queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
@@ -198,9 +215,12 @@ export default function DashboardPage() {
     [provisioningQ.data],
   )
 
+  const expiring = useMemo(() => expiringKeys(Array.isArray(credentialsQ.data) ? credentialsQ.data : null), [credentialsQ.data])
+
   const attentionItems = useMemo(
     () => buildAttentionItems({
       rebuildCrews,
+      expiringKeys: expiring,
       inbox: inbox.items,
       heldCrews,
       reviewCount: reviewQ.data?.length ?? 0,
@@ -208,7 +228,7 @@ export default function DashboardPage() {
       activeByKind: inbox.activeByKind,
       decisionCount: inbox.decisionCount,
     }),
-    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, rebuildCrews, reviewQ.data],
+    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, rebuildCrews, expiring, reviewQ.data],
   )
   const attention = attentionState({ items: attentionItems, inboxLoading: inbox.loading, inboxError: inbox.error })
 
@@ -351,6 +371,9 @@ export default function DashboardPage() {
               spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
               completedSeries={volumeFailed ? undefined : runsPerBucket}
               completedSeriesLabel={`Runs started per ${reportWindow === "24h" ? "hour" : "day"}`}
+              successSeries={totalsOf(successSeriesQ.data)}
+              p95Series={totalsOf(p95SeriesQ.data)}
+              spendSeries={totalsOf(spendSeriesQ.data)?.map((v) => v ?? 0)}
             />
           )}
 

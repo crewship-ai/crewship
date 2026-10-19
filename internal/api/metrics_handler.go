@@ -31,6 +31,10 @@ var (
 		"cost_usd":        {},
 		"runs_count":      {},
 		"active_missions": {},
+		// Per-bucket run outcomes, from the same run.* entries and rules as
+		// GET /api/v1/runs/insights. A bucket with no finished run has no value.
+		"success_rate":    {},
+		"p95_duration_ms": {},
 	}
 	validWindows = map[string]time.Duration{
 		"24h": 24 * time.Hour,
@@ -104,7 +108,7 @@ func parseTimeseriesParams(r *http.Request) (timeseriesParams, int, string) {
 	}
 
 	if _, ok := validMetrics[p.Metric]; !ok {
-		return p, http.StatusBadRequest, "invalid metric; must be one of issues_closed, cost_usd, runs_count, active_missions"
+		return p, http.StatusBadRequest, "invalid metric; must be one of issues_closed, cost_usd, runs_count, active_missions, success_rate, p95_duration_ms"
 	}
 	wdur, ok := validWindows[p.Window]
 	if !ok {
@@ -130,6 +134,10 @@ func parseTimeseriesParams(r *http.Request) (timeseriesParams, int, string) {
 	nBuckets := int(p.WindowDur / p.BucketDur)
 	if nBuckets > 200 {
 		return p, http.StatusBadRequest, fmt.Sprintf("bucket %s against window %s would produce %d buckets (max 200)", p.Bucket, p.Window, nBuckets)
+	}
+
+	if (p.Metric == "success_rate" || p.Metric == "p95_duration_ms") && p.GroupBy != "none" {
+		return p, http.StatusBadRequest, "success_rate and p95_duration_ms cannot be grouped"
 	}
 
 	// group_by semantics per metric.
@@ -242,6 +250,8 @@ func (h *MetricsHandler) Timeseries(w http.ResponseWriter, r *http.Request) {
 		err = h.fillRunsCount(r, p, idxByKey, &resp)
 	case "active_missions":
 		err = h.fillActiveMissions(r, p, starts, idxByKey, &resp)
+	case "success_rate", "p95_duration_ms":
+		err = h.fillRunOutcomes(r, p, idxByKey, &resp)
 	}
 	if err != nil {
 		h.logger.Error("metrics timeseries query failed",
@@ -257,7 +267,10 @@ func (h *MetricsHandler) Timeseries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For group_by=none, ensure every bucket has the "total" key (even if zero).
-	if p.GroupBy == "none" {
+	// The run-outcome metrics are the exception: a bucket where nothing
+	// finished has no rate and no duration, and a zero there would read as
+	// "every run failed" or "instant".
+	if p.GroupBy == "none" && p.Metric != "success_rate" && p.Metric != "p95_duration_ms" {
 		if _, has := resp.SeriesLabels["total"]; !has {
 			resp.SeriesLabels["total"] = "Total"
 		}

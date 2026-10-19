@@ -90,3 +90,40 @@ describe("calendar-panel", () => {
     expect(state().crewId).toBeNull()
   })
 })
+
+describe("calendar-panel agents", () => {
+  const scout = { id: "ag-scout", slug: "scout", name: "Scout" }
+  const withAgents = items([
+    entry({ id: "1", at: at(2026, 10, 15, 8), slug: "scan", agents: [scout] }),
+    entry({ id: "2", at: at(2026, 10, 15, 9), slug: "scan" }),
+  ])
+  function AgentHarness() {
+    const [filters, setFilters] = useState<CalendarFilters>({ ...EMPTY_CALENDAR_FILTERS, scope: "workspace" })
+    return (
+      <>
+        <CalendarPanel items={withAgents} filters={filters} crews={CREWS} onChange={(p) => setFilters((f) => ({ ...f, ...p }))} />
+        <output data-testid="filters">{JSON.stringify(filters)}</output>
+      </>
+    )
+  }
+
+  it("lists the agents with their dates, picks one, and clears it by picking again", () => {
+    render(<AgentHarness />)
+    const row = screen.getByRole("button", { name: /^Scout/ })
+    expect(row).toHaveTextContent("1")
+    fireEvent.click(row)
+    expect(state().agentId).toBe("ag-scout")
+    fireEvent.click(screen.getByRole("button", { name: /^Scout/ }))
+    expect(state().agentId).toBeNull()
+  })
+
+  it("has an Agent facet: Has an agent / No agent", () => {
+    render(<AgentHarness />)
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    const group = screen.getByRole("group", { name: "Agent" })
+    expect(within(group).getByRole("button", { name: /Has an agent/ })).toHaveTextContent("1")
+    fireEvent.click(within(group).getByRole("button", { name: /No agent/ }))
+    expect(state().agentFacets).toEqual(["none"])
+  })
+})

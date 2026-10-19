@@ -1,12 +1,13 @@
 "use client"
 
 import type { LucideIcon } from "lucide-react"
-import { Check, Clock, Hand, Info, Play, Plus, X } from "lucide-react"
+import { Check, Clock, Hand, Info, Play, Plus, User, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { addDays, dateKey } from "@/lib/routine-calendar"
 import {
   CELL_CAP,
   agendaLayout,
+  agentLanes,
   dayLabel,
   monthLayout,
   nowLineAfter,
@@ -180,6 +181,76 @@ export function CalendarWeek({
         </div>
       </div>
       <p className="text-label text-muted-foreground">Only times with something in them are shown.</p>
+    </div>
+  )
+}
+
+/** Agents: one row per agent, what it has to run this week; dates nobody works on sit at the bottom. */
+export function CalendarLanes({
+  items,
+  from,
+  selectedId,
+  onPick,
+  now = new Date(),
+}: {
+  items: CalendarItem[]
+  from: Date
+  selectedId: string | null
+  onPick: (id: string) => void
+  now?: Date
+}) {
+  const { days, lanes, none } = agentLanes(items, from)
+  const todayKey = dateKey(now)
+  const GRID = "grid grid-cols-[140px_repeat(7,minmax(0,1fr))]"
+  const dayCell = (list: CalendarItem[], day: Date, laneKey: string) => {
+    const key = dateKey(day)
+    const shown = list.slice(0, CELL_CAP)
+    return (
+      <div key={key} data-testid={`lane-cell-${laneKey}-${key}`} className={cn("flex min-h-11 min-w-0 flex-col gap-1 border-l border-border p-1", key === todayKey && "bg-primary/[0.04]")}>
+        {shown.map((i) => (
+          <ItemChip key={i.id} item={i} selected={selectedId === i.id} onPick={onPick} />
+        ))}
+        {list.length > shown.length && <small className="px-1 text-micro text-muted-foreground">+{list.length - shown.length} more</small>}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card" role="grid" aria-label="Agents">
+        <div className="min-w-[860px]">
+          <div className={cn(GRID, "border-b border-border bg-muted/40")} role="row">
+            <span />
+            {days.map((d) => (
+              <span key={dateKey(d)} role="columnheader">
+                {dayHead(d, todayKey)}
+              </span>
+            ))}
+          </div>
+          {lanes.map((lane) => (
+            <div key={lane.agent.id} role="row" className={cn(GRID, "border-b border-border")}>
+              <span role="rowheader" className="flex min-w-0 flex-col justify-center px-2 py-2">
+                <b className="truncate text-body font-medium">{lane.agent.name}</b>
+                <small className="truncate text-label text-muted-foreground">{lane.agent.slug}</small>
+              </span>
+              {days.map((d) => dayCell(lane.byDay.get(dateKey(d)) ?? [], d, lane.agent.id))}
+            </div>
+          ))}
+          {none.length > 0 && (
+            <div role="row" className={cn(GRID, "border-b border-border bg-muted/20")}>
+              <span role="rowheader" className="flex items-center gap-2 px-2 py-2">
+                <User className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0">
+                  <b className="block truncate text-body font-medium">No agent</b>
+                  <small className="block truncate text-label text-muted-foreground">Nobody works on it</small>
+                </span>
+              </span>
+              {days.map((d) => dayCell(none.filter((i) => i.day === dateKey(d)), d, "none"))}
+            </div>
+          )}
+          {!lanes.length && !none.length && <p className="px-4 py-6 text-center text-body text-muted-foreground">Nothing this week.</p>}
+        </div>
+      </div>
+      <p className="text-label text-muted-foreground">One row per agent: the routine starts and runs it has this week. Dates with no agent show at the bottom.</p>
     </div>
   )
 }

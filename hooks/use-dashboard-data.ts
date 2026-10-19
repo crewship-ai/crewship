@@ -73,6 +73,7 @@ export const dashboardKeys = {
   runInsights: (ws: string, window: DashboardWindow) =>
     ["runs-insights", ws, { window }] as const,
   runtimeCapacity: () => ["runtime-capacity"] as const,
+  credentials: (ws: string) => ["dashboard-credentials", ws] as const,
   provisioningSummary: (ws: string) => ["provisioning-summary", ws] as const,
   memoryHealth: (ws: string) => ["memory-health", ws] as const,
   crewSpend: (ws: string, window: DashboardWindow) =>
@@ -336,6 +337,29 @@ export function useProvisioningSummary(workspaceId: string | null, opts?: Dashbo
     enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
     retry: false,
     staleTime: 30_000,
+  })
+}
+
+/** The workspace's credentials, for the "key expiring" tile. A member who may not list them gets null and no tile. */
+export interface DashboardCredential {
+  id: string
+  name: string
+  status: string
+  token_expires_at?: string | null
+}
+
+export function useDashboardCredentials(workspaceId: string | null, opts?: DashboardQueryOpts) {
+  return useQuery<DashboardCredential[] | null>({
+    queryKey: dashboardKeys.credentials(workspaceId ?? ""),
+    queryFn: ({ signal }) =>
+      fetchOr<DashboardCredential[] | null>(
+        `/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+    staleTime: 5 * 60_000,
   })
 }
 

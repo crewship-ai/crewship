@@ -1284,3 +1284,64 @@ func sortedAgents(m map[string]*AgentCount) []AgentCount {
 	})
 	return out
 }
+
+// RunOutcome is one run started in a window, with how it ended. Status is the
+// same classification RunInsights uses, so a chart and the insights tiles can
+// never disagree about what counts as a success.
+type RunOutcome struct {
+	StartedAt  time.Time
+	FinishedAt time.Time // zero while the run has no terminal entry
+	Status     RunStatus
+}
+
+// RunOutcomes lists the runs of a workspace that started at or after since,
+// newest first, capped at maxInsightRows (ok=false in the second result when
+// the cap cut the list).
+func RunOutcomes(ctx context.Context, db *sql.DB, workspaceID string, since time.Time) ([]RunOutcome, bool, error) {
+	if workspaceID == "" {
+		return nil, false, fmt.Errorf("journal: RunOutcomes requires workspace_id")
+	}
+	where := "workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND ts >= ?"
+	cte, cteArgs := runAggregatesCTE([]string{"started_at", "finished_at", "terminal_type"}, where)
+	q := cte + `
+SELECT started_at, finished_at, terminal_type
+FROM run_aggregates
+WHERE started_at IS NOT NULL
+ORDER BY started_at DESC
+LIMIT ?`
+	args := append(append([]any{}, cteArgs...), workspaceID, formatSinceBound(since.UTC()), maxInsightRows+1)
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("journal: run outcomes: %w", err)
+	}
+	defer rows.Close()
+	var out []RunOutcome
+	for rows.Next() {
+		var startedTS string
+		var finishedTS, terminal sql.NullString
+		if err := rows.Scan(&startedTS, &finishedTS, &terminal); err != nil {
+			return nil, false, fmt.Errorf("journal: scan run outcome: %w", err)
+		}
+		if len(out) == maxInsightRows {
+			return out, true, nil
+		}
+		st, err := parseJournalTS(startedTS)
+		if err != nil {
+			continue
+		}
+		o := RunOutcome{StartedAt: st, Status: runStatusFromTerminal(terminal.String)}
+		if finishedTS.Valid {
+			if ft, err := parseJournalTS(finishedTS.String); err == nil {
+				o.FinishedAt = ft
+			}
+		}
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("journal: run outcomes iteration: %w", err)
+	}
+	return out, false, nil
+}
+
+// Percentile95 is the nearest-rank p95 the insights tiles use.
+func Percentile95(values []int64) int64 { return percentile(values, 0.95) }

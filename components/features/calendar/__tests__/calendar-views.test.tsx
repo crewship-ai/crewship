@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { CalendarAgenda, CalendarMonth, CalendarWeek } from "../calendar-views"
+import { CalendarAgenda, CalendarLanes, CalendarMonth, CalendarWeek } from "../calendar-views"
 import { at, entry, items } from "./fixtures"
 
 const NOW = new Date(2026, 9, 15, 8, 16) // Thu 15 Oct 2026, 08:16
@@ -88,5 +88,25 @@ describe("calendar-month", () => {
     fireEvent.click(within(day).getByRole("button", { name: "+3 more" }))
     expect(onOpenDay).toHaveBeenCalledWith("2026-10-15")
     expect(within(screen.getByTestId("month-day-2026-10-02")).queryByRole("img", { name: "Something could not finish" })).toBeNull()
+  })
+})
+
+describe("calendar-lanes (Agents view)", () => {
+  const scout = { id: "ag-scout", slug: "scout", name: "Scout" }
+  const lanes = items([
+    entry({ id: "a", at: at(2026, 10, 15, 8), slug: "scan", agents: [scout] }),
+    entry({ id: "b", at: at(2026, 10, 16, 9), slug: "triage" }),
+  ])
+
+  it("draws one row per agent and a No agent row at the bottom", () => {
+    const onPick = vi.fn()
+    render(<CalendarLanes items={lanes} from={MONDAY} selectedId={null} onPick={onPick} now={NOW} />)
+    const grid = screen.getByRole("grid", { name: "Agents" })
+    const rows = within(grid).getAllByRole("row")
+    expect(rows[1]).toHaveTextContent("Scout")
+    expect(rows[rows.length - 1]).toHaveTextContent("No agent")
+    fireEvent.click(within(rows[1]).getByRole("button", { name: /Weekly scan/ }))
+    expect(onPick).toHaveBeenCalledWith("planned:a")
+    expect(within(rows[rows.length - 1]).getByRole("button", { name: /Nightly triage/ })).toBeInTheDocument()
   })
 })

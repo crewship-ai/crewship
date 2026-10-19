@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { applySavedView, parseSavedViews, isJournalView, issueViews, journalViews } from "@/lib/saved-views"
+import { applySavedView, parseSavedViews, isCalendarView, isJournalView, issueViews, journalViews, calendarViews } from "@/lib/saved-views"
 import type { SavedView } from "@/lib/types/mission"
 
 // =============================================================================
@@ -82,5 +82,24 @@ describe("saved-view API compatibility", () => {
   })
   it("prefers explicit snake-case values, including empty strings", () => {
     expect(applySavedView(view({ filters_json: JSON.stringify({ project_id: "", projectId: "ignored", crew_id: "c", crewId: "ignored", assignee_id: "a", assigneeId: "ignored", agent_id: "ignored", search: "", query: "ignored" }) }))).toEqual({ projectId: "", crewId: "c", agentId: "a", search: "" })
+  })
+})
+
+describe("calendar saved views share the table without leaking into the other surfaces", () => {
+  const calendar = view({ id: "c1", filters_json: JSON.stringify({ surface: "calendar", params: { scope: "workspace" } }) })
+  const journal = view({ id: "j1", filters_json: JSON.stringify({ surface: "journal", params: { tab: "runs" } }) })
+  const issue = view({ id: "i1", filters_json: '{"project_id":"p1"}' })
+
+  it("recognises its own rows by the marker in filters_json", () => {
+    expect(isCalendarView(calendar)).toBe(true)
+    expect(isCalendarView(journal)).toBe(false)
+    expect(isCalendarView(issue)).toBe(false)
+    expect(isCalendarView(view({ filters_json: "not json" }))).toBe(false)
+    expect(calendarViews([calendar, journal, issue]).map((v) => v.id)).toEqual(["c1"])
+  })
+
+  it("the issue board and the journal no longer see calendar views", () => {
+    expect(issueViews([calendar, journal, issue]).map((v) => v.id)).toEqual(["i1"])
+    expect(journalViews([calendar, journal, issue]).map((v) => v.id)).toEqual(["j1"])
   })
 })

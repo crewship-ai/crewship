@@ -108081,7 +108081,9 @@
                         "issues_closed",
                         "cost_usd",
                         "runs_count",
-                        "active_missions"
+                        "active_missions",
+                        "success_rate",
+                        "p95_duration_ms"
                       ],
                       "type": "string"
                     },

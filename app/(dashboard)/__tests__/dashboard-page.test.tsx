@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { AgentSummary, CrewSummary, CrewSpendResponse, RunInsightsResponse, RuntimeCapacityResponse, TimeseriesResponse } from "../dashboard-types"
+import type { ProvisioningSummaryResponse } from "@/hooks/use-dashboard-data"
 import { useAppStore } from "@/lib/store"
 import DashboardPage from "../page"
 
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => {
     session: { data: { user: { name: "Pavel Srba" } } as { user: { name: string } } | null, status: "authenticated" },
     fetch: vi.fn(), events: new Map<string, () => void>(), invalidateA: vi.fn(), invalidateB: vi.fn(), volumeCalls: vi.fn(), insightsCalls: vi.fn(), agentCalls: vi.fn(), routineRefresh: vi.fn(),
     agents: query<AgentSummary[]>(), crews: query<CrewSummary[]>(), review: query<unknown[]>(), progress: query<unknown[]>(), completed: query<unknown[]>(), runs: query<unknown[]>(),
-    insights: query<RunInsightsResponse>(), capacity: query<RuntimeCapacityResponse>(), spend: query<CrewSpendResponse>(), volume: query<Partial<TimeseriesResponse>>(),
+    insights: query<RunInsightsResponse>(), capacity: query<RuntimeCapacityResponse>(), provisioning: query<ProvisioningSummaryResponse>(), credentials: query<unknown[]>(), spend: query<CrewSpendResponse>(), volume: query<Partial<TimeseriesResponse>>(),
     gaps: new Map<string, { crewId: string }[]>(),
     inbox: { items: [] as unknown[], loading: false, error: null as string | null, activeByKind: {} as Record<string, number>, decisionCount: 0, refresh: vi.fn() },
     schedules: [] as unknown[],
@@ -34,6 +35,8 @@ vi.mock("@/hooks/use-dashboard-data", () => ({
   useDashboardActiveRuns: () => state.runs,
   useRunsInsights: (...args: unknown[]) => { state.insightsCalls(...args); return state.insights },
   useRuntimeCapacity: () => state.capacity,
+  useProvisioningSummary: () => state.provisioning,
+  useDashboardCredentials: () => state.credentials,
   useMetricsTimeseries: (...args: unknown[]) => { state.volumeCalls(...args); return state.volume },
   useCrewSpend: () => state.spend,
   useCrewServiceSummaries: () => ({ byCrew: new Map() }),
@@ -71,7 +74,7 @@ beforeEach(() => {
   state.inbox = { items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0, refresh: vi.fn() }
   state.schedules = []
   state.realtime = "connected"
-  for (const key of ["agents", "crews", "review", "progress", "completed", "runs", "insights", "capacity", "spend", "volume"] as const) {
+  for (const key of ["agents", "crews", "review", "progress", "completed", "runs", "insights", "capacity", "provisioning", "credentials", "spend", "volume"] as const) {
     state[key].data = undefined; state[key].isPending = false; state[key].isError = false; state[key].refetch.mockReset()
   }
   // A workspace with a crew renders the dashboard; tests of the empty
@@ -112,7 +115,7 @@ it.each(["24h", "7d", "30d"])("uses the selected %s period for both insights and
   await loaded()
   fireEvent.click(screen.getByRole("radio", { name: period }))
   expect(screen.getByRole("radio", { name: period })).toHaveAttribute("aria-checked", "true")
-  expect(state.volumeCalls).toHaveBeenLastCalledWith("a", { metric: "runs_count", window: period, bucket: period === "24h" ? "1h" : "1d", group_by: "crew" }, { enabled: true })
+  expect(state.volumeCalls).toHaveBeenCalledWith("a", { metric: "runs_count", window: period, bucket: period === "24h" ? "1h" : "1d", group_by: "crew" }, { enabled: true })
   expect(state.insightsCalls).toHaveBeenLastCalledWith("a", period, { enabled: true })
   expect(screen.getByRole("region", { name: `Run volume · ${period} · by crew` })).toBeInTheDocument()
 })
@@ -243,6 +246,29 @@ it("scopes instance-wide holds to current workspace crews and counts each crew o
   expect(screen.getByTestId("attention")).toHaveTextContent("1 crew waiting for capacity")
   expect(screen.getByTestId("attention")).not.toHaveTextContent("FOREIGN PRIVATE DETAIL")
   expect(screen.queryByText("Your workspace is ready")).not.toBeInTheDocument()
+})
+
+it("says which crews need a rebuild, after capacity, with the first crew's name", async () => {
+  state.crews.data = [crew("one")]
+  state.capacity.data = { enabled: true, held: [{ crew_id: "one", reason: "memory", detail: "Current crew is waiting", since: "", waited_ms: 0 }] }
+  state.provisioning.data = {
+    failed: [{ id: "c9", slug: "web", name: "Web", error: "boom" }],
+    needs_provision: [{ id: "c8", slug: "data", name: "Data" }],
+    total: 2,
+  }
+  render(<DashboardPage />)
+  await loaded()
+  const text = screen.getByTestId("attention").textContent ?? ""
+  expect(text).toContain("2 crews need a rebuild: Web")
+  expect(text.indexOf("waiting for capacity")).toBeLessThan(text.indexOf("need a rebuild"))
+})
+
+it("asks for Success, P95 and Spend series for the same window as the chart", async () => {
+  render(<DashboardPage />)
+  await loaded()
+  for (const metric of ["success_rate", "p95_duration_ms", "cost_usd"]) {
+    expect(state.volumeCalls).toHaveBeenCalledWith("a", { metric, window: "24h", bucket: "1h", group_by: "none" }, { enabled: true })
+  }
 })
 
 it("builds a run chart from wire buckets and resolves crew identity by id, slug, name or fallback", async () => {

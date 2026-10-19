@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { CalendarClock } from "lucide-react"
 import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
@@ -19,7 +19,7 @@ import { RoutineRecurrenceFields } from "@/components/features/routines/routine-
 import { Segmented } from "@/components/ui/segmented"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { dateKey, scheduledInstant } from "@/lib/routine-calendar"
-import { formatRoutineTime, routineTimeZone } from "@/lib/routine-time"
+import { clockChangeFlags, formatRoutineTime, routineTimeZone } from "@/lib/routine-time"
 import { cn } from "@/lib/utils"
 
 type Mode = "once" | "repeat"
@@ -118,6 +118,8 @@ export function ScheduleStartDialog({
       controller.abort()
     }
   }, [base, mode, canRepeat, cron, timezone])
+
+  const clockChanges = useMemo(() => clockChangeFlags(next.occurrences, timezone), [next.occurrences, timezone])
 
   const scheduleOnce = async (inputs: Record<string, unknown>) => {
     const [day, time] = when.split("T")
@@ -236,9 +238,10 @@ export function ScheduleStartDialog({
                 <p className="text-label text-destructive">{next.error}</p>
               ) : next.state === "ok" ? (
                 <ul aria-label="Next 3 starts" className="flex flex-wrap gap-1.5">
-                  {next.occurrences.map((o) => (
+                  {next.occurrences.map((o, i) => (
                     <li key={o} className="rounded-md border border-border px-1.5 py-0.5 font-mono text-label">
-                      {formatRoutineTime(o)}
+                      {formatRoutineTime(o, timezone)}
+                      {clockChanges[i] && <span className="text-chip-warn-fg"> · after the clock change</span>}
                     </li>
                   ))}
                 </ul>
