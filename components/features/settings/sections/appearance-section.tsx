@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
+import { useUndoableAppearance } from "@/hooks/use-appearance-undo"
 import { retryAppearanceSync, useAppearanceSyncStatus } from "@/hooks/use-appearance-sync"
 import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
 import { ACCENTS, WORKSPACE_ACCENT, type AccentChoice } from "@/lib/theme/accents"
@@ -250,6 +251,8 @@ function SchemeHint({ styleId, onSwitch }: { styleId: string; onSwitch: () => vo
 export function AppearanceSection() {
   const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled, style, pickStyle, resetStyle, setKnob } = useAppearance()
   const { resolvedTheme } = useTheme()
+  // Every personal change below applies and saves at once, and offers Undo.
+  const undoable = useUndoableAppearance()
   const syncStatus = useAppearanceSyncStatus()
   const workspaceHex = useWorkspaceAccentHex()
   const scheme: Scheme = resolvedTheme === "light" || (resolvedTheme !== "dark" && theme === "light") ? "light" : "dark"
@@ -258,6 +261,9 @@ export function AppearanceSection() {
 
   return (
     <div className="space-y-5">
+      <p data-testid="appearance-autosave" className="text-control text-muted-foreground">
+        Changes save as you make them. Undo brings back the last one.
+      </p>
       <WorkspaceDefaultCard />
       <SettingsCard
         icon={Shapes}
@@ -266,47 +272,47 @@ export function AppearanceSection() {
         actions={
           <span className="flex flex-wrap items-center justify-end gap-2">
             <InheritChip field="style" />
-            <Button variant="outline" size="xs" onClick={resetStyle} disabled={atDefault} className="coarse:h-[44px]">
+            <Button variant="outline" size="xs" onClick={undoable("Style reset", resetStyle)} disabled={atDefault} className="coarse:h-[44px]">
               Reset style
             </Button>
           </span>
         }
       >
-        <StyleGallery state={style} scheme={scheme} onPick={pickStyle} />
+        <StyleGallery state={style} scheme={scheme} onPick={undoable("Style changed", pickStyle)} />
         <div className="border-t border-border/60">
           {Object.entries(KNOBS).map(([name, knob]) => (
             <SettingsRow key={name} label={knob.label} description={KNOB_HINTS[name]}>
-              <SettingsSegmented label={knob.label} options={knob.options} value={knobValue(style, name)} onChange={(v) => setKnob(name, v)} />
+              <SettingsSegmented label={knob.label} options={knob.options} value={knobValue(style, name)} onChange={undoable("Style changed", (v: string) => setKnob(name, v))} />
             </SettingsRow>
           ))}
         </div>
       </SettingsCard>
 
       <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system" actions={<InheritChip field="theme" />}>
-        <ThemeTiles value={theme} onChange={setTheme} allowed={allowedSchemes(styleId)} />
-        <SchemeHint styleId={styleId} onSwitch={() => pickStyle(HARBOR.id)} />
+        <ThemeTiles value={theme} onChange={undoable("Theme changed", setTheme)} allowed={allowedSchemes(styleId)} />
+        <SchemeHint styleId={styleId} onSwitch={() => undoable("Style changed", pickStyle)(HARBOR.id)} />
       </SettingsCard>
 
       <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus" actions={<InheritChip field="accent" />}>
         <SettingsRow label="Colour">
-          <AccentSwatches value={accent} onChange={setAccent} />
+          <AccentSwatches value={accent} onChange={undoable("Accent changed", setAccent)} />
         </SettingsRow>
-        <TeamColourRow hex={workspaceHex} value={accent} onChange={setAccent} />
+        <TeamColourRow hex={workspaceHex} value={accent} onChange={undoable("Accent changed", setAccent)} />
         <AccentPreview />
       </SettingsCard>
 
       <SettingsCard icon={SlidersHorizontal} title="Layout & motion">
         <SettingsRow label="Text size" description="Scales text, spacing and controls together, like zoom — kept with your account.">
-          <SettingsSegmented label="Text size" options={TEXT_SIZE_OPTIONS} value={textSize} onChange={setTextSize} />
+          <SettingsSegmented label="Text size" options={TEXT_SIZE_OPTIONS} value={textSize} onChange={undoable("Text size changed", setTextSize)} />
         </SettingsRow>
         <SettingsRow label="Density" description="Compact tightens list, table and settings rows. Text size stays the same.">
-          <SettingsSegmented label="Density" options={DENSITY_OPTIONS} value={density} onChange={setDensity} />
+          <SettingsSegmented label="Density" options={DENSITY_OPTIONS} value={density} onChange={undoable("Density changed", setDensity)} />
         </SettingsRow>
         <SettingsRow label="Sidebar" description="How the left rail behaves. Same as the switch at the bottom of the rail and ⌘B.">
-          <SettingsSegmented label="Sidebar" options={SIDEBAR_OPTIONS} value={sidebar} onChange={setSidebar} />
+          <SettingsSegmented label="Sidebar" options={SIDEBAR_OPTIONS} value={sidebar} onChange={undoable("Sidebar changed", setSidebar)} />
         </SettingsRow>
         <SettingsRow label="Reduce motion" description="System follows your operating system's setting.">
-          <SettingsSegmented label="Reduce motion" options={MOTION_OPTIONS} value={motion} onChange={setMotion} />
+          <SettingsSegmented label="Reduce motion" options={MOTION_OPTIONS} value={motion} onChange={undoable("Motion changed", setMotion)} />
         </SettingsRow>
         <SettingsRow
           label="Sync across devices"
