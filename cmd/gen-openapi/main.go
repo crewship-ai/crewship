@@ -648,6 +648,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range routineTrustSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range boardHumanSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range documentSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}

@@ -42,6 +42,11 @@ func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table stri
 	if !installed {
 		mustExec(t, db, `CREATE TABLE `+table+`(page_id TEXT PRIMARY KEY REFERENCES pages(id), private_content TEXT)`)
 	}
+	if installed && table == "page_boards" {
+		mustExec(t, db, `UPDATE pages SET private_audience=1 WHERE id=?`, pageID)
+		mustExec(t, db, `INSERT INTO page_boards(page_id,seq,format) VALUES(?,0,?)`, pageID, emptyBoardFormat)
+		return
+	}
 	switch ownershipContentColumn(t, db, table) {
 	case "snapshot":
 		mustExec(t, db, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,?,1,?,?)`, workspace, pageID, []byte("NEVER_EXPOSE_THIS"), []byte("[]"))
@@ -55,7 +60,7 @@ func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table stri
 
 func ownershipContentColumn(t *testing.T, db *sql.DB, table string) string {
 	t.Helper()
-	column := map[string]string{"documents": "snapshot", "slides_heads": "canonical_json"}[table]
+	column := map[string]string{"documents": "snapshot", "slides_heads": "canonical_json", "page_boards": "format"}[table]
 	if column != "" {
 		var installed bool
 		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name=?)`, table, column).Scan(&installed); err != nil {
@@ -99,13 +104,17 @@ func TestPrivateOwnershipExplicitTransferPreservesContentAndGrants(t *testing.T)
 			for _, c := range listing.Pages[0].EligibleSuccessors {
 				eligible[c.UserID] = true
 			}
-			if !eligible["reader"] || !eligible[r.adminID] || eligible["ungranted"] || eligible[r.userID] {
+			if !eligible["reader"] || !eligible[r.adminID] || eligible["ungranted"] != (table == "page_boards") || eligible[r.userID] {
 				t.Fatalf("eligibility %v", eligible)
 			}
 			if strings.Contains(list.Body.String(), "NEVER_EXPOSE_THIS") || list.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal("custody listing disclosed content or cached contacts")
 			}
-			for _, successor := range []string{"ungranted", r.userID} {
+			deniedSuccessors := []string{r.userID}
+			if table != "page_boards" {
+				deniedSuccessors = append(deniedSuccessors, "ungranted")
+			}
+			for _, successor := range deniedSuccessors {
 				denied := ownershipCall(t, r, h, "POST", "/", fmt.Sprintf(`{"expected_owner_user_id":%q,"successor_user_id":%q}`, r.userID, successor))
 				wantCode(t, denied, 403, "successor must already read output")
 			}
@@ -115,14 +124,18 @@ func TestPrivateOwnershipExplicitTransferPreservesContentAndGrants(t *testing.T)
 			if err := r.db.QueryRow(`SELECT owner_user_id FROM pages WHERE id='private-output'`).Scan(&owner); err != nil || owner != "reader" {
 				t.Fatalf("owner %s %v", owner, err)
 			}
-			if err := r.db.QueryRow(`SELECT ` + ownershipContentColumn(t, r.db, table) + ` FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
+			contentMarker := "NEVER_EXPOSE_THIS"
+			if table == "page_boards" {
+				contentMarker = emptyBoardFormat
+			}
+			if err := r.db.QueryRow(`SELECT ` + ownershipContentColumn(t, r.db, table) + ` FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != contentMarker {
 				t.Fatalf("private content changed %s %v", content, err)
 			}
 			if err := r.db.QueryRow(`SELECT granted_by_user_id FROM page_grants WHERE page_id='private-output'`).Scan(&issuer); err != nil || issuer != r.userID {
 				t.Fatalf("grant issuer changed %s %v", issuer, err)
 			}
 			ph := NewPageHandler(r.db, nil, newTestLogger())
-			rec, err := ph.loadPage(t.Context(), r.wsID, "private-output")
+			rec, err := ph.loadPage(withUser(t.Context(), &AuthUser{ID: "reader"}), r.wsID, "private-output")
 			if err != nil {
 				t.Fatal(err)
 			}

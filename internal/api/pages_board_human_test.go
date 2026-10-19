@@ -25,86 +25,11 @@ func boardHumanFixture(t *testing.T) (*PageHandler, *pagesTransferRig, boardHuma
 	}
 	f.seedPage(t, "board-human-page", "private-board", "Private Board title", f.userID, "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='board-human-page'`)
-	mustExec(t, f.db, boardHumanSchema)
 	for _, user := range []string{f.userID, f.adminID} {
 		mustExec(t, f.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes,created_at) VALUES(?,?,'board test',?,'STANDARD','["pages:*"]','2026-10-19T00:00:00Z')`, "board-token-"+user, user, hashStandard("crewship_cli_board_"+user))
 	}
 	return h, f, boundary
 }
-
-// Standalone fixture mirrors the Board migration for isolated boundary tests.
-const boardHumanSchema = `
--- Empty Board read/create baseline. Profile and init receipt conventions are
--- shared with the existing Board foundation; drawing writes remain disabled.
-CREATE TABLE IF NOT EXISTS page_boards (
- page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
- seq INTEGER NOT NULL CHECK(seq>=0),
- format TEXT NOT NULL CHECK(format='crewship-board-excalidraw-0.18.1-v1')
-);
-CREATE TABLE IF NOT EXISTS page_board_mutations (
- board_page_id TEXT NOT NULL REFERENCES page_boards(page_id) ON DELETE CASCADE,
- mutation_id TEXT NOT NULL,
- author_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
- fingerprint TEXT NOT NULL,
- result_seq INTEGER NOT NULL,
- created_at TEXT NOT NULL,
- PRIMARY KEY(board_page_id,mutation_id)
-);
-CREATE TRIGGER IF NOT EXISTS page_boards_require_private_human_insert BEFORE INSERT ON page_boards
-WHEN NOT EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL AND private_audience=1)
-BEGIN SELECT RAISE(ABORT,'board requires private human ownership'); END;
-CREATE TRIGGER IF NOT EXISTS page_boards_require_private_human_update BEFORE UPDATE OF page_id ON page_boards
-WHEN NOT EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL AND private_audience=1)
-BEGIN SELECT RAISE(ABORT,'board requires private human ownership'); END;
-CREATE TRIGGER IF NOT EXISTS pages_preserve_board_custody BEFORE UPDATE OF owner_user_id,owner_crew_id,private_audience ON pages
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=OLD.id)
- AND (NEW.owner_user_id IS NULL OR NEW.owner_crew_id IS NOT NULL OR NEW.private_audience<>1)
-BEGIN SELECT RAISE(ABORT,'board requires private human ownership'); END;
-CREATE TRIGGER IF NOT EXISTS page_boards_exclusive_insert BEFORE INSERT ON page_boards
-WHEN EXISTS(SELECT 1 FROM documents WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM slides_heads WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_panels WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_project_live WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page already has content'); END;
-CREATE TRIGGER IF NOT EXISTS page_boards_exclusive_update BEFORE UPDATE OF page_id ON page_boards
-WHEN EXISTS(SELECT 1 FROM documents WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM slides_heads WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_panels WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=NEW.page_id)
- OR EXISTS(SELECT 1 FROM page_project_live WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page already has content'); END;
-CREATE TRIGGER IF NOT EXISTS documents_exclude_board_insert BEFORE INSERT ON documents
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS documents_exclude_board_update BEFORE UPDATE OF page_id ON documents
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS slides_heads_exclude_board_insert BEFORE INSERT ON slides_heads
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS slides_heads_exclude_board_update BEFORE UPDATE OF page_id ON slides_heads
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_panels_exclude_board_insert BEFORE INSERT ON page_panels
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_panels_exclude_board_update BEFORE UPDATE OF page_id ON page_panels
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_project_drafts_exclude_board_insert BEFORE INSERT ON page_project_drafts
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_project_drafts_exclude_board_update BEFORE UPDATE OF page_id ON page_project_drafts
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_project_live_exclude_board_insert BEFORE INSERT ON page_project_live
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-CREATE TRIGGER IF NOT EXISTS page_project_live_exclude_board_update BEFORE UPDATE OF page_id ON page_project_live
-WHEN EXISTS(SELECT 1 FROM page_boards WHERE page_id=NEW.page_id)
-BEGIN SELECT RAISE(ABORT,'board page cannot attach another content type'); END;
-`
 
 func boardHumanCall(t *testing.T, f *pagesTransferRig, b boardHumanBoundary, user, method, slug, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -124,7 +49,7 @@ func boardHumanCall(t *testing.T, f *pagesTransferRig, b boardHumanBoundary, use
 func TestBoardHumanInitializeReadRetryAndDeny(t *testing.T) {
 	h, f, b := boardHumanFixture(t)
 	for _, method := range []string{"GET", "POST"} {
-		w := boardHumanCall(t, f, b, f.userID, method, "private-board", `{"mutation_id":"first"}`)
+		w := boardHumanCall(t, f, b, f.userID, method, "@board-human-page", `{"mutation_id":"first"}`)
 		if method == "GET" && w.Code != 404 {
 			t.Fatalf("uninitialized read=%d %s", w.Code, w.Body.String())
 		}
@@ -133,19 +58,19 @@ func TestBoardHumanInitializeReadRetryAndDeny(t *testing.T) {
 		}
 	}
 	first := boardHumanCall(t, f, b, f.userID, "GET", "private-board", "")
-	retry := boardHumanCall(t, f, b, f.userID, "POST", "private-board", `{"mutation_id":"first"}`)
+	retry := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", `{"mutation_id":"first"}`)
 	if first.Code != 200 || retry.Code != 200 || first.Body.String() != retry.Body.String() {
 		t.Fatalf("lost ACK retry differs: %s / %s", first.Body.String(), retry.Body.String())
 	}
 	if !strings.Contains(first.Body.String(), `"records":[]`) || !strings.Contains(first.Body.String(), `"page_id":"board-human-page"`) || first.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("snapshot=%s", first.Body.String())
 	}
-	if got := boardHumanCall(t, f, b, f.userID, "POST", "private-board", `{"mutation_id":"different"}`); got.Code != 409 {
+	if got := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", `{"mutation_id":"different"}`); got.Code != 409 {
 		t.Fatalf("different retry=%d %s", got.Code, got.Body.String())
 	}
 	mustExec(t, h.db, `UPDATE workspace_members SET role='ADMIN' WHERE user_id=?`, f.adminID)
 	for _, method := range []string{"GET", "POST"} {
-		got := boardHumanCall(t, f, b, f.adminID, method, "private-board", `{"mutation_id":"first"}`)
+		got := boardHumanCall(t, f, b, f.adminID, method, "@board-human-page", `{"mutation_id":"first"}`)
 		if got.Code != 404 || strings.Contains(got.Body.String(), "Private Board title") {
 			t.Fatalf("admin leaked Board: %d %s", got.Code, got.Body.String())
 		}
@@ -186,7 +111,7 @@ func TestBoardHumanFailClosedInputsAndAuthority(t *testing.T) {
 			if tc.change != "" {
 				mustExec(t, h.db, tc.change)
 			}
-			got := boardHumanCall(t, f, b, f.userID, "POST", "private-board", tc.body)
+			got := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", tc.body)
 			if got.Code != tc.status {
 				t.Fatalf("status=%d want %d: %s", got.Code, tc.status, got.Body.String())
 			}
@@ -200,7 +125,7 @@ func TestBoardHumanFailClosedInputsAndAuthority(t *testing.T) {
 
 func TestBoardHumanUnsupportedAndExclusiveType(t *testing.T) {
 	h, f, b := boardHumanFixture(t)
-	got := boardHumanCall(t, f, b, f.userID, "POST", "private-board", `{"mutation_id":"first"}`)
+	got := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", `{"mutation_id":"first"}`)
 	if got.Code != 200 {
 		t.Fatal(got.Body.String())
 	}
@@ -215,7 +140,7 @@ func TestBoardHumanUnsupportedAndExclusiveType(t *testing.T) {
 	}
 	mustExec(t, h.db, `UPDATE page_boards SET seq=1 WHERE page_id='board-human-page'`)
 	for _, method := range []string{"GET", "POST"} {
-		got := boardHumanCall(t, f, b, f.userID, method, "private-board", `{"mutation_id":"first"}`)
+		got := boardHumanCall(t, f, b, f.userID, method, "@board-human-page", `{"mutation_id":"first"}`)
 		if got.Code != 409 || strings.Contains(got.Body.String(), `"records"`) {
 			t.Fatalf("unsupported state looked empty: %d %s", got.Code, got.Body.String())
 		}
@@ -231,7 +156,7 @@ func TestBoardHumanUnsupportedAndExclusiveType(t *testing.T) {
 
 func TestBoardHumanExplicitCustodyTransferDoesNotGrantPriorRead(t *testing.T) {
 	h, f, b := boardHumanFixture(t)
-	if got := boardHumanCall(t, f, b, f.userID, "POST", "private-board", `{"mutation_id":"first"}`); got.Code != 200 {
+	if got := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", `{"mutation_id":"first"}`); got.Code != 200 {
 		t.Fatal(got.Body.String())
 	}
 	pagesSeedUser(t, h, f.wsID, "board-reader", "board-reader@example.test", "MEMBER")
@@ -262,7 +187,7 @@ func TestBoardHumanRechecksAfterUpload(t *testing.T) {
 	for _, change := range []string{`UPDATE cli_tokens SET revoked_at='2026-10-19'`, `UPDATE pages SET owner_user_id='ptadmin' WHERE id='board-human-page'`} {
 		h, f, b := boardHumanFixture(t)
 		r := pagesRequest(t, "POST", "/", f.wsID, f.userID, "MEMBER", "")
-		r.SetPathValue("slug", "private-board")
+		r.SetPathValue("slug", "@board-human-page")
 		r.Header.Set("Authorization", "Bearer crewship_cli_board_"+f.userID)
 		r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
 		r.Body = &ownershipChangingBody{Reader: strings.NewReader(`{"mutation_id":"first"}`), change: func() { mustExec(t, h.db, change) }}
@@ -280,7 +205,7 @@ func TestBoardHumanRechecksAfterUpload(t *testing.T) {
 
 func TestBoardHumanAgentCannotBorrowHumanCredential(t *testing.T) {
 	_, f, b := boardHumanFixture(t)
-	if got := boardHumanCall(t, f, b, f.userID, "POST", "private-board", `{"mutation_id":"first"}`); got.Code != 200 {
+	if got := boardHumanCall(t, f, b, f.userID, "POST", "@board-human-page", `{"mutation_id":"first"}`); got.Code != 200 {
 		t.Fatal(got.Body.String())
 	}
 	r := pagesRequest(t, "GET", "/", f.wsID, f.userID, "MEMBER", "")

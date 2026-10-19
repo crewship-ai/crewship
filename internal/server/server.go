@@ -1038,6 +1038,7 @@ func (s *Server) mountAPIRouter(
 	ratelimitcfg.SetGlobal(rateLimitStore)
 	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
+	opts = append(opts, goapi.WithBoardEnabled(cfg.BoardEnabled))
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}

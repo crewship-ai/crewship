@@ -21,6 +21,9 @@ func newPageBoardHumanCommand() *cobra.Command {
 			var body any
 			method := http.MethodGet
 			if operation == "init" {
+				if !strings.HasPrefix(args[0], "@") || len(args[0]) < 2 {
+					return fmt.Errorf("Board initialization requires the original @PageID; reuse it for identical retries")
+				}
 				mutation, _ := cmd.Flags().GetString("mutation-id")
 				if mutation == "" || strings.TrimSpace(mutation) != mutation || len(mutation) > 128 {
 					return fmt.Errorf("--mutation-id must be a nonempty stable ID of at most 128 bytes; reuse it for identical retries")

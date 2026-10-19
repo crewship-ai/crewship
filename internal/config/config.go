@@ -44,18 +44,19 @@ func envBool(name string) (val, ok bool) {
 type Config struct {
 	pathSources map[string]string // effective explicit path origins, populated while loading
 
-	Server    ServerConfig    `yaml:"server"`
-	IPC       IPCConfig       `yaml:"ipc"`
-	Container ContainerConfig `yaml:"container"`
-	Storage   StorageConfig   `yaml:"storage"`
-	State     StateConfig     `yaml:"state"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Auth      AuthConfig      `yaml:"auth"`
-	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
-	Keeper    KeeperConfig    `yaml:"keeper"`
-	License   LicenseConfig   `yaml:"license"`
-	Composio  ComposioConfig  `yaml:"composio"`
-	Documents DocumentsConfig `yaml:"documents"`
+	Server       ServerConfig    `yaml:"server"`
+	IPC          IPCConfig       `yaml:"ipc"`
+	Container    ContainerConfig `yaml:"container"`
+	Storage      StorageConfig   `yaml:"storage"`
+	State        StateConfig     `yaml:"state"`
+	Logging      LoggingConfig   `yaml:"logging"`
+	Auth         AuthConfig      `yaml:"auth"`
+	LLMProxy     LLMProxyConfig  `yaml:"llm_proxy"`
+	Keeper       KeeperConfig    `yaml:"keeper"`
+	License      LicenseConfig   `yaml:"license"`
+	Composio     ComposioConfig  `yaml:"composio"`
+	Documents    DocumentsConfig `yaml:"documents"`
+	BoardEnabled bool            `yaml:"board_enabled"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -537,6 +538,9 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
 		cfg.Documents.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_BOARD_ENABLED"); ok {
+		cfg.BoardEnabled = v == "true" || v == "1"
 	}
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET"); ok {
 		cfg.Documents.AuthoritySocket = v

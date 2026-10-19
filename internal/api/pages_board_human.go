@@ -66,6 +66,10 @@ func (h *PageHandler) boardHumanFailure(w http.ResponseWriter, err error) {
 // mutation ID is required for lost-response retries; a different ID conflicts.
 func (h *PageHandler) InitBoard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if reference := r.PathValue("slug"); !strings.HasPrefix(reference, "@") || len(reference) < 2 {
+		replyError(w, http.StatusBadRequest, "Board initialization requires the original @PageID")
+		return
+	}
 	if _, err := h.boardHumanPage(r, true); err != nil {
 		h.boardHumanFailure(w, err)
 		return
@@ -93,7 +97,7 @@ func (h *PageHandler) InitBoard(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	// SQLite writer reservation orders membership/token/custody revocation with
 	// this attachment. The query is scoped and never changes Page identity.
-	if _, err = tx.ExecContext(r.Context(), `UPDATE pages SET updated_at=updated_at WHERE workspace_id=? AND slug=?`, WorkspaceIDFromContext(r.Context()), r.PathValue("slug")); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `UPDATE pages SET updated_at=updated_at WHERE workspace_id=? AND id=?`, WorkspaceIDFromContext(r.Context()), strings.TrimPrefix(r.PathValue("slug"), "@")); err != nil {
 		h.boardHumanFailure(w, err)
 		return
 	}
@@ -148,7 +152,7 @@ func (h *PageHandler) InitBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !present {
-		broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()), "page.updated", map[string]any{"page_id": rec.ID})
+		broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()), "page.updated", map[string]any{})
 	}
 	writeEmptyBoard(w, rec)
 }

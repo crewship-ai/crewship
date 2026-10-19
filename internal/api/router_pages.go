@@ -88,6 +88,12 @@ func (r *Router) registerPageRoutes() {
 	// Same two wrappers every read route in this package uses; the local
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
+	if r.boardEnabled {
+		// openapi: responses 200,401,403,404,409,500
+		r.mux.Handle("GET /api/v1/pages/{slug}/board", authed(r.authMw.RequireWorkspace(http.HandlerFunc(p.GetBoard))))
+		// openapi: responses 200,400,401,403,404,409,413,500
+		r.authedMut("POST", "/api/v1/pages/{slug}/board", roleInline, p.InitBoard)
+	}
 	wsCtx := r.authMw.RequireWorkspace
 	// The administrative ceiling never grants a run permission to publish.
 	// openapi: responses 200,400,401,403,404,500

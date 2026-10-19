@@ -3,28 +3,32 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // Actual built CLI, real HTTP credential middleware and SQLite persistence.
-// Route composition is local because production registration belongs to the
-// integrator. This is not editor, agent, multi-writer or full B1 acceptance.
+// Uses the production Router with the explicit feature flag enabled. This is
+// not editor, agent, multi-writer or full B1 acceptance.
 func TestBoardHumanActualCLI(t *testing.T) {
-	h, f, b := boardHumanFixture(t)
-	middleware := NewAuthMiddleware(nil, sessions.NewDBStore(h.db), h.db, newTestLogger())
-	mux := http.NewServeMux()
-	wrap := func(fn http.HandlerFunc) http.Handler { return middleware.RequireAuth(middleware.RequireWorkspace(fn)) }
-	mux.Handle("POST /api/v1/pages/{slug}/board", wrap(b.InitBoard))
-	mux.Handle("GET /api/v1/pages/{slug}/board", wrap(b.GetBoard))
-	server := httptest.NewServer(mux)
+	h, f, _ := boardHumanFixture(t)
+	// Production CLI resolves human-readable workspace references. Use an
+	// opaque ID here so a pages-scoped credential need not enumerate workspaces.
+	const workspaceID = "cboardhumanactualcli000001"
+	mustExec(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES(?,'Board CLI','board-cli')`, workspaceID)
+	mustExec(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) SELECT 'board-cli-'||id,?,user_id,role FROM workspace_members WHERE workspace_id=?`, workspaceID, f.wsID)
+	mustExec(t, h.db, `UPDATE pages SET workspace_id=? WHERE id='board-human-page'`, workspaceID)
+	f.wsID = workspaceID
+	router, err := NewRouter(h.db, "board-router-qualification-secret", newTestLogger(), WithBoardEnabled(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(router.Shutdown)
+	server := httptest.NewServer(router)
 	defer server.Close()
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -50,7 +54,7 @@ func TestBoardHumanActualCLI(t *testing.T) {
 	if output, err := run("patch"); err == nil {
 		t.Fatalf("unsupported Board operation exited successfully: %s", output)
 	}
-	initialized, err := run("init", "private-board", "--mutation-id", "cli-first")
+	initialized, err := run("init", "@board-human-page", "--mutation-id", "cli-first")
 	var snapshot struct {
 		PageID  string `json:"page_id"`
 		Records []any  `json:"records"`
@@ -63,7 +67,7 @@ func TestBoardHumanActualCLI(t *testing.T) {
 	if err != nil || !bytes.Equal(initialized, shown) {
 		t.Fatalf("CLI read: %v %s / %s", err, initialized, shown)
 	}
-	retried, err := run("init", "private-board", "--mutation-id", "cli-first")
+	retried, err := run("init", "@board-human-page", "--mutation-id", "cli-first")
 	if err != nil || !bytes.Equal(initialized, retried) {
 		t.Fatalf("CLI lost ACK retry: %v %s", err, retried)
 	}

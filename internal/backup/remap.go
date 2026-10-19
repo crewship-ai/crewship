@@ -425,6 +425,15 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	// Board receipts reference page_boards(page_id), not an independent id.
+	// Follow the Page anchor and retain immutable mutation IDs/fingerprints.
+	for _, row := range dump.Tables["page_board_mutations"] {
+		if old, ok := row["board_page_id"].(string); ok {
+			if mapped := idMap["pages"][old]; mapped != "" {
+				row["board_page_id"] = mapped
+			}
+		}
+	}
 	if err := remapSlides(dump, idMap); err != nil {
 		return err
 	}

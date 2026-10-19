@@ -31,6 +31,12 @@ import (
 
 type RouterOption func(*Router)
 
+// WithBoardEnabled installs private empty-Board read/create routes. It grants
+// no authoring authority; each handler still validates the current human.
+func WithBoardEnabled(enabled bool) RouterOption {
+	return func(r *Router) { r.boardEnabled = enabled }
+}
+
 // WithDocumentAuthority enables only the private persistence socket, never a
 // public document editor or API. Empty paths leave the foundation disabled.
 func WithDocumentAuthority(socket, secretFile string) RouterOption {

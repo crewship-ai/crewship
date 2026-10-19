@@ -314,6 +314,8 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"page_boards",
+	"page_board_mutations",
 	"documents",
 	"document_creations",
 	"slides_heads",
@@ -642,6 +644,19 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 		}
 		if table == "users" {
+			// Initialization receipts retain historical authors even after their
+			// workspace membership ends. Carry only authors referenced here.
+			hasBoardAuthors, err := tableHasColumn(ctx, tx, "page_board_mutations", "author_user_id")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe Board receipt authors: %w", err)
+			}
+			if hasBoardAuthors {
+				where = "(" + where + `) OR id IN (
+					SELECT author_user_id FROM page_board_mutations
+					WHERE board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)
+					  AND author_user_id IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
 			// Included workspace membership/grants can reference humans with no
 			// crew or chat. Probe the optional table for older/minimal schemas.
 			hasMembers, err := tableExists(ctx, tx, "workspace_members")
