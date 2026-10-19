@@ -33,6 +33,10 @@ interface Options {
   /** Signature of the history currently on screen, or null before the first
    *  load settles (nothing to compare against yet). */
   getKnownSignature: () => string | null
+  /** True only after this exact source was confirmed; a settled empty draft is not proof. */
+  isSourceConfirmed: () => boolean
+  /** Definitive source refusal: clear protected history and deny late events. */
+  onDenied: (status: 401 | 403 | 404) => void
   /** The server holds messages the screen does not: reload history. */
   onChange: () => void
 }
@@ -51,17 +55,19 @@ interface Options {
  * {@link RESTRICTED_CHAT_POLL_MS} and asks for a history reload when the list
  * differs from the one on screen. It never polls while hidden, while paused or
  * with a request still in flight, checks once immediately when the tab becomes
- * visible again, stops on unmount, and stops for good on 404 (the chat is gone
- * or no longer readable — the screen's own error handling takes over).
+ * visible again and stops on unmount. A definitive denial clears the screen
+ * before polling stops; an unknown draft's 404 only stops polling.
  */
-export function useRestrictedChatPoll({ enabled, sessionId, workspaceId, paused, getKnownSignature, onChange }: Options): void {
+export function useRestrictedChatPoll({ enabled, sessionId, workspaceId, paused, getKnownSignature, isSourceConfirmed, onDenied, onChange }: Options): void {
   const pausedRef = useRef(paused)
   const knownRef = useRef(getKnownSignature)
   const changeRef = useRef(onChange)
+  const confirmedRef = useRef(isSourceConfirmed)
   useEffect(() => {
     pausedRef.current = paused
     knownRef.current = getKnownSignature
     changeRef.current = onChange
+    confirmedRef.current = isSourceConfirmed
   })
 
   useEffect(() => {
@@ -81,16 +87,22 @@ export function useRestrictedChatPoll({ enabled, sessionId, workspaceId, paused,
       if (stopped || inFlight || pausedRef.current || document.visibilityState !== "visible") return
       const known = knownRef.current()
       if (known === null) return
+      const sourceWasConfirmed = confirmedRef.current()
       inFlight = true
       try {
         const res = await apiFetch(
           `/api/v1/chats/${requireApiPathSegment(sessionId)}/messages?workspace_id=${encodeURIComponent(workspaceId)}`,
           { signal: controller.signal },
         )
-        if (res.status === 404) { stop(); return }
+        if (controller.signal.aborted || stopped) return
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          if (res.status !== 404 || sourceWasConfirmed) onDenied(res.status)
+          stop()
+          return
+        }
         if (!res.ok) return
         const data = (await res.json()) as { messages?: { id?: string }[] } | null
-        if (controller.signal.aborted || pausedRef.current) return
+        if (controller.signal.aborted || stopped || pausedRef.current) return
         if (messagesSignature(data?.messages ?? []) !== knownRef.current()) changeRef.current()
       } catch {
         // Transient: the next tick tries again.
@@ -109,5 +121,5 @@ export function useRestrictedChatPoll({ enabled, sessionId, workspaceId, paused,
       controller.abort()
       stop()
     }
-  }, [enabled, sessionId, workspaceId])
+  }, [enabled, sessionId, workspaceId, onDenied])
 }
