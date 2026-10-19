@@ -1,0 +1,46 @@
+---
+title: Native Slides initialization and reads
+---
+
+The schema-1 native Slides adapter can initialize a populated presentation on an
+existing empty private Page and read its saved head or an exact revision.
+A server must explicitly install the human adapter before these routes exist;
+default Router construction leaves it disabled.
+
+Use a current human session or CLI token. Initialization requires the Page's
+current human custodian and `pages:write`; reading requires current private
+access and `pages:read`. Another unrestricted workspace OWNER can read with a
+mandatory private-access audit. An ADMIN role or ordinary Page grant does not
+widen a private Page's audience. Agent, internal and acting-agent credentials
+are refused.
+
+```bash
+crewship slide initialize @PAGE_ID --file initialization.json
+crewship slide read @PAGE_ID
+crewship slide at-rev @PAGE_ID 1
+```
+
+The initialization file uses the existing strict Slides contract: `page_id`,
+`schema_version: 1`, `mutation_id` and a complete `deck` whose `deck_id` equals
+`page_id`. Geometry, text, shape, table, notes and theme use the bounded typed
+schema. Read the shared [schema fixture](../../testdata/slides-schema-v1.json)
+for the deck structure. The CLI validates this request before transport.
+
+Retain the exact initialization file after an unknown outcome. Repeating it
+with the same current actor returns the original revision and content hash with
+`duplicate: true`. Reusing its mutation ID with changed content or actor fails.
+The immutable Page ID prevents an old initialization from targeting a new Page
+that reuses the same slug. The command accepts a slug for lookup; use `@PAGE_ID`
+when retaining a durable reference.
+
+The server commits head, immutable revision, receipt and object identities in
+one transaction, with current credential, membership and Page custody checks
+under the writer fence. A storage failure rolls back the entire initialization.
+Existing Document, static artifact, Board, project or panel content blocks this
+path. It creates neither a Page nor a permission grant.
+
+Schema 2 and future schemas remain unavailable, including on reads: no partial
+text, image metadata or hashes are returned. Retained stored data is preserved.
+Patch, reorder, restore, history, image upload, agent creation, editor, Present
+and export are outside this adapter. This delivery makes no canonical-format or
+Office/headless export qualification claim.
