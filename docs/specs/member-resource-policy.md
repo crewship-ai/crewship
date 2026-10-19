@@ -591,9 +591,17 @@ Browser and CLI WebSockets, journal SSE and run NDJSON retain the authenticated
 session or CLI-token row ID and its original expiry. Successful API revocation
 invalidates matching in-memory stream leases after commit and wakes idle streams;
 every frame is fenced again at delivery, including replay and control frames.
-A monotonic admission epoch captured before database authentication prevents
-late registration with a pre-revocation validation result. No TTL or batch skips
-extend access. The registry retains active requests/connections only.
+An admission snapshot captured before database authentication compares only
+the selected session/token and the applicable user revocation epochs. Revoking
+another identity cannot reject a valid concurrent request. Snapshot cleanup also
+covers failed/canceled authentication; counters disappear when no earlier
+admission can need them. This prevents late registration with a pre-revocation
+validation result. No TTL or batch skips
+extend access. The registry retains active requests/connections and pending authentications only.
+Repeated signout still updates the stored revocation reason/timestamp, but only
+a committed active-to-revoked session transition sends a notification. An empty
+bulk session revocation does not advance a user epoch. Custom session stores
+without atomic transition reporting retain their existing notification contract.
 
 Revocation stops admission of the next frame; already authorized or in-flight
 bytes cannot be recalled. Ordinary logout does not cancel an already started
