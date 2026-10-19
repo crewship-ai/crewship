@@ -25,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Prepare strict original text-selection validation for future Document edits; run admission and editing integration remain separate.
+
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
