@@ -71,6 +71,7 @@ async function stub(page: Page, { role = "OWNER", failList = false, seats = [] }
     else if (path === `/api/v1/provider-logins/pools/${POOL.id}`) body = POOL
     else if (path === "/api/v1/me/preferences") body = {}
     // VLT-04: recorded use per account (no quota, no $).
+    else if (path === "/api/v1/paymaster/credential-spend") body = { rows: [{ credential_id: "seat-or", cost_usd: 3.1, call_count: 12, input_tokens: 1000, output_tokens: 500, last_ts: new Date(now).toISOString() }] }
     else if (path === "/api/v1/paymaster/subscriptions") body = { rows: [{ credential_id: "seat-max", subscription_plan: "Max", provider: "ANTHROPIC", call_count: 47, input_tokens: 900000, output_tokens: 350000, last_ts: new Date(now).toISOString() }] }
     // VLT-01: the pre-save probe. The fixture never echoes the value back.
     else if (path === "/api/v1/credentials/test") body = { valid: true, supported: true, status: 200 }
@@ -193,16 +194,20 @@ for (const [width, height, label] of [[1440, 1000, "desktop"], [390, 844, "phone
 }
 
 for (const [width, height] of [[1440, 1000], [1024, 800], [390, 844]] as const) {
-  test(`VLT-04 AI account cards show recorded tokens, no quota bars and no $ at ${width}`, async ({ page }) => {
+  test(`VLT-04 AI account cards show recorded tokens, $ this month on API keys only, no quota bars at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height })
     await stub(page, { seats: SEATS })
     await page.goto("/credentials?space=providers")
     const max = page.locator("[data-slot=account-card]", { hasText: "Claude Max · Demo" })
     await expect(max.getByText("1.3M tokens · 47 calls · last 30 days")).toBeVisible()
-    await expect(page.getByText("No usage data yet")).toHaveCount(2)
+    // The API-key account shows its metered spend; seats never show a price.
+    const or = page.locator("[data-slot=account-card]", { hasText: "OpenRouter" })
+    await expect(or.getByText("$3.10 this month")).toBeVisible()
+    await expect(page.getByText("No usage data yet")).toHaveCount(1)
     await expect(page.getByRole("progressbar")).toHaveCount(0)
     await expect(page.getByText("Near the limit")).toHaveCount(0)
-    await expect(page.locator("[data-slot=provider-accounts]")).not.toContainText(/\$\d/)
+    const seats = page.locator("[data-slot=account-card]").filter({ hasNotText: "OpenRouter" })
+    for (let i = 0; i < (await seats.count()); i++) await expect(seats.nth(i)).not.toContainText(/\$\d/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   })
 }
