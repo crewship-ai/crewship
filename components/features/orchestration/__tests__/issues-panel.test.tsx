@@ -24,7 +24,7 @@ const VIEWS = [{ id: "v1", name: "Launch blockers", filters_json: "{}", sort_jso
 function setup(over: Partial<IssuesPanelProps> = {}) {
   const props: IssuesPanelProps = {
     issues: ISSUES,
-    quickCounts: { mine: 1, all: 2 },
+    quickCounts: { mine: 1, reply: 2, working: 3, review: 4, blocked: 5, all: 2 },
     projects: PROJECTS,
     savedViews: VIEWS,
     crews: CREWS,
@@ -64,6 +64,31 @@ describe("IssuesPanel", () => {
     expect(nav.push).toHaveBeenCalledWith("/issues/intake")
     fireEvent.click(screen.getByText("Recurring issues"))
     expect(nav.push).toHaveBeenCalledWith("/issues/intake?tab=recurring")
+  })
+
+  it("lists v67's six views with their server counts", () => {
+    setup()
+    const labels = ["My work", "Needs my reply", "Agents working", "Waiting for my review", "Blocked", "All issues"]
+    const text = document.body.textContent ?? ""
+    for (let i = 1; i < labels.length; i++) expect(text.indexOf(labels[i - 1])).toBeLessThan(text.indexOf(labels[i]))
+    const row = screen.getByText("Needs my reply").closest("[data-slot], div") as HTMLElement
+    expect(row.textContent).toContain("2")
+    fireEvent.click(screen.getByText("Blocked"))
+    expect(screen.getByText("Blocked")).toBeInTheDocument()
+  })
+
+  it("draws the project bar from done over total, and no bar for an empty project", () => {
+    const projects = [
+      { ...PROJECTS[0], id: "p1", name: "Launch v2", issue_count: 4, done_count: 1, progress: 25 },
+      { ...PROJECTS[0], id: "p2", name: "Empty one", issue_count: 0, done_count: 0, progress: 0 },
+      { ...PROJECTS[0], id: "p3", name: "Barely", issue_count: 400, done_count: 1, progress: 0 },
+    ] as Project[]
+    setup({ projects })
+    const fill = (name: string) => screen.queryByTestId(`project-progress-${name}`)?.firstElementChild as HTMLElement | undefined
+    expect(fill("p1")?.style.width).toBe("25%")
+    expect(fill("p2")).toBeUndefined()
+    // one done issue out of 400 is still visible
+    expect(parseFloat(fill("p3")?.style.width ?? "0")).toBeGreaterThan(0)
   })
 
   it("orders the sections Views → Projects → Saved views", () => {
@@ -168,6 +193,10 @@ describe("panel keys", () => {
   it("1–9 walk Views, then saved views, then projects", () => {
     expect(panelKeyOrder(PROJECTS, VIEWS)).toEqual([
       { kind: "quick", id: "mine" },
+      { kind: "quick", id: "reply" },
+      { kind: "quick", id: "working" },
+      { kind: "quick", id: "review" },
+      { kind: "quick", id: "blocked" },
       { kind: "quick", id: "all" },
       { kind: "saved", id: "v1" },
       { kind: "project", id: "p1" },

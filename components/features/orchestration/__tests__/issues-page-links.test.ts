@@ -76,3 +76,12 @@ describe("issueNeighbours", () => {
     expect(issueNeighbours([issue("OPS-4")], "OPS-4")).toEqual({ prev: null, next: null })
   })
 })
+
+describe("arrival from the issue page, all six views", () => {
+  it.each(["mine", "reply", "working", "review", "blocked", "all"])("?view=%s", (v) => {
+    expect(arrivalFromParams(new URLSearchParams(`view=${v}`)).quick).toBe(v)
+  })
+  it("ignores an unknown view", () => {
+    expect(arrivalFromParams(new URLSearchParams("view=everything")).quick).toBeNull()
+  })
+})

@@ -2,11 +2,10 @@ import { describe, it, expect } from "vitest"
 
 import {
   QUICK_VIEWS,
-  applyQuickView,
   dueLabel,
   groupIssues,
-  isMyWork,
   orderIssues,
+  quickViewQuery,
   shortAgo,
 } from "../issues-view-model"
 import type { Mission } from "@/lib/types/mission"
@@ -15,26 +14,24 @@ const m = (over: Partial<Mission>): Mission =>
   ({ id: over.id ?? "x", title: over.id ?? "x", status: "TODO", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", ...over }) as Mission
 
 describe("quick views", () => {
-  it("my work derives from owner and from whoever holds the work, never from closed issues", () => {
-    const issues = [
-      m({ id: "owned", owner: { id: "me" } }),
-      m({ id: "held", work_mode: "human", worker_user_id: "me", owner: { id: "jana" } }),
-      m({ id: "legacy", assignee_type: "user", assignee_id: "me" }),
-      m({ id: "delegated", owner: { id: "jana" }, delegate: { id: "me" } }),
-      m({ id: "done", owner: { id: "me" }, status: "DONE" }),
-      m({ id: "cancelled", owner: { id: "me" }, status: "CANCELLED" }),
-      m({ id: "theirs", owner: { id: "jana" } }),
-    ]
-    expect(applyQuickView(issues, "mine", "me").map((i) => i.id)).toEqual(["owned", "held", "legacy"])
-    expect(applyQuickView(issues, "all", "me")).toHaveLength(issues.length)
+  it("offers v67's six views in v67's order", () => {
+    expect(QUICK_VIEWS.map((v) => v.label)).toEqual([
+      "My work",
+      "Needs my reply",
+      "Agents working",
+      "Waiting for my review",
+      "Blocked",
+      "All issues",
+    ])
   })
 
-  it("is empty for a reader who is not known yet", () => {
-    expect(isMyWork(m({ owner: { id: "me" } }), null)).toBe(false)
-  })
-
-  it("offers only the views the list can answer honestly", () => {
-    expect(QUICK_VIEWS.map((v) => v.label)).toEqual(["My work", "All issues"])
+  it("each view is a server filter, never a filter over the loaded page", () => {
+    expect(quickViewQuery("all")).toBe("")
+    expect(quickViewQuery("mine")).toBe("mine=1")
+    expect(quickViewQuery("reply")).toBe("needs=reply")
+    expect(quickViewQuery("working")).toBe("working=1")
+    expect(quickViewQuery("review")).toBe("needs=review")
+    expect(quickViewQuery("blocked")).toBe("blocked=1")
   })
 })
 

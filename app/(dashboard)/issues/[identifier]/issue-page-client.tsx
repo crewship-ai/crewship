@@ -131,6 +131,7 @@ function IssuePage() {
                 workspaceId={workspaceId}
                 onChanged={() => setReloadKey((n) => n + 1)}
                 onDeleted={() => router.push(origin?.href.startsWith("/issues") ? origin.href : "/issues")}
+                onDuplicated={(next) => router.push(`/issues/${encodeURIComponent(next)}`)}
               />
             )}
             {!isMobile && <SubBarIconButton icon={X} onClick={toList} aria-label="Back to list" title="Back to list" />}
@@ -139,7 +140,7 @@ function IssuePage() {
       />
 
       <div className="relative flex min-h-0 flex-1">
-        <IssuePagePanel lists={lists} me={me} navigate={go} />
+        <IssuePagePanel lists={lists} workspaceId={workspaceId} navigate={go} />
         <div className="relative min-h-0 min-w-0 flex-1">
           <div className="h-full overflow-y-auto pb-20">
             {wsLoading || !workspaceId || !identifier ? (

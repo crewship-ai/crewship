@@ -13,7 +13,7 @@
 import { filtersFromParams, filtersToParams, type IssueFilters } from "@/hooks/use-issue-filters"
 import { getIssueWorker } from "@/lib/issue-execution"
 import type { Mission } from "@/lib/types/mission"
-import { groupIssues, orderIssues, type GroupBy, type OrderBy, type QuickView } from "@/components/features/issues/issues-view-model"
+import { groupIssues, orderIssues, isQuickView, type GroupBy, type OrderBy, type QuickView } from "@/components/features/issues/issues-view-model"
 import type { IssuesPanelSelection } from "./issues-panel"
 
 const withQuery = (params: URLSearchParams) => {
@@ -61,7 +61,7 @@ export function arrivalFromParams(params: URLSearchParams): IssuesArrival {
   const createProject = params.get("create") === "project"
   if (createProject) rest.delete("create")
   return {
-    quick: view === "mine" || view === "all" ? view : null,
+    quick: isQuickView(view) ? view : null,
     savedId: params.get("saved") || null,
     search: params.get("q") || null,
     createProject,

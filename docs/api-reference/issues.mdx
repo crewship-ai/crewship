@@ -88,6 +88,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `project_id` | string | -- | Filter by project |
 | `crew_id` | string | -- | Filter by crew |
 | `assignee_id` | string | -- | Filter by assignee |
+| `owner_id` | string | -- | Filter by human owner: a user ID, or `me` for the caller |
+| `delegate_id` | string | -- | Filter by agent delegate |
+| `work_mode` | string | -- | Who holds the work: `agent` or `human`; anything else is `400` |
+| `mine` | string | -- | `1`: My work, open issues the caller owns or holds as the worker |
+| `working` | string | -- | `1`: Agents working, an agent holds the issue and one of its sessions is `active` |
+| `needs` | string | -- | `reply`: open issues the caller owns where an agent session is `awaiting_input`. `review`: issues in `REVIEW` the caller owns. Anything else is `400` |
+| `blocked` | string | -- | `1`: Blocked, an open issue blocks it (`blocks` / `blocked_by` relation) |
 | `label` | string | -- | Filter by label name |
 | `q` | string | -- | Search in title or identifier (LIKE match), on the server |
 | `search` | string | -- | Older alias of `q` |
@@ -95,6 +102,8 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
 | `counts` | string | -- | `1` to also compute per-status totals under the same filters as the page (every filter applied, `limit`/`offset` ignored). Answered in the `X-Status-Counts` header; the body is unchanged. Any other value is ignored. |
+
+The view filters above (`owner_id` ... `blocked`) are the Issues panel's quick views. They combine with every other filter by AND, are scoped to the caller's workspace, and reach `X-Total-Count` and `counts=1` as well, so a view's count is exact rather than the size of a loaded page. "Open" means a status outside `DONE`, `COMPLETED`, `CANCELLED` and `DUPLICATE`. Views about the caller (`me`, `mine`, `needs`) match nothing when the request carries no user (a token without one); they never widen to every issue.
 
 The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 

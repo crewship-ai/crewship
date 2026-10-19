@@ -3,13 +3,15 @@
 // The issue page's ⋯ menu (v67 `H.POPS.imenu`, issues.js:261): Copy link,
 // Move to project…, Cancel issue…, Delete issue….
 //
-// Left out on purpose: Duplicate issue, Notify me and Mark as duplicate of
+// Duplicate issue is the existing create call with the title, brief, priority,
+// project and labels of this issue (a copy starts in Backlog, with nobody
+// holding it). Left out on purpose: Notify me and Mark as duplicate of
 // (no backend yet, #3459), Bind a routine and Convert to sub-issue (the
 // properties already carry Routine and Parent), Take over and Hand off
 // (Work & control carries them, with their revision contract).
 
 import * as React from "react"
-import { Archive, FolderKanban, Link2, MoreHorizontal, Trash2 } from "lucide-react"
+import { Archive, Copy, FolderKanban, Link2, MoreHorizontal, Trash2 } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "@/lib/toast"
@@ -44,6 +46,7 @@ export function IssueOptionsMenu({
   workspaceId,
   onChanged,
   onDeleted,
+  onDuplicated,
 }: {
   issue: Mission
   projects: Project[]
@@ -52,6 +55,8 @@ export function IssueOptionsMenu({
   onChanged: () => void
   /** The issue is gone; the page leaves. */
   onDeleted: () => void
+  /** A copy was created; the page opens it. */
+  onDuplicated?: (identifier: string) => void
 }) {
   const [dialog, setDialog] = React.useState<"move" | "cancel" | "delete" | null>(null)
   const id = issue.identifier ?? issue.id
@@ -80,6 +85,28 @@ export function IssueOptionsMenu({
     return true
   }
 
+  const duplicate = async () => {
+    const res = await apiFetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: `${issue.title} (copy)`,
+        ...(issue.description ? { description: issue.description } : {}),
+        ...(issue.priority && issue.priority !== "none" ? { priority: issue.priority } : {}),
+        ...(issue.project_id ? { project_id: issue.project_id } : {}),
+        ...(issue.labels?.length ? { labels: issue.labels.map((l) => l.id) } : {}),
+      }),
+    })
+    if (!res.ok) {
+      toast.error(await problem(res, "The issue was not duplicated."))
+      return
+    }
+    const created = (await res.json().catch(() => null)) as { identifier?: string | null; id?: string } | null
+    const next = created?.identifier ?? created?.id
+    toast.success(next ? `${next} created from ${id}` : `${id} duplicated`)
+    if (next) onDuplicated?.(next)
+  }
+
   return (
     <>
       <DropdownMenu>
@@ -91,6 +118,11 @@ export function IssueOptionsMenu({
           <DropdownMenuItem onSelect={copyLink}>
             <Link2 className="size-3.5" aria-hidden /> Copy link
           </DropdownMenuItem>
+          {can("edit_fields") && (
+            <DropdownMenuItem onSelect={() => void duplicate()}>
+              <Copy className="size-3.5" aria-hidden /> Duplicate issue
+            </DropdownMenuItem>
+          )}
           {can("edit_fields") && (
             <DropdownMenuItem onSelect={() => setDialog("move")}>
               <FolderKanban className="size-3.5" aria-hidden /> Move to project…

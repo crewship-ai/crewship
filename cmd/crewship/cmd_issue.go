@@ -273,6 +273,23 @@ var issueListCmd = &cobra.Command{
 		if v, _ := flags.GetString("assignee"); v != "" {
 			params.Set("assignee_id", v)
 		}
+		if v, _ := flags.GetString("owner"); v != "" {
+			params.Set("owner_id", v)
+		}
+		if v, _ := flags.GetString("delegate"); v != "" {
+			params.Set("delegate_id", v)
+		}
+		if v, _ := flags.GetString("work-mode"); v != "" {
+			params.Set("work_mode", v)
+		}
+		if v, _ := flags.GetString("needs"); v != "" {
+			params.Set("needs", v)
+		}
+		for flag, param := range map[string]string{"mine": "mine", "working": "working", "blocked": "blocked"} {
+			if on, _ := flags.GetBool(flag); on {
+				params.Set(param, "1")
+			}
+		}
 		if v, _ := flags.GetString("label"); v != "" {
 			params.Set("label", v)
 		}
@@ -517,6 +534,13 @@ func init() {
 	issueListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee ID")
 	issueListCmd.Flags().String("label", "", "Filter by label name")
+	issueListCmd.Flags().String("owner", "", "Only issues owned by this user ID, or \"me\"")
+	issueListCmd.Flags().String("delegate", "", "Only issues delegated to this agent ID")
+	issueListCmd.Flags().String("work-mode", "", "Who holds the work: agent or human")
+	issueListCmd.Flags().Bool("mine", false, "My work: open issues I own or hold as the worker")
+	issueListCmd.Flags().Bool("working", false, "Agents working: an agent holds the issue and its session is active")
+	issueListCmd.Flags().String("needs", "", "Needs me: reply (an agent awaits my answer on an issue I own) or review (in REVIEW and I own it)")
+	issueListCmd.Flags().Bool("blocked", false, "Blocked: an open issue blocks it")
 	issueListCmd.Flags().String("search", "", "Search issues by title or identifier (server-side)")
 	addListPagingFlags(issueListCmd.Flags(), 50)
 	issueListCmd.Flags().Bool("counts", false, "Also report how many issues sit in each status under the same filter (?counts=1, X-Status-Counts)")
