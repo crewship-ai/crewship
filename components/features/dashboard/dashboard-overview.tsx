@@ -262,7 +262,7 @@ export function AttentionTiles({
             key={item.id}
             href={item.href}
             data-slot="attention-tile"
-            className="group flex min-w-0 flex-col items-start gap-2 rounded-card border border-border bg-card px-3.5 py-3 text-muted-foreground transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-primary md:flex-row md:items-center md:gap-3"
+            className="pack-postcard group flex min-w-0 flex-col items-start gap-2 rounded-card border border-border bg-card px-3.5 py-3 text-muted-foreground transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-primary md:flex-row md:items-center md:gap-3"
           >
             <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-md text-heading font-semibold tabular-nums", TILE_TONE[item.tone])}>
               {item.count}
@@ -448,7 +448,7 @@ export function DashboardKpis({
         <div key={tile.label} data-slot="kpi" className="min-w-0 bg-card px-4 py-3.5">
           <small className="block text-control text-muted-foreground">{tile.label}</small>
           <span className="flex flex-wrap items-baseline gap-x-1.5">
-            <b className="text-title font-semibold tabular-nums tracking-tight text-foreground">{tile.value}</b>
+            <b className="pack-display text-title font-semibold tabular-nums tracking-tight text-foreground">{tile.value}</b>
             {tile.context && <em className="text-label not-italic text-muted-foreground">{tile.context}</em>}
           </span>
           {tile.spark}

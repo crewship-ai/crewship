@@ -41,6 +41,27 @@ afterEach(() => {
 const stored = () => JSON.parse(store.get(STYLE_STORAGE_KEY) ?? "null")
 const gallery = () => screen.getByRole("radiogroup", { name: "Style" })
 
+describe("Gaming packs (#3790)", () => {
+  it("lists a Gaming group with an Afterglow tile that previews itself, dark only", () => {
+    render(<AppearanceSection />)
+    const group = within(gallery()).getByRole("group", { name: "Gaming" })
+    expect(within(group).getByRole("heading", { name: "Gaming" })).toBeTruthy()
+    const tile = within(group).getByRole("radio", { name: "Afterglow" })
+    expect(within(tile).getByTestId("style-preview").getAttribute("data-style")).toBe("afterglow")
+    expect(within(tile).getByText("Dark only")).toBeTruthy()
+  })
+
+  it("picking Afterglow stores it, moves the theme to Dark and keeps the sail-blue accent", () => {
+    theme = "light"
+    render(<AppearanceSection />)
+    fireEvent.click(screen.getByRole("radio", { name: "Afterglow" }))
+    expect(stored().style).toBe("afterglow")
+    expect(setTheme).toHaveBeenCalledWith("dark")
+    expect(document.documentElement.getAttribute("data-style")).toBe("afterglow")
+    expect(document.documentElement.getAttribute("data-accent")).toBe("blue")
+  })
+})
+
 describe("the gallery (STY-01)", () => {
   it("is a Style card above Theme, with one tile per style, grouped by category", () => {
     render(<AppearanceSection />)

@@ -71,7 +71,8 @@ const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "s
 const TEXT = ["foreground", "muted-foreground", "muted-foreground-soft", "success", "warn", "destructive"]
 const SEMANTIC_ON_CARD = ["info", "notice", "gold", "indigo", "rose", "lime", "orange", "azure", "purple-hover"]
 
-const shipped = STYLES.filter((s) => s.id !== HARBOR.id)
+// Theme packs are held to the same bar in lib/theme-packs/__tests__/contrast.test.ts.
+const shipped = STYLES.filter((s) => s.id !== HARBOR.id && !s.pack)
 
 describe("the shipped styles", () => {
   it("there is a first batch beyond Harbor", () => {

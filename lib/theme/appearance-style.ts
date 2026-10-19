@@ -21,6 +21,7 @@
 
 import type { AccentChoice } from "@/lib/theme/accents"
 import type { ThemeChoice } from "@/lib/theme/appearance"
+import { PACKS } from "@/lib/theme-packs"
 
 /** The per-user preference key (GET/PUT /api/v1/me/preferences/{key}). */
 export const STYLE_PREFERENCE_KEY = "appearance.style"
@@ -44,7 +45,7 @@ export interface StyleState {
 }
 
 /** Gallery sections, in order. */
-export const STYLE_CATEGORIES = ["Crewship", "AI", "Development", "Productivity", "Design", "Communication", "Enterprise"] as const
+export const STYLE_CATEGORIES = ["Crewship", "AI", "Development", "Productivity", "Design", "Communication", "Enterprise", "Gaming"] as const
 export type StyleCategory = (typeof STYLE_CATEGORIES)[number]
 
 /** A registry row: the rendering facts plus what the gallery shows. */
@@ -54,6 +55,8 @@ export interface StyleInfo extends StyleDef {
   blurb: string
   /** Rail, card, accent and dark ground, for a glance before the live preview loads. */
   swatch: [string, string, string, string]
+  /** True for a theme pack (lib/theme-packs); its tokens are generated, not in styles.css. */
+  pack?: boolean
 }
 
 export const HARBOR: StyleInfo = {
@@ -66,8 +69,7 @@ export const HARBOR: StyleInfo = {
   swatch: ["#F3F4F6", "#FFFFFF", "#1E7BFE", "#0F1013"],
 }
 
-/** Every style this build can render. */
-export const STYLES: StyleInfo[] = [
+const BUILT_IN: StyleInfo[] = [
   HARBOR,
   { id: "harbor-night", name: "Harbor Night", category: "Crewship", blurb: "Deep navy ground with a sky-blue accent. Dark only.", schemes: ["dark"], accent: "sky", swatch: ["#070D18","#111A2E","#38BDF8","#0B1220"] },
   { id: "ink", name: "Ink", category: "AI", blurb: "Black and white, maximum contrast, no extra colour.", schemes: ["light","dark"], accent: "graphite", swatch: ["#F7F7F8","#FFFFFF","#64748B","#121212"] },
@@ -84,6 +86,12 @@ export const STYLES: StyleInfo[] = [
   { id: "orchid", name: "Orchid", category: "Design", blurb: "Playful purple with large round shapes.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F6F3FF","#FFFFFF","#6366F1","#160F2C"] },
   { id: "charcoal", name: "Charcoal", category: "Communication", blurb: "Black and warm grey surfaces, softly rounded.", schemes: ["light","dark"], accent: "pink", swatch: ["#F5F5F3","#FFFFFF","#EC4899","#141414"] },
   { id: "signal", name: "Signal", category: "Enterprise", blurb: "Dark dashboard surfaces with very sharp corners.", schemes: ["light","dark"], accent: "indigo", swatch: ["#F4F5F5","#FFFFFF","#6366F1","#111217"] },
+]
+
+/** Every style this build can render: the built-in ones, then the theme packs. */
+export const STYLES: StyleInfo[] = [
+  ...BUILT_IN,
+  ...PACKS.map((p): StyleInfo => ({ id: p.id, name: p.name, category: p.category, blurb: p.blurb, schemes: p.schemes, accent: p.accent, swatch: p.swatch, pack: true })),
 ]
 
 /**

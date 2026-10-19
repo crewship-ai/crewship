@@ -12,6 +12,8 @@ import { stylePreviewAttrs } from "@/lib/theme/style-preview"
 // style will have — not a picture that can drift from the stylesheet.
 
 function accentSwatch(style: StyleInfo): string {
+  // A pack's primary action is its own colour (not the Crewship accent it suggests).
+  if (style.pack) return style.swatch[2]
   return ACCENTS.find((a) => a.id === style.accent)?.swatch ?? style.swatch[2]
 }
 
@@ -33,7 +35,11 @@ function StylePreview({ style, scheme }: { style: StyleInfo; scheme: Scheme }) {
         <span className="h-1.5 w-1/2 rounded-full bg-foreground" />
         <span className="h-1 w-3/4 rounded-full bg-muted-foreground" />
         <div className="flex flex-1 items-end justify-between gap-1 rounded-card border border-border bg-card p-1.5">
-          <span className="h-1 w-1/3 rounded-full bg-muted-foreground-soft" />
+          {style.pack ? (
+            <span data-testid="pack-sunset" className="h-1.5 w-1/3 rounded-full" style={{ background: "var(--pack-sunset)" }} />
+          ) : (
+            <span className="h-1 w-1/3 rounded-full bg-muted-foreground-soft" />
+          )}
           <span className="h-2.5 w-6 rounded-md" style={{ background: accentSwatch(style) }} />
         </div>
       </div>

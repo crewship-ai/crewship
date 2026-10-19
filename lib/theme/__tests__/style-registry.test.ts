@@ -81,7 +81,8 @@ describe("registry (STY-01, STY-04)", () => {
 describe("token blocks (STY-02)", () => {
   it("each style has exactly one block per scheme it supports, and no block for another", () => {
     const selectors = [...bare.matchAll(/([^{}]+)\{/g)].map((m) => m[1].trim())
-    for (const s of STYLES) {
+    // Theme packs have their own generated stylesheet (lib/theme-packs/__tests__).
+    for (const s of STYLES.filter((x) => !x.pack)) {
       expect(selectors.includes(`[data-style="${s.id}"]:not(.dark)`), `${s.id} light`).toBe(s.schemes.includes("light"))
       expect(selectors.includes(`.dark[data-style="${s.id}"]`), `${s.id} dark`).toBe(s.schemes.includes("dark"))
       expect(selectors.includes(`[data-style="${s.id}"]`), `${s.id} shape`).toBe(true)
@@ -91,6 +92,7 @@ describe("token blocks (STY-02)", () => {
   it("no block belongs to a style the registry does not list", () => {
     const ids = new Set(STYLES.map((s) => s.id))
     for (const m of bare.matchAll(/\[data-style="([a-z0-9-]+)"\]/g)) expect(ids.has(m[1]), m[1]).toBe(true)
+    for (const s of STYLES.filter((x) => x.pack)) expect(bare, `${s.id} lives in packs.generated.css`).not.toContain(`data-style="${s.id}"`)
   })
 
   it("a style block only sets custom properties — no rules about components", () => {
@@ -119,7 +121,7 @@ describe("token blocks (STY-02)", () => {
 })
 
 describe("no style outside the theme files (STY-02 guard)", () => {
-  const ALLOWED = [/^lib\/theme\//, /^app\/styles\//, /^app\/globals\.css$/]
+  const ALLOWED = [/^lib\/theme\//, /^lib\/theme-packs\//, /^app\/styles\//, /^app\/globals\.css$/]
   const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "__tests__", "e2e", "test-results", "lib/generated", ".claude", ".orca"])
   const PATTERN = /data-style|dataset\.style|dataset\["style"\]|dataset\['style'\]/
   const walk = (dir: string): string[] =>
@@ -139,7 +141,7 @@ describe("no style outside the theme files (STY-02 guard)", () => {
 })
 
 describe("fonts (STY-05, ODCH-11)", () => {
-  it("a style loads no font and names no family", () => {
+  it("a built-in style loads no font and names no family (packs declare theirs in packs.generated.css)", () => {
     expect(bare).not.toMatch(/font-family|@font-face|@import|url\(/)
     expect(bare).not.toMatch(/--font-/)
   })
