@@ -87,7 +87,7 @@ export function UserMenu({ placement = "toolbar" }: {
           placement === "sidebar" ? (
             <button type="button" className="rail-user" aria-label="User menu">
               <span className="relative shrink-0">
-                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-7" textClassName="text-micro" />
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-[28px]" textClassName="text-micro" />
                 <span
                   data-slot="presence-dot"
                   aria-hidden

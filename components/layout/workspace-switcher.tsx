@@ -3,7 +3,7 @@
 import { RAIL_ROW } from "@/components/layout/rail"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronDown, Plus, Settings, UserPlus } from "lucide-react"
+import { Check, ChevronDown, ChevronsUpDown, Plus, Settings, UserPlus } from "lucide-react"
 import { toast } from "@/lib/toast"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
 import { deriveAccessMode } from "@/hooks/use-access-mode"
@@ -105,19 +105,18 @@ export function WorkspaceSwitcher() {
               >
                 {workspace ? (
                   <WorkspaceMark name={triggerLabel} logoUrl={shown.logo}
-                    className="rail-tile rail-ws size-7 rounded-lg bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
+                    className="rail-tile rail-ws bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
                 ) : (
-                  <span className="rail-tile rail-ws size-7 rounded-lg bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
+                  <span className="rail-tile rail-ws bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
                 )}
-                {/* The name gets the whole row, up to two lines. The rail row is
-                    36px and the name had ~120px beside the tile and chevron,
-                    so with the role stacked under it any real name truncated
-                    ("Demo User's …"). The role is in the tooltip, in the menu
-                    rows below, and in the user menu. */}
-                <span className="rail-label min-w-0 flex-1 text-left">
-                  <span className="line-clamp-2 break-words text-[12.5px] font-semibold leading-[1.15]">{triggerLabel}</span>
+                {/* Open, a card: the name on one line, the role under it, ⇕ at
+                    the end (round 63). In the rail only the mark shows, so
+                    nothing beside it pushes it off the axis. */}
+                <span className="rail-label grid min-w-0 flex-1 text-left leading-tight">
+                  <span className="truncate text-[12.5px] font-semibold">{triggerLabel}</span>
+                  {triggerSub && <span className="truncate text-micro text-muted-foreground-soft">{triggerSub}</span>}
                 </span>
-                <ChevronDown className="rail-label mr-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                <ChevronsUpDown className="rail-label h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
               </SidebarMenuButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="bottom" className="w-72">

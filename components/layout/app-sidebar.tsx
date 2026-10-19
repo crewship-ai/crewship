@@ -11,7 +11,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import { CrewshipBrand } from "@/components/layout/crewship-brand"
-import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf } from "@/components/layout/rail"
+import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf, useFoldedRailGroups, useRailBandEdges } from "@/components/layout/rail"
 import { UserMenu } from "@/components/layout/user-menu"
 import { useAppStore } from "@/lib/store"
 import type { NavItem } from "@/lib/nav-sections"
@@ -76,6 +76,9 @@ export function AppSidebar() {
     )
   }
   const main = navSections.filter((s) => s.placement !== "footer")
+  const { state } = useSidebar()
+  const { folded, toggle } = useFoldedRailGroups()
+  const band = useRailBandEdges<HTMLDivElement>()
   const footer = navSections.filter((s) => s.placement === "footer").flatMap((s) => visible(s.items))
 
   return (
@@ -85,17 +88,24 @@ export function AppSidebar() {
         <SidebarSearch />
       </SidebarHeader>
 
-      <SidebarContent className="rail-inset gap-0! overflow-x-hidden! pb-2">
-        {main.map((section, i) => {
-          const items = visible(section.items)
-          if (items.length === 0) return null
-          return (
-            <SidebarGroup key={section.label || `group-${i}`} className="p-0!" aria-label={section.label || "Main"}>
-              <RailGroupHead label={section.label} />
-              <SidebarMenu className="gap-px">{items.map(row)}</SidebarMenu>
-            </SidebarGroup>
-          )
-        })}
+      {/* The app band scrolls between the fixed top and foot (round 63), so
+          more apps never push the sail or the user out of view. */}
+      <SidebarContent ref={band} className="rail-inset rail-band gap-0! overflow-x-hidden! pb-2">
+        <div>
+          {main.map((section, i) => {
+            const items = visible(section.items)
+            if (items.length === 0) return null
+            const listId = `rail-group-${i}`
+            // Folding is for the open sidebar; the rail always shows every app.
+            const open = state === "collapsed" || !folded.includes(section.label)
+            return (
+              <SidebarGroup key={section.label || `group-${i}`} className="p-0!" aria-label={section.label || "Main"}>
+                <RailGroupHead label={section.label} open={open} controls={listId} onToggle={section.label ? () => toggle(section.label) : undefined} />
+                {open && <SidebarMenu id={listId} className="gap-px">{items.map(row)}</SidebarMenu>}
+              </SidebarGroup>
+            )
+          })}
+        </div>
       </SidebarContent>
 
       {/* The Crewship sail ends the rail, above the footer's rule. */}
@@ -122,7 +132,7 @@ function SidebarSearch() {
   const open = useAppStore((s) => s.setCommandPaletteOpen)
   return (
     <button type="button" className="rail-search" onClick={() => open(true)} aria-label="Search" aria-keyshortcuts="Meta+K">
-      <Search aria-hidden />
+      <span className="rail-tile" aria-hidden><Search /></span>
       <span className="rail-label min-w-0 flex-1 truncate text-left">Search</span>
       <kbd className="rail-label font-mono text-micro">⌘K</kbd>
     </button>
