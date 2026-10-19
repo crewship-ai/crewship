@@ -106,7 +106,24 @@ test('deterministic IDs cannot collide, and a deleted original ID cannot be reus
   const { doc, input } = await fixture({ type: 'doc', content: ['left', 'a', 'b', 'request-new-0', 'right'].map(id => p(id)) });
   try { await rejected(input, [insert('a')]); } finally { doc.destroy(); }
   const next = await fixture({ type: 'doc', content: ['left', 'a', 'b', 'request-new-1', 'right'].map(id => p(id)) });
-  try { await rejected(next.input, [{ op: 'delete', id: 'request-new-1' }, insert('a')]); } finally { next.doc.destroy(); }
+  try {
+    next.input.scope = await captureStructuralScope(next.doc, { block_ids: ['a', 'b', 'request-new-1'], allow_insert_after: true }, 3);
+    await rejected(next.input, [{ op: 'delete', id: 'request-new-1' }, insert('a')]);
+  } finally { next.doc.destroy(); }
+});
+
+test('running computation snapshots inputs before asynchronous hashing', async () => {
+  const { doc, input } = await fixture();
+  try {
+    const operations = [insert('a')];
+    const pending = buildStructuralCandidate(input, operations);
+    operations[0].after_id = 'right';
+    input.requestID = 'changed';
+    input.scope.blocks[0].hash = '0'.repeat(64);
+    const result = await pending;
+    assert.equal(result.proof.request_id, 'request');
+    assert.equal(result.proof.operations[0].after_id, 'a');
+  } finally { doc.destroy(); }
 });
 
 test('empty intermediate document is rejected, while inserted blocks can be subsequent explicit targets', async () => {
