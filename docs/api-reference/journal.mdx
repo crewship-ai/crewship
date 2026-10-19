@@ -337,7 +337,7 @@ GET /api/v1/journal/lookup
 there are no query parameters.
 The authenticated workspace context determines the lookup scope.
 
-Returns workspace-scoped crews, agents, and missions for journal-card enrichment (palette colours and lucide icons). Fetched once on page mount; the frontend invalidates it from realtime crew/agent/mission events. Backend handler: `internal/api/journal_lookup.go`.
+Returns workspace-scoped crews, agents, missions and people for journal-card enrichment (palette colours and lucide icons). `people` lists this workspace's members by id and display name (never an email), so a row's `actor_id` reads as a name. Fetched once on page mount; the frontend invalidates it from realtime crew/agent/mission events. Backend handler: `internal/api/journal_lookup.go`.
 
 **Response:** `200 OK`
 
@@ -351,6 +351,9 @@ Returns workspace-scoped crews, agents, and missions for journal-card enrichment
   ],
   "missions": [
     {"id":"MIS-42","title":"Migrate auth","status":"IN_PROGRESS"}
+  ],
+  "people": [
+    {"id":"usr_jana","name":"Jana Nováková"}
   ]
 }
 ```
@@ -367,6 +370,8 @@ Each list is capped at 1000 rows; workspaces beyond that get a useful subset. Em
 | `agents[].avatar_seed` | string? | Deterministic seed; the frontend renders an avatar from this. |
 | `agents[].avatar_style` | string? | Avatar style hint (`pixel-art`, `lorelei`, ...). |
 | `missions[].status` | string | A mission status: `PLANNING`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED` — or, for an issue row, an issue status (`BACKLOG`, `TODO`, `DUPLICATE` as well). `COMPLETED` is retired (B13, #2383): the column holds `DONE`. |
+| `people[].id` | string | A user id, as journal entries carry it in `actor_id`. Members of this workspace only. |
+| `people[].name` | string | Display name; empty when the person set none. No email is returned. |
 
 Soft-deleted crews and agents (`deleted_at IS NOT NULL`) are filtered out. Missions have no soft-delete column; all rows are returned, ordered by `created_at DESC` within the cap.
 

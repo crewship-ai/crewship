@@ -98,6 +98,7 @@ const lookup: JournalLookupValue = {
   crews: new Map([["c1", { id: "c1", name: "Research", slug: "research", icon: null, color: "teal" }]]),
   agents: new Map([["a1", { id: "a1", name: "Scout", slug: "scout", crew_id: "c1", avatar_seed: null, avatar_style: null }]]),
   missions: new Map([["m1", { id: "m1", title: "Fix flaky login", status: "IN_REVIEW", identifier: "CRW-1" }]]),
+  people: new Map([["u1", { id: "u1", name: "Jana Nováková" }]]),
   loading: false,
   refresh: vi.fn(),
 }

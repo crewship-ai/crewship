@@ -22,6 +22,7 @@ function lookupWith(agents: AgentLookup[]): JournalLookupValue {
     agents: new Map(agents.map((a) => [a.id, a])),
     crews: new Map(),
     missions: new Map(),
+    people: new Map(),
     loading: false,
     refresh: () => {},
   }

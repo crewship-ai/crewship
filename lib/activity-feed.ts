@@ -180,7 +180,7 @@ const ACTION_LABEL: Record<string, string> = {
   "page.grant_removed": "Access removed",
   "page.folder_changed": "Moved to a folder",
   "page.owner_transferred": "Owner changed",
-  "page.spec.changed": "Changed",
+  "page.spec.changed": "Updated",
   "skill.assigned": "Skill added",
   "skill.unassigned": "Skill removed",
   "skill.imported": "Skill imported",
@@ -307,6 +307,9 @@ export function workFromChain(c: ChainSummary, ctx: WorkContext = {}): WorkItem 
 
 export interface ChangeContext {
   agentName?: (id: string) => string | undefined
+  crewName?: (id: string) => string | undefined
+  /** A workspace member's display name (journal lookup `people`). */
+  personName?: (id: string) => string | undefined
   issueLabel?: (id: string) => string | undefined
   routineName?: (slug: string) => string | undefined
 }
@@ -315,10 +318,16 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined
 }
 
-/** `agent_template` → "Agent template". */
+/** `agent_template` → "Agent template"; the audit log's `AGENT` → "Agent". */
 function entityLabel(type: string): string {
-  const words = type.replace(/[_.-]+/g, " ").trim()
+  const words = type.replace(/[_.-]+/g, " ").trim().toLowerCase()
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : type
+}
+
+/** `IN_PROGRESS` → "In progress": the status words the issue page uses. */
+function statusWords(v: string): string {
+  const words = v.replace(/[_-]+/g, " ").trim().toLowerCase()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : v
 }
 
 // The audit log's own summary, "hook.delete hook hk_4734b7ad8": action, type, id.
@@ -330,7 +339,7 @@ const RAW_AUDIT_SUMMARY = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\s+([a-z][a-z0-9_]*)
  * the event name the audit log stores ("hook.delete …") never reaches the
  * title. Null when the entry names no object, so the caller keeps looking.
  */
-export function auditObject(e: Pick<JournalEntry, "payload" | "summary">): string | null {
+export function auditObject(e: Pick<JournalEntry, "payload" | "summary">, ctx: ChangeContext = {}): string | null {
   const p = e.payload ?? {}
   const meta = p["metadata"] && typeof p["metadata"] === "object" ? (p["metadata"] as Record<string, unknown>) : {}
   let type = str(p["entity_type"])
@@ -341,9 +350,14 @@ export function auditObject(e: Pick<JournalEntry, "payload" | "summary">): strin
     type = m[1]
     id = m[2]
   }
-  const name = str(p["name"]) ?? str(meta["name"]) ?? str(p["title"]) ?? str(meta["title"]) ?? str(meta["slug"])
+  const kind = type.toLowerCase()
+  // Agents and crews have names the lookup knows; one it no longer knows is
+  // named by its type alone, since its id would mean nothing to a reader.
+  const known = id && kind === "agent" ? ctx.agentName?.(id) : id && kind === "crew" ? ctx.crewName?.(id) : undefined
+  const name = known ?? str(p["name"]) ?? str(meta["name"]) ?? str(p["title"]) ?? str(meta["title"]) ?? str(meta["slug"])
   const label = entityLabel(type)
   if (name) return `${label} ${name}`
+  if (kind === "agent" || kind === "crew") return label
   return id ? `${label} ${id.length > 12 ? id.slice(0, 12) : id}` : label
 }
 
@@ -362,24 +376,33 @@ export function changeFromEntry(e: JournalEntry, ctx: ChangeContext = {}): Chang
   if (!kind) return null
   const p = e.payload ?? {}
   const routineSlug = str(p["pipeline_slug"]) ?? str(p["routine_slug"])
+  const isIssue = e.entry_type.startsWith("mission.")
   const object =
-    (e.entry_type.startsWith("audit.") && auditObject(e)) ||
+    (e.entry_type.startsWith("audit.") && auditObject(e, ctx)) ||
     (e.mission_id && (ctx.issueLabel?.(e.mission_id) ?? str(p["identifier"]) ?? str(p["title"]))) ||
+    // mission.created carries the new issue's title as its details.
+    (e.entry_type === "mission.created" && str(p["details"])) ||
     (routineSlug && (ctx.routineName?.(routineSlug) ?? routineSlug)) ||
     str(p["page_title"]) ||
+    (e.entry_type.startsWith("page.") && str(p["page"])) ||
     str(p["credential_name"]) ||
     str(p["skill_name"]) ||
     str(p["name"]) ||
     str(p["title"]) ||
-    e.summary
+    (isIssue ? "An issue" : e.summary)
   const who =
     e.actor_type === "agent" && e.agent_id
       ? (ctx.agentName?.(e.agent_id) ?? "An agent")
       : e.actor_type === "user"
-        ? "A person"
+        ? ((e.actor_id && ctx.personName?.(e.actor_id)) || "A person")
         : "System"
   const from = str(p["from"])
   const to = str(p["to"])
+  // "assignee_id: <id>" — the new assignee, by name when the lookup has it.
+  const assignee = e.entry_type === "mission.assigned" ? /assignee_id:\s*(\S+)/.exec(str(p["details"]) ?? "")?.[1] : undefined
+  const assigneeName = assignee ? (ctx.agentName?.(assignee) ?? ctx.personName?.(assignee)) : undefined
+  const action =
+    e.entry_type === "page.spec.changed" ? (p["created"] === true ? "Created" : "Updated") : changeAction(e.entry_type)
   const ts = Date.parse(e.ts)
   return {
     type: "change",
@@ -387,9 +410,9 @@ export function changeFromEntry(e: JournalEntry, ctx: ChangeContext = {}): Chang
     ts: Number.isNaN(ts) ? 0 : ts,
     kind,
     object,
-    action: changeAction(e.entry_type),
+    action,
     who,
-    diff: from && to ? `${from} → ${to}` : undefined,
+    diff: from && to ? `${isIssue ? statusWords(from) : from} → ${isIssue ? statusWords(to) : to}` : assigneeName ? `to ${assigneeName}` : undefined,
     missionId: e.mission_id || undefined,
     routineSlug,
     agentId: e.actor_type === "agent" ? e.agent_id : undefined,

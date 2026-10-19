@@ -262,7 +262,7 @@ command an `ALLOW` ran).
 
 ## `crewship journal lookup`
 
-Fetch the workspace reference table the web timeline uses to render journal cards with human-readable crew/agent/mission names. Useful for joining `crewship journal --format json` output against names in shell pipelines.
+Fetch the workspace reference table the web timeline uses to render journal cards with human-readable crew, agent, mission and people names. Useful for joining `crewship journal --format json` output against names in shell pipelines.
 
 ```bash
 crewship journal lookup
@@ -270,13 +270,14 @@ crewship journal lookup --format json
 crewship journal lookup --format json | jq '.crews[] | {id, slug, name}'
 ```
 
-Backed by `GET /api/v1/journal/lookup`. The endpoint is workspace-scoped — no filter arguments. The response groups three reference lists:
+Backed by `GET /api/v1/journal/lookup`. The endpoint is workspace-scoped — no filter arguments. The response groups four reference lists:
 
 | Section | Fields |
 |---|---|
 | `crews` | `id`, `name`, `slug`, `icon`, `color` |
 | `agents` | `id`, `name`, `slug`, `crew_id` |
 | `missions` | `id`, `title`, `status` |
+| `people` | `id`, `name` — workspace members, so a user entry's `actor_id` reads as a name (no email) |
 
 Text mode renders each section as a short table and caps each at **50 rows** so the output stays scannable; pass `--format json` (or `yaml`) to get the full unbounded snapshot.
 

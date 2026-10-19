@@ -15,6 +15,7 @@ const lookup: JournalLookupValue = {
   ]),
   agents: new Map(),
   missions: new Map(),
+    people: new Map(),
   loading: false,
   refresh: vi.fn(),
 }
