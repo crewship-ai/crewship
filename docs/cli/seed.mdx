@@ -213,8 +213,14 @@ crews). On a dev slot the intended flow is:
 
 ```bash
 crew reset --yes                                   # default demo data, your slot only
-crewship seed --server http://localhost:8081 --ui-tour
+crewship whoami                                    # note Server and the workspace slug
+crewship seed --server http://127.0.0.1:8081 --workspace demo-xxxx --ui-tour
 ```
+
+Pass `--server` exactly as `crewship whoami` prints it: the CLI keeps its sign-in
+per server URL, and `localhost` and `127.0.0.1` are different keys, so the other
+spelling fails with `session_invalid`. `--workspace` is required because seed never
+picks a workspace from the active profile.
 
 It only adds, and every write goes through the HTTP API:
 
