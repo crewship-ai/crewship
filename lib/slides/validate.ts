@@ -34,7 +34,9 @@ export function exactObject(value: unknown, fields: readonly string[]): Record<s
 export function validText(value: unknown, limit: number): value is string {
   return typeof value === "string" && !/\p{Cs}/u.test(value) && byteLength(value) <= limit && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value)
 }
-const validFont = (family: unknown, size: unknown) => validText(family, 128) && family.trim() !== "" && !/[\n\t]/.test(family) && integer(size, 1, 160)
+// Go strings.TrimSpace (unicode.IsSpace): differs from String.trim at U+0085 and U+FEFF.
+const GO_SPACE = new RegExp("^[\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$")
+const validFont = (family: unknown, size: unknown) => validText(family, 128) && !GO_SPACE.test(family) && !/[\n\t]/.test(family) && integer(size, 1, 160)
 const isColor = (value: unknown) => typeof value === "string" && COLOR.test(value)
 
 const FIELDS = {

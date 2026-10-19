@@ -86,7 +86,11 @@ function validMutation(request: { schema_version: unknown; base_rev: unknown; mu
   if (!intIn(request.base_rev, 0) || !isIdentifier(request.mutation_id) || !isIdentifier(request.page_id)) fail("invalid mutation identity or base revision")
 }
 
-/** Strict decode (Go DecodePatch). Returns a deep copy that owns its payloads. */
+/**
+ * Strict decode (Go DecodePatch). Returns a deep copy that owns its payloads.
+ * Stricter than Go (safe side): an empty if_content_hash without a target schema and a
+ * negative slide position are rejected here. RestoreRequest is not mirrored.
+ */
 export function decodePatch(input: unknown): PatchRequest {
   const raw = requestObject(input, ["page_id", "schema_version", "base_rev", "mutation_id", "operations"], ["if_order_version", "target_schema_version", "if_content_hash"])
   if (!intIn(raw.schema_version, 0) || (raw.target_schema_version !== undefined && !intIn(raw.target_schema_version, 0))) fail("Slides JSON: schema_version must be an integer")
@@ -138,6 +142,7 @@ export function decodeInitialize(input: unknown): InitializeRequest {
  * Pure atomic apply (Go ApplyPatch). Operations see the candidate produced by
  * earlier ones; any failure throws and `current`/`request` stay untouched.
  * The result shares no nested object with `current` or `request`.
+ * Expects a request that passed `decodePatch` (operation field types are not rechecked).
  */
 export function applyPatch(current: SlideDeck, request: PatchRequest): SlideDeck {
   if (request.page_id !== current.deck_id || request.schema_version !== current.schema_version) throw new SlidesConflictError()
@@ -196,7 +201,7 @@ function applyOperations(candidate: SlideDeck, used: Map<string, "slide" | "elem
 }
 
 export interface MutationContext { pageId: string; schemaVersion: number; baseRev: number; mutationId: string; orderVersion?: number }
-export type Unrepresentable = "layer_order" | "slide_order" | "deck_frame" | "operation_budget"
+export type Unrepresentable = "layer_order" | "slide_order" | "deck_frame" | "deck_identity" | "identity_reuse" | "order_version_missing" | "operation_budget" | "unreproduced"
 export interface DiffResult { request: PatchRequest | null; unrepresentable: Unrepresentable[] }
 const same = (a: unknown, b: unknown) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b))
 
@@ -206,7 +211,24 @@ const same = (a: unknown, b: unknown) => JSON.stringify(ordered(a)) === JSON.str
  * cannot express (z-order, slide reorder, theme/size) are reported, never dropped.
  */
 export function diffToPatch(base: SlideDeck, next: SlideDeck, context: MutationContext): DiffResult {
+  try { return diffUnchecked(base, next, context) } catch (error) {
+    // Reused ids (cross-slide moves, duplicates) stay reserved in the authority, so they cannot be saved.
+    if (error instanceof SlidesConflictError || error instanceof SlidesValidationError) return { request: null, unrepresentable: ["identity_reuse"] }
+    throw error
+  }
+}
+
+const ignored = (deck: SlideDeck, skip: ReadonlySet<Unrepresentable>) => ordered({
+  ...deck,
+  slides: [...deck.slides].sort((a, b) => (a.id < b.id ? -1 : 1)).map(slide => skip.has("layer_order") ? { ...slide, elements: [...slide.elements].sort((a, b) => (a.id < b.id ? -1 : 1)) } : slide),
+  ...(skip.has("slide_order") ? { slide_order: [] } : {}),
+  ...(skip.has("deck_frame") ? { width: 0, height: 0, theme: {} } : {}),
+})
+
+function diffUnchecked(base: SlideDeck, next: SlideDeck, context: MutationContext): DiffResult {
   const unrepresentable = new Set<Unrepresentable>()
+  if (base.schema_version !== next.schema_version || base.deck_id !== next.deck_id) unrepresentable.add("deck_identity")
+  if (next.slides.length !== next.slide_order.length || next.slides.some(slide => !next.slide_order.includes(slide.id))) unrepresentable.add("slide_order")
   const running = structuredClone(base), used = objectIds(running), operations: SlideOperation[] = []
   const emit = (op: SlideOperation) => { applyOperations(running, used, [op]); operations.push(structuredClone(op)) }
   if (base.width !== next.width || base.height !== next.height || !same(base.theme, next.theme)) unrepresentable.add("deck_frame")
@@ -231,8 +253,11 @@ export function diffToPatch(base: SlideDeck, next: SlideDeck, context: MutationC
   }
   next.slide_order.forEach((id, position) => { if (!baseIds.has(id)) emit({ op: "insert_slide", slide: nextById.get(id)!, position }) })
   if (operations.length > MAX_OPERATIONS) unrepresentable.add("operation_budget")
+  if (context.orderVersion === undefined && operations.some(op => op.op === "insert_slide" || op.op === "delete_slide")) unrepresentable.add("order_version_missing")
   if (operations.length === 0 || unrepresentable.size > 0) return { request: null, unrepresentable: [...unrepresentable] }
   const request: PatchRequest = { page_id: context.pageId, schema_version: context.schemaVersion, base_rev: context.baseRev, mutation_id: context.mutationId, operations }
   if (context.orderVersion !== undefined) request.if_order_version = context.orderVersion
+  // Replay what we would send and compare with the draft: anything not reproduced is reported.
+  if (JSON.stringify(ignored(applyPatch(base, request), unrepresentable)) !== JSON.stringify(ignored(next, unrepresentable))) return { request: null, unrepresentable: ["unreproduced"] }
   return { request, unrepresentable: [] }
 }

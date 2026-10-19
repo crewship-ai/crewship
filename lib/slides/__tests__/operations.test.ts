@@ -213,6 +213,39 @@ describe("diffToPatch and the fixture save client", () => {
     expect(diffToPatch(sample(), theme, { ...context, mutationId: "t" }).unrepresentable).toEqual(["deck_frame"])
     expect(diffToPatch(sample(), sample(), { ...context, mutationId: "n" })).toEqual({ request: null, unrepresentable: [] })
   })
+  it("never drops a change: identity, frame and membership differences are reported", () => {
+    const run = (edit: (deck: SlideDeck) => void) => { const next = sample(); edit(next); return diffToPatch(sample(), next, { ...context, mutationId: "r" }) }
+    expect(run(deck => { deck.schema_version = 2 })).toEqual({ request: null, unrepresentable: ["deck_identity"] })
+    expect(run(deck => { deck.deck_id = "other"; deck.slides[1].notes = "x" })).toEqual({ request: null, unrepresentable: ["deck_identity"] })
+    expect(run(deck => { deck.slides.push({ id: "orphan", notes: "", elements: [] }) }).unrepresentable).toContain("slide_order")
+    expect(run(deck => { deck.slide_order = ["slide_b"]; deck.slides.pop() }).request?.operations[0].op).toBe("delete_slide")
+  })
+  it("reports id reuse and cross-slide moves instead of throwing", () => {
+    const moved = sample(), [element] = moved.slides[0].elements.splice(0, 1)
+    moved.slides[1].elements.push(element)
+    expect(diffToPatch(sample(), moved, { ...context, mutationId: "mv" })).toEqual({ request: null, unrepresentable: ["identity_reuse"] })
+    const clash = sample(); clash.slides[1].elements.push({ ...clash.slides[0].elements[1] })
+    expect(diffToPatch(sample(), clash, { ...context, mutationId: "dup" }).unrepresentable).toContain("identity_reuse")
+  })
+  it("blocks structural changes without an order version", () => {
+    const next = sample(); next.slides.push({ id: "slide_c", notes: "", elements: [] }); next.slide_order.push("slide_c")
+    expect(diffToPatch(sample(), next, { pageId: "fixture_page", schemaVersion: 1, baseRev: 1, mutationId: "s" })).toEqual({ request: null, unrepresentable: ["order_version_missing"] })
+  })
+  it("trims font families exactly like Go TrimSpace", () => {
+    const withFont = (family: string) => { const deck = sample(); deck.theme.font_family = family; return deck }
+    expect(() => validateSlideDeck(withFont("\u0085"))).toThrow(/theme/)
+    expect(() => validateSlideDeck(withFont("\u00a0 \u3000"))).toThrow(/theme/)
+    expect(() => validateSlideDeck(withFont("\ufeff"))).not.toThrow()
+  })
+  it("rejects a mutation id replayed with a different body", async () => {
+    const server = createFixtureSaveClient({ deck: sample(), rev: 1, orderVersion: 1 })
+    const a = sample(); a.slides[1].notes = "one"
+    const b = sample(); b.slides[1].notes = "two"
+    const first = diffToPatch(sample(), a, { ...context, mutationId: "same" }).request!
+    await server.patch(first)
+    const second = diffToPatch(sample(), b, { ...context, mutationId: "same" }).request!
+    expect(await server.patch(second)).toMatchObject({ status: "conflict", current: { rev: 2 } })
+  })
   it("saves, replays by mutation id and reports conflicts with the fresh head", async () => {
     const server = createFixtureSaveClient({ deck: sample(), rev: 1, orderVersion: 1 })
     const next = sample(); next.slides[1].notes = "saved"
