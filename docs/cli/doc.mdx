@@ -174,6 +174,8 @@ cannot publish this protected conversation. Create new private documents from
 your own private conversation; administrative chat access is not creation consent.
 Deleting a protected source conversation currently returns 409: retained log
 copies still depend on its privacy record. Ordinary chat deletion is unaffected.
+Configured chat retention also keeps protected source conversations and excludes
+them from its deletion preview while those copies depend on their privacy record.
 
 The run creates a populated document and returns its saved link. Reopening a
 result does not grant a later run permission to edit it. Repeating an uncertain
