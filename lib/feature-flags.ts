@@ -44,3 +44,12 @@ export function chatSearchFilesFixtures(): boolean {
 export function chatSidebarSmartSections(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS === "true"
 }
+
+/**
+ * Chat sidebar view chips (Unreads, Agents running) and the "hold rows still
+ * under the pointer" behaviour (CH-26). Both change live sidebar behaviour, so
+ * default OFF.
+ */
+export function chatSidebarViews(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS === "true"
+}

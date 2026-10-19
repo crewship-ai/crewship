@@ -25,8 +25,9 @@ export const SIDEBAR_VIEWS: SidebarViewMeta[] = [
   { id: "review", label: "Review", live: false },
 ]
 
-export function availableViews(smartSections: boolean): SidebarViewMeta[] {
-  return SIDEBAR_VIEWS.filter((view) => view.live || smartSections)
+/** No views at all unless the views flag is on; fixture views additionally need the smart-sections flag. */
+export function availableViews(viewsOn: boolean, smartSections: boolean): SidebarViewMeta[] {
+  return viewsOn ? SIDEBAR_VIEWS.filter((view) => view.live || smartSections) : []
 }
 
 export interface ViewItem {
@@ -38,14 +39,20 @@ export interface ViewItem {
   running: boolean
   /** Fixture rows are previews: shown, labelled, not openable. */
   fixture?: boolean
+  /** The open chat, appended because the view would filter it out. Not counted. */
+  kept?: boolean
+  /** Not openable yet (the agent's sessions have not loaded). */
+  disabled?: boolean
 }
 
-export function itemsForView(view: SidebarViewId, all: ViewItem[], fixtures: Partial<Record<SidebarViewId, ViewItem[]>>): ViewItem[] {
+export function itemsForView(view: SidebarViewId, all: ViewItem[], fixtures: Partial<Record<SidebarViewId, ViewItem[]>>, query = ""): ViewItem[] {
+  const q = query.trim().toLowerCase()
+  const byQuery = (items: ViewItem[]) => (q ? items.filter((item) => item.title.toLowerCase().includes(q)) : items)
   switch (view) {
-    case "all": return all
-    case "unreads": return all.filter((item) => item.unread > 0)
-    case "running": return all.filter((item) => item.kind === "agent" && item.running)
-    default: return (fixtures[view] ?? []).map((item) => ({ ...item, fixture: true }))
+    case "all": return byQuery(all)
+    case "unreads": return byQuery(all.filter((item) => item.unread > 0))
+    case "running": return byQuery(all.filter((item) => item.kind === "agent" && item.running))
+    default: return byQuery((fixtures[view] ?? []).map((item) => ({ ...item, fixture: true })))
   }
 }
 
@@ -57,7 +64,32 @@ export function itemsForView(view: SidebarViewId, all: ViewItem[], fixtures: Par
 export function keepActive(shown: ViewItem[], all: ViewItem[], activeId: string | null): { items: ViewItem[]; activeOutside: boolean } {
   if (!activeId || shown.some((item) => item.id === activeId)) return { items: shown, activeOutside: false }
   const active = all.find((item) => item.id === activeId)
-  return active ? { items: [...shown, active], activeOutside: true } : { items: shown, activeOutside: false }
+  return active ? { items: [...shown, { ...active, kept: true }], activeOutside: true } : { items: shown, activeOutside: false }
+}
+
+/** Unread count of an agent from its unfiltered session list. */
+export function agentUnread(threads: { unread_count?: number }[] | undefined): number {
+  return (threads ?? []).reduce((sum, thread) => sum + (thread.unread_count ?? 0), 0)
+}
+
+export type AgentOpen<T> = { state: "unavailable" } | { state: "none" } | { state: "thread"; thread: T }
+
+/**
+ * Which existing session a view row opens. Never invents a new one: while the
+ * agent's sessions are not loaded (or failed to load) the row is unavailable,
+ * and the session that carries the unread count wins over the newest one.
+ * `none` means the agent really has no session, so starting one is correct.
+ */
+export function resolveAgentOpen<T extends { unread_count?: number }>(
+  agentId: string,
+  threadsByAgent: Record<string, T[]>,
+  threadsLoaded: boolean | undefined,
+  failed: boolean,
+): AgentOpen<T> {
+  if (!threadsLoaded || failed || !Object.hasOwn(threadsByAgent, agentId)) return { state: "unavailable" }
+  const threads = threadsByAgent[agentId]
+  if (threads.length === 0) return { state: "none" }
+  return { state: "thread", thread: threads.find((thread) => (thread.unread_count ?? 0) > 0) ?? threads[0] }
 }
 
 export const VIEW_FIXTURES: Partial<Record<SidebarViewId, ViewItem[]>> = {

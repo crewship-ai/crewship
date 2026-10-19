@@ -20,9 +20,9 @@ import { useSidebarSessionSearch } from "./use-sidebar-session-search"
 import { FavoriteButton, useChatFavorites } from "./chat-favorites"
 import { ChatCrewPicker } from "./chat-crew-picker"
 import { SidebarViewChips, SidebarViewList } from "./sidebar-view-list"
-import { availableViews, itemsForView, keepActive, VIEW_FIXTURES, type SidebarViewId, type ViewItem } from "./sidebar-views"
+import { agentUnread, availableViews, itemsForView, keepActive, resolveAgentOpen, VIEW_FIXTURES, type SidebarViewId, type ViewItem } from "./sidebar-views"
 import { conversationTitle } from "@/components/features/conversations/conversation-identity"
-import { chatSidebarSmartSections } from "@/lib/feature-flags"
+import { chatSidebarSmartSections, chatSidebarViews } from "@/lib/feature-flags"
 import { ChatSearchDialog, useChatSearchHotkey } from "./search/chat-search-dialog"
 import type { Props, ConversationRow } from "./conversations-sidebar"
 import type { ChatTreeAgent } from "./chat-tree-data"
@@ -74,6 +74,7 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
   const [searchOpen, setSearchOpen] = useState(false)
   const [view, setView] = useState<SidebarViewId>("all")
   const [holdList, setHoldList] = useState(false)
+  const changeView = (next: SidebarViewId) => { setHoldList(false); setView(next) }
   useChatSearchHotkey(() => setSearchOpen(true))
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { const saved = readFlags(`${stateKey}:agents`); const id = Object.keys(saved).find((id) => saved[id]); return id ? { [id]: true } : {} })
   const { favorites, toggle: toggleFavorite } = useChatFavorites(stateKey)
@@ -149,22 +150,25 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
   const sharedFavoriteCount = rooms.filter((room) => favorites.includes(`room:${room.id}`) && (room.is_direct ? showPeople : showTeamSpaces)).length
   const hasFavorites = (showAgents && pinnedAgents.length > 0) || sharedFavoriteCount > 0
   const sharedProps = { extraRooms: favoriteRooms, favorites, onFavorite: toggleFavorite, showLoadMore: false, onSelect: onUnifiedSelect }
-  const views = availableViews(chatSidebarSmartSections())
-  const activeId = chat?.selectedId ? `room:${chat.selectedId}` : (() => { const agentId = rows.find((row) => row.thread.id === activeThreadId)?.agent.id; return agentId ? `agent:${agentId}` : null })()
+  const views = availableViews(chatSidebarViews(), chatSidebarSmartSections())
+  // The open session comes from the unfiltered data, so typing in the sidebar search never makes it vanish.
+  const activeAgentId = activeThreadId ? (loadedRows.find((row) => row.thread.id === activeThreadId)?.agent.id ?? Object.entries(threadsByAgent).find(([, list]) => list.some((thread) => thread.id === activeThreadId))?.[0]) : undefined
+  const activeId = chat?.selectedId ? `room:${chat.selectedId}` : activeAgentId ? `agent:${activeAgentId}` : null
   const allItems: ViewItem[] = [
     ...rooms.map((room): ViewItem => ({ id: `room:${room.id}`, kind: "room", title: conversationTitle(room), unread: room.unread_count, running: false })),
-    ...roster.map((agent): ViewItem => ({ id: `agent:${agent.id}`, kind: "agent", title: agent.name, unread: rows.filter((row) => row.agent.id === agent.id).reduce((sum, row) => sum + (row.thread.unread_count ?? 0), 0), running: agent.status === "RUNNING" })),
+    ...roster.map((agent): ViewItem => ({ id: `agent:${agent.id}`, kind: "agent", title: agent.name, unread: agentUnread(threadsByAgent[agent.id]), running: agent.status === "RUNNING", disabled: resolveAgentOpen(agent.id, threadsByAgent, props.threadsLoaded, !!props.threadErrors?.[agent.id]).state === "unavailable" })),
   ]
   const viewMeta = views.find((item) => item.id === view) ?? views[0]
-  const viewItems = view === "all" ? [] : keepActive(itemsForView(view, allItems, VIEW_FIXTURES), allItems, activeId).items
+  const viewItems = view === "all" ? [] : keepActive(itemsForView(view, allItems, VIEW_FIXTURES, query), allItems, activeId).items
   function openViewItem(item: ViewItem) {
-    if (item.fixture) return
+    if (item.fixture || item.disabled) return
     const id = item.id.slice(item.id.indexOf(":") + 1)
     if (item.kind === "room") { chat?.select(id); onUnifiedSelect?.(); return }
     const agent = roster.find((candidate) => candidate.id === id)
-    const latest = agent && rows.find((row) => row.agent.id === id)
-    if (agent && latest) onSelectThread(agent, latest.thread)
-    else if (agent) start(agent)
+    if (!agent) return
+    const target = resolveAgentOpen(id, threadsByAgent, props.threadsLoaded, !!props.threadErrors?.[id])
+    if (target.state === "thread") onSelectThread(agent, target.thread)
+    else if (target.state === "none") start(agent)
   }
   function resetFilters() { setUnread(false); setLive(false); setCrewFilter(null); setSectionFilter("all"); onScopeChange("direct") }
   const sectionState = (name: string) => ({ open: !closed[name], onToggle: () => setClosed((old) => ({ ...old, [name]: !old[name] })) })
@@ -207,8 +211,6 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
           </div>
   }) }
 
-  // The open session comes from the unfiltered data, so typing in the sidebar search never makes it vanish.
-  const activeAgentId = activeThreadId ? (loadedRows.find((row) => row.thread.id === activeThreadId)?.agent.id ?? Object.entries(threadsByAgent).find(([, list]) => list.some((thread) => thread.id === activeThreadId))?.[0]) : undefined
   return <div className={cn("flex h-full min-h-0 flex-col", props.className)}>
     {searchOpen && <ChatSearchDialog open={searchOpen} onOpenChange={setSearchOpen} workspaceId={chat?.workspaceId} roster={roster} current={activeAgentId && activeThreadId ? { agentId: activeAgentId, sessionId: activeThreadId } : null} />}
     <SidebarToolbar>
@@ -216,7 +218,7 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
         <SidebarSearch value={query} onValueChange={setQuery} aria-label={picking ? "Search agents" : "Search conversations"} placeholder={picking ? "Find an agent…" : "Search names, sessions…"} onKeyDown={(event) => { if (event.key === "Escape") { setPicking(false); setQuery("") } }} />
       </div>
       <button type="button" aria-label="Search all chats (Ctrl+Shift+F)" title="Search messages and files" onClick={() => setSearchOpen(true)} className="kit-tap flex size-8 coarse:size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"><Search aria-hidden className="size-3.5" /></button>
-      {!picking && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={resetFilters}>
+      {!picking && view === "all" && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={resetFilters}>
         <SidebarFacet label="Show" resetLabel="All conversations" resetActive={sectionFilter === "all"} onReset={() => setSectionFilter("all")} first>
           {([['agents', 'Agent sessions'], ['people', 'People'], ['rooms', 'Team spaces']] as const).map(([id, label]) => <SidebarFacetOption key={id} active={sectionFilter === id} onToggle={() => setSectionFilter(sectionFilter === id ? "all" : id)}>{label}</SidebarFacetOption>)}
         </SidebarFacet>
@@ -234,7 +236,7 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
       </SidebarFilterPopover>}
       {props.onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={props.onToggleCollapse} {...(props.collapseLabel ? { "aria-label": props.collapseLabel, title: props.collapseLabel } : {})} />}
     </SidebarToolbar>
-    {!picking && <SidebarViewChips views={views} value={view} onChange={setView} />}
+    {!picking && views.length > 0 && <SidebarViewChips views={views} value={view} onChange={changeView} />}
     {!picking && filterCount > 0 && <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-primary/20 px-2 py-1 text-[10px] text-muted-foreground"><span className="min-w-0 flex-1 truncate">{sectionFilter === "agents" ? "Agents only" : sectionFilter === "people" ? "People" : sectionFilter === "rooms" ? "Team spaces" : "All conversations"}{scope !== "direct" && ` · ${scope === "all" ? "All sessions" : CHAT_SCOPES.find((item) => item.id === scope)?.label}`}{crewFilter && " · Crew filter"}</span><button type="button" aria-label="Clear chat filters" className="kit-tap" onClick={resetFilters}><X className="size-3" /></button></div>}
     {q && !picking && <div className="px-3 pb-2 text-[11px] text-muted-foreground">{sessionSearch.loading ? <span role="status">Searching session titles…</span> : sessionSearch.error ? <button type="button" onClick={sessionSearch.retry}>Session search unavailable. Retry</button> : sessionSearch.more ? <button type="button" onClick={sessionSearch.loadMore} className="text-primary">Load more matching sessions</button> : "Matching names and session titles"}</div>}
     <div className="min-h-0 flex-1 overflow-y-auto pb-3">
@@ -244,7 +246,7 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
           {showPeople && <UnifiedConversationSection query={query} section="people" {...sharedProps} favoritesOnly hideEmpty />}
           {showAgents && renderAgents(pinnedAgents)}
         </Section>}
-        {view !== "all" && <Section title={viewMeta.label} count={viewItems.length} open onToggle={() => setView("all")}><SidebarViewList label={viewMeta.label} items={viewItems} activeId={activeId} hold={holdList} onHold={setHoldList} onOpen={openViewItem} /></Section>}
+        {view !== "all" && <Section title={viewMeta.label} count={viewItems.filter((item) => !item.kept).length} open onToggle={() => changeView("all")}><>{filterCount > 0 && <p className="px-3 pb-1 text-[11px] text-muted-foreground">Filters apply to All. Search applies here.</p>}<SidebarViewList label={viewMeta.label} items={viewItems} activeId={activeId} hold={holdList} onHold={setHoldList} onOpen={openViewItem} /></></Section>}
         {view === "all" && showTeamSpaces && (roomCount > 0 || !rooms.some((room) => !room.is_direct && favorites.includes(`room:${room.id}`))) && <Section title="Team spaces" count={roomCount} {...sectionState("rooms")}><UnifiedConversationSection query={query} section="rooms" {...sharedProps} /></Section>}
         {view === "all" && showPeople && (peopleCount > 0 || !rooms.some((room) => room.is_direct && favorites.includes(`room:${room.id}`))) && <Section title="People" count={peopleCount} {...sectionState("people")}><UnifiedConversationSection query={query} section="people" {...sharedProps} /></Section>}
         {view === "all" && showAgents && (otherAgents.length > 0 || !pinnedAgents.length || props.loadError) && <Section title="Agents" count={otherAgents.length} {...sectionState("agents")}>
