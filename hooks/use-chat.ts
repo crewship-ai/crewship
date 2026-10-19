@@ -375,19 +375,23 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   const replyHasTextRef = useRef(false)
   const restrictedAbortRef = useRef<AbortController | null>(null)
   useEffect(() => () => {restrictedAbortRef.current?.abort()}, [sessionId])
-  const authorityKey = JSON.stringify([currentUserId ?? null, workspaceId ?? null])
+  const principalKey = JSON.stringify([currentUserId ?? null, workspaceId ?? null])
+  const authorityKey = JSON.stringify([principalKey, sessionId ?? null])
   const authorityRef = useRef(authorityKey)
   const knownHumanRef = useRef(!!currentUserId)
   const knownWorkspaceRef = useRef(!!workspaceId)
   if (currentUserId) knownHumanRef.current = true
   if (workspaceId) knownWorkspaceRef.current = true
+  const [deniedConversation, setDeniedConversation] = useState<string | null>(null)
+  const deniedConversationRef = useRef(deniedConversation)
+  deniedConversationRef.current = deniedConversation
   const [deniedScope, setDeniedScope] = useState<string | null>(null)
   const deniedScopeRef = useRef(deniedScope)
   deniedScopeRef.current = deniedScope
-  const authorityReadable = authorityRef.current === authorityKey && deniedScope !== authorityKey
+  const authorityReadable = authorityRef.current === authorityKey && deniedScope !== principalKey && deniedConversation !== authorityKey
     && (!knownHumanRef.current || !!currentUserId) && (!knownWorkspaceRef.current || !!workspaceId)
   const isCurrentAuthority = useCallback(() => authorityRef.current === authorityKey
-    && deniedScopeRef.current !== authorityKey && authorityReadable, [authorityKey, authorityReadable])
+    && deniedScopeRef.current !== principalKey && deniedConversationRef.current !== authorityKey && authorityReadable, [authorityKey, principalKey, authorityReadable])
   const [storedTurns, setTurns] = useState<ChatTurn[]>([])
   // Mask before passive effects: a new/unknown human cannot paint old parts.
   const turns = useMemo(() => authorityReadable ? storedTurns : [], [authorityReadable, storedTurns])
@@ -489,11 +493,14 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   }, [])
 
   useEffect(() => {
-    const changedPrincipal = authorityRef.current !== authorityKey
+    const changedScope = authorityRef.current !== authorityKey
     authorityRef.current = authorityKey
     clearStreamState()
-    // Preserve same-principal atomic session swaps, clear on authority change.
-    if (changedPrincipal) setTurns([])
+    // A conversation change invalidates the visible transcript even for the same human.
+    if (changedScope) {
+      setTurns([])
+      setDeniedConversation(null)
+    }
   }, [sessionId, authorityKey, clearStreamState])
 
   // Cancel any in-flight frame on unmount so the scheduled callback never
@@ -1917,16 +1924,25 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     drainPending()
   }, [drainPending, ingestCanonicalEvent, isCurrentAuthority, sessionId])
 
+  /** A definitive source-read refusal clears protected state until the source is reopened. */
+  const markHistoryDenied = useCallback(() => {
+    if (!isCurrentAuthority() || sessionIdRef.current !== sessionId) return
+    deniedConversationRef.current = authorityKey
+    setDeniedConversation(authorityKey)
+    clearStreamState()
+    setTurns([])
+  }, [isCurrentAuthority, sessionId, authorityKey, clearStreamState])
+
   useEffect(() => {
     const revoke = () => {
-      deniedScopeRef.current = authorityRef.current
-      setDeniedScope(authorityRef.current)
+      deniedScopeRef.current = principalKey
+      setDeniedScope(principalKey)
       clearStreamState()
       setTurns([])
     }
     window.addEventListener(AUTH_EVENT, revoke)
     return () => window.removeEventListener(AUTH_EVENT, revoke)
-  }, [clearStreamState])
+  }, [clearStreamState, principalKey])
 
   // Derive flat messages for backwards compat (used by history loading)
   const messages: ChatMessage[] = turns.flatMap((turn) =>
@@ -1950,6 +1966,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     editAndResend,
     loadHistory,
     markHistoryUnavailable,
+    markHistoryDenied,
     resubscribeSession,
     isStreaming,
     connectionStatus: (executionProfile === "restricted" ? "connected" : realtimeEnabled ? status : "unavailable") as WSStatus,
