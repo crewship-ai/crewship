@@ -5,35 +5,33 @@ import { BookOpen, Bug, ExternalLink, Sparkles } from "lucide-react"
 
 import { CrewshipLogo, CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
+import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 import { DOCS_URL, RELEASES_URL, SUPPORT_URL } from "@/lib/crewship-links"
 import { RAIL_ROW } from "@/components/layout/rail"
 import { apiFetch } from "@/lib/api-fetch"
 import { buildLabel, editionName, type Build } from "@/lib/build-info"
 
 /**
- * The Crewship ship at the top of the rail (owner, 19 Oct). It stays when the
- * rail folds to icons, so the product is named on every screen, and it opens
- * a short About: what Crewship is, which build this is, where to read more.
- * The workspace switcher sits under it: the ship is the product, the switcher
- * the organisation you are in.
+ * The Crewship sail at the foot of the rail, above the sidebar-mode row
+ * (owner, 19 Oct; wireframe round 61). It stays when the rail folds to icons,
+ * so the product is named on every screen, and it opens a short About: what
+ * Crewship is, which build this is, where to read more. The top of the rail
+ * is the workspace switcher and Search only: folded, the sail, the workspace
+ * and Search stacked in one column read as noise. The tile is the brand's own
+ * lit blue and does not follow the chosen style.
  */
 export function CrewshipBrand() {
   const [open, setOpen] = useState(false)
   return (
-    <>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton tooltip="About Crewship" aria-label="About Crewship" className={RAIL_ROW} onClick={() => setOpen(true)}>
-            <span className="rail-tile rail-tile-static bg-foreground! text-background!" aria-hidden>
-              <CrewshipLogo tight className="h-3.5 w-auto" />
-            </span>
-            <span className="rail-label min-w-0 flex-1 truncate text-left text-control font-semibold tracking-tight">Crewship</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+    <SidebarMenuItem>
+      <SidebarMenuButton tooltip="About Crewship" aria-label="About Crewship" className={RAIL_ROW} onClick={() => setOpen(true)}>
+        <span className="rail-tile rail-brand" aria-hidden>
+          <CrewshipLogo tight />
+        </span>
+        <span className="rail-label min-w-0 flex-1 truncate text-left text-control font-semibold tracking-tight">Crewship</span>
+      </SidebarMenuButton>
       <AboutCrewship open={open} onOpenChange={setOpen} />
-    </>
+    </SidebarMenuItem>
   )
 }
 

@@ -1163,6 +1163,19 @@ body {
   .rail-tile > svg { width: 16px; height: 16px; }
   .rail-row:hover .rail-tile,
   .rail-row[data-active="true"] .rail-tile { color: var(--foreground); }
+  /* The Crewship sail at the foot of the rail (owner, 19 Oct): the brand's
+     own blue tile, lit, the same in every style, theme and accent. */
+  .rail-tile.rail-brand,
+  .rail-row:hover .rail-tile.rail-brand {
+    width: 20px;
+    height: 20px;
+    margin-inline: -2px;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #1B75FE, #2B90FF);
+    color: #fff;
+    box-shadow: 0 0 0 1px rgb(43 144 255 / 0.45), 0 0 12px 1px rgb(27 117 254 / 0.5);
+  }
+  .rail-tile.rail-brand > svg { width: 12px; height: auto; }
   /* A count: an accent pill at the end of the open row; in the rail, the same
      pill on the icon's corner. */
   .rail-count {

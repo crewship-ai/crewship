@@ -8,7 +8,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
-- **The Crewship ship is always at the top left.** The rail opens with the Crewship mark above the workspace switcher, and it stays when the rail folds to icons. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
+- **The Crewship sail is always in the rail.** It sits at the foot of the rail, above the sidebar mode, in its own lit blue tile, and stays when the rail folds to icons; the top of the rail is the workspace switcher and Search. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
 
 - **Workspace default look.** An owner or admin can set a default style, accent and theme for the workspace (Settings › Appearance › Workspace default, `crewship workspace update --appearance-default`, `PATCH /api/v1/workspaces/{id}` field `appearance_default`). Members inherit every value they have not chosen themselves; Appearance shows which is which and offers Use workspace default. Appearance sync now saves only values you changed, instead of your whole look.
 

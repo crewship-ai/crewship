@@ -81,7 +81,6 @@ export function AppSidebar() {
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader className="rail-inset gap-1.5 pb-1 pt-3">
-        <CrewshipBrand />
         <WorkspaceSwitcher />
         <SidebarSearch />
       </SidebarHeader>
@@ -99,9 +98,10 @@ export function AppSidebar() {
         })}
       </SidebarContent>
 
-      {/* Sidebar mode, Settings and Admin, then — below a rule — who you are. */}
+      {/* Crewship, sidebar mode, Settings and Admin, then who you are. */}
       <SidebarFooter className="rail-inset gap-px border-t border-sidebar-border pb-2 pt-2">
         <SidebarMenu className="gap-px">
+          <CrewshipBrand />
           <SidebarModeMenu />
           {footer.map(row)}
         </SidebarMenu>
