@@ -140,6 +140,39 @@ export async function incomingWebhookFlow(page: Page) {
     await expect(page.getByText("Received · 24h", { exact: true })).toHaveCount(
       0,
     )
+
+    // #3622: browser presentation of a capacity receipt, then its confirmed run.
+    // Only the receipt projection is mocked; save, execution and run detail use
+    // the real API. Actual capacity/retry persistence is covered by Go tests.
+    let linkedRun = ""
+    const pendingPattern = `**${root}/pipelines/pending?status=all`
+    await page.route(pendingPattern, async route => {
+      await route.fulfill({ json: [{
+        id: "reason-browser-start", pipeline_slug: slug,
+        fire_at: new Date(Date.now() - 60_000).toISOString(),
+        status: linkedRun ? "fired" : "pending", run_id: linkedRun,
+        reason_code: linkedRun ? "unknown" : "routine_capacity",
+        dispatch_attempts: 1, can_cancel: false,
+      }] })
+    })
+    try {
+      await page.goto(`/routines?${new URLSearchParams({slug, view:"plan"})}`)
+      await expect(page.getByText("Waiting for capacity", {exact:true})).toBeVisible()
+      await expect(page.getByTestId("pending-state-reason-browser-start")).toContainText("holds its slot")
+      const run = await page.request.post(`${root}/pipelines/${slug}/run`, {data:{inputs:{x:"reason-proof"}}})
+      expect(run.ok()).toBeTruthy()
+      const result = await run.json()
+      expect(result.status).toBe("COMPLETED")
+      linkedRun = result.run_id
+      expect(linkedRun).toBeTruthy()
+      const receipt = page.getByTestId("settled-start-reason-browser-start")
+      await expect(receipt).toContainText("Started", {timeout:15_000})
+      await receipt.getByRole("link", {name:"Open run"}).click()
+      await expect(page).toHaveURL(new RegExp(`run=${linkedRun}`))
+      await expect(page.getByText("reason-proof", {exact:true}).first()).toBeVisible()
+    } finally {
+      await page.unroute(pendingPattern)
+    }
   } finally {
     for (const id of hooks) {
       const deleted = await page.request.delete(

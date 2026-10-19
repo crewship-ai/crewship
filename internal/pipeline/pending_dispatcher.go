@@ -326,22 +326,36 @@ func pendingCapacityBackoff(attempt int) time.Duration {
 
 func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr PendingRun, runErr error) {
 	now := d.now().UTC()
+	pr.ReasonCode = "dispatch_failed"
 	status, reason := "failed", "Deferred start could not be dispatched. Check server logs using the pending ID."
 	var next *time.Time
 	// A dispatch cut short by cancellation (server shutdown or deploy) never
 	// produced a run, so it is retried like a capacity refusal instead of
 	// being finalized as failed. fireOne only gets here without a run ID.
 	interrupted := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil
-	if errors.Is(runErr, ErrConcurrencyLimitReached) || interrupted {
+	capacity := errors.Is(runErr, ErrConcurrencyLimitReached)
+	if capacity || interrupted {
+		pr.ReasonCode = "routine_capacity"
 		waiting := "Waiting for routine execution capacity."
-		if interrupted && !errors.Is(runErr, ErrConcurrencyLimitReached) {
+		if interrupted && !capacity {
+			pr.ReasonCode = "retry_backoff"
 			waiting = "Dispatch was interrupted before the run started; it will be retried."
 		}
 		switch {
 		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
-			status, reason = "expired", "Deferred start expired before execution capacity became available."
+			pr.ReasonCode = "expired"
+			status, reason = "expired", "Deferred start expired before dispatch."
+			if capacity {
+				pr.ReasonCode = "capacity_expired"
+				reason = "Deferred start expired before execution capacity became available."
+			}
 		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
-			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			pr.ReasonCode = "dispatch_failed"
+			reason = "Dispatch remained interrupted after 10 attempts; no TTL was supplied."
+			if capacity {
+				pr.ReasonCode = "routine_capacity"
+				reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			}
 		default:
 			status, reason = "pending", waiting
 			at := now.Add(pendingCapacityBackoff(pr.DispatchAttempts))
@@ -351,8 +365,10 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 			next = &at
 		}
 	} else if errors.Is(runErr, ErrPinnedVersionNotFound) {
+		pr.ReasonCode = "version_missing"
 		reason = "The accepted recipe version is no longer available."
 	} else if errors.Is(runErr, ErrRoutineNotActive) {
+		pr.ReasonCode = "routine_inactive"
 		reason = "The routine is no longer active."
 	}
 	// Finalize even when the execution context was canceled at shutdown. This

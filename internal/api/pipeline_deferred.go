@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // maxDeferralSeconds bounds delay/ttl/debounce windows (30 days) — keeps
@@ -246,7 +247,12 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		id = "pnd_" + generateCUID()
 	}
 	store := pipeline.NewPendingRunStore(h.db)
+	reasonCode := ""
+	if opts.queuedForCapacity {
+		reasonCode = "routine_capacity"
+	}
 	stored, err := store.EnqueueChecked(r.Context(), pipeline.PendingRun{
+		ReasonCode:    reasonCode,
 		PinnedVersion: body.PinnedVersion,
 		ID:            id,
 		WorkspaceID:   workspaceID,
@@ -359,6 +365,7 @@ type pendingRunReceipt struct {
 	Status           string         `json:"status"`
 	RunID            string         `json:"run_id"`
 	DispatchAttempts int            `json:"dispatch_attempts"`
+	ReasonCode       string         `json:"reason_code"`
 	LastError        string         `json:"last_error"`
 	CanCancel        bool           `json:"can_cancel"`
 }
@@ -375,8 +382,12 @@ func deferredReceipt(pr pipeline.PendingRun, canUpdate bool) (pendingRunReceipt,
 		text := at.UTC().Format(time.RFC3339Nano)
 		return &text
 	}
+	reasonCode := pipeline.PendingReasonCode(pr)
+	if pr.Status == "pending" && quiesce.QueuePaused() {
+		reasonCode = "paused"
+	}
 	return pendingRunReceipt{
-		Inputs: inputs, PinnedVersion: pr.PinnedVersion, ID: pr.ID,
+		ReasonCode: reasonCode, Inputs: inputs, PinnedVersion: pr.PinnedVersion, ID: pr.ID,
 		PipelineSlug: pr.PipelineSlug, DebounceKey: pr.DebounceKey,
 		Priority: pr.Priority, FireAt: pr.FireAt.Format(time.RFC3339Nano),
 		ExpiresAt: asString(pr.ExpiresAt), NextAttemptAt: asString(pr.NextAttemptAt),
