@@ -449,6 +449,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if err := validatePrivateArtifactContextDump(extracted.DBDump); err != nil {
 			return nil, err
 		}
+		if err := validatePrivateArtifactContextTarget(ctx, db, extracted.DBDump); err != nil {
+			return nil, err
+		}
 	}
 	servicePlan, err := extracted.prepareServiceRestorePlan(ctx, manifest.Contents.ServiceSnapshots)
 	if err != nil {

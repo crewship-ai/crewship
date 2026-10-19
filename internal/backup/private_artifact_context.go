@@ -32,6 +32,30 @@ func validatePrivateArtifactContextDump(dump *DBDump) error {
 	return nil
 }
 
+// Generic schema compatibility may drop unknown columns. Classification is a
+// security boundary, so a protected source must never lose it on an old target.
+func validatePrivateArtifactContextTarget(ctx context.Context, target interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, dump *DBDump) error {
+	if dump == nil {
+		return nil
+	}
+	for _, row := range dump.Tables["chats"] {
+		if row[privateArtifactMarker] == nil {
+			continue
+		}
+		var column bool
+		if err := target.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name='private_artifact_author_user_id')`).Scan(&column); err != nil {
+			return err
+		}
+		if !column {
+			return errors.New("backup: target lacks private artifact conversation classification; apply target migrations before restoring protected conversations")
+		}
+		return nil
+	}
+	return nil
+}
+
 // Recovery may defer encryption-dependent migrations. It must not discard the
 // only source privacy proof before the classification backfill can run.
 func preservePrivateArtifactContextProof(ctx context.Context, db *sql.DB) error {

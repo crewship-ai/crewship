@@ -1124,6 +1124,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
 		return stats, err
 	}
+	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
+		return stats, err
+	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
 	if err != nil {
 		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
