@@ -1,10 +1,5 @@
 import { apiFetch } from "@/lib/api-fetch"
-import {
-  CONVERSATION_SEARCH_MIN_QUERY,
-  conversationHitHref,
-  conversationHitSnippet,
-  type ConversationHit,
-} from "@/lib/conversation-search"
+import { CONVERSATION_SEARCH_MIN_QUERY, conversationHitHref, type ConversationHit } from "@/lib/conversation-search"
 
 /**
  * Chat search (CH-25). Talks to the EXISTING POST /api/v1/conversations/search,
@@ -104,6 +99,7 @@ export async function runChatSearch(opts: {
   if (parsed.text.length < CONVERSATION_SEARCH_MIN_QUERY || !opts.workspaceId) return { status: "idle", hits: [] }
 
   let agentId: string | undefined
+  if (opts.scope === "this" && parsed.filters.in) return { status: "error", hits: [], note: "in: cannot be combined with This chat. Switch to All chats to search one agent." }
   if (opts.scope === "this") {
     if (!opts.current?.sessionId) return { status: "unavailable", hits: [], note: "Search inside this chat is not available for this conversation yet." }
     agentId = opts.current.agentId
@@ -149,11 +145,24 @@ export function hitMessageHref(hit: ConversationHit): string | null {
 
 const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f‎‏‪-‮⁦-⁩]/g
 
-/** Snippet as plain-text segments; the UI renders them as text nodes, never HTML. */
+const SNIPPET_MAX = 140
+const SNIPPET_LEAD = 40
+
+/**
+ * Snippet as plain-text segments, windowed around the first match so a match
+ * deep in a long message is still shown and highlighted. The UI renders the
+ * segments as text nodes, never HTML.
+ */
 export function snippetSegments(content: string, text: string): { text: string; match: boolean }[] {
-  const clean = conversationHitSnippet({ content: content.replace(UNSAFE, "") } as ConversationHit)
+  const full = content.replace(UNSAFE, "").replace(/\s+/g, " ").trim()
+  if (!full) return []
   const terms = [...new Set(text.toLowerCase().split(/\s+/).filter((t) => t.length >= 2))]
-  if (!terms.length || !clean) return clean ? [{ text: clean, match: false }] : []
+  const fullLower = full.toLowerCase()
+  const first = terms.map((t) => fullLower.indexOf(t)).filter((i) => i >= 0).sort((a, b) => a - b)[0]
+  const start = first === undefined ? 0 : Math.max(0, first - SNIPPET_LEAD)
+  const end = Math.min(full.length, start + SNIPPET_MAX)
+  const clean = `${start > 0 ? "\u2026" : ""}${full.slice(start, end)}${end < full.length ? "\u2026" : ""}`
+  if (!terms.length) return [{ text: clean, match: false }]
   const lower = clean.toLowerCase()
   const marks: [number, number][] = []
   for (const term of terms) {
@@ -165,9 +174,9 @@ export function snippetSegments(content: string, text: string): { text: string; 
   let pos = 0
   for (const [s, e] of marks) {
     if (e <= pos) continue
-    const start = Math.max(s, pos)
-    if (start > pos) out.push({ text: clean.slice(pos, start), match: false })
-    out.push({ text: clean.slice(start, e), match: true })
+    const from = Math.max(s, pos)
+    if (from > pos) out.push({ text: clean.slice(pos, from), match: false })
+    out.push({ text: clean.slice(from, e), match: true })
     pos = e
   }
   if (pos < clean.length) out.push({ text: clean.slice(pos), match: false })

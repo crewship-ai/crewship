@@ -81,6 +81,11 @@ describe("runChatSearch", () => {
     expect(r.status).toBe("error")
     expect(fetchMock).not.toHaveBeenCalled()
   })
+  it("rejects in: together with This chat instead of ignoring it", async () => {
+    const r = await runChatSearch({ raw: "deploy in:ada", scope: "this", workspaceId: "ws", roster, current: { agentId: "a1", sessionId: "s1" } })
+    expect(r.status).toBe("error")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it("does not search below the minimum text length", async () => {
     expect((await runChatSearch({ raw: "d", scope: "all", workspaceId: "ws", roster })).status).toBe("idle")
   })
@@ -94,6 +99,12 @@ describe("hitMessageHref / snippetSegments", () => {
   it("highlights terms as plain text segments (never markup)", () => {
     const segs = snippetSegments("Deploy <b>now</b>", "deploy")
     expect(segs).toEqual([{ text: "Deploy", match: true }, { text: " <b>now</b>", match: false }])
+  })
+  it("windows the snippet around a match deep in a long message", () => {
+    const segs = snippetSegments(`${"filler ".repeat(60)}needle ${"tail ".repeat(60)}`, "needle")
+    expect(segs.find((s) => s.match)?.text).toBe("needle")
+    expect(segs.map((s) => s.text).join("").length).toBeLessThanOrEqual(142)
+    expect(segs[0].text.startsWith("\u2026")).toBe(true)
   })
   it("strips control characters", () => {
     expect(snippetSegments("a\u0000b‮c", "zz")).toEqual([{ text: "abc", match: false }])

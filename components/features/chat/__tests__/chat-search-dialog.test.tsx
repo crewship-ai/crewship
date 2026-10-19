@@ -54,3 +54,38 @@ it("reports unsupported filters and unavailable Files / room scopes honestly", a
   expect(await screen.findByText(/not available for this conversation/)).toBeInTheDocument()
   expect(api).not.toHaveBeenCalled()
 })
+
+it("does not open or show a previous scope's rows while the new search is pending", async () => {
+  api.mockResolvedValueOnce(Response.json({ hits: [hit] }))
+  setup()
+  type("deploy")
+  await screen.findByRole("option")
+  let release: (r: Response) => void = () => {}
+  api.mockReturnValueOnce(new Promise<Response>((resolve) => { release = resolve }))
+  fireEvent.click(screen.getByRole("tab", { name: "This chat" }))
+  expect(screen.queryByRole("option")).toBeNull()
+  fireEvent.keyDown(screen.getByLabelText("Search query"), { key: "Enter" })
+  expect(push).not.toHaveBeenCalled()
+  release(Response.json({ hits: [] }))
+})
+
+it("exposes the highlighted result to assistive tech and supports arrow keys between tabs", async () => {
+  api.mockResolvedValue(Response.json({ hits: [hit, { ...hit, id: "m2" }] }))
+  setup()
+  type("deploy")
+  const options = await screen.findAllByRole("option")
+  const input = screen.getByLabelText("Search query")
+  expect(input).toHaveAttribute("aria-activedescendant", options[0].id)
+  fireEvent.keyDown(input, { key: "ArrowDown" })
+  expect(input).toHaveAttribute("aria-activedescendant", options[1].id)
+  fireEvent.keyDown(screen.getByRole("tab", { name: "All chats" }), { key: "ArrowLeft" })
+  expect(screen.getByRole("tab", { name: "This chat" })).toHaveAttribute("aria-selected", "true")
+  expect(screen.getByRole("tabpanel")).toBeInTheDocument()
+})
+
+it("closes on Escape", () => {
+  const onOpenChange = vi.fn()
+  setup({ onOpenChange })
+  fireEvent.keyDown(screen.getByLabelText("Search query"), { key: "Escape" })
+  expect(onOpenChange).toHaveBeenCalledWith(false)
+})

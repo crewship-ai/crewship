@@ -184,9 +184,10 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
           </div>
   }) }
 
-  const activeRow = activeThreadId ? rows.find((row) => row.thread.id === activeThreadId) : undefined
+  // The open session comes from the unfiltered data, so typing in the sidebar search never makes it vanish.
+  const activeAgentId = activeThreadId ? (loadedRows.find((row) => row.thread.id === activeThreadId)?.agent.id ?? Object.entries(threadsByAgent).find(([, list]) => list.some((thread) => thread.id === activeThreadId))?.[0]) : undefined
   return <div className={cn("flex h-full min-h-0 flex-col", props.className)}>
-    {searchOpen && <ChatSearchDialog open={searchOpen} onOpenChange={setSearchOpen} workspaceId={chat?.workspaceId} roster={roster} current={activeRow ? { agentId: activeRow.agent.id, sessionId: activeRow.thread.id } : null} />}
+    {searchOpen && <ChatSearchDialog open={searchOpen} onOpenChange={setSearchOpen} workspaceId={chat?.workspaceId} roster={roster} current={activeAgentId && activeThreadId ? { agentId: activeAgentId, sessionId: activeThreadId } : null} />}
     <SidebarToolbar>
       <div data-chat-search className="min-w-0 flex-1">
         <SidebarSearch value={query} onValueChange={setQuery} aria-label={picking ? "Search agents" : "Search conversations"} placeholder={picking ? "Find an agent…" : "Search names, sessions…"} onKeyDown={(event) => { if (event.key === "Escape") { setPicking(false); setQuery("") } }} />

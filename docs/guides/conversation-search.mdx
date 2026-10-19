@@ -187,15 +187,17 @@ stays the global palette). The dialog has three tabs:
 
 - **This chat** — matches inside the open agent session.
 - **All chats** — every agent conversation you can see.
-- **Files** — not available yet; the tab says so rather than showing zero results.
+- **Files** — not available yet; the tab says so rather than showing zero results. (Developers can enable sample data with `NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES=true`; it is not real file search.)
 
 Type free text plus optional filters: `from:ada` (or `from:user`),
 `in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,
 `before:2026-10-31`. An unknown filter is reported, not ignored. Use the arrow
-keys to move through results and Enter to open the exact message; Escape closes.
+keys to move through results (Left/Right switches tabs) and Enter to open the exact message; Escape closes.
 
 Only `in:` is applied by the server. `from:`, `has:`, the date filters and
 **This chat** are applied to the server's 50 best matches, so when that page
 was full the dialog says the result is **partial** instead of claiming nothing
 matched. Rooms and direct messages with people are not covered by this search
 yet.
+
+`after:` is inclusive and `before:` is exclusive, both at 00:00 UTC of the given date, while result dates are shown in your local time. `in:` cannot be combined with **This chat**. If the matched message is not shown as its own entry in the open conversation (for example it was merged into an earlier reply), the dialog says it could not locate it rather than saying it is gone.
