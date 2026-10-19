@@ -25,19 +25,21 @@ export function CatalogFilterBar({ facets, value, onChange }: {
     return <Button key={`${group}:${id}`} type="button" size="sm" variant={on ? "secondary" : "outline"} aria-pressed={on}
       disabled={!on && count === 0} onClick={() => onChange({ ...value, [key]: toggle(list, id) })}>{label} <span className="tabular-nums text-muted-foreground">{count}</span></Button>
   }
+  // A group that cannot vary on this list (fewer than two values present, none picked) is noise.
+  const varies = (counts: number[], picked: unknown[]) => picked.length > 0 || counts.filter(n => n > 0).length > 1
   return <div role="group" aria-label="Catalog filters" className="flex flex-wrap items-center gap-2">
-    <div role="group" aria-label="Type" className="flex flex-wrap gap-1">
+    {varies(Object.values(facets.types), value.types) && <div role="group" aria-label="Type" className="flex flex-wrap gap-1">
       {(Object.keys(TYPE_LABEL) as (keyof typeof TYPE_LABEL)[]).map(t => chip("type", "types", t, TYPE_LABEL[t], facets.types[t]))}
-    </div>
-    <div role="group" aria-label="Scope" className="flex flex-wrap gap-1">
+    </div>}
+    {varies(Object.values(facets.scopes), value.scopes) && <div role="group" aria-label="Scope" className="flex flex-wrap gap-1">
       {(Object.keys(SCOPE_LABEL) as (keyof typeof SCOPE_LABEL)[]).map(s => chip("scope", "scopes", s, SCOPE_LABEL[s], facets.scopes[s]))}
-    </div>
-    {facets.owners.length > 1 && <div role="group" aria-label="Owner" className="flex flex-wrap gap-1">
+    </div>}
+    {varies(facets.owners.map(o => o.count), value.owners) && <div role="group" aria-label="Owner" className="flex flex-wrap gap-1">
       {facets.owners.map(o => chip("owner", "owners", o.ref, o.label, o.count))}
     </div>}
-    <div role="group" aria-label="State" className="flex flex-wrap gap-1">
+    {varies(Object.values(facets.states), value.states) && <div role="group" aria-label="State" className="flex flex-wrap gap-1">
       {(Object.keys(STATE_LABEL) as (keyof typeof STATE_LABEL)[]).map(s => chip("state", "states", s, STATE_LABEL[s], facets.states[s]))}
-    </div>
+    </div>}
     <p className="w-full text-xs text-muted-foreground">Slides, Board, App and Design are not in this catalog yet.</p>
     {catalogFilterCount(value) > 0 && <Button type="button" size="sm" variant="ghost" onClick={() => onChange(EMPTY_CATALOG_FILTERS)}>Clear filters</Button>}
   </div>

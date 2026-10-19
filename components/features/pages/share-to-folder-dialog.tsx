@@ -29,9 +29,12 @@ import {
   summariseBulk,
   type BulkItemResult,
 } from "@/lib/pages/catalog-share"
-import { useFolderAcl, usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
+import { useFolderAcl, usePageFolders } from "@/hooks/use-page-folders"
+import { MoveError, movePage } from "@/lib/pages/catalog-move"
 
 export interface ShareSubject {
+  /** Immutable page ID: the move addresses it, never the slug. */
+  id: string
   slug: string
   name: string
   pagesVersion: number | null
@@ -50,7 +53,6 @@ export interface ShareToFolderDialogProps {
 
 export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects, onDone }: ShareToFolderDialogProps) {
   const folders = usePageFolders(workspaceId, open)
-  const { addPage } = usePageFolderMutations(workspaceId)
   const [target, setTarget] = React.useState<string | null>(null)
   const [results, setResults] = React.useState<BulkItemResult[] | null>(null)
   const [running, setRunning] = React.useState(false)
@@ -64,6 +66,16 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
   const options = folders.folders.filter(f => f.canAcceptPages === true)
   const folder = options.find(f => f.slug === target) ?? null
   const acl = useFolderAcl(workspaceId, target, open && target !== null)
+  // One source for text and request: a manager's ACL answer carries its own
+  // version, and that is the one sent. The list's version is used only when
+  // the ACL is not readable, where the text is built from the list marker too.
+  const aclVersion = acl.manages ? acl.aclVersion : (folder?.aclVersion ?? null)
+  const stale = Boolean(folder) && acl.manages && acl.aclVersion !== folder!.aclVersion
+  const reread = folders.reread
+  React.useEffect(() => { if (stale) void reread() }, [stale, reread])
+  const gainsAccess: boolean | null = !folder || acl.loading ? null
+    : acl.manages ? acl.entries.length > 0
+      : folder.shared === "none" ? false : folder.shared === "unknown" ? null : true
   const audience = !folder || acl.loading ? null
     : acl.manages ? moveImpactFromAcl(acl.entries) : moveImpactFromShared(folder.shared)
   const many = subjects.length > 1
@@ -74,19 +86,21 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
       targetName: folder.name,
       audience,
       versions,
+      gainsAccess,
+      each: many,
     })
     : null
 
   const confirm = async () => {
-    if (!folder || !consequence || running) return
+    if (!folder || !consequence || running || stale) return
     setRunning(true)
     const out: BulkItemResult[] = []
     for (const s of subjects) {
       try {
-        await addPage.mutateAsync({ folder: folder.slug, page: s.slug, pagesVersion: s.pagesVersion, aclVersion: folder.aclVersion })
+        await movePage(workspaceId, { id: s.id, targetFolder: folder.slug, pagesVersion: s.pagesVersion, aclVersion })
         out.push({ slug: s.slug, name: s.name, outcome: "success" })
       } catch (error) {
-        const status = (error as { status?: number; conflict?: unknown }).status ?? ((error as { conflict?: unknown }).conflict ? 409 : undefined)
+        const status = error instanceof MoveError ? error.status : undefined
         out.push({ slug: s.slug, name: s.name, outcome: outcomeOf({ status }), message: error instanceof Error ? error.message : undefined })
       }
     }
@@ -99,7 +113,7 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
   const tally = results ? summariseBulk(results) : null
 
   return (
-    <CreateSurface open={open} onOpenChange={onOpenChange} size="sm" onSubmit={() => void confirm()}>
+    <CreateSurface open={open} onOpenChange={next => { if (!running) onOpenChange(next) }} size="sm" onSubmit={() => void confirm()}>
       <CreateSurfaceHeader
         concept="pages"
         context={many ? `${subjects.length} items` : subjects[0]?.name}
@@ -117,7 +131,7 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
               {results.map(r => (
                 <li key={r.slug} data-outcome={r.outcome} className="flex items-center gap-2 px-2.5 py-2 text-xs">
                   <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                  <span className={cn("shrink-0", r.outcome === "success" ? "text-muted-foreground" : "text-destructive")}>{BULK_OUTCOME_LABEL[r.outcome]}</span>
+                  <span className={cn("shrink-0", r.outcome === "success" ? "text-muted-foreground" : "text-destructive")} title={r.message}>{BULK_OUTCOME_LABEL[r.outcome]}{r.message && r.outcome !== "success" ? `: ${r.message}` : ""}</span>
                 </li>
               ))}
             </ul>
@@ -161,6 +175,7 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
                 ) : (
                   <p role="status" className="flex items-center gap-2 text-muted-foreground"><Spinner className="h-3 w-3" />Reading who will see it…</p>
                 )}
+                {stale && <p role="status" className="text-muted-foreground">The folder's permissions changed. Reading them again before you can confirm.</p>}
               </div>
             )}
           </>
@@ -170,10 +185,10 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
         <CreateSurfaceFooter onCancel={() => onOpenChange(false)} cancelLabel="Close" guardCancel={false} />
       ) : (
         <CreateSurfaceFooter
-          onCancel={() => onOpenChange(false)}
+          onCancel={() => { if (!running) onOpenChange(false) }}
           primaryLabel="Move and share"
           onPrimary={() => void confirm()}
-          primaryDisabled={!consequence || running || subjects.length === 0}
+          primaryDisabled={!consequence || running || stale || subjects.length === 0}
           busy={running}
           guardCancel={false}
         />

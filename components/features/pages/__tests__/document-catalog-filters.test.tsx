@@ -16,18 +16,26 @@ it("filters by scope and says when nothing matches", () => {
   expect(screen.getByText("Doc b")).toBeTruthy()
 })
 
-it("never counts or previews an item it was not given", () => {
-  // The server omits another human's private item; the catalog has no other source.
-  render(<DocumentCatalog pages={[row("mine", { private_audience: true })]} onSelect={vi.fn()} filterable />)
-  expect(screen.getByRole("button", { name: /^Private 1/ })).toBeTruthy()
-  expect(screen.getByRole("button", { name: /^In a folder 0/ })).toBeTruthy()
-  expect(screen.queryByText("Doc secret")).toBeNull()
-  expect(document.body.textContent).not.toMatch(/secret/)
+it("hides filter groups that cannot vary on the list", () => {
+  render(<DocumentCatalog pages={[row("a", { private_audience: true })]} onSelect={vi.fn()} filterable />)
+  expect(screen.queryByRole("group", { name: "Scope" })).toBeNull()
+  expect(screen.queryByRole("group", { name: "Type" })).toBeNull()
+  expect(screen.queryByRole("group", { name: "Owner" })).toBeNull()
+})
+
+it("offers selection and move only when the flag is on", () => {
+  const pages = [row("a", { private_audience: true, id: "id-a" })]
+  const { rerender } = render(<DocumentCatalog pages={pages} onSelect={vi.fn()} onShare={vi.fn()} />)
+  expect(screen.queryByRole("button", { name: /Move to a working folder/ })).toBeNull()
+  expect(screen.queryByRole("checkbox")).toBeNull()
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_COPY_MOVE", "true")
+  rerender(<DocumentCatalog pages={pages} onSelect={vi.fn()} onShare={vi.fn()} />)
+  expect(screen.getByRole("checkbox", { name: "Select Doc a" })).toBeTruthy()
 })
 
 it("hides Duplicate until the copy flag is on", () => {
   const onDuplicate = vi.fn()
-  const pages = [row("a", { private_audience: true })]
+  const pages = [row("a", { private_audience: true, id: "id-a" })]
   const { rerender } = render(<DocumentCatalog pages={pages} onSelect={vi.fn()} onDuplicate={onDuplicate} />)
   expect(screen.queryByRole("button", { name: "Duplicate Doc a" })).toBeNull()
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_COPY_MOVE", "true")

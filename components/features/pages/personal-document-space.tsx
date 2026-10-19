@@ -5,6 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { usePages } from "@/hooks/use-pages"
 import type { PageView } from "@/hooks/use-pages"
 import { DocumentCatalog } from "./document-catalog"
+import { artifactCopyMove } from "@/lib/feature-flags"
 import { duplicatePage } from "@/lib/pages/catalog-duplicate"
 import { ShareToFolderDialog } from "./share-to-folder-dialog"
 
@@ -21,10 +22,12 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
   const human = session?.user?.id
   const { pages, loading, error } = usePages(workspaceId, "personal")
   const [copyError, setCopyError] = React.useState<string | null>(null)
+  const copying = React.useRef(false)
   const duplicate = (page: PageView) => {
-    if (!workspaceId || !page.immutablePageId) return
+    if (!workspaceId || !page.immutablePageId || copying.current) return
+    copying.current = true
     setCopyError(null)
-    duplicatePage(workspaceId, page.immutablePageId).then(copy => onSelect(`@${copy.id}`), error => setCopyError(error instanceof Error ? error.message : "The copy could not be made."))
+    duplicatePage(workspaceId, page.immutablePageId).then(copy => onSelect(`@${copy.id}`), error => setCopyError(error instanceof Error ? error.message : "The copy could not be made.")).finally(() => { copying.current = false })
   }
   const [sharing, setSharing] = React.useState<PageView[] | null>(null)
   const ownedDocuments = human && workspaceId && !error ? pages.filter(page =>
@@ -43,7 +46,7 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
         {copyError && <p role="alert" className="px-6">{copyError}</p>}
         {!own.length && !unknown && <p role="status" className="px-6">No private Documents in your space.</p>}
       </>}
-    {workspaceId && sharing && <ShareToFolderDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setSharing(null) }}
-      subjects={sharing.map(page => ({ slug: page.slug, name: page.name, pagesVersion: page.pagesVersion }))} />}
+    {workspaceId && sharing && artifactCopyMove() && <ShareToFolderDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setSharing(null) }}
+      subjects={sharing.flatMap(page => page.immutablePageId ? [{ id: page.immutablePageId, slug: page.slug, name: page.name, pagesVersion: page.pagesVersion }] : [])} />}
   </section>
 }

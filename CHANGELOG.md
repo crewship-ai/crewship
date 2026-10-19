@@ -10,7 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
-- **Share a Document from My space with a clear audience.** Filter the catalog by type, scope, owner and state, and move Documents into a working folder after a dialog that names who gains the content and history, with a result for every item. Duplicate and the atomic move wait for server support.
+- **Filter My space.** The private Document catalog can be narrowed by type, scope, owner and state; groups that cannot vary on the list are hidden. Counts only reflect items the server returned.
+- Move to a working folder (who gains content and history, same ID, a result per item) and Duplicate are built behind `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` and stay hidden until the server routes exist.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.

@@ -45,14 +45,22 @@ describe("catalog filters", () => {
 
 describe("share consequence", () => {
   it("states who gains content and history and that the ID stays", () => {
-    const text = shareConsequence({ name: "Plan", targetName: "Ops", audience: "Through the folder: visible to crew Ops.", versions: 4 })
+    const text = shareConsequence({ name: "Plan", targetName: "Ops", audience: "Through the folder: visible to crew Ops.", versions: 4, gainsAccess: true })
     expect(text.audience).toContain("crew Ops")
     expect(text.history).toContain("4 versions")
     expect(text.identity).toMatch(/same ID/)
     expect(text.copy).toMatch(/Duplicate/)
   })
   it("does not invent a version count", () => {
-    expect(shareConsequence({ name: "Plan", targetName: "Ops", audience: "x", versions: null }).history).toMatch(/full history/)
+    expect(shareConsequence({ name: "Plan", targetName: "Ops", audience: "x", versions: null, gainsAccess: true }).history).toMatch(/full history/)
+  })
+})
+
+describe("share consequence without access", () => {
+  it("does not promise history to anyone when nobody gains access", () => {
+    expect(shareConsequence({ name: "P", targetName: "Ops", audience: "x", versions: 3, gainsAccess: false }).history).toMatch(/Nobody gains access/)
+    expect(shareConsequence({ name: "P", targetName: "Ops", audience: "x", versions: null, gainsAccess: null }).history).toMatch(/could not be determined/)
+    expect(shareConsequence({ name: "P", targetName: "Ops", audience: "x", versions: null, gainsAccess: true, each: true }).history).toMatch(/^For each item/)
   })
 })
 

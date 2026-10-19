@@ -80,3 +80,29 @@ it("keeps the personal server projection separate from the all-pages cache", asy
  expect(request).toHaveBeenCalledTimes(2)
  expect(client.getQueryCache().getAll().filter(query => query.queryKey[0] === "pages")).toHaveLength(2)
 })
+
+it("counts and shows nothing for items the server did not admit or that are not the caller's", async () => {
+ request.mockResolvedValue(Response.json([row("Mine", { private_audience: true }), row("Other human", { private_audience: true, owner: "user/other" }), row("Unclassified")]))
+ mount()
+ await screen.findByText("Mine")
+ expect(screen.queryByText("Other human")).toBeNull()
+ expect(screen.queryByText("Unclassified")).toBeNull()
+ expect(document.body.textContent).not.toMatch(/Other human|Unclassified/)
+ expect(screen.queryByRole("group", { name: "Scope" })).toBeNull()
+})
+it("wires Duplicate once per click and opens the copy by its new ID", async () => {
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACT_COPY_MOVE", "true")
+ let finish!: () => void
+ request.mockImplementation(async (url: string, init?: RequestInit) => {
+  if (init?.method === "POST") { await new Promise<void>(resolve => { finish = resolve }); return Response.json({ page: { id: "copy-id", slug: "copy" } }, { status: 201 }) }
+  return Response.json([row("Own private", { id: "src-id", private_audience: true }), row("No id", { id: "bad id!", private_audience: true })])
+ })
+ const view = mount()
+ const button = await screen.findByRole("button", { name: "Duplicate Own private" })
+ expect(screen.queryByRole("button", { name: "Duplicate No id" })).toBeNull()
+ fireEvent.click(button); fireEvent.click(button)
+ await waitFor(() => expect(request.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1))
+ await act(async () => { finish() })
+ await waitFor(() => expect(view.select).toHaveBeenCalledWith("@copy-id"))
+ vi.unstubAllEnvs()
+})

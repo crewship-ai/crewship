@@ -79,8 +79,12 @@ export interface ShareConsequenceInput {
   targetName: string
   /** The audience sentence from the folder ACL, built by lib/pages/folder-sharing. */
   audience: string
-  /** Version count when known; null says "full history" without a number. */
+  /** Version count when known; null states the rule without a number. */
   versions: number | null
+  /** Whether anyone beyond the owner gains access; null when the folder's sharing is unknown. */
+  gainsAccess: boolean | null
+  /** Several items: the history line applies to each of them. */
+  each?: boolean
 }
 
 export interface ShareConsequence {
@@ -90,10 +94,14 @@ export interface ShareConsequence {
   copy: string
 }
 
-export function shareConsequence({ name, targetName, audience, versions }: ShareConsequenceInput): ShareConsequence {
-  const history = versions != null && versions > 0
-    ? `Everyone who gains access sees the current content and the full history (${versions} ${versions === 1 ? "version" : "versions"}).`
-    : "Everyone who gains access sees the current content and the full history."
+export function shareConsequence({ name, targetName, audience, versions, gainsAccess, each }: ShareConsequenceInput): ShareConsequence {
+  const count = versions != null && versions > 0 ? ` (${versions} ${versions === 1 ? "version" : "versions"})` : ""
+  const subject = each ? "For each item, everyone" : "Everyone"
+  const history = gainsAccess === false
+    ? "Nobody gains access, so no one else sees the content or its history."
+    : gainsAccess === null
+      ? "Who gains access could not be determined, so who sees the content and history is not known."
+      : `${subject} who gains access sees the current content and the full history${count}.`
   return {
     audience: `${name} moves into ${targetName}. ${audience}`,
     history,
