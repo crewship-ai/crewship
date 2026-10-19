@@ -24,18 +24,23 @@ it.each([false, true])("opens the personal Documents view from the actual shell 
   const url = new URL(input, "http://localhost")
   if (url.pathname === "/api/v1/documents/status") return Response.json({ enabled: true })
   if (url.pathname === "/api/v1/page-folders") return Response.json({ folders: [] })
-  if (url.pathname === "/api/v1/pages") return Response.json([])
+  if (url.pathname === "/api/v1/pages") {
+   const own = { id: "own-private", slug: "own-private", name: "Own private", owner: "user/space-human", has_document: true, private_audience: true, panels: [] }
+   return Response.json(url.searchParams.get("audience") === "personal" ? [own] : [own, { id: "shared", slug: "shared", name: "Shared", panels: [] }])
+  }
   return Response.json({})
  })
  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
  try {
   await act(async () => { render(<QueryClientProvider client={client}><PagesLayout workspaceId="ws" /></QueryClientProvider>) })
   expect(screen.queryByRole("region", { name: "Personal Documents fixture" })).toBeNull()
+  await screen.findByText("2 pages")
   const toggle = await screen.findByRole("button", { name: "My space" })
   expect(toggle).toHaveAttribute("aria-pressed", "false")
   fireEvent.click(toggle)
   expect(await screen.findByRole("region", { name: "Personal Documents fixture" })).toHaveTextContent("ws")
   expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await screen.findByText("1 page")
   fireEvent.click(toggle)
   expect(screen.queryByRole("region", { name: "Personal Documents fixture" })).toBeNull()
   expect(toggle).toHaveAttribute("aria-pressed", "false")
