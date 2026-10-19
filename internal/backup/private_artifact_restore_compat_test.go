@@ -92,7 +92,11 @@ func TestPrivateArtifactPortableRestorePreflight(t *testing.T) {
 				}
 			}
 			touched := false
-			_, err = RestoreDumpTxHooks(t.Context(), target, dump, &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error { touched = true; return nil }})
+			hooks := &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error { touched = true; return nil }}
+			if kind == "pre artifacts ordinary" {
+				hooks.legacySourceVersions = []int{169}
+			}
+			_, err = RestoreDumpTxHooks(t.Context(), target, dump, hooks)
 			unsafe := strings.HasPrefix(kind, "artifact era") || kind == "new protected into old target"
 			if unsafe {
 				if err == nil || !strings.Contains(err.Error(), "private artifact conversation classification") {
@@ -160,5 +164,71 @@ func TestPrivateArtifactNoKitRecoveryPreservesUnbackfilledProof(t *testing.T) {
 	var count int
 	if err := restored.QueryRow(`SELECT count(*) FROM document_creation_consents WHERE workspace_id=?`, ws).Scan(&count); err != nil || count != 1 {
 		t.Errorf("unbackfilled proof discarded: count=%d err=%v", count, err)
+	}
+}
+
+// A real artifact-era crew dump contains chats but neither creation table.
+// Its applied source registry, not table presence, distinguishes it from a
+// pre-artifact bundle. No transcript/provider inference can recover the seal.
+func TestPrivateArtifactCrewRestoreRequiresRetainedClassification(t *testing.T) {
+	source := testutil.NewMemDB(t)
+	if err := database.MigrateSkipping(t.Context(), source, slog.New(slog.NewTextHandler(io.Discard, nil)), "private_artifact_conversation_context"); err != nil {
+		t.Fatal(err)
+	}
+	ws, crew := seedCovWorkspace(t, source, "old-crew-private")
+	for _, query := range []string{
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,title) VALUES('crew-private-chat','ws_cov_old-crew-private','a_cov_old-crew-private','u_cov_old-crew-private','private','private-draft-marker')`,
+		`INSERT INTO conversation_messages(id,session_id,agent_id,role,content,author_user_id,ts) VALUES('crew-private-message','crew-private-chat','a_cov_old-crew-private','user','Create private output','u_cov_old-crew-private','2026-10-19T00:00:00Z')`,
+		`INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at) VALUES('crew-private-message','ws_cov_old-crew-private','u_cov_old-crew-private','crew-private-chat','original','2026-10-19T00:00:00Z')`,
+	} {
+		if _, err := source.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	versions := AppliedMigrationVersions(t.Context(), source)
+	artifactEra := false
+	for _, version := range versions {
+		if version == 20261018074722 {
+			artifactEra = true
+		}
+	}
+	if !artifactEra {
+		t.Fatal("fixture lacks actual artifact-era source migration")
+	}
+	dump, err := DumpCrew(t.Context(), source, crew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"document_creations", "document_creation_consents"} {
+		if _, present := dump.Tables[table]; present {
+			t.Fatalf("crew dump unexpectedly carries %s", table)
+		}
+	}
+	if len(dump.Tables["chats"]) != 1 {
+		t.Fatal("crew source chat not dumped")
+	}
+	if _, present := dump.Tables["chats"][0][privateArtifactMarker]; present {
+		t.Fatal("old source unexpectedly has classification column")
+	}
+	for _, kind := range []string{"artifact-era registry", "unknown registry"} {
+		t.Run(kind, func(t *testing.T) {
+			target := openMigratedDBCov(t)
+			touched := false
+			hooks := &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error { touched = true; return nil }}
+			if kind == "artifact-era registry" {
+				hooks.legacySourceVersions = versions
+			}
+			_, err := RestoreDumpTxHooks(t.Context(), target, dump, hooks)
+			if err == nil || !strings.Contains(err.Error(), "private artifact conversation classification") {
+				t.Errorf("ambiguous crew bundle classification was silently discarded: %v", err)
+			}
+			if touched {
+				t.Error("restore hook ran before crew privacy preflight")
+			}
+			var count int
+			if queryErr := target.QueryRow(`SELECT count(*) FROM chats WHERE workspace_id=?`, ws).Scan(&count); queryErr != nil || count != 0 {
+				t.Errorf("ambiguous crew chat landed: rows=%d err=%v", count, queryErr)
+			}
+		})
 	}
 }
