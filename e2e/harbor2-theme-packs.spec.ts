@@ -31,7 +31,10 @@ test.describe("Afterglow", () => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
     const gallery = page.getByRole("radiogroup", { name: "Style" })
-    await expect(gallery.getByRole("group", { name: "Gaming" })).toBeVisible()
+    // Gaming is a group in the full gallery and a category chip in the compact
+    // picker (#3657); the Afterglow palette is a radio in the Style group in both.
+    await expect(gallery.getByRole("radio", { name: "Afterglow", exact: true })).toBeVisible()
+    await expect(page.getByRole("group", { name: "Gaming" }).or(page.getByRole("button", { name: "Gaming" })).first()).toBeVisible()
     const harborGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 
     await gallery.getByRole("radio", { name: "Afterglow", exact: true }).click()
