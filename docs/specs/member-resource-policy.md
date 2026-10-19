@@ -236,6 +236,11 @@ but multiple workspaces can fill it: a new entry or audience is then refused
 with the same transient 429. Existing audiences remain usable subject to their
 unchanged rate budgets. Capacity refusal allocates no empty account and spends
 neither budget; active entries are never evicted or reset to grant a fresh burst.
+The account rate budget is checked before a new audience is retained. Account,
+workspace and audience entries are committed to the limiter only after both
+rate budgets admit the request. Rejected requests neither allocate audience
+capacity nor refresh idle timestamps; each user/workspace retains its existing
+257-audience quota within the workspace quota.
 
 Idle entries expire after at least five minutes and the configured full-refill
 interval. Ordered idle lists retain exactly one node per entry and audience;

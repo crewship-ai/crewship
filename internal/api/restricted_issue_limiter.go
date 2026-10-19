@@ -76,6 +76,7 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 	}
 	workspaceKey := sharedSearchIdentity("", workspace)
 	owner := s.workspaces[workspaceKey]
+	newAccount := account == nil
 	if account == nil {
 		if s.accountCapacityFull(owner) {
 			s.expire(now, idle)
@@ -86,47 +87,59 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 		}
 		if owner == nil {
 			owner = &sharedSearchWorkspace{key: workspaceKey}
-			s.workspaces[workspaceKey] = owner
 		}
 		account = &sharedSearchAccount{aggregate: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchAccount), 15), audiences: make(map[sharedSearchAudience]*sharedSearchBucket), key: key, workspace: owner}
-		s.accounts[key] = account
-		owner.accounts++
-		account.idle = s.accountIdle.PushBack(account)
 	}
-	account.used = now
-	s.accountIdle.MoveToBack(account.idle)
+	// Refuse an exhausted account before looking up or retaining a new
+	// audience. Otherwise rejected project selections can fill the workspace.
+	account.aggregate.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchAccount))
+	aggregate := account.aggregate.ReserveN(now, 1)
+	if wait := aggregate.DelayFrom(now); !aggregate.OK() || wait > 0 {
+		aggregate.CancelAt(now)
+		return false, max(wait, time.Nanosecond)
+	}
 	audienceKey := sharedSearchAudienceKey(project)
 	bucket := account.audiences[audienceKey]
 	if bucket != nil && now.Sub(bucket.used) >= idle {
 		s.removeAudience(bucket)
 		bucket = nil
 	}
+	newBucket := bucket == nil
 	if bucket == nil {
 		if s.audienceCapacityFull(account) {
 			s.expire(now, idle)
 		}
 		if s.audienceCapacityFull(account) {
+			aggregate.CancelAt(now)
 			return false, time.Minute
 		}
 		bucket = &sharedSearchBucket{limiter: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchProject), 5), key: audienceKey, account: account}
+	}
+	bucket.limiter.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchProject))
+	audience := bucket.limiter.ReserveN(now, 1)
+	if wait := audience.DelayFrom(now); !audience.OK() || wait > 0 {
+		aggregate.CancelAt(now)
+		audience.CancelAt(now)
+		return false, max(wait, time.Nanosecond)
+	}
+	// Retain and touch entries only after both budgets admit the request.
+	// Capacity refusals above also leave no provisional empty account behind.
+	if newAccount {
+		s.workspaces[workspaceKey] = owner
+		s.accounts[key] = account
+		owner.accounts++
+		account.idle = s.accountIdle.PushBack(account)
+	}
+	if newBucket {
 		account.audiences[audienceKey] = bucket
 		account.highWater = max(account.highWater, len(account.audiences))
 		bucket.idle = s.audienceIdle.PushBack(bucket)
 		s.total++
 		account.workspace.audiences++
 	}
-	bucket.used = now
+	account.used, bucket.used = now, now
+	s.accountIdle.MoveToBack(account.idle)
 	s.audienceIdle.MoveToBack(bucket.idle)
-	account.aggregate.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchAccount))
-	bucket.limiter.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchProject))
-	aggregate := account.aggregate.ReserveN(now, 1)
-	audience := bucket.limiter.ReserveN(now, 1)
-	wait := max(aggregate.DelayFrom(now), audience.DelayFrom(now))
-	if !aggregate.OK() || !audience.OK() || wait > 0 {
-		aggregate.CancelAt(now)
-		audience.CancelAt(now)
-		return false, max(wait, time.Nanosecond)
-	}
 	return true, 0
 }
 
