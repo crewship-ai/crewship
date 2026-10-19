@@ -87,6 +87,10 @@ export const APPEARANCE_SYNC_STORAGE_KEY = "crewship-appearance-sync"
  *  defaults (migrateDeviceAppearance); bumped when a default changes. */
 export const APPEARANCE_VERSION_STORAGE_KEY = "crewship-appearance-version"
 export const APPEARANCE_VERSION = "2"
+/** Which values the user chose, and which came from a workspace default
+ *  (lib/theme/appearance-explicit). Per device, like the values. */
+export const APPEARANCE_EXPLICIT_STORAGE_KEY = "crewship-appearance-explicit"
+export const APPEARANCE_INHERITED_STORAGE_KEY = "crewship-appearance-inherited"
 
 /** The one key in the per-user preference store (GET /api/v1/me/preferences). */
 export const APPEARANCE_PREFERENCE_KEY = "appearance"
@@ -247,7 +251,7 @@ function onStorage(e: StorageEvent): void {
   else if (e.key === STYLE_STORAGE_KEY) {
     // The style attribute is painted by AppearanceStyleSync from the new value.
   }
-  else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY) return
+  else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY && e.key !== APPEARANCE_EXPLICIT_STORAGE_KEY && e.key !== APPEARANCE_INHERITED_STORAGE_KEY) return
   emit()
 }
 

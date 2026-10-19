@@ -53,10 +53,11 @@ describe("PagesStrip", () => {
     ERROR = null
   })
 
-  it("titles the card PAGES", () => {
+  it("titles the card ARTIFACTS (ODCH-19)", () => {
     renderStrip()
-    expect(screen.getByText("Pages")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "All pages" })).toHaveAttribute("href", "/pages")
+    expect(screen.getByText("Artifacts")).toBeInTheDocument()
+    expect(screen.queryByText("Pages")).toBeNull()
+    expect(screen.getByRole("link", { name: "All artifacts" })).toHaveAttribute("href", "/pages")
   })
 
   it("shows the page state as a pill", () => {
@@ -137,6 +138,7 @@ describe("PagesStrip", () => {
     renderStrip()
     expect(screen.getByText("Nothing has run yet")).toBeInTheDocument()
     expect(screen.getByText(/crewship page set/i)).toBeInTheDocument()
+    expect(screen.getByText(/Open Artifacts/)).toBeInTheDocument()
   })
 
   it("shows a loading skeleton before the first page arrives", () => {

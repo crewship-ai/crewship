@@ -153,7 +153,7 @@ export function PagesOverview({
         <Appear order={1}>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard
-              title="Pages"
+              title="Artifacts"
               value={summary.total}
               subtitle={
                 totalPanels === 0

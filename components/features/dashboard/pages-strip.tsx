@@ -93,8 +93,7 @@ export function PagesStrip({ now }: PagesStripProps) {
         : "all fresh"
 
   return (
-    // "Pages" stays the name until the Artifacts rename ships.
-    <DashCard title="Pages" concept="pages" meta={hint} link={{ label: "All pages", href: "/pages" }}>
+    <DashCard title="Artifacts" concept="pages" meta={hint} link={{ label: "All artifacts", href: "/pages" }}>
       {loading && pages.length === 0 ? (
         <div className="space-y-2 border-t border-border px-4 py-3">
           {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-8 w-full rounded-md" />)}
@@ -108,7 +107,7 @@ export function PagesStrip({ now }: PagesStripProps) {
           </DashNote>
         ) : (
           <DashNote>
-            <b className="font-medium text-foreground">Nothing has run yet</b> · No page has received a payload yet. Open Pages and run a producer, or push one with <code className="font-mono">crewship page set &lt;page&gt;/&lt;panel&gt; --data -</code>.
+            <b className="font-medium text-foreground">Nothing has run yet</b> · No page has received a payload yet. Open Artifacts and run a producer, or push one with <code className="font-mono">crewship page set &lt;page&gt;/&lt;panel&gt; --data -</code>.
           </DashNote>
         )
       ) : (

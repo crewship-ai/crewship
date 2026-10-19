@@ -106,7 +106,7 @@ export type ChangeKind = "issue" | "routine" | "artifact" | "crew" | "access"
 export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
   issue: "Issues",
   routine: "Routines",
-  artifact: "Pages",
+  artifact: "Artifacts",
   crew: "Crews, skills and integrations",
   access: "Access and credentials",
 }

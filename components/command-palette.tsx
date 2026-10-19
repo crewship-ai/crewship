@@ -250,7 +250,7 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   // The Journal is Activity now (F-02): typing "journal" lands here.
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces", "journal", "audit"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
-  { title: "Pages", href: "/pages", icon: LayoutTemplate, keywords: ["dashboards", "panels"] },
+  { title: "Artifacts", href: "/pages", icon: LayoutTemplate, keywords: ["pages", "dashboards", "panels"] },
   { title: "Integrations", href: "/integrations", icon: Plug, keywords: ["mcp", "notifications", "channels"] },
   { title: "Skills", href: "/skills", icon: Zap, keywords: [] },
   { title: "Credentials", href: "/credentials", icon: Key, keywords: ["secrets", "tokens"] },
@@ -797,23 +797,6 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
           </>
         )}
 
-        {typing && otherWorkspaces.length > 0 && (
-          <CommandGroup heading={<GroupLabel>Switch workspace</GroupLabel>} className={PALETTE_GROUP_CLASS}>
-            {otherWorkspaces.map((w) => (
-              <CommandItem
-                key={w.id}
-                value={`${w.name} ${w.slug ?? ""} workspace switch`}
-                className={PALETTE_ITEM_CLASS}
-                onSelect={() => runCommand(() => setWorkspaceId(w.id))}
-              >
-                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
-                <span className="type-row flex-1 truncate">{w.name}</span>
-                <span className="type-meta text-muted-foreground-soft">Workspace</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-
         {conversationRows.length > 0 && (
           // forceMount on both the group and its rows: these hits were
           // ranked by the server's BM25 over the whole message, and cmdk's
@@ -916,7 +899,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
         )}
 
         {pages.length > 0 && (
-          <CommandGroup heading={<GroupLabel>Pages</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+          <CommandGroup heading={<GroupLabel>Artifacts</GroupLabel>} className={PALETTE_GROUP_CLASS}>
             {pages.map((p) => {
               const context = pageContextOf(p)
               const href = pageHref(p.view.slug)
@@ -929,7 +912,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
                   keywords={[context ?? "", p.hasApplication ? "app application" : ""]}
                   className={PALETTE_ITEM_CLASS}
                   data-href={href}
-                  onSelect={() => go(href, p.view.name, "Pages")}
+                  onSelect={() => go(href, p.view.name, "Artifacts")}
                 >
                   {/* The page's own avatar (#2563), as the rail draws it: its
                       colour when it has one, the muted text colour otherwise —
@@ -1211,7 +1194,9 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
           </CommandGroup>
         )}
 
-        <CommandGroup heading={<GroupLabel>Navigation</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+        {/* v67's empty palette: Recent, Quick actions, Go to, Switch workspace.
+            The settings pages are a search result, so they wait for a query. */}
+        <CommandGroup heading={<GroupLabel>Go to</GroupLabel>} className={PALETTE_GROUP_CLASS}>
           {NAV_ITEMS.filter((item) => item.href !== "/admin" || isAdmin).map((item) => (
             <CommandItem
               key={item.href}
@@ -1219,7 +1204,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
               keywords={["navigate", "page", item.title.toLowerCase(), ...item.keywords]}
               className={PALETTE_ITEM_CLASS}
               data-href={item.href}
-              onSelect={() => go(item.href, item.title, "Navigation")}
+              onSelect={() => go(item.href, item.title, "Go to")}
             >
               <item.icon className="h-4 w-4 text-muted-foreground" />
               <span className="type-row">{item.title}</span>
@@ -1227,24 +1212,43 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
           ))}
         </CommandGroup>
 
-        <CommandGroup heading={<GroupLabel>Settings</GroupLabel>} className={PALETTE_GROUP_CLASS}>
-          {settingsLinks.map((item) => {
-            const href = item.href ?? `/settings?tab=${item.key}`
-            return (
-              <CommandItem
-                key={item.key}
-                value={`${item.label} settings`}
-                keywords={["settings", "preferences", item.label.toLowerCase()]}
-                className={PALETTE_ITEM_CLASS}
-                data-href={href}
-                onSelect={() => go(href, item.label, "Settings")}
-              >
-                <item.icon className="h-4 w-4 text-muted-foreground" />
-                <span className="type-row">{item.label}</span>
-              </CommandItem>
-            )
-          })}
+        {typing && (
+          <CommandGroup heading={<GroupLabel>Settings</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {settingsLinks.map((item) => {
+              const href = item.href ?? `/settings?tab=${item.key}`
+              return (
+                <CommandItem
+                  key={item.key}
+                  value={`${item.label} settings`}
+                  keywords={["settings", "preferences", item.label.toLowerCase()]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, item.label, "Settings")}
+                >
+                  <item.icon className="h-4 w-4 text-muted-foreground" />
+                  <span className="type-row">{item.label}</span>
+                </CommandItem>
+              )
+            })}
         </CommandGroup>
+        )}
+
+        {otherWorkspaces.length > 0 && (
+          <CommandGroup heading={<GroupLabel>Switch workspace</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {otherWorkspaces.map((w) => (
+              <CommandItem
+                key={w.id}
+                value={`${w.name} ${w.slug ?? ""} workspace switch`}
+                className={PALETTE_ITEM_CLASS}
+                onSelect={() => runCommand(() => setWorkspaceId(w.id))}
+              >
+                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                <span className="type-row flex-1 truncate">{w.name}</span>
+                <span className="type-meta text-muted-foreground-soft">Workspace</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
       </CommandList>
 

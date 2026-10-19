@@ -36,6 +36,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 import { useAppearanceSync } from "../use-appearance-sync"
 import { useAppearance } from "../use-appearance"
 import { ACCENT_STORAGE_KEY } from "@/lib/theme/accents"
+import { markExplicit } from "@/lib/theme/appearance-explicit"
 import { APPEARANCE_SYNC_STORAGE_KEY, DENSITY_STORAGE_KEY, MOTION_STORAGE_KEY } from "@/lib/theme/appearance"
 
 const PREFS = "/api/v1/me/preferences"
@@ -116,33 +117,46 @@ describe("useAppearanceSync", () => {
     expect(JSON.parse(init.body)).toEqual({ theme: "light", accent: "teal", density: "compact", motion: "system", textSize: "default", sidebar: "hover" })
   })
 
-  it("seeds the server with this device's look when it has none yet", async () => {
+  it("does not seed an empty server with this device's look (WSD-02)", async () => {
     store.set(ACCENT_STORAGE_KEY, "graphite")
     apiFetch.mockResolvedValue(ok({ "crews.bottomPanel.height": 240 }))
     renderSync()
 
-    await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", density: "comfortable", motion: "system", textSize: "small", sidebar: "pinned" })
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(PREFS))
+    await new Promise((r) => setTimeout(r, 600))
+    expect(puts()).toHaveLength(0)
   })
 
-  it("completes a partial server value from local and writes the whole thing back", async () => {
+  it("writes only what the user changed, not the rest of the look", async () => {
+    store.set(ACCENT_STORAGE_KEY, "graphite")
+    apiFetch.mockResolvedValue(ok({}))
+    const { result } = renderSync()
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(PREFS))
+    await new Promise((r) => setTimeout(r, 0))
+
+    act(() => result.current.setDensity("compact"))
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ density: "compact" })
+  })
+
+  it("keeps a partial server value as it is, applying the fields it has", async () => {
     apiFetch.mockResolvedValue(ok({ appearance: { theme: "light", accent: "nope" } }))
     const { result } = renderSync()
 
     await waitFor(() => expect(result.current.theme).toBe("light"))
-    await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", density: "comfortable", motion: "system", textSize: "small", sidebar: "pinned" })
+    await new Promise((r) => setTimeout(r, 600))
+    expect(puts()).toHaveLength(0)
+    expect(result.current.explicit.has("theme")).toBe(true)
+    expect(result.current.explicit.has("accent")).toBe(false)
   })
 
-  it("completes a value saved by an older build, keeping its fields", async () => {
-    // An older build wrote four fields; this one adds its local text size and
-    // sidebar mode and writes the whole value back once.
+  it("applies a value saved by an older build without completing it", async () => {
     apiFetch.mockResolvedValue(ok({ appearance: { theme: "light", accent: "workspace", density: "comfortable", motion: "system" } }))
     const { result } = renderSync()
 
     await waitFor(() => expect(result.current.accent).toBe("workspace"))
-    await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", density: "comfortable", motion: "system", textSize: "small", sidebar: "pinned" })
+    await new Promise((r) => setTimeout(r, 600))
+    expect(puts()).toHaveLength(0)
   })
 
   it("sends nothing at all with sync off on this device", async () => {
@@ -247,6 +261,7 @@ describe("useAppearanceSync — appearance.style", () => {
     act(() => {
       // A style pick: the style first, then its accent — the order on the wire is fixed anyway.
       store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{}}')
+      markExplicit("style")
       result.current.setAccent("teal")
     })
     await waitFor(() => expect(stylePuts()).toHaveLength(1))
@@ -266,6 +281,7 @@ describe("useAppearanceSync — appearance.style", () => {
     await new Promise((r) => setTimeout(r, 50))
     act(() => {
       store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{"radius":"round"}}')
+      markExplicit("style")
       window.dispatchEvent(new StorageEvent("storage", { key: STYLE_STORAGE_KEY }))
     })
     await waitFor(() => expect(status.result.current).toBe("failed"))

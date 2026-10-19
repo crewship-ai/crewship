@@ -87,7 +87,7 @@ describe("one grid, one motion", () => {
     expect(screen.getByRole("button", { name: "Sidebar: Expand on hover" })).toBeInTheDocument()
     const menu = openModes()
     const options = Array.from(menu.querySelectorAll("[role=menuitemradio]")).map((e) => e.textContent)
-    expect(options.map((t) => t?.split(/(?=[A-Z⌘])/)[0])).toEqual(["Expanded", "Expand on hover", "Collapsed"])
+    expect(options.map((t) => t?.split(/(?=Always|Icons|⌘)/)[0])).toEqual(["Expanded", "Expand on hover", "Collapsed"])
   })
 
   it("keeps icons only when Collapsed is chosen, and ⌘B returns to it after pinning", () => {

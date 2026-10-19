@@ -9,7 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
 const hooks = vi.hoisted(() => ({ theme: {} as unknown, hex: null as string | null | undefined, themeName: "dark" }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspacePagesTheme: () => hooks.theme, refreshWorkspaceSettings: vi.fn() }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspacePagesTheme: () => hooks.theme, useWorkspace: () => ({ workspace: null, workspaceId: null, role: null }), refreshWorkspaceSettings: vi.fn() }))
 vi.mock("next-themes", () => ({ useTheme: () => ({ theme: hooks.themeName, setTheme: vi.fn() }) }))
 vi.mock("@/components/layout/workspace-accent", () => ({ useWorkspaceAccentHex: () => hooks.hex }))
 vi.mock("@/hooks/use-appearance-sync", () => ({ useAppearanceSyncStatus: () => "synced", retryAppearanceSync: vi.fn() }))

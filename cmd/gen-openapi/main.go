@@ -914,7 +914,7 @@ func responseComponents() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
-		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(),
+		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(), "appearance_default": appearanceDefaultSchema(),
 		"created_at": scalar("string"), "updated_at": scalar("string"),
 		"currentUserRole": nullable("string"), "currentUserCapabilities": array(scalar("string")),
 		"allow_privileged_credentials": scalar("boolean"), "run_retention_days": nullable("integer"),

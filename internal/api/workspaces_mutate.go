@@ -112,6 +112,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, workspaceResponse{
 		ID:                wsID,
 		PagesTheme:        json.RawMessage(`{}`),
+		AppearanceDefault: json.RawMessage(`{}`),
 		Name:              req.Name,
 		Slug:              req.Slug,
 		Kind:              "team",
@@ -125,7 +126,9 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/workspaces/{workspaceId}
 
 type updateWorkspaceRequest struct {
-	PagesTheme        json.RawMessage `json:"pages_theme"`
+	PagesTheme json.RawMessage `json:"pages_theme"`
+	// AppearanceDefault (WSD-01) is the workspace default look; `{}` resets it.
+	AppearanceDefault json.RawMessage `json:"appearance_default"`
 	Name              *string         `json:"name"`
 	Slug              *string         `json:"slug"`
 	PreferredLanguage *string         `json:"preferred_language"`
@@ -256,7 +259,16 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.AppearanceDefault != nil {
+		if err := validateWorkspaceAppearanceDefault(req.AppearanceDefault); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	ub := newUpdate()
+	if req.AppearanceDefault != nil {
+		ub.Set("appearance_default", string(req.AppearanceDefault))
+	}
 	if req.PagesTheme != nil {
 		ub.Set("pages_theme", string(req.PagesTheme))
 	}
@@ -337,6 +349,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.PagesTheme != nil {
 		changed = append(changed, "pages_theme")
 	}
+	if req.AppearanceDefault != nil {
+		changed = append(changed, "appearance_default")
+	}
 	if req.Name != nil {
 		changed = append(changed, "name")
 	}
@@ -390,7 +405,7 @@ func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string
 		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme,
+			w.approvals_retention_days, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -399,7 +414,7 @@ func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
+		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		return ws, err

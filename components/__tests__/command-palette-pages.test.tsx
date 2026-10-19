@@ -110,19 +110,19 @@ describe("⌘K — Pages group", () => {
   it("lists the pages the server authorised, each opening /pages/<slug>", async () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     const row = within(g).getByRole("option")
     expect(row).toHaveTextContent("Fleet board")
     expect(row).toHaveAttribute("data-href", "/pages/fleet")
     // The generic destination is still there, in its own group.
-    const nav = await group(/navigation/i)
-    expect(within(nav).getByText("Pages")).toBeInTheDocument()
+    const nav = await group(/go to/i)
+    expect(within(nav).getByText("Artifacts")).toBeInTheDocument()
   })
 
   it("encodes a slug the URL cannot carry as-is", async () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "q&a/2026 sít", name: "Q&A" })] }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     expect(within(g).getByRole("option")).toHaveAttribute("data-href", `/pages/${encodeURIComponent("q&a/2026 sít")}`)
   })
 
@@ -137,7 +137,7 @@ describe("⌘K — Pages group", () => {
       ],
     }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     const rows = within(g).getAllByRole("option")
     expect(rows).toHaveLength(3)
     const text = rows.map((r) => r.textContent)
@@ -158,7 +158,7 @@ describe("⌘K — Pages group", () => {
       ],
     }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     const rows = within(g).getAllByRole("option")
     expect(rows).toHaveLength(2)
     expect(rows[0].querySelector('[data-slot="page-glyph"][data-icon="rocket"][data-color="violet"]')).toBeInTheDocument()
@@ -168,7 +168,7 @@ describe("⌘K — Pages group", () => {
 
   it("asks for the whole index — no limit, the caller's workspace", async () => {
     openPalette()
-    await group(/navigation/i)
+    await group(/go to/i)
     await waitFor(() => expect(pagesCalls()).toHaveLength(1))
     const url = pagesCalls()[0]
     expect(url).toBe("/api/v1/pages?workspace_id=ws-A")
@@ -178,18 +178,18 @@ describe("⌘K — Pages group", () => {
   it("opens the page on click and on Enter, and remembers it under this identity", async () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     fireEvent.click(within(g).getByRole("option"))
     expect(h.push).toHaveBeenCalledWith("/pages/fleet")
     expect(vi.mocked(localStorage.setItem)).toHaveBeenCalledWith(
       "crewship.palette.recent:u-alice:ws-A",
-      JSON.stringify([{ href: "/pages/fleet", label: "Fleet board", group: "Pages" }]),
+      JSON.stringify([{ href: "/pages/fleet", label: "Fleet board", group: "Artifacts" }]),
     )
 
     h.push.mockReset()
     cleanup()
     openPalette()
-    const g2 = await group(/^pages$/i)
+    const g2 = await group(/^artifacts$/i)
     const input = screen.getByPlaceholderText(/search issues/i)
     fireEvent.change(input, { target: { value: "fleet board" } })
     await waitFor(() => expect(within(g2).getByRole("option")).toHaveAttribute("aria-selected", "true"))
@@ -204,7 +204,7 @@ describe("⌘K — Pages list failures leave the rest of the palette standing", 
     ["500", { ok: false, status: 500, body: { error: "boom" } }],
     ["malformed JSON", { ok: true, malformed: true }],
     ["an unrecognised envelope", { ok: true, body: { nope: true } }],
-  ])("on %s: no Pages group, every other group intact, no page row in Recent", async (_label, answer) => {
+  ])("on %s: no Artifacts group, every other group intact, no page row in Recent", async (_label, answer) => {
     ANSWERS["/api/v1/pages"] = answer as Answer
     ANSWERS["/api/v1/crews"] = { ok: true, body: [OPS_CREW] }
     vi.mocked(localStorage.getItem).mockReturnValue(
@@ -216,7 +216,7 @@ describe("⌘K — Pages list failures leave the rest of the palette standing", 
     openPalette()
     const crews = await group(/^crews$/i)
     expect(within(crews).getByText("Operations")).toBeInTheDocument()
-    expect(screen.queryByRole("group", { name: /^pages$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: /^artifacts$/i })).not.toBeInTheDocument()
     // The stored page name is not shown as an available page against a
     // list that did not answer; the rest of Recent is untouched.
     const recent = await group(/recent/i)
@@ -242,7 +242,7 @@ describe("⌘K — Recent page rows are checked against the authorised list", ()
   it("keeps a page that is still in the list, under its current name; drops the deleted and the revoked", async () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     openPalette()
-    await group(/^pages$/i)
+    await group(/^artifacts$/i)
     const recent = await group(/recent/i)
     const labels = within(recent).getAllByRole("option").map((r) => r.textContent)
     expect(labels.some((l) => l?.includes("Fleet board") && !l.includes("old name"))).toBe(true)
@@ -303,7 +303,7 @@ describe("⌘K — identity and workspace changes", () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     ANSWERS["/api/v1/crews"] = { ok: true, body: [OPS_CREW] }
     const view = openPalette()
-    await group(/^pages$/i)
+    await group(/^artifacts$/i)
     await group(/^crews$/i)
 
     h.workspaceId = null
@@ -324,7 +324,7 @@ describe("⌘K — identity and workspace changes", () => {
     vi.mocked(localStorage.getItem).mockImplementation((k: string) => stored[k] ?? null)
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     const view = openPalette()
-    await group(/^pages$/i)
+    await group(/^artifacts$/i)
     expect(screen.getByText("Alice's issue")).toBeInTheDocument()
 
     // Signed out: nothing of Alice's stays, nothing is fetched for nobody.
@@ -344,7 +344,7 @@ describe("⌘K — identity and workspace changes", () => {
     view.rerender(<CommandPalette open={true} onOpenChange={vi.fn()} />)
     expect(await screen.findByText("Bob's issue")).toBeInTheDocument()
     expect(screen.queryByText("Alice's issue")).not.toBeInTheDocument()
-    await group(/^pages$/i)
+    await group(/^artifacts$/i)
   })
 
   it("neither reads nor writes Recent without a signed-in user", async () => {
@@ -355,7 +355,7 @@ describe("⌘K — identity and workspace changes", () => {
     )
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     openPalette()
-    const g = await group(/^pages$/i)
+    const g = await group(/^artifacts$/i)
     expect(screen.queryByText("Somebody's issue")).not.toBeInTheDocument()
     fireEvent.click(within(g).getByRole("option"))
     expect(h.push).toHaveBeenCalledWith("/pages/fleet")

@@ -27,7 +27,7 @@ export function joinedDate(iso: string): string {
 }
 
 // v67 `.m-grp`: a small sans group row ("OWNERS · 1"), and a sans sentence-case head.
-const groupHead = "sticky top-0 z-[1] border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground"
+const groupHead = "sticky top-0 z-[1] border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-left text-label font-semibold text-foreground"
 const cell = "border-b border-border/60 px-3 py-2.5 align-middle first:pl-4 last:pr-4"
 const head = "border-b border-border/60 bg-surface-subtle px-3 py-2 text-left text-label font-medium text-muted-foreground first:pl-4 last:pr-4"
 
@@ -78,7 +78,7 @@ export function PeopleTable({
         <tbody key={g.key}>
           <tr>
             <th scope="rowgroup" colSpan={cols} className={groupHead}>
-              {g.label}<span className="ml-1.5 font-normal tabular-nums text-muted-foreground-soft">· {g.people.length}</span>
+              {g.label}<span className="ml-1.5 font-normal tabular-nums text-muted-foreground">{g.people.length}</span>
             </th>
           </tr>
           {g.people.map((m) => {
@@ -146,8 +146,8 @@ export function PeopleList({ groups, caps, currentUserId, onOpen }: {
     <div data-slot="members-list">
       {groups.map((g) => (
         <section key={g.key} aria-label={g.label}>
-          <h3 className="border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-            {g.label}<span className="ml-2 font-normal text-muted-foreground-soft">{g.people.length}</span>
+          <h3 className="border-b border-border/60 bg-surface-subtle px-4 py-1.5 text-label font-semibold text-foreground">
+            {g.label}<span className="ml-1.5 font-normal tabular-nums text-muted-foreground">{g.people.length}</span>
           </h3>
           {g.people.map((m) => {
             const label = personLabel(m.user.full_name, m.user.email)

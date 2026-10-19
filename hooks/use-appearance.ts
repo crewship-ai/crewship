@@ -5,6 +5,14 @@ import { useTheme } from "next-themes"
 
 import { DEFAULT_ACCENT, type AccentChoice } from "@/lib/theme/accents"
 import {
+  INHERITABLE_FIELDS,
+  clearExplicit,
+  markExplicit,
+  parseFieldList,
+  readExplicitRaw,
+  type ExplicitField,
+} from "@/lib/theme/appearance-explicit"
+import {
   applyStyleAttributes,
   parseStyleState,
   planStyleSelection,
@@ -84,6 +92,13 @@ export function useStyleState(): StyleState | null {
   return useMemo(() => (raw ? parseStyleState(JSON.parse(raw)) : null), [raw])
 }
 
+const serverExplicit = () => "[]"
+/** The fields the user chose themselves (the rest are inherited). */
+export function useExplicitFields(): ReadonlySet<ExplicitField> {
+  const raw = useSyncExternalStore(subscribeAppearance, readExplicitRaw, serverExplicit)
+  return useMemo(() => new Set(parseFieldList(raw)), [raw])
+}
+
 export interface AppearanceState {
   /** The stored theme choice (System stays "system"); undefined until
    *  next-themes knows it. */
@@ -94,6 +109,11 @@ export interface AppearanceState {
   textSize: TextSize
   sidebar: SidebarChoice
   syncEnabled: boolean
+  /** Which values the user chose; the others come from the workspace default
+   *  or the built-in look. `style` stands for the style and its knobs. */
+  explicit: ReadonlySet<ExplicitField>
+  /** "Use workspace default": forget the user's own theme, accent and style. */
+  resetToWorkspaceDefault: () => void
   /** The stored style and knobs; null while Harbor is simply the default. */
   style: StyleState | null
   /** One-shot: the style, its suggested accent and, for a single-scheme style, its scheme. */
@@ -114,6 +134,11 @@ export interface AppearanceState {
  * Every appearance choice and its setter, for any picker — the top-bar menu,
  * Settings › Appearance, anything later.
  *
+ * A change made through these setters is the user's own choice: it is marked
+ * explicit (lib/theme/appearance-explicit) and so synced and kept when the
+ * workspace default changes. The sync hook applies server and workspace
+ * values through the lib setters instead, which do not mark.
+ *
  * Changing a choice here only changes it locally. Nothing in a picker talks
  * to the server: the one AppearanceSync in the shell (hooks/use-appearance-sync)
  * watches these same values and writes them back, so a picker cannot forget
@@ -123,7 +148,10 @@ export interface AppearanceState {
 export function useAppearance(): AppearanceState {
   const { theme: rawTheme, resolvedTheme, setTheme: setNextTheme } = useTheme()
   const theme = isThemeChoice(rawTheme) ? rawTheme : undefined
-  const setTheme = useCallback((t: ThemeChoice) => setNextTheme(t), [setNextTheme])
+  const setTheme = useCallback((t: ThemeChoice) => {
+    markExplicit("theme")
+    setNextTheme(t)
+  }, [setNextTheme])
   const style = useStyleState()
   const accent = useAccentChoice()
   const paint = (next: StyleState, scheme: "light" | "dark") => {
@@ -133,22 +161,33 @@ export function useAppearance(): AppearanceState {
   const currentScheme = resolvedTheme === "light" ? "light" : "dark"
   const pickStyle = (id: string) => {
     const plan = planStyleSelection(id, style, theme)
+    markExplicit("style")
+    if (plan.theme) markExplicit("theme")
+    markExplicit("accent")
     paint(plan.style, plan.theme === "light" || plan.theme === "dark" ? plan.theme : currentScheme)
     setAccentChoice(plan.accent)
     if (plan.theme) setTheme(plan.theme)
     emitAppearanceChange()
   }
   const resetStyle = () => {
+    markExplicit("style")
     paint(resetStyleState(), currentScheme)
     emitAppearanceChange()
   }
   const setKnob = (name: string, value: string) => {
+    markExplicit("style")
     paint(setKnobValue(style, name, value), currentScheme)
     emitAppearanceChange()
+  }
+  const own = <A extends unknown[]>(field: ExplicitField, fn: (...a: A) => void) => (...a: A) => {
+    markExplicit(field)
+    fn(...a)
   }
   return {
     theme,
     accent,
+    explicit: useExplicitFields(),
+    resetToWorkspaceDefault: () => clearExplicit(INHERITABLE_FIELDS),
     style,
     pickStyle,
     resetStyle,
@@ -159,11 +198,11 @@ export function useAppearance(): AppearanceState {
     sidebar: useSidebarChoice(),
     syncEnabled: useAppearanceSyncEnabled(),
     setTheme,
-    setAccent: setAccentChoice,
-    setDensity,
-    setMotion,
-    setTextSize,
-    setSidebar: setSidebarChoice,
+    setAccent: own("accent", setAccentChoice),
+    setDensity: own("density", setDensity),
+    setMotion: own("motion", setMotion),
+    setTextSize: own("textSize", setTextSize),
+    setSidebar: own("sidebar", setSidebarChoice),
     setSyncEnabled,
   }
 }
