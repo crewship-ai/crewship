@@ -219,7 +219,8 @@ test.describe("Agent facet (INB-01)", () => {
     await expect(panel(page).getByRole("button", { name: "Remove filter Agent: unknown" })).toBeVisible()
     await expect(panel(page).getByText("Nothing matches these filters.")).toBeVisible()
     await expect(rows(page)).toHaveCount(0)
-    await panel(page).getByRole("button", { name: "Clear filters" }).click()
+    // The chip row has its own Clear filters (phone pilot); this is the empty state's.
+    await panel(page).locator("[data-slot=inline-empty]").getByRole("button", { name: "Clear filters" }).click()
     await expect(panel(page).getByText(/^Agent:/)).toHaveCount(0)
   })
 
