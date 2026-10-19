@@ -51,7 +51,7 @@ func TestPrivateArtifactMarkerUserReconciliation(t *testing.T) {
 }
 
 func TestPrivateArtifactPortableRestorePreflight(t *testing.T) {
-	for _, kind := range []string{"artifact era missing marker", "artifact era missing marker and visibility", "pre artifacts ordinary", "new ordinary explicit null"} {
+	for _, kind := range []string{"artifact era missing marker", "artifact era missing marker and visibility", "artifact era group missing marker", "pre artifacts ordinary", "new ordinary explicit null"} {
 		t.Run(kind, func(t *testing.T) {
 			source := openMigratedDBCov(t)
 			ws, _ := seedCovWorkspace(t, source, "private-marker-dump")
@@ -69,6 +69,9 @@ func TestPrivateArtifactPortableRestorePreflight(t *testing.T) {
 				delete(row, "private_artifact_author_user_id")
 				if kind == "artifact era missing marker and visibility" {
 					delete(row, "visibility")
+				}
+				if kind == "artifact era group missing marker" {
+					row["visibility"] = "group"
 				}
 				if kind == "new ordinary explicit null" {
 					row["private_artifact_author_user_id"] = nil
