@@ -207,6 +207,42 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []chatResponse{}
 	}
+	// Recheck all returned rows after enrichment: an ordinary conversation
+	// may have become protected during this read. The batch keeps ordinary
+	// catalogs out of a per-row authorization query loop.
+	ids := make([]string, len(result))
+	for i := range result {
+		ids[i] = result[i].ID
+	}
+	allowed, err := chataudience.FilterReadableArtifactConversations(r.Context(), h.db, workspaceID, userID, ids)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit private conversation listing", err)
+		return
+	}
+	filtered := result[:0]
+	for _, chat := range result {
+		if allowed[chat.ID] {
+			filtered = append(filtered, chat)
+		}
+	}
+	if len(filtered) != len(result) {
+		if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM chats c WHERE c.agent_id=? AND c.workspace_id=?`+audienceWhere+kindWhere, args...).Scan(&total); err != nil {
+			replyInternalError(w, h.logger, "refresh private conversation count", err)
+			return
+		}
+		writeListMeta(w, total, limit, offset)
+		// The original decorative counts predate the observed audience change.
+		w.Header().Del(ChatKindCountsHeader)
+		if r.URL.Query().Get("counts") == "1" {
+			counts, err := h.chatKindCounts(r.Context(), agentID, workspaceID, userID)
+			if err != nil {
+				h.logger.Warn("refresh private chat kind counts", "error", err)
+			} else {
+				w.Header().Set(ChatKindCountsHeader, formatChatKindCounts(counts))
+			}
+		}
+	}
+	result = filtered
 	writeJSON(w, http.StatusOK, result)
 }
 
