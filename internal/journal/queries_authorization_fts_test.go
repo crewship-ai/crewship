@@ -6,7 +6,7 @@ import (
 )
 
 func TestAuthorizationAuditFTSSummaryBoundary(t *testing.T) {
-	for _, typ := range []EntryType{EntryMemberCapabilitiesChanged, EntryPageGrantAdded, EntryPageGrantRemoved, "page.folder_acl_changed"} {
+	for _, typ := range []EntryType{EntryMemberAdded, EntryMemberCapabilitiesChanged, EntryPageGrantAdded, EntryPageGrantRemoved, "page.folder_acl_changed"} {
 		t.Run(string(typ), func(t *testing.T) {
 			db := openTestDBWithFTS(t)
 			defer db.Close()

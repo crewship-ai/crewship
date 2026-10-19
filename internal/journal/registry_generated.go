@@ -85,6 +85,7 @@ var AllEntryTypes = []EntryType{
 	EntryLLMCacheHit,
 	EntryLLMCall,
 	EntryMemberAccessChanged,
+	EntryMemberAdded,
 	EntryMemberCapabilitiesChanged,
 	EntryMemberRemoved,
 	EntryMemberRoleChanged,

@@ -24,6 +24,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
+
+- Workspace member addition and account provisioning now commit their chained audit atomically, recheck live administrator authority, and keep initial rights and setup material out of public journal frames.
 - Crew member additions, removals and role override changes now commit with their old/new membership audit or roll back, with notifications only after commit.
 - Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
 - Dispatch due manual backups reliably across fractional-second timestamp boundaries, while keeping future busy retries queued until their exact deadline.
