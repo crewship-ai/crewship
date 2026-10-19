@@ -96,3 +96,39 @@ func TestSerializeEntryKeepsDelegatedOriginPrivate(t *testing.T) {
 		t.Fatal("serialization altered durable delegated authority")
 	}
 }
+
+func TestSerializePageGrantSnapshotsStayCanonical(t *testing.T) {
+	for _, kind := range []EntryType{EntryPageGrantAdded, EntryPageGrantRemoved, EntryPageSpecChanged} {
+		t.Run(string(kind), func(t *testing.T) {
+			payload := map[string]any{
+				"page": "fleet", "page_id": "page", "actor_user_id": "actor",
+				"subject_type": "crew", "subject_id": "crew", "subject": "engine",
+				"level": "produce", "panels": []string{"visible-panel"},
+				"previous_grant": map[string]any{"granted_by_user_id": "original-issuer", "panel_ids": `["stored-private-scope"]`},
+				"grant":          nil,
+			}
+			before, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			public := SerializeEntry(Entry{Type: kind, Payload: payload})["payload"].(map[string]any)
+			expected := map[string]any{}
+			for key, value := range payload {
+				if kind != EntryPageSpecChanged && (key == "previous_grant" || key == "grant") {
+					if _, exists := public[key]; exists {
+						t.Errorf("canonical %s leaked to the public feed", key)
+					}
+					continue
+				}
+				expected[key] = value
+			}
+			if !reflect.DeepEqual(public, expected) {
+				t.Error("existing public fields or unrelated event changed")
+			}
+			after, err := json.Marshal(payload)
+			if err != nil || string(after) != string(before) {
+				t.Fatal("serialization changed canonical payload")
+			}
+		})
+	}
+}

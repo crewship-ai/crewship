@@ -406,6 +406,22 @@ the same path, so agent A cannot claim to be agent B.
 **Every grant change is journalled** (`page.grant_added` / `page.grant_removed`, actor and
 subject recorded) — an ACL nobody can audit is not a security control.
 
+`PUT` and `DELETE` grant mutations commit together with the configured keyed
+journal. They recheck the current human account, trusted workspace membership
+and page owner/ADMIN/OWNER authority under the writer fence. A journal failure,
+ignored insert, altered final grant or failed commit rolls back the mutation;
+notifications follow the successful commit. Existing Page events retain their
+actor, subject, level and panel fields and add `previous_grant` / `grant` stored
+row snapshots (`null` at creation/removal respectively). These snapshots remain
+canonical audit data: the common GET/SSE/WS serializer omits only these two new
+keys, preserves the previous public event fields and never rewrites the stored
+payload. Reissuing still records
+one fact and reanchors its issuer. Revoking every level records each removed row,
+including grants whose subject has departed; a missing grant remains 404 without
+a change event. Folder ACL mutations and broader permission-audit coverage are
+separate work.
+
+
 Three rules decided 2026-08-12:
 
 1. **Only a human issues a grant.** An agent with `write` may rebuild the page freely but can
