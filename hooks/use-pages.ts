@@ -129,6 +129,8 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  /** Explicit server classification, independent of folder or owner. */
+  private_audience?: boolean
   has_document?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
@@ -471,6 +473,8 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  /** Unknown on legacy servers; never infer from ownership or folder. */
+  privateAudience?: boolean
   /** Confirmed native Document descriptor; missing means a legacy Page. */
   hasDocument?: boolean
   id: string
@@ -619,6 +623,7 @@ export function toPageView(raw: WirePage): PageView {
   return {
     id: trimmed(raw.id) ?? slug,
     hasDocument: raw.has_document === true,
+    privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
