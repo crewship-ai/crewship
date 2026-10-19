@@ -98,10 +98,14 @@ export function AppSidebar() {
         })}
       </SidebarContent>
 
-      {/* Crewship, sidebar mode, Settings and Admin, then who you are. */}
+      {/* The Crewship sail ends the rail, above the footer's rule. */}
+      <SidebarMenu className="rail-inset shrink-0 pb-1.5">
+        <CrewshipBrand />
+      </SidebarMenu>
+
+      {/* Sidebar mode, Settings and Admin, then who you are. */}
       <SidebarFooter className="rail-inset gap-px border-t border-sidebar-border pb-2 pt-2">
         <SidebarMenu className="gap-px">
-          <CrewshipBrand />
           <SidebarModeMenu />
           {footer.map(row)}
         </SidebarMenu>

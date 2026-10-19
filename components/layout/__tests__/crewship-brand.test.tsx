@@ -51,11 +51,11 @@ describe("Crewship brand in the rail", () => {
     expect(screen.getByRole("link", { name: /Report a problem/ })).toHaveAttribute("href", SUPPORT_URL)
   })
 
-  it("sits at the foot of the sidebar, above the sidebar-mode row, not in the header", () => {
+  it("sits at the bottom of the rail, above the footer's rule, not in the header or the footer", () => {
     const src = readFileSync(path.resolve(__dirname, "../app-sidebar.tsx"), "utf8")
     const brand = src.indexOf("<CrewshipBrand")
-    expect(brand).toBeGreaterThan(src.indexOf("<SidebarFooter"))
-    expect(brand).toBeLessThan(src.indexOf("<SidebarModeMenu"))
+    expect(brand).toBeGreaterThan(src.indexOf("</SidebarContent>"))
+    expect(brand).toBeLessThan(src.indexOf("<SidebarFooter"))
     const header = src.slice(src.indexOf("<SidebarHeader"), src.indexOf("</SidebarHeader>"))
     expect(header).not.toContain("CrewshipBrand")
   })
