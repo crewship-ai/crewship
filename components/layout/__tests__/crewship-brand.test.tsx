@@ -79,6 +79,6 @@ describe("workspace mark size", () => {
     expect(marks.length).toBe(2)
     for (const m of marks) expect(m).toMatch(/\bsize-7\b/)
     const css = readFileSync(path.resolve(__dirname, "../../../app/globals.css"), "utf8")
-    expect(css).toMatch(/\.rail-tile\.rail-ws\s*\{[^}]*width:\s*auto/)
+    expect(css).toMatch(/\.rail-tile\.rail-ws\s*\{[^}]*width:\s*calc\(var\(--spacing\) \* 7\)[^}]*height:\s*calc\(var\(--spacing\) \* 7\)/)
   })
 })
