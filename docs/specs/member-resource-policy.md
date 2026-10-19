@@ -616,6 +616,16 @@ retain their class for server-side handling and logging.
 
 ## Capability and membership audit
 
+Adding an existing account to a workspace or provisioning a new or existing account
+commits the membership and `member.added` chained audit together. Both provisioning
+commit paths recheck the live trusted administrator and OWNER-only ADMIN grant
+boundary inside their writer transaction. The internal event records the stored,
+normalized initial rights after Guest policy replacement; public GET/SSE/WS
+serialization exposes only opaque member/subject IDs and the action, never role,
+rights, email or setup material. Audit or commit failure rolls back the membership,
+new account and setup-token writes; notification occurs only after commit.
+This does not cover initial workspace OWNER establishment or onboarding creation.
+
 A changed capability set appends `member.capabilities_changed`, and a removed
 workspace membership appends `member.removed`, in the same transaction as the
 mutation. Capability changes revalidate the caller’s active, trusted OWNER/ADMIN

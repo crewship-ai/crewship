@@ -140,6 +140,20 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	actor := UserFromContext(r.Context())
+	if actor == nil {
+		replyError(w, 401, "Authentication required")
+		return
+	}
+	if err := memberCreateActorIn(r.Context(), tx, actor.ID, workspaceID, role); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, 403, "Forbidden")
+		} else {
+			replyInternalError(w, h.logger, "authorize member provisioning", err)
+		}
+		return
+	}
+
 	var userID string
 	createdUser := false
 	err = tx.QueryRowContext(r.Context(),
@@ -208,16 +222,20 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 
 	memberID := uuid.NewString()
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.ExecContext(r.Context(),
+	if result, err := tx.ExecContext(r.Context(),
 		`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		memberID, workspaceID, userID, role, now, now); err != nil {
 		replyInternalError(w, h.logger, "provision: insert membership", err)
 		return
+	} else if n, err := result.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge provision membership", errors.Join(err, errors.New("membership insert did not affect one row")))
+		return
 	}
 
+	expected := access.Membership{ID: memberID, Mode: "trusted", Revision: 1}
 	if req.AccessMode == "restricted" {
-		_, err = (access.Store{DB: h.db}).ReplaceIn(r.Context(), tx, UserFromContext(r.Context()).ID, userID, workspaceID, "restricted", access.Membership{ID: memberID, Revision: 1}, req.Rights)
+		expected, err = (access.Store{DB: h.db}).ReplaceIn(r.Context(), tx, UserFromContext(r.Context()).ID, userID, workspaceID, "restricted", access.Membership{ID: memberID, Revision: 1}, req.Rights)
 		if err != nil {
 			h.memberAccessError(w, err)
 			return
@@ -257,9 +275,17 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if claimed {
+		notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected)
+		if err != nil {
+			replyInternalError(w, h.logger, "audit provisioned membership", err)
+			return
+		}
 		if err := tx.Commit(); err != nil {
 			replyInternalError(w, h.logger, "provision: commit", err)
 			return
+		}
+		if notify != nil {
+			notify()
 		}
 		h.logger.Info("workspace member added (existing account, no setup link issued)",
 			"workspace_id", workspaceID, "email", email, "role", role,
@@ -276,9 +302,17 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit provisioned membership", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "provision: commit", err)
 		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	// Named actor, because minting an account for someone else is exactly

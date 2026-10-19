@@ -172,6 +172,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "invitation.accepted",
     "member.access_changed",
     "member.capabilities_changed",
+    "member.added",
     "member.removed",
     ],
   },

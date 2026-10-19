@@ -96,3 +96,17 @@ func TestSerializeEntryKeepsDelegatedOriginPrivate(t *testing.T) {
 		t.Fatal("serialization altered durable delegated authority")
 	}
 }
+
+func TestSerializeMemberAddedKeepsInitialAuthorityPrivate(t *testing.T) {
+	payload := map[string]any{"member_id": "member", "subject_user_id": "subject", "action": "added", "role": "VIEWER", "access_mode": "restricted", "rights": []any{map[string]any{"id": "private-resource"}}, "email": "private@example.test", "setup_url": "private-setup"}
+	original, _ := json.Marshal(payload)
+	wire := SerializeEntry(Entry{Type: EntryMemberAdded, ActorType: ActorUser, ActorID: "actor", Payload: payload})
+	expected := map[string]any{"member_id": "member", "subject_user_id": "subject", "action": "added"}
+	if !reflect.DeepEqual(wire["payload"], expected) || wire["actor_id"] != "actor" {
+		t.Fatalf("public membership projection expanded: %#v", wire)
+	}
+	after, _ := json.Marshal(payload)
+	if string(original) != string(after) {
+		t.Fatal("public projection changed canonical chain payload")
+	}
+}

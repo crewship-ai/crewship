@@ -46,6 +46,15 @@ func SerializeEntry(e Entry) map[string]any {
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
 		payload := maps.Clone(e.Payload)
+		if e.Type == EntryMemberAdded {
+			// Canonical role/initial resource rights are administrative audit data.
+			payload = map[string]any{}
+			for _, key := range []string{"member_id", "subject_user_id", "action"} {
+				if value, ok := e.Payload[key]; ok {
+					payload[key] = value
+				}
+			}
+		}
 		_, receiptOrigin := payload["human_authority"]
 		_, delegatedOrigin := payload["chat_origin_id"]
 		if receiptOrigin || delegatedOrigin {
