@@ -250,7 +250,7 @@ func TestPatchRejectedBatchPreservesDecodedRequest(t *testing.T) {
 
 func TestPatchCandidateAndDecodedPayloadAreIndependent(t *testing.T) {
 	for _, operation := range []string{"insert_slide", "insert_element", "set_element"} {
-		for _, kind := range []string{"text", "table", "image"} {
+		for _, kind := range []string{"text", "shape", "table", "image"} {
 			for _, direction := range []string{"candidate", "request"} {
 				t.Run(operation+"/"+kind+"/"+direction, func(t *testing.T) {
 					deck, _, _ := modelFixture(t)
@@ -259,6 +259,8 @@ func TestPatchCandidateAndDecodedPayloadAreIndependent(t *testing.T) {
 					switch kind {
 					case "text":
 						element.Text = &Text{Value: "Original", FontFamily: "Arial", FontSize: 12, Color: "#112233", Align: "left"}
+					case "shape":
+						element.Shape = &Shape{Kind: "rectangle", Fill: "#FFFFFF", Stroke: "#112233", StrokeWidth: 1}
 					case "table":
 						element.Table = &Table{Cells: [][]string{{"Original"}}, FontFamily: "Arial", FontSize: 12, Color: "#112233", Fill: "#FFFFFF", Border: "#112233"}
 					case "image":
@@ -310,6 +312,8 @@ func TestPatchCandidateAndDecodedPayloadAreIndependent(t *testing.T) {
 					switch kind {
 					case "text":
 						changed.Text.Value = "Mutated"
+					case "shape":
+						changed.Shape.Fill = "#445566"
 					case "table":
 						changed.Table.Cells[0][0] = "Mutated"
 					case "image":
