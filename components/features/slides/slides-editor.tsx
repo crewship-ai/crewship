@@ -6,10 +6,10 @@ import { insertSlide, isNativeSlideDeck, moveSlide, newElement, orderedSlides } 
 import { SlideCanvas } from "./slide-canvas"
 import { SlidePresent } from "./slide-present"
 
-const control = "min-h-9 coarse:min-h-12 rounded border px-3 disabled:opacity-50"
+const control = "min-h-9 coarse:min-h-[44px] rounded border px-3 disabled:opacity-50"
 const fontProperties = (element: SlideElement) => element.type === "text" ? element.text : element.type === "table" ? element.table : undefined
 const fillProperties = (element: SlideElement) => element.type === "shape" ? element.shape : element.type === "table" ? element.table : undefined
-const input = "min-h-9 coarse:min-h-12 w-full rounded border bg-background px-2"
+const input = "min-h-9 coarse:min-h-[44px] w-full rounded border bg-background px-2"
 
 export interface SlidesEditorProps {
   deck: unknown

@@ -199,6 +199,9 @@ test("PR browser contract subset", async ({ page }) => {
     // Harbor 2 (issues I-FULL) folded the old History tab into the Timeline
     // card, whose Show segment All · Comments · Activity · Runs narrows it;
     // Activity is the event log alone, so the inbox_acted row must be there.
+    // Reduced motion (from main): the contract checks the durable receipt, not
+    // the entrance tween.
+    await page.emulateMedia({ reducedMotion: "reduce" })
     await page.goto(`/issues/${encodeURIComponent(identifier)}`)
     await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 })
     const activityOnly = page.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "Activity", exact: true })

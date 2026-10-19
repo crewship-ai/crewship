@@ -103,6 +103,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - ⚠️ **Behaviour change: cost figures are readable by workspace OWNER and ADMIN only.** `GET /api/v1/paymaster/spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders` and `GET /api/v1/journal/spend` (and so `crewship cost`, `crewship paymaster` and `crewship spend`) now answer `403` to MANAGER, MEMBER, VIEWER and GUEST; before, the web app hid Spend but any member could read it from the API. An empty window returns `"rows": []` instead of `null`. The dashboard and Activity no longer ask for, or show, spend for other roles.
+- **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
+- Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
+- Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+
 - Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
 - Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
 
