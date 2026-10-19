@@ -55,6 +55,7 @@ func TestPrivateArtifactTargetRefusalPrecedesServiceFence(t *testing.T) {
 				exec(`INSERT INTO service_runtime_intents(id,crew_id,service_name,desired_state,version,updated_at) VALUES('private-fence-intent',?,'database','running',7,'2026-10-19T00:00:00Z')`, crew)
 				if protected {
 					exec(`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,mode,origin) VALUES('private-fence-chat',?,?,?,'private','CHAT','UI')`, workspace, "a_cov_"+suffix, actor.UserID)
+					exec(`INSERT INTO conversation_messages(id,session_id,agent_id,role,content,author_user_id,ts) VALUES('private-fence-message','private-fence-chat',?,'user','Create a private Document',?,'2026-10-19T00:00:00Z')`, "a_cov_"+suffix, actor.UserID)
 					exec(`INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at) VALUES('private-fence-message',?,?,'private-fence-chat','private-fence-submission','2026-10-19T00:00:00Z')`, workspace, actor.UserID)
 					var author string
 					if err := db.QueryRow(`SELECT private_artifact_author_user_id FROM chats WHERE id='private-fence-chat'`).Scan(&author); err != nil || author != actor.UserID {
