@@ -41,31 +41,67 @@ afterEach(() => {
 const stored = () => JSON.parse(store.get(STYLE_STORAGE_KEY) ?? "null")
 const gallery = () => screen.getByRole("radiogroup", { name: "Style" })
 
+const preview = () => screen.getByTestId("style-preview")
+const filters = () => screen.getByRole("group", { name: "Style categories" })
+
+// The owner, 19 Oct: 42 large previews made the card five screens long. The
+// gallery is now one live preview of the chosen style, category chips and a
+// compact grid of palettes; hovering a palette shows it in the preview.
 describe("the gallery (STY-01)", () => {
-  it("is a Style card above Theme, with one tile per style, grouped by category", () => {
+  it("is a Style card above Theme, with one compact palette per style", () => {
     render(<AppearanceSection />)
     const style = screen.getByRole("region", { name: "Style" })
     const themeCard = screen.getByRole("region", { name: "Theme" })
     expect(style.compareDocumentPosition(themeCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const tiles = within(gallery()).getAllByRole("radio")
     expect(tiles.map((t) => t.getAttribute("aria-label"))).toEqual(STYLES.map((s) => s.name))
-    for (const c of STYLE_CATEGORIES) expect(within(gallery()).getByRole("heading", { name: c })).toBeTruthy()
+    for (const s of STYLES) {
+      const tile = screen.getByRole("radio", { name: s.name })
+      const swatches = within(tile).getAllByTestId("style-swatch")
+      expect(swatches.map((w) => w.style.background), s.name).toHaveLength(4)
+      // The blurb lives in the preview, not on every tile.
+      expect(tile.textContent).not.toContain(s.blurb)
+      expect(within(tile).queryByTestId("style-preview")).toBeNull()
+    }
   })
 
-  it("Harbor is pressed by default and every tile carries a live preview in its own style", () => {
+  it("filters by category with chips; All shows every style again", () => {
+    render(<AppearanceSection />)
+    const used = STYLE_CATEGORIES.filter((c) => STYLES.some((s) => s.category === c))
+    expect(within(filters()).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", ...used])
+    fireEvent.click(within(filters()).getByRole("button", { name: "AI" }))
+    expect(within(filters()).getByRole("button", { name: "AI" }).getAttribute("aria-pressed")).toBe("true")
+    expect(within(gallery()).getAllByRole("radio").map((t) => t.getAttribute("aria-label"))).toEqual(STYLES.filter((s) => s.category === "AI").map((s) => s.name))
+    fireEvent.click(within(filters()).getByRole("button", { name: "All" }))
+    expect(within(gallery()).getAllByRole("radio")).toHaveLength(STYLES.length)
+  })
+
+  it("Harbor is pressed by default and the one live preview shows the chosen style with its blurb", () => {
     render(<AppearanceSection />)
     expect(screen.getByRole("radio", { name: "Harbor" }).getAttribute("aria-checked")).toBe("true")
-    for (const s of STYLES) {
-      const preview = within(screen.getByRole("radio", { name: s.name })).getByTestId("style-preview")
-      expect(preview.getAttribute("data-style"), s.name).toBe(s.id)
-    }
+    expect(screen.getAllByTestId("style-preview")).toHaveLength(1)
+    expect(preview().getAttribute("data-style")).toBe("harbor")
+    expect(screen.getByTestId("style-current")).toHaveTextContent(STYLES[0].blurb)
+  })
+
+  it("hovering a palette previews it without choosing it; leaving shows the chosen one again", () => {
+    render(<AppearanceSection />)
+    const slate = STYLES.find((s) => s.id === "slate")!
+    fireEvent.mouseEnter(screen.getByRole("radio", { name: "Slate" }))
+    expect(preview().getAttribute("data-style")).toBe("slate")
+    expect(screen.getByTestId("style-current")).toHaveTextContent(slate.blurb)
+    expect(stored()).toBeNull()
+    fireEvent.mouseLeave(screen.getByRole("radio", { name: "Slate" }))
+    expect(preview().getAttribute("data-style")).toBe("harbor")
   })
 
   it("a preview of a dark-only style is dark whatever the page is; others follow the page scheme", () => {
     theme = "light"
     render(<AppearanceSection />)
-    expect(within(screen.getByRole("radio", { name: "Harbor Night" })).getByTestId("style-preview").classList.contains("dark")).toBe(true)
-    expect(within(screen.getByRole("radio", { name: "Slate" })).getByTestId("style-preview").classList.contains("dark")).toBe(false)
+    fireEvent.mouseEnter(screen.getByRole("radio", { name: "Harbor Night" }))
+    expect(preview().classList.contains("dark")).toBe(true)
+    fireEvent.mouseEnter(screen.getByRole("radio", { name: "Slate" }))
+    expect(preview().classList.contains("dark")).toBe(false)
   })
 
   it("shows the stored style as pressed, and Harbor for one it does not know", () => {
@@ -176,16 +212,13 @@ describe("reset and knobs (APR-04, STY-03)", () => {
 })
 
 describe("phone and tablet (390 and 1024 px)", () => {
-  it("the grid collapses to one column on a phone, two on a tablet, three on a desktop", () => {
+  it("the palettes sit two to a row on a phone, four on a tablet, six on a desktop", () => {
     render(<AppearanceSection />)
-    const grids = gallery().querySelectorAll("[data-testid='style-grid']")
-    expect(grids.length).toBe(STYLE_CATEGORIES.length)
-    for (const g of grids) {
-      const cls = g.className
-      expect(cls).toContain("grid-cols-1")
-      expect(cls).toMatch(/\bsm:grid-cols-2\b/)
-      expect(cls).toMatch(/\blg:grid-cols-3\b/)
-    }
+    const cls = gallery().className
+    expect(gallery().getAttribute("data-testid")).toBe("style-grid")
+    expect(cls).toContain("grid-cols-2")
+    expect(cls).toMatch(/\bsm:grid-cols-4\b/)
+    expect(cls).toMatch(/\blg:grid-cols-6\b/)
   })
 
   it("tiles and reset are 44 px on a coarse pointer, written in px", () => {
