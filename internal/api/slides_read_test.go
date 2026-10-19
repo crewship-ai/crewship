@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
-	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -191,11 +189,9 @@ func TestSlidesHumanReadContractAndSchemaDenial(t *testing.T) {
 		})
 	}
 	f.unchangedRows(t)
-	// Existing native Document content must not be treated as a Slides Page.
-	_, err := documents.New(f.db, documents.Options{}).Init(t.Context(), documents.Key{WorkspaceID: f.workspace, PageID: f.page}, 1, []byte("synthetic-mixed-type"), []byte(`[]`), func(context.Context, *sql.Tx) (string, error) { return "user:" + f.user, nil })
-	if err != nil {
-		t.Fatal(err)
-	}
+	// An installed extension with attached content cannot share this reader.
+	execOrFatal(t, f.db, "CREATE TABLE page_boards(page_id TEXT PRIMARY KEY)")
+	execOrFatal(t, f.db, "INSERT INTO page_boards(page_id) VALUES(?)", f.page)
 	w := f.request(t, f.token, "deck", f.workspace, nil)
 	if w.Code != 404 {
 		t.Fatalf("mixed type%d", w.Code)
@@ -351,4 +347,44 @@ func TestSlidesHumanReadActualCLI(t *testing.T) {
 		t.Fatalf("deleted immutable reference %v %s", err, out)
 	}
 	slidesReadNoContent(t, out)
+}
+
+func TestSlidesHumanReadOwnerChangeRequiresAudit(t *testing.T) {
+	f := newSlidesReadFixture(t, true)
+	execOrFatal(t, f.db, "UPDATE workspace_members SET role='OWNER' WHERE user_id=?", f.user)
+	custodian := generateCUID()
+	pagesSeedUser(t, f.router.Pages(), f.workspace, custodian, "custodian@slides.example", "MEMBER")
+	// Transfer custody after the public lookup, at the real Store writer fence.
+	execOrFatal(t, f.db, "CREATE TRIGGER slides_read_transfer BEFORE UPDATE ON slides_writer_fence BEGIN UPDATE pages SET owner_user_id='"+custodian+"' WHERE id='"+f.page+"'; END")
+	w := f.request(t, f.token, "@"+f.page, f.workspace, nil)
+	if w.Code != 200 {
+		t.Fatalf("current OWNER read%d %s", w.Code, w.Body)
+	}
+	var count int
+	err := f.db.QueryRow("SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND entity_id=? AND user_id=? AND json_extract(metadata,'$.owner_user_id')=?", f.page, f.user, custodian).Scan(&count)
+	if err != nil || count != 1 {
+		t.Fatalf("final custodian disclosure requires audit: count%d %v", count, err)
+	}
+	f.unchangedRows(t)
+	execOrFatal(t, f.db, "UPDATE pages SET owner_user_id=? WHERE id=?", f.user, f.page)
+	execOrFatal(t, f.db, "CREATE TRIGGER slides_read_audit_failure BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END")
+	denied := f.request(t, f.token, "@"+f.page, f.workspace, nil)
+	if denied.Code < 400 {
+		t.Fatal("custody transfer disclosed content without required audit")
+	}
+	slidesReadNoContent(t, denied.Body.Bytes())
+	// Unsupported decks are rejected before an unrelated required-audit failure.
+	deck := f.deck
+	deck.SchemaVersion = 2
+	canonical, err := slides.Canonical(deck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := slides.DeckHash(deck)
+	execOrFatal(t, f.db, "UPDATE slides_heads SET schema_version=2,canonical_json=?,content_hash=? WHERE page_id=?", canonical, hash, f.page)
+	unsupported := f.request(t, f.token, "@"+f.page, f.workspace, nil)
+	if unsupported.Code != 409 {
+		t.Fatalf("unsupported deck must precede failing audit: status%d", unsupported.Code)
+	}
+	slidesReadNoContent(t, unsupported.Body.Bytes())
 }
