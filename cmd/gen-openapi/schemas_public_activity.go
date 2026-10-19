@@ -145,8 +145,13 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"POST /api/v1/conversations/search": {Request: conversationSearch, Response: object(map[string]any{"hits": array(searchHit), "query": str(), "count": integer(), "scope": str()})},
 	}
 	inbox := map[string]DomainSchema{
-		"GET /api/v1/inbox":        {Response: object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()})},
-		"GET /api/v1/inbox/count":  {Response: object(map[string]any{"unread_count": integer()})},
+		"GET /api/v1/inbox":       {Response: object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()})},
+		"GET /api/v1/inbox/count": {Response: object(map[string]any{"unread_count": integer()})},
+		"GET /api/v1/inbox/counts": {Response: object(map[string]any{
+			"total": integer(), "unread": integer(),
+			"spaces":  object(map[string]any{"action": integer(), "updates": integer(), "history": integer()}),
+			"by_kind": object(map[string]any{}),
+		})},
 		"GET /api/v1/inbox/{id}":   {Response: inboxItem},
 		"PATCH /api/v1/inbox/{id}": {Request: inboxPatch, Response: object(map[string]any{"id": str(), "state": str()})},
 		// B15 (#2389): acting on a run_needs_human card. The receipt is what

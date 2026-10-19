@@ -268,6 +268,11 @@ type suspendRequest struct {
 // exactly what the person had.
 // POST /api/v1/admin/instance/people/{userId}/suspend
 func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
+	actor := UserFromContext(r.Context())
+	if actor == nil || actor.ID == "" {
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
 	id, email, ok := h.person(w, r)
 	if !ok {
 		return
@@ -279,7 +284,7 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if actor := UserFromContext(r.Context()); actor != nil && actor.ID == id {
+	if actor.ID == id {
 		replyError(w, http.StatusConflict, "you cannot suspend your own account")
 		return
 	}
@@ -335,19 +340,23 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
-	res, err := tx.ExecContext(ctx,
-		`UPDATE cli_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, id)
+	ids, err := revokeCLITokensAuditedTx(ctx, tx, actor.ID, id, now)
 	if err != nil {
-		replyInternalError(w, h.logger, "suspend: revoke CLI tokens", err)
+		replyInternalError(w, h.logger, "suspend: revoke CLI tokens and audit", err)
 		return
 	}
-	tokens, _ := res.RowsAffected()
+	tokens := int64(len(ids))
 	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	}); err != nil {
 		replyInternalError(w, h.logger, "suspend: audit", err)
 		return
 	}
+	if err := ackCLITokenRevocationsTx(ctx, tx, ids, id, now); err != nil {
+		replyInternalError(w, h.logger, "suspend: acknowledge CLI tokens", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "suspend: commit", err)
 		return
@@ -1051,6 +1060,7 @@ type instanceAuditRow struct {
 	TargetWorkspaceID *string `json:"target_workspace_id"`
 	Metadata          string  `json:"metadata"`
 	CreatedAt         string  `json:"created_at"`
+	Integrity         string  `json:"integrity"`
 }
 
 // AuditLog lists instance-level actions, newest first. ?limit= (default 100,
@@ -1061,8 +1071,7 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
 		limit = min(v, 500)
 	}
-	q := `SELECT a.id, a.user_id, u.email, a.action, a.entity_type, a.entity_id, a.target_workspace_id, COALESCE(a.metadata, '{}'), a.created_at
-		FROM instance_audit_logs a LEFT JOIN users u ON u.id = a.user_id`
+	q := `SELECT ` + instanceAuditColumns + `,` + instanceAuditChainColumns + `,u.email FROM instance_audit_logs a` + instanceAuditPredecessor + ` LEFT JOIN users u ON u.id = a.user_id`
 	var args []any
 	if e := strings.TrimSpace(r.URL.Query().Get("entity_id")); e != "" {
 		q += ` WHERE a.entity_id = ? OR a.target_workspace_id = ?`
@@ -1079,10 +1088,31 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	out := []instanceAuditRow{}
 	for rows.Next() {
 		var a instanceAuditRow
-		if err := rows.Scan(&a.ID, &a.UserID, &a.UserEmail, &a.Action, &a.EntityType, &a.EntityID, &a.TargetWorkspaceID, &a.Metadata, &a.CreatedAt); err != nil {
+		var fields journal.InstanceAuditFields
+		var proof instanceAuditProof
+		args := append(proof.scanArgs(&fields), &a.UserEmail)
+		if err := rows.Scan(args...); err != nil {
 			replyInternalError(w, h.logger, "instance audit: scan", err)
 			return
 		}
+		a.ID = fields.ID
+		a.Action = fields.Action
+		a.EntityType = fields.EntityType
+		a.CreatedAt = fields.CreatedAt
+		ptr := func(v sql.NullString) *string {
+			if !v.Valid {
+				return nil
+			}
+			return &v.String
+		}
+		a.UserID = ptr(fields.UserID)
+		a.EntityID = ptr(fields.EntityID)
+		a.TargetWorkspaceID = ptr(fields.TargetWorkspaceID)
+		a.Metadata = "{}"
+		if fields.Metadata.Valid {
+			a.Metadata = fields.Metadata.String
+		}
+		a.Integrity = proof.integrity(fields)
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {

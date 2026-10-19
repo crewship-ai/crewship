@@ -23,6 +23,7 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `inbox list` | List inbox items (default: unread only). |
 | `inbox get <id>` | Show a single item with its full body + structured payload. |
 | `inbox count` | Print the bell-badge unread count (cheaper than `list` for polling). |
+| `inbox counts` | Print totals per space (to handle / updates / history) and per kind, in one request. |
 | `inbox read <id>` | Mark an item as read **for you** — read state is per user, so another recipient of a role-targeted item still sees it unread. |
 | `inbox unread <id>` | Flip an item back to unread for you (clears only your own read marker; restores an archived item for everyone). |
 | `inbox resolve <id>` | Mark resolved, optionally recording the action taken. Resolved is workspace-shared. Refused (`409`) on a live waitpoint or escalation — see [`inbox resolve`](#inbox-resolve). |
@@ -124,6 +125,15 @@ done
 ```
 
 `inbox count` hits `GET /api/v1/inbox/count` (the bell-badge endpoint) — much cheaper than `inbox list` when you only need the integer.
+
+### Totals per space and kind
+
+```bash
+crewship inbox counts
+crewship inbox counts --format json
+```
+
+`inbox counts` hits `GET /api/v1/inbox/counts`: items you can see, split into *to handle* (a real action behind it), *updates* and *history* (resolved), overall and per kind. It counts inbox items only; approvals-queue rows and issue tasks that the web page merges in are not included.
 
 ### Mark an item
 
