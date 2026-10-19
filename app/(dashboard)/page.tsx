@@ -45,6 +45,7 @@ import {
   useMetricsTimeseries,
   useRunsInsights,
   useRuntimeCapacity,
+  useProvisioningSummary,
   type TimeseriesParams,
 } from "@/hooks/use-dashboard-data"
 import type { DashboardWindow } from "./dashboard-types"
@@ -132,6 +133,7 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
+  const provisioningQ = useProvisioningSummary(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -171,6 +173,8 @@ export default function DashboardPage() {
   useRealtimeEvent("pipeline.run.started", debouncedRefresh)
   useRealtimeEvent("pipeline.run.completed", debouncedRefresh)
   useRealtimeEvent("pipeline.run.failed", debouncedRefresh)
+  useRealtimeEvent("provision.completed", debouncedRefresh)
+  useRealtimeEvent("provision.failed", debouncedRefresh)
   useRealtimeEvent("realtime.reconnected", debouncedRefresh)
 
   const gapsByCrew = useMemo(() => {
@@ -189,8 +193,14 @@ export default function DashboardPage() {
     [capacityQ.data, crews],
   )
 
+  const rebuildCrews = useMemo(
+    () => [...(provisioningQ.data?.failed ?? []), ...(provisioningQ.data?.needs_provision ?? [])],
+    [provisioningQ.data],
+  )
+
   const attentionItems = useMemo(
     () => buildAttentionItems({
+      rebuildCrews,
       inbox: inbox.items,
       heldCrews,
       reviewCount: reviewQ.data?.length ?? 0,
@@ -198,7 +208,7 @@ export default function DashboardPage() {
       activeByKind: inbox.activeByKind,
       decisionCount: inbox.decisionCount,
     }),
-    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, reviewQ.data],
+    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, rebuildCrews, reviewQ.data],
   )
   const attention = attentionState({ items: attentionItems, inboxLoading: inbox.loading, inboxError: inbox.error })
 

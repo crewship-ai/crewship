@@ -681,6 +681,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 
 	// Crew provisioning (require workspace context)
+	r.mux.Handle("GET /api/v1/crews/provisioning-summary", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionSummary))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)

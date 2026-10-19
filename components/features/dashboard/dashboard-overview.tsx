@@ -103,7 +103,7 @@ export const ATTENTION_VISIBLE = 4
 /**
  * The items past the fourth tile. Returned rather than dropped so the row can
  * name them and keep their links — the order is fixed (decisions, failures,
- * reviews, capacity, schedules), so the later operational alerts would
+ * reviews, capacity, rebuilds, schedules), so the later operational alerts would
  * otherwise vanish exactly when the first tiles are full (#2187).
  */
 export function attentionOverflow(items: AttentionTile[]): AttentionTile[] {
@@ -114,7 +114,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
 /**
  * The attention tiles, in a fixed priority order: decisions, failures,
- * reviews, capacity, schedules. A kind with nothing waiting has no tile.
+ * reviews, capacity, rebuilds, schedules. A kind with nothing waiting has no tile.
  */
 export function buildAttentionItems({
   inbox,
@@ -123,6 +123,7 @@ export function buildAttentionItems({
   reviewIdentifiers = [],
   activeByKind,
   decisionCount,
+  rebuildCrews = [],
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
@@ -134,6 +135,10 @@ export function buildAttentionItems({
    *  and the headline silently plateaued there (#2187). */
   activeByKind?: Record<string, number>
   decisionCount?: number
+  /** Crews whose image build failed or that have no built image yet, from
+   *  GET /api/v1/crews/provisioning-summary — the same crews the Crews panel
+   *  lists under "Needs you". */
+  rebuildCrews?: { id: string; name: string; slug?: string }[]
 }): AttentionTile[] {
   const items: AttentionTile[] = []
   const decisions = inbox.filter(isBlockingInboxItem)
@@ -195,6 +200,18 @@ export function buildAttentionItems({
       title: "Waiting for capacity",
       detail: heldCrews[0]?.detail || "View host admission details",
       href: "/settings",
+      tone: "warn",
+    })
+  }
+  if (rebuildCrews.length > 0) {
+    const n = rebuildCrews.length
+    items.push({
+      id: "rebuild",
+      label: `${n} ${plural(n, "crew needs", "crews need")} a rebuild`,
+      count: String(n),
+      title: plural(n, "Crew needs a rebuild", "Crews need a rebuild"),
+      detail: rebuildCrews[0]?.name || "Open Crews",
+      href: "/crews",
       tone: "warn",
     })
   }

@@ -250,3 +250,33 @@ describe("a partial answer is not presented as a complete one", () => {
     expect(attentionState({ items: [], inboxLoading: false, inboxError: null }).inboxKnown).toBe(true)
   })
 })
+
+describe("crews that need a rebuild", () => {
+  const held = [{ crew_id: "crew-1", reason: "host_memory", since: "2026-01-01", waited_ms: 5000 }]
+  const rebuild = [
+    { id: "c2", slug: "web", name: "Web" },
+    { id: "c3", slug: "data", name: "Data" },
+  ]
+
+  it.each([
+    { name: "none", crews: [], ids: [] as string[] },
+    { name: "one", crews: rebuild.slice(0, 1), ids: ["rebuild"], label: "1 crew needs a rebuild", detail: "Web" },
+    { name: "several", crews: rebuild, ids: ["rebuild"], label: "2 crews need a rebuild", detail: "Web" },
+  ])("$name", ({ crews, ids, label, detail }) => {
+    const items = buildAttentionItems({ inbox: [], heldCrews: [], rebuildCrews: crews })
+    expect(items.map((i) => i.id)).toEqual(ids)
+    if (!label) return
+    expect(items[0]).toMatchObject({ label, detail, href: "/crews", tone: "warn", count: String(crews.length) })
+  })
+
+  it("comes after capacity and before schedule alerts", () => {
+    const inbox = [{ id: "s1", kind: "schedule_missed", state: "unread" }] as InboxItem[]
+    const items = buildAttentionItems({ inbox, heldCrews: held, rebuildCrews: rebuild })
+    expect(items.map((i) => i.id)).toEqual(["capacity", "rebuild", "schedules"])
+  })
+
+  it("is enough on its own for the strip not to say nothing needs you", () => {
+    const items = buildAttentionItems({ inbox: [], heldCrews: [], rebuildCrews: rebuild })
+    expect(attentionState({ items, inboxLoading: false, inboxError: null }).kind).toBe("items")
+  })
+})

@@ -22,6 +22,7 @@ Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/a
 |---|---|---|
 | GET | [`/api/v1/features/catalog`](#feature-catalog) | List installable devcontainer features |
 | GET | [`/api/v1/runtimes/catalog`](#runtime-catalog) | List mise-managed runtimes |
+| GET | [`/api/v1/crews/provisioning-summary`](#provisioning-summary) | List crews whose build failed or that need a build |
 | GET | [`/api/v1/crews/{crewId}/provision`](#provision-status) | Get crew provision status |
 | POST | [`/api/v1/crews/{crewId}/provision`](#trigger-provision) | Trigger a provision |
 | GET | [`/api/v1/crews/{crewId}/provision/revisions`](#environment-revisions) | Read bounded immutable build history |
@@ -145,6 +146,26 @@ Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the 
 ## Crew provisioning lifecycle
 
 Inspect, trigger, rebuild, and recycle a crew's cached image and runtime container.
+
+### Provisioning summary
+
+```
+GET /api/v1/crews/provisioning-summary
+```
+
+**Auth:** Authenticated workspace request; every member can read it, like the crew list. **Request:** no parameters, no body. **Response:** `200 OK`.
+
+One request for the whole workspace instead of one `provision` call per crew. A crew is listed when its most recent build failed (`failed`, with the `error` text when one was recorded) or when it has no built image and no build is running (`needs_provision`). Crews with a running build, deleted crews and the onboarding setup crew are left out. Both lists are always arrays, sorted by crew name; at most 500 crews are considered. The Dashboard's "N crews need a rebuild" tile reads `total`.
+
+```json
+{
+  "failed": [{ "id": "crew_1", "slug": "web", "name": "Web", "error": "building feature image: exit code 100" }],
+  "needs_provision": [{ "id": "crew_2", "slug": "data", "name": "Data" }],
+  "total": 2
+}
+```
+
+CLI: `crewship crew provision summary`.
 
 ### Provision status
 

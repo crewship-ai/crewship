@@ -143,6 +143,11 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// ProvisionStatus builds a map: provenance and job progress are conditional,
 	// while these base keys are written on every successful response.
 	provisionStatus["required"] = []string{"devcontainer_config", "devcontainer_config_defaulted", "cached_image", "config_hash", "toolchain", "agents_pending_restart", "status"}
+	summaryCrew := object(map[string]any{"id": str(), "slug": str(), "name": str(), "error": str()})
+	summaryCrew["required"] = []string{"id", "slug", "name"}
+	provisionSummary := object(map[string]any{"failed": array(summaryCrew), "needs_provision": array(summaryCrew), "total": integer()})
+	provisionSummary["required"] = []string{"failed", "needs_provision", "total"}
+	add("GET", "/api/v1/crews/provisioning-summary", "CrewProvisioningSummaryV1", provisionSummary)
 	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", provisionStatus)
 	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
 	revision["required"] = []string{"id", "definition_hash", "build_hash", "image_id", "toolchain", "created_at"}
