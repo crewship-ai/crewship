@@ -16671,6 +16671,347 @@
         ],
         "type": "object"
       },
+      "SlidesInitialize": {
+        "additionalProperties": false,
+        "properties": {
+          "base_rev": {
+            "enum": [
+              0
+            ],
+            "type": "integer"
+          },
+          "deck": {
+            "additionalProperties": false,
+            "description": "Native schema1: bounded geometry, text, element count and table-cell budgets are validated by the Go store. Unknown fields, images and future schemas are refused.",
+            "properties": {
+              "deck_id": {
+                "type": "string"
+              },
+              "height": {
+                "minimum": 64,
+                "type": "integer"
+              },
+              "schema_version": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "slide_order": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "slides": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "elements": {
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "shape"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "table"
+                                  ]
+                                }
+                              ]
+                            },
+                            "properties": {
+                              "type": {
+                                "enum": [
+                                  "text"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ]
+                          },
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "text"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "table"
+                                  ]
+                                }
+                              ]
+                            },
+                            "properties": {
+                              "type": {
+                                "enum": [
+                                  "shape"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "shape"
+                            ]
+                          },
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "text"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "shape"
+                                  ]
+                                }
+                              ]
+                            },
+                            "properties": {
+                              "type": {
+                                "enum": [
+                                  "table"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "table"
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "height": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "shape": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "fill": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "rectangle",
+                                  "ellipse"
+                                ],
+                                "type": "string"
+                              },
+                              "stroke": {
+                                "type": "string"
+                              },
+                              "stroke_width": {
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "fill",
+                              "stroke",
+                              "stroke_width"
+                            ],
+                            "type": "object"
+                          },
+                          "table": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "border": {
+                                "type": "string"
+                              },
+                              "cells": {
+                                "items": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "type": "array"
+                              },
+                              "color": {
+                                "type": "string"
+                              },
+                              "fill": {
+                                "type": "string"
+                              },
+                              "font_family": {
+                                "type": "string"
+                              },
+                              "font_size": {
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "cells",
+                              "font_family",
+                              "font_size",
+                              "color",
+                              "fill",
+                              "border"
+                            ],
+                            "type": "object"
+                          },
+                          "text": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "align": {
+                                "enum": [
+                                  "left",
+                                  "center",
+                                  "right"
+                                ],
+                                "type": "string"
+                              },
+                              "color": {
+                                "type": "string"
+                              },
+                              "font_family": {
+                                "type": "string"
+                              },
+                              "font_size": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "font_family",
+                              "font_size",
+                              "color",
+                              "align"
+                            ],
+                            "type": "object"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "shape",
+                              "table"
+                            ],
+                            "type": "string"
+                          },
+                          "width": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "x": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "y": {
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "type",
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "notes": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "notes",
+                    "elements"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "theme": {
+                "additionalProperties": false,
+                "properties": {
+                  "background": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string"
+                  },
+                  "font_family": {
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "background",
+                  "color",
+                  "font_family",
+                  "font_size"
+                ],
+                "type": "object"
+              },
+              "width": {
+                "minimum": 64,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema_version",
+              "deck_id",
+              "width",
+              "height",
+              "theme",
+              "slide_order",
+              "slides"
+            ],
+            "type": "object"
+          },
+          "mutation_id": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "schema_version",
+          "base_rev",
+          "mutation_id",
+          "deck"
+        ],
+        "type": "object"
+      },
       "SlidesRead": {
         "additionalProperties": false,
         "properties": {
@@ -17013,6 +17354,37 @@
           "order_version",
           "content_hash",
           "deck"
+        ],
+        "type": "object"
+      },
+      "SlidesReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "mutation_id": {
+            "type": "string"
+          },
+          "order_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mutation_id",
+          "revision",
+          "order_version",
+          "content_hash",
+          "duplicate"
         ],
         "type": "object"
       },
@@ -130124,6 +130496,186 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/slides/initialize": {
+      "post": {
+        "description": "Submit page slides initialize (POST /api/v1/pages/{slug}/slides/initialize).",
+        "operationId": "post_api_v1_pages_slug_slides_initialize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlidesInitialize"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlidesReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page slides initialize",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/versions": {
