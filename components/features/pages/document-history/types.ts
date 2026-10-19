@@ -22,6 +22,20 @@ export type HistoryRead<T> =
   | { status: "idle" | "loading" | "denied" | "error" | "unavailable" }
   | { status: "ready"; scopeKey: string; data: T }
 
+import type { DocumentHistoryActions } from "@/lib/documents/history-actions"
+
+/** Optional compare and revert tools; without them history is a read-only browser (plus restore). */
+export interface DocumentHistoryReview {
+  /** Confirmed head content and revision; compare and revert are relative to it. */
+  currentContent: unknown
+  headRev: number
+  hasLocalDraft: boolean
+  /** Only for people who can write; undefined hides Revert. */
+  actions?: DocumentHistoryActions
+  onDownloadDraft: () => void
+  onActionDone: (rev: number) => void
+}
+
 export interface DocumentHistoryProps {
   pageId: string
   scopeKey: string
@@ -30,6 +44,7 @@ export interface DocumentHistoryProps {
   snapshot: HistoryRead<DocumentCheckpointSnapshot>
   onSelect: (checkpointId: string) => void
   onClose: () => void
+  review?: DocumentHistoryReview
   restore?: {
     allowed: boolean
     baseKey?: string

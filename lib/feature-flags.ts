@@ -25,3 +25,12 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Gates Document revert and proposal review (client for endpoints that
+ * the backend has not shipped yet; see the F3 coordination requests).
+ * Default OFF.
+ */
+export function documentReviewActions(): boolean {
+  return process.env.NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS === "true"
+}

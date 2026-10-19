@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { formatDateTime } from "@/lib/time"
+import { DocumentCompare } from "./document-compare"
+import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
@@ -18,8 +20,9 @@ function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }
   return <DocumentReadonly schema={snapshot.schema} content={snapshot.content} accessibleLabel={`Confirmed revision ${snapshot.rev}`} />
 }
 
-export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore }: DocumentHistoryProps) {
+export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review }: DocumentHistoryProps) {
   const [confirmation, setConfirmation] = useState<string>()
+  const [comparing, setComparing] = useState<string>()
   // The caller must invalidate scope on current-human/workspace/Page/auth changes.
   // Never retain an old response merely because the new request is pending.
   const denied = list.status === "denied" || snapshot.status === "denied"
@@ -68,6 +71,11 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
         </li>)}
       </ul>}
       {selectedId && <div className="space-y-2">
+        {exact && review && <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="coarse:min-h-12" aria-pressed={comparing === selectedId} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with current</Button>
+        </div>}
+        {exact && review && comparing === selectedId && <DocumentCompare base={read.content} target={review.currentContent} baseLabel={`revision ${read.rev}`} targetLabel="the current document" />}
+        {exact && review?.actions && <HistoryActions key={selectedId} checkpointId={selectedId} revision={read.rev} headRev={review.headRev} hasLocalDraft={review.hasLocalDraft} actions={review.actions} onDownloadDraft={review.onDownloadDraft} onDone={review.onActionDone} />}
         {exact ? <ConfirmedContent key={`${scopeKey}/${selectedId}/${read.rev}`} snapshot={read} />
           : <p role={snapshot.status === "denied" || snapshot.status === "error" ? "alert" : "status"}>
             {snapshot.status === "loading" ? "Loading checkpoint…"
