@@ -26,7 +26,7 @@ func TestRoutineReceipts_ListGetFenceAndPaginate(t *testing.T) {
 	}
 	var accepted map[string]any
 	decodeJSON(t, rr, &accepted)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	runID, _ := accepted["run_id"].(string)
 	receiptID, _ := accepted["delivery_id"].(string)
 	if runID == "" || receiptID == "" {
@@ -203,7 +203,7 @@ func TestRoutineReceipts_RunStatusIsNullBeforeTheRunRecordAndRealAfter(t *testin
 	// Release the run. The erroring runner fails it; the record now exists
 	// and the receipt reports its real status rather than a guess.
 	close(barrier)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	after := read()
 	if after.RunStatus == nil {
 		t.Fatal("run_status still null after the run record was written")

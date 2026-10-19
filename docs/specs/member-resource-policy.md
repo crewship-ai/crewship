@@ -610,6 +610,23 @@ including native project-file requests, check the credential before each text or
 done frame and emit no error body after credential loss. This does not permit
 restricted accounts to open terminals or widen their workspace access.
 
+Terminals additionally recheck the active account, live crew and workspace,
+trusted membership with MEMBER-or-higher role, and global restricted-profile
+ceiling in one fresh SQL snapshot before each PTY input/output data frame,
+resize or pong, and resource-bound info/error response. Container preparation
+is followed by another check before starting the PTY. Database errors refuse
+use and close the connection; they do not revoke the source credential.
+The same watcher checks idle CLI and browser shells on a 30-second cadence.
+Resource queries configure a five-second context deadline, but native SQLite
+busy handling can outlast cancellation; this is not a hard maximum closure
+bound. A failed check releases no frame. These checks also observe database
+mutations made outside HTTP, without relying on a post-commit notification in
+this process.
+Already authorized or in-flight operations cannot be recalled. This is a
+security fallback costing one resource query per data/control frame, not the
+H1 zero-SQL authority design; that performance goal remains open. Other users'
+credentials and streams are not revoked by another user's membership change.
+
 
 Revocation stops admission of the next frame; already authorized or in-flight
 bytes cannot be recalled. Ordinary logout does not cancel an already started
