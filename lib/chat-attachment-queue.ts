@@ -13,6 +13,15 @@ export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxBytes: 25 * 1024 * 1024,
 }
 
+/** Clipboard text, if any (text/plain). */
+export function textFromClipboard(data: Pick<DataTransfer, "getData"> | null | undefined): string {
+  try {
+    return data?.getData?.("text/plain") ?? ""
+  } catch {
+    return ""
+  }
+}
+
 export type AttachmentRefusal = "too_large" | "empty" | "too_many"
 
 export interface RejectedFile {
@@ -77,31 +86,40 @@ export function filesFromClipboard(data: Pick<DataTransfer, "files" | "items"> |
 }
 
 /** One serial queue: uploads run one at a time in the order they were queued,
- *  whichever control produced them. A task whose id was cancelled before it
- *  started never runs. */
-export function createUploadQueue() {
+ *  whichever control produced them. Each enqueue gets a token; a task whose id
+ *  was cancelled or re-enqueued before it started is stale and never runs, so
+ *  cancel-then-retry uploads exactly once. `onIdle` fires when the last task
+ *  finishes so the owner can drop the queue. */
+export function createUploadQueue(onIdle?: () => void) {
   let tail: Promise<void> = Promise.resolve()
-  const cancelled = new Set<string>()
+  let seq = 0
+  let pending = 0
+  const current = new Map<string, number>()
   return {
     enqueue(id: string, run: () => Promise<void>): Promise<void> {
-      cancelled.delete(id)
+      const token = ++seq
+      current.set(id, token)
+      pending++
       const next = tail.then(async () => {
-        if (cancelled.has(id)) {
-          cancelled.delete(id)
-          return
-        }
         try {
-          await run()
-        } catch {
-          // A task reports its own failure; the queue must keep draining.
+          if (current.get(id) !== token) return
+          try {
+            await run()
+          } catch {
+            // A task reports its own failure; the queue must keep draining.
+          }
+        } finally {
+          if (current.get(id) === token) current.delete(id)
+          if (--pending === 0) onIdle?.()
         }
       })
       tail = next
       return next
     },
-    /** Mark an id so it is skipped if it has not started yet. */
+    /** Invalidate a queued id so it is skipped if it has not started. */
     cancel(id: string) {
-      cancelled.add(id)
+      current.delete(id)
     },
+    size: () => current.size,
   }
 }

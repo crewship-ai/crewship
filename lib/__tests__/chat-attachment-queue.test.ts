@@ -62,3 +62,24 @@ describe("createUploadQueue", () => {
     expect(log).toEqual(["a"])
   })
 })
+
+describe("queue token and pruning", () => {
+  it("re-enqueueing a cancelled id runs it once; the stale task is skipped", async () => {
+    const q = createUploadQueue()
+    const log: string[] = []
+    const p1 = q.enqueue("a", async () => { await new Promise((r) => setTimeout(r, 5)); log.push("a") })
+    const p2 = q.enqueue("b", async () => { log.push("b1") })
+    q.cancel("b")
+    const p3 = q.enqueue("b", async () => { log.push("b2") })
+    await Promise.all([p1, p2, p3])
+    expect(log).toEqual(["a", "b2"])
+  })
+  it("reports idle and leaves no state behind", async () => {
+    let idle = 0
+    const q = createUploadQueue(() => idle++)
+    q.cancel("never-queued")
+    await Promise.all([q.enqueue("a", async () => {}), q.enqueue("b", async () => {})])
+    expect(idle).toBe(1)
+    expect(q.size()).toBe(0)
+  })
+})

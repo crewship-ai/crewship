@@ -193,6 +193,19 @@ export function useMessageSubmit({
           return
         }
 
+        // A failed or cancelled chip is not attached. Sending quietly without
+        // it would let the user believe the agent has the file.
+        const notAttached = items.filter(
+          (a) => !a.owner && (a.status === "error" || a.status === "cancelled"),
+        )
+        if (notAttached.length > 0) {
+          toast.error(
+            `Not attached: ${notAttached.map((a) => a.name).join(", ")}`,
+            { description: "Retry or remove them, then send." },
+          )
+          return
+        }
+
         // An attachment with no caption is a real message. Requiring text here
         // is how a photo sent from a phone used to disappear without a trace.
         if (!text && sendableAttachments(items).length === 0) {

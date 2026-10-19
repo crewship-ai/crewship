@@ -18,6 +18,7 @@ import {
   DEFAULT_ATTACHMENT_LIMITS,
   createUploadQueue,
   filesFromClipboard,
+  textFromClipboard,
   refusalMessage,
   validateAttachmentBatch,
 } from "@/lib/chat-attachment-queue"
@@ -30,6 +31,8 @@ type UploadFailureReason =
   | "network"
   | "too_large"
   | "unsupported_type"
+  | "empty"
+  | "too_many"
   | "rate_limited"
   | "unknown"
 
@@ -62,7 +65,7 @@ class UploadFailure extends Error {
 const uploadQueues = new Map<string, ReturnType<typeof createUploadQueue>>()
 function queueFor(sessionId: string) {
   let q = uploadQueues.get(sessionId)
-  if (!q) uploadQueues.set(sessionId, (q = createUploadQueue()))
+  if (!q) uploadQueues.set(sessionId, (q = createUploadQueue(() => uploadQueues.delete(sessionId))))
   return q
 }
 
@@ -350,7 +353,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
           mime_kind: mimeKind(f.type),
           size_bytes: f.size,
           source,
-          reason: reason === "too_large" ? "too_large" : "unknown",
+          reason,
         })
       }
       for (const f of accepted) {
@@ -395,6 +398,13 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // rather than spinning: the user has to pick the file again.
       if (!att.file) {
         toast.error("Attach the file again — the browser no longer has it to retry.")
+        return
+      }
+      const others = (useComposerStore.getState().attachments[sessionId] ?? []).filter(
+        (a) => a.id !== id && a.status !== "cancelled" && a.status !== "error",
+      ).length
+      if (others >= DEFAULT_ATTACHMENT_LIMITS.maxCount) {
+        toast.error(refusalMessage(att.name, "too_many", DEFAULT_ATTACHMENT_LIMITS))
         return
       }
       updateAttachment(sessionId, id, { status: "validating", error: undefined })
@@ -443,6 +453,19 @@ export function AttachmentZone({
       if (files.length === 0) return
       e.preventDefault()
       e.stopPropagation()
+      // A clipboard can carry text next to the file (spreadsheet cells, rich
+      // content). Attach the file and still insert the text.
+      const text = textFromClipboard(e.clipboardData)
+      const target = e.target
+      if (text && target instanceof HTMLTextAreaElement) {
+        // The native setter bypasses React's value tracker, so the input
+        // event below is seen as a real change by the controlled textarea.
+        const { selectionStart: from, selectionEnd: to, value } = target
+        const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+        setValue?.call(target, value.slice(0, from) + text + value.slice(to))
+        target.setSelectionRange(from + text.length, from + text.length)
+        target.dispatchEvent(new Event("input", { bubbles: true }))
+      }
       void upload(files, "paste")
     },
     [upload],

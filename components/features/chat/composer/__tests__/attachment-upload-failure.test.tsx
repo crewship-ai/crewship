@@ -214,7 +214,7 @@ describe("a rejected upload never reads as an attached file", () => {
     expect(composeMessageWithAttachments("both of these", storeList())).toBe("both of these")
   })
 
-  it("one succeeds and one fails: the message carries exactly the one that landed", async () => {
+  it("one succeeds and one fails: the message carries exactly the one that landed once the failed chip is removed", async () => {
     let call = 0
     global.fetch = vi.fn(() => {
       call += 1
@@ -234,10 +234,17 @@ describe("a rejected upload never reads as an attached file", () => {
     expect(composed).not.toContain("bad.pdf")
     expect(composed).toMatch(/I've attached a file/)
 
-    // …and the send agrees with it: exactly one path on the wire.
+    // …and the send agrees with it: while the failed chip is still there the
+    // send is held and the file is named, so nothing is dropped silently.
     typeInComposer("two invoices")
     submitForm()
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(String(toastError.mock.calls.at(-1)?.[0])).toContain("bad.pdf")
+    expect(sendMessage).not.toHaveBeenCalled()
 
+    // Removing the failed chip lets exactly the one that landed go out.
+    fireEvent.click(screen.getByLabelText("Remove bad.pdf"))
+    submitForm()
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     const [content] = sendMessage.mock.calls[0] as [string]
     expect(content).toContain("attachments/sess-1/good.pdf")

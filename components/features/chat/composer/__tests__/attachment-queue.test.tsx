@@ -135,3 +135,90 @@ describe("one attachment queue", () => {
     expect(props.sendMessage).not.toHaveBeenCalled()
   })
 })
+
+describe("review blockers", () => {
+  beforeEach(() => {
+    sid = `sess-${++n}`
+    props.sendMessage.mockClear()
+    useComposerStore.setState({ attachments: {}, drafts: {} })
+    toastError.mockClear()
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it("a mixed text+file paste attaches the file AND keeps the text", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    render(<ChatComposer {...props} />)
+    const ta = document.querySelector("textarea")!
+    fireEvent.change(ta, { target: { value: "ab" } })
+    ta.setSelectionRange(1, 1)
+    const data = {
+      files: [file("cell.png")],
+      items: [{ kind: "file", type: "image/png", getAsFile: () => file("cell.png") }],
+      getData: (t: string) => (t === "text/plain" ? "XY" : ""),
+    }
+    fireEvent.paste(ta, { clipboardData: data })
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    await waitFor(() => expect(ta.value).toBe("aXYb"))
+  })
+
+  it("cancel then retry of a waiting file uploads it exactly once", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    render(<ChatComposer {...props} />)
+    pick([file("a.txt"), file("b.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    fireEvent.click(screen.getByLabelText("Cancel b.txt"))
+    fireEvent.click(screen.getByLabelText("Retry b.txt"))
+    g.calls[0].release()
+    await waitFor(() => expect(g.calls).toHaveLength(2))
+    g.calls[1].release()
+    await waitFor(() => expect(list().map((a) => a.status)).toEqual(["ready", "ready"]))
+    expect(g.calls.map((c) => c.name)).toEqual(["a.txt", "b.txt"])
+  })
+
+  it("cancelling a running upload aborts its request without an error toast", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    render(<ChatComposer {...props} />)
+    pick([file("a.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    fireEvent.click(screen.getByLabelText("Cancel a.txt"))
+    expect(g.calls[0].signal?.aborted).toBe(true)
+    await waitFor(() => expect(list()[0].status).toBe("cancelled"))
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("retry respects the per-message limit", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    const mk = (i: number, status: "ready" | "cancelled") => ({
+      id: `x${i}`, name: `x${i}.txt`, size: 5, type: "text/plain", status,
+      path: status === "ready" ? `attachments/${sid}/x${i}.txt` : undefined,
+      file: status === "cancelled" ? file(`x${i}.txt`) : undefined,
+    })
+    useComposerStore.setState({
+      attachments: { [sid]: [mk(0, "cancelled"), ...Array.from({ length: 10 }, (_, i) => mk(i + 1, "ready"))] },
+    })
+    render(<ChatComposer {...props} />)
+    fireEvent.click(screen.getByLabelText("Retry x0.txt"))
+    expect(String(toastError.mock.calls[0]?.[0])).toMatch(/at most 10 files/)
+    expect(g.calls).toHaveLength(0)
+    expect(list()[0].status).toBe("cancelled")
+  })
+
+  it("send is blocked, naming the files, while a failed or cancelled chip is present", async () => {
+    useComposerStore.setState({
+      attachments: { [sid]: [
+        { id: "r", name: "ok.txt", size: 5, type: "text/plain", status: "ready", path: `attachments/${sid}/ok.txt` },
+        { id: "c", name: "gone.txt", size: 5, type: "text/plain", status: "cancelled" },
+      ] },
+    })
+    render(<ChatComposer {...props} />)
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: "hello" } })
+    fireEvent.submit(document.querySelector("form")!)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(String(toastError.mock.calls[0][0])).toContain("gone.txt")
+    expect(props.sendMessage).not.toHaveBeenCalled()
+  })
+})
