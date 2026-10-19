@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -148,5 +150,95 @@ func TestPrivateAudienceWorkspaceBackupDoesNotBypassPrivacy(t *testing.T) {
 	w := f.do(f.boss, "GET", "/api/v1/admin/backups/status?workspace_id=ws-old", "")
 	if w.Code != 200 {
 		t.Errorf("instance administrator lost backup access: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPrivateAudienceRestrictedCatalogAndCustodian(t *testing.T) {
+	h, workspace, author, _, create := documentCreationFixture(t)
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, author)
+	creationExpect(t, create("member", documentCreationBody), 201)
+	if got := pagesGetStatus(t, h, workspace, author, "MEMBER", "created-doc"); got.Code != 200 {
+		t.Fatalf("custodian positive calibration: %d %s", got.Code, got.Body.String())
+	}
+	pagesSeedUser(t, h, workspace, "catalog-guest", "catalog-guest@example.test", "MEMBER")
+	execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE workspace_id=? AND user_id='catalog-guest'`, workspace)
+	t.Run("guest-catalog-omits-private-document", func(t *testing.T) {
+		request := pagesRequest(t, "GET", "/api/v1/pages", workspace, "catalog-guest", "MEMBER", "")
+		response := httptest.NewRecorder()
+		h.List(response, request)
+		if response.Code != 200 {
+			t.Fatalf("Guest catalog HTTP%d want200: %s", response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "created-doc") || strings.Contains(response.Body.String(), "Created report") {
+			t.Fatal("Guest catalog disclosed private metadata")
+		}
+		if got := pagesGetStatus(t, h, workspace, "catalog-guest", "MEMBER", "created-doc"); got.Code != 404 {
+			t.Fatalf("Guest direct read HTTP%d want404", got.Code)
+		}
+	})
+	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('other-private-context','Other','other-private-context')`)
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('other-custodian-membership','other-private-context',?,'MEMBER','restricted')`, author)
+	t.Run("custodian-restricted-elsewhere-keeps-own-document", func(t *testing.T) {
+		if got := pagesGetStatus(t, h, workspace, author, "MEMBER", "created-doc"); got.Code != 200 {
+			t.Fatalf("custodian read HTTP%d want200: %s", got.Code, got.Body.String())
+		}
+		if !pagesSlugListed(pagesListSlugs(t, h, workspace, author, "MEMBER"), "created-doc") {
+			t.Fatal("custodian's private document missing from catalog")
+		}
+	})
+	t.Run("restricted-stale-owner-cannot-read-other-custodian", func(t *testing.T) {
+		if pagesSlugListed(pagesListSlugs(t, h, workspace, "catalog-guest", "OWNER"), "created-doc") {
+			t.Fatal("stale OWNER context disclosed another custodian's document")
+		}
+		if got := pagesGetStatus(t, h, workspace, "catalog-guest", "OWNER", "created-doc"); got.Code != 404 {
+			t.Fatalf("stale OWNER direct read HTTP%d want404", got.Code)
+		}
+	})
+	t.Run("custody-read-does-not-enable-mutations", func(t *testing.T) {
+		for _, method := range []string{"PATCH", "DELETE"} {
+			req := pagesRequest(t, method, "/api/v1/pages/created-doc", workspace, author, "MEMBER", `{"name":"must-not-write"}`)
+			req.SetPathValue("slug", "created-doc")
+			response := httptest.NewRecorder()
+			if method == "PATCH" {
+				h.Update(response, req)
+			} else {
+				h.Delete(response, req)
+			}
+			if response.Code != 404 {
+				t.Fatalf("restricted custody %s returned%d want404: %s", method, response.Code, response.Body.String())
+			}
+		}
+		response := httptest.NewRecorder()
+		h.List(response, pagesRequest(t, "GET", "/api/v1/pages", workspace, author, "MEMBER", ""))
+		var rows []map[string]any
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &rows) != nil || len(rows) != 1 {
+			t.Fatalf("custody catalog: HTTP%d %s", response.Code, response.Body.String())
+		}
+		if rows[0]["can_move"] != false || rows[0]["can_remove_from_folder"] != false {
+			t.Fatalf("restricted custody advertised mutations: %s", response.Body.String())
+		}
+	})
+	t.Run("suspended-custodian-cannot-read", func(t *testing.T) {
+		execOrFatal(t, h.db, `UPDATE users SET suspended_at='2026-10-19T00:00:00Z' WHERE id=?`, author)
+		if got := pagesGetStatus(t, h, workspace, author, "MEMBER", "created-doc"); got.Code != 404 {
+			t.Fatalf("suspended custodian read HTTP%d want404", got.Code)
+		}
+		if pagesSlugListed(pagesListSlugs(t, h, workspace, author, "MEMBER"), "created-doc") {
+			t.Fatal("suspended custodian listed private output")
+		}
+	})
+}
+
+func TestPrivateAudienceReaderDistinguishesDenialFromFailure(t *testing.T) {
+	h, _, _, workspace, _ := newPagesFixture(t)
+	reader, err := h.livePrivatePageReader(t.Context(), workspace, "missing-human")
+	if err != nil || reader != nil {
+		t.Fatalf("missing membership: reader%v err%v", reader, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	reader, err = h.livePrivatePageReader(ctx, workspace, "missing-human")
+	if reader != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("operational failure masked as denial: reader%v err%v", reader, err)
 	}
 }
