@@ -8,6 +8,10 @@ tag: Stable
 
 # Spend
 
+<Note>
+Cost figures are readable by workspace `OWNER` and `ADMIN` only. For any other role the server answers `403` ("Spend requires OWNER or ADMIN") and the command prints that reason.
+</Note>
+
 `cmd/crewship/cmd_spend.go` is the CLI counterpart to [`GET /api/v1/journal/spend`](/api-reference/journal#spend-rollup) (#1404) — a cost rollup built directly over the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd`.
 
 <Note>

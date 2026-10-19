@@ -389,6 +389,7 @@ export function DashboardKpis({
   // (undefined) into "not metered", a claim about the billing mode.
   spendUsd,
   spendPerRun = null,
+  showSpend = true,
   completedSeries,
   completedSeriesLabel,
 }: {
@@ -398,6 +399,8 @@ export function DashboardKpis({
    *  ledger rows; undefined while pending or after a failed fetch. */
   spendUsd: number | null | undefined
   spendPerRun?: number | null
+  /** The cost ledger is OWNER/ADMIN only (#3590); other roles get no tile. */
+  showSpend?: boolean
   /** Runs per bucket across the window, oldest first. */
   completedSeries?: number[]
   completedSeriesLabel?: string
@@ -440,10 +443,10 @@ export function DashboardKpis({
       value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
       context: spendUsd === undefined ? "unavailable" : spendUsd === null ? "not metered" : spendPerRun != null ? `per run $${spendPerRun.toFixed(2)}` : undefined,
     },
-  ]
+  ].filter((tile) => showSpend || tile.label !== "Spend")
 
   return (
-    <div data-testid="dashboard-kpis" className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-border xl:grid-cols-4">
+    <div data-testid="dashboard-kpis" className={cn("mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-border", showSpend ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
       {tiles.map((tile) => (
         <div key={tile.label} data-slot="kpi" className="min-w-0 bg-card px-4 py-3.5">
           <small className="block text-control text-muted-foreground">{tile.label}</small>

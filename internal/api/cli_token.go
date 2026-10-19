@@ -414,13 +414,32 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := generateCUID()
 	nowStr := now.Format(time.RFC3339)
 
-	_, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "create cli token: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	tokenResult, err := tx.ExecContext(r.Context(),
 		`INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, expires_at, scopes, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, user.ID, body.Name, tokenHash, tier, expiresAt, scopesJSON, nowStr)
 	if err != nil {
 		h.logger.Error("insert cli_token", "error", err, "tier", tier)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, user.ID, id, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "create cli token: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, id, user.ID, nil); err != nil {
+		replyInternalError(w, h.logger, "create cli token: acknowledge", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "create cli token: commit", err)
 		return
 	}
 
@@ -543,7 +562,13 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	tokenID := r.PathValue("tokenId")
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	result, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	result, err := tx.ExecContext(r.Context(),
 		"UPDATE cli_tokens SET revoked_at = ? WHERE id = ? AND user_id = ?",
 		now, tokenID, user.ID)
 	if err != nil {
@@ -551,9 +576,26 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: count", err)
+		return
+	}
 	if rows == 0 {
 		replyError(w, http.StatusNotFound, "Token not found")
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, user.ID, tokenID, "auth.cli_token_revoked"); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, result, tokenID, user.ID, &now); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: acknowledge", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: commit", err)
 		return
 	}
 

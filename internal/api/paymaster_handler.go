@@ -26,6 +26,18 @@ func NewPaymasterHandler(db *sql.DB, logger *slog.Logger) *PaymasterHandler {
 	return &PaymasterHandler{db: db, logger: logger}
 }
 
+// requireSpendReader is the read rule for every cost endpoint (#3590):
+// OWNER and ADMIN only. Spend is an operator figure; the UI hides it from
+// everyone else, and this makes the server agree. 403 for every other role
+// (including GUEST and an empty role) after the workspace check.
+func requireSpendReader(w http.ResponseWriter, r *http.Request) bool {
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		replyError(w, http.StatusForbidden, "Spend requires OWNER or ADMIN")
+		return false
+	}
+	return true
+}
+
 // SpendByCrew serves GET /api/v1/paymaster/spend/by-crew?since=<d>
 // Returns one row per crew with total cost + call count + token totals
 // within the window (default last 7 days). Used by the Paymaster
@@ -36,12 +48,18 @@ func (h *PaymasterHandler) SpendByCrew(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SpendByCrew(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-crew", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.CrewSpend{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
 }
@@ -52,6 +70,9 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 	crewID := r.PathValue("crewId")
@@ -82,6 +103,9 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("paymaster spend-by-agent", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.AgentSpend{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "crew_id": crewID})
 }
@@ -124,6 +148,9 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
 		replyError(w, http.StatusBadRequest, "mission_id required")
@@ -160,6 +187,9 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	since, _ := parseWindow(r)
 	limit := 10
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -172,6 +202,9 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("paymaster top-spenders", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.TopSpender{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "limit": limit, "since": since})
 }
