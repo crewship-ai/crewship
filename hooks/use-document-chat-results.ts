@@ -13,6 +13,14 @@ export function useDocumentChatResults(workspaceId: string, chatId: string, curr
   const available = enabled === true && Boolean(workspaceId && chatId && currentUserId)
   const key = ["document-chat-results", workspaceId, chatId, currentUserId ?? ""] as const
   const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ["document-chat-results", workspaceId, chatId, currentUserId ?? ""] }) }, [client, workspaceId, chatId, currentUserId])
+  const discardDeleted = useCallback(() => {
+    const queryKey = ["document-chat-results", workspaceId, chatId, currentUserId ?? ""]
+    // Cancel before clearing so an older successful response cannot restore a title.
+    void client.cancelQueries({ queryKey, exact: true }, { revert: false })
+    client.setQueryData<DocumentChatResults>(queryKey, { results: [] })
+    void client.invalidateQueries({ queryKey, exact: true })
+  }, [client, workspaceId, chatId, currentUserId])
+  useRealtimeEventSafe("page.deleted", discardDeleted)
   useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("conversation.updated", invalidate)
   useRealtimeEventSafe("run.completed", invalidate)

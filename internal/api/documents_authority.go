@@ -93,7 +93,17 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.middleware.RequireAuth(h.middleware.RequireWorkspace(operation)).ServeHTTP(w, r)
 }
 func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, initialize bool) documents.Authorize {
+	return h.authorizeWithReadRecord(r, k, write, initialize, nil)
+}
+
+// Capture only a fully authorized human record from this transaction. The
+// request-local capture is reset on every attempt, including agent/refusal paths.
+// Required privacy audit runs after Store commit, never through h.db inside tx.
+func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents.Key, write, initialize bool, capture func(*pageRecord)) documents.Authorize {
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if capture != nil {
+			capture(nil)
+		}
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		user := UserFromContext(ctx)
 		if user == nil {
@@ -171,6 +181,9 @@ func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, i
 			if e != nil || !ok {
 				return "", errDocumentAccess
 			}
+		}
+		if capture != nil {
+			capture(rec)
 		}
 		return "user:" + user.ID, nil
 	}
@@ -250,7 +263,14 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints"
-	auth := h.authorize(r, k, !read, op == "initialize")
+	_, agent := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read")
+	var readRecord *pageRecord
+	var capture func(*pageRecord)
+	if auditNeeded {
+		capture = func(rec *pageRecord) { readRecord = rec }
+	}
+	auth := h.authorizeWithReadRecord(r, k, !read, op == "initialize", capture)
 	lease := documents.Lease{Owner: in.LeaseOwner, Writer: in.LeaseToken, Epoch: in.Epoch}
 	if in.Token != "" {
 		lease.Owner = in.Owner
@@ -355,6 +375,18 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		documentAuthorityError(w, err)
 		return
+	}
+	// Audit the custodian seen by the fenced read, not an earlier public Page
+	// preflight or a later owner lookup vulnerable to transfer-back races.
+	// A failed Store result never reaches this point, even if it populated data.
+	if auditNeeded {
+		if readRecord == nil {
+			documentAuthorityError(w, errDocumentAccess)
+			return
+		}
+		if !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
+			return
+		}
 	}
 	writeJSON(w, 200, result)
 }

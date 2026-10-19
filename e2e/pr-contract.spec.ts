@@ -189,9 +189,15 @@ test("PR browser contract subset", async ({ page }) => {
 
     // The receipt on the issue's event log, read the way a person reads it:
     // the issue's History tab shows the inbox_acted row.
+    // This contract checks the durable receipt, not the delayed entrance tween.
+    // Reduced motion prevents a delayed 10px translation moving the tab between
+    // Playwright's stable-position check and its physical click.
+    await page.emulateMedia({ reducedMotion: "reduce" })
     await page.goto(`/issues/${encodeURIComponent(identifier)}`)
     await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 })
-    await page.getByRole("button", { name: /^history$/i }).click()
+    const historyTab = page.getByRole("button", { name: /^history$/i })
+    await historyTab.click()
+    await expect(historyTab).toHaveAttribute("aria-pressed", "true")
     await expect(page.getByText(/inbox acted/)).toBeVisible()
     // And as the CLI reads it (`crewship issue events`): the same row, the
     // same seq the receipt named.
