@@ -313,3 +313,54 @@ it("folds pending init over authoritative history and clears it on principal cha
   send(envelope(1, "new authority"))
   expect(hook.result.current.turns[0].parts.some(part => part.type === "system_init")).toBe(false)
 })
+
+describe("conversation scope isolation", () => {
+  it("masks the previous conversation during the first render of a new session", () => {
+    const frames: { session: string; text: string }[] = []
+    const hook = renderHook(({ session }) => {
+      const chat = useChat({ sessionId: session, currentUserId: "human", workspaceId: "workspace", wsUrl: "ws://test", getToken: async () => null })
+      frames.push({ session, text: chat.turns.flatMap(turn => turn.parts.map(part => part.content)).join("") })
+      return chat
+    }, { initialProps: { session: "s" } })
+    act(() => hook.result.current.loadHistory([]))
+    send(envelope(1, "Private conversation A"))
+    expect(hook.result.current.turns[0].parts[0].content).toBe("Private conversation A")
+    const oldMessage = socket.message
+    hook.rerender({ session: "other" })
+    expect(frames.find(frame => frame.session === "other")?.text).toBe("")
+    act(() => oldMessage({ type: "chat_event", channel: "session:s", payload: { event: envelope(2, "late private A") } }))
+    expect(hook.result.current.turns).toEqual([])
+  })
+})
+
+it("does not regain a revoked human's authority by switching conversations", () => {
+  const hook = renderHook(({ session }) => useChat({ sessionId: session, currentUserId: "human", workspaceId: "workspace", wsUrl: "ws://test", getToken: async () => null }), { initialProps: { session: "s" } })
+  act(() => hook.result.current.loadHistory([]))
+  send(envelope(1, "Private conversation A"))
+  act(() => window.dispatchEvent(new CustomEvent("auth:session-expired")))
+  hook.rerender({ session: "other" })
+  act(() => hook.result.current.loadHistory([{ id: "denied", role: "assistant", content: "Must remain hidden", timestamp: new Date() }]))
+  expect(hook.result.current.turns).toEqual([])
+  let sent: unknown
+  act(() => { sent = hook.result.current.sendMessage("Must not dispatch") })
+  expect(sent).toBe(false)
+})
+
+it("clears a denied conversation and rejects late data without denying another chat", () => {
+  const hook = renderHook(({ session }) => useChat({ sessionId: session, currentUserId: "human", workspaceId: "workspace", wsUrl: "ws://test", getToken: async () => null }), { initialProps: { session: "s" } })
+  act(() => hook.result.current.loadHistory([]))
+  send(envelope(1, "Private denied conversation"))
+  const oldLoader = hook.result.current.loadHistory
+  const oldMessage = socket.message
+  act(() => hook.result.current.markHistoryDenied())
+  expect(hook.result.current.turns).toEqual([])
+  expect(hook.result.current.isStreaming).toBe(false)
+  act(() => oldLoader([{ id: "late", role: "assistant", content: "Private late history", timestamp: new Date() }]))
+  act(() => oldMessage({ type: "chat_event", channel: "session:s", payload: { event: envelope(2, "Private late event") } }))
+  expect(hook.result.current.turns).toEqual([])
+  const oldDeny = hook.result.current.markHistoryDenied
+  hook.rerender({ session: "readable" })
+  act(() => oldDeny())
+  act(() => hook.result.current.loadHistory([{ id: "allowed", role: "assistant", content: "Authorized other chat", timestamp: new Date() }]))
+  expect(hook.result.current.turns[0].parts[0].content).toBe("Authorized other chat")
+})
