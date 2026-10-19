@@ -196,3 +196,52 @@ func TestRunStartBoundaryCancelBeforeBody(t *testing.T) {
 		t.Fatalf("durable cancellation: %+v %v", actual, err)
 	}
 }
+
+func TestRunStartBoundaryBodyPhasePrecedesEffects(t *testing.T) {
+	for _, failBodyPhase := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reject_body_phase_%t", failBodyPhase), func(t *testing.T) {
+			var rig *effectRig
+			var setup, body atomic.Int32
+			observed := make(chan error, 2)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				expected := "body"
+				if r.URL.Path == "/setup" {
+					setup.Add(1)
+					expected = startPhasePreHooks
+				} else {
+					body.Add(1)
+				}
+				phase, err := rig.runStore.startPhase(r.Context(), "phase-observation")
+				if err != nil || phase != expected {
+					observed <- fmt.Errorf("effect %s observed phase=%q expected=%q error=%v", r.URL.Path, phase, expected, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			definition := fmt.Sprintf(`{"dsl_version":"1.0","name":"phase-observation","hooks":{"before_all":{"id":"before","type":"http","http":{"method":"POST","url":%q}}},"steps":[{"id":"apply","type":"http","http":{"method":"POST","url":%q}}]}`, srv.URL+"/setup", srv.URL+"/body")
+			rig = newEffectRig(t, "phase-observation", definition)
+			if failBodyPhase {
+				if _, err := rig.store.db.Exec(`CREATE TRIGGER refuse_body_phase BEFORE UPDATE OF start_phase ON pipeline_runs WHEN NEW.start_phase='body' BEGIN SELECT RAISE(ABORT,'body phase unavailable'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := rig.exec.Run(t.Context(), RunInput{PipelineID: rig.pipeline.ID, WorkspaceID: "ws_test", Mode: ModeRun, RunIDOverride: "phase-observation"})
+			if setup.Load() != 1 || result == nil {
+				t.Fatalf("setup=%d result=%+v error=%v", setup.Load(), result, err)
+			}
+			if failBodyPhase {
+				if err == nil || body.Load() != 0 || result.Status != "FAILED" {
+					t.Fatalf("body crossed failed persistence: calls=%d result=%+v error=%v", body.Load(), result, err)
+				}
+			} else if err != nil || body.Load() != 1 || result.Status != "COMPLETED" {
+				t.Fatalf("body=%d result=%+v error=%v", body.Load(), result, err)
+			}
+			select {
+			case err := <-observed:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+}
