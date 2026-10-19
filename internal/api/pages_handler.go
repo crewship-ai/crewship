@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -475,6 +476,7 @@ func (p *panelRecord) ownerRef() string    { return "crew/" + p.OwnerCrew }
 // viewer will never be shown is a leak of that panel's existence and its
 // health.
 func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -492,10 +494,19 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "list pages", err)
 		return
 	}
-	out := make([]pageListWire, 0, len(index.rows))
-	for i := range index.rows {
-		out = append(out, h.pageListRow(&index.rows[i], index.folders, viewer))
+	rows, total, err := pageCatalogRows(r, index, user.ID)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	out := make([]pageListWire, 0, len(rows))
+	for i := range rows {
+		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
+			return
+		}
+		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
 }
 
