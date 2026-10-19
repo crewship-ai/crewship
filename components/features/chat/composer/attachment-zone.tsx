@@ -14,6 +14,13 @@ import { useComposerStore, type ComposerAttachment } from "@/stores/composer-sto
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
+import {
+  DEFAULT_ATTACHMENT_LIMITS,
+  createUploadQueue,
+  filesFromClipboard,
+  refusalMessage,
+  validateAttachmentBatch,
+} from "@/lib/chat-attachment-queue"
 
 /** Where the bytes came from. Four controls, one upload path. */
 export type AttachmentSource = "picker" | "drop" | "paste" | "camera"
@@ -46,10 +53,18 @@ class UploadFailure extends Error {
   }
 }
 
-// 25 MB cap — best practice for chat attachments. Bigger than the
-// previous 10 MB which was too small for screenshots / log dumps but
-// well under the multipart parsing slowdown threshold.
-const MAX_SIZE = 25 * 1024 * 1024
+// Limits (25 MB per file, file count per message) live in
+// lib/chat-attachment-queue.ts; every entry point validates through there.
+
+/** One upload queue per conversation. Picker, paste, drop, camera and retry all
+ *  enqueue here, so uploads run one at a time in the order the user added
+ *  them, and one conversation's slow upload never blocks another's. */
+const uploadQueues = new Map<string, ReturnType<typeof createUploadQueue>>()
+function queueFor(sessionId: string) {
+  let q = uploadQueues.get(sessionId)
+  if (!q) uploadQueues.set(sessionId, (q = createUploadQueue()))
+  return q
+}
 
 interface AttachmentZoneProps {
   agentId: string
@@ -232,6 +247,10 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
    *  names. */
   const runUpload = useCallback(
     async (att: ComposerAttachment, file: File, wsId: string, source?: AttachmentSource) => {
+      // Cancelled while it waited in the queue: stay cancelled.
+      const current = (useComposerStore.getState().attachments[sessionId] ?? []).find((a) => a.id === att.id)
+      if (!current || current.status === "cancelled") return
+      updateAttachment(sessionId, att.id, { status: "uploading", error: undefined })
       const key = abortKey(sessionId, att.id)
       const ac = new AbortController()
       abortRegistry.set(key, ac)
@@ -317,21 +336,24 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // Pair each chip with its source File so a skipped (oversized)
       // file can't shift indices and mismatch chip ↔ file.
       const queued: Array<{ att: ComposerAttachment; file: File }> = []
-      for (const f of files) {
-        if (f.size > MAX_SIZE) {
-          toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
-          // A refusal that never reached the network is still a failed
-          // attachment to the person holding the phone, and it is the one the
-          // server-side logs can never show.
-          emitChatEvent("attachment_upload_failed", {
-            session_id: sessionId,
-            mime_kind: mimeKind(f.type),
-            size_bytes: f.size,
-            source,
-            reason: "too_large",
-          })
-          continue
-        }
+      const counted = (useComposerStore.getState().attachments[sessionId] ?? []).filter(
+        (a) => a.status !== "cancelled" && a.status !== "error",
+      ).length
+      const { accepted, rejected } = validateAttachmentBatch(counted, files)
+      for (const { file: f, reason } of rejected) {
+        toast.error(refusalMessage(f.name, reason, DEFAULT_ATTACHMENT_LIMITS))
+        // A refusal that never reached the network is still a failed
+        // attachment to the person holding the phone, and it is the one the
+        // server-side logs can never show.
+        emitChatEvent("attachment_upload_failed", {
+          session_id: sessionId,
+          mime_kind: mimeKind(f.type),
+          size_bytes: f.size,
+          source,
+          reason: reason === "too_large" ? "too_large" : "unknown",
+        })
+      }
+      for (const f of accepted) {
         queued.push({
           file: f,
           att: {
@@ -339,16 +361,16 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
             name: f.name,
             size: f.size,
             type: f.type || "application/octet-stream",
-            status: "uploading",
+            status: "validating",
             file: f,
           },
         })
       }
       if (queued.length === 0) return
       addAttachments(sessionId, queued.map(({ att }) => att))
-      for (const { att, file } of queued) {
-        await runUpload(att, file, workspaceId, source)
-      }
+      await Promise.all(
+        queued.map(({ att, file }) => queueFor(sessionId).enqueue(att.id, () => runUpload(att, file, workspaceId, source))),
+      )
     },
     [sessionId, workspaceId, addAttachments, runUpload],
   )
@@ -368,20 +390,31 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // Already running — the Retry control is only rendered on an error chip,
       // but two calls for one chip would mean two POSTs of the same file and
       // two abort controllers under one key.
-      if (!att || att.status === "uploading") return
+      if (!att || att.status === "uploading" || att.status === "validating") return
       // No File means the page was reloaded out from under the chip. Say so
       // rather than spinning: the user has to pick the file again.
       if (!att.file) {
         toast.error("Attach the file again — the browser no longer has it to retry.")
         return
       }
-      updateAttachment(sessionId, id, { status: "uploading", error: undefined })
-      await runUpload(att, att.file, workspaceId)
+      updateAttachment(sessionId, id, { status: "validating", error: undefined })
+      await queueFor(sessionId).enqueue(id, () => runUpload(att, att.file as File, workspaceId))
     },
     [sessionId, workspaceId, updateAttachment, runUpload],
   )
 
-  return { upload, retry }
+  /** Stop a queued or running upload but keep the chip (as cancelled) so the
+   *  file can be retried. Removing the chip is a separate action. */
+  const cancel = useCallback(
+    (id: string) => {
+      queueFor(sessionId).cancel(id)
+      updateAttachment(sessionId, id, { status: "cancelled", error: undefined })
+      abortIfPending(sessionId, id)
+    },
+    [sessionId, updateAttachment],
+  )
+
+  return { upload, retry, cancel }
 }
 
 export function AttachmentZone({
@@ -397,10 +430,23 @@ export function AttachmentZone({
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []
 
-  const { upload, retry } = useAttachmentUpload(agentId, sessionId)
+  const { upload, retry, cancel } = useAttachmentUpload(agentId, sessionId)
 
   const handleFiles = useCallback((files: File[]) => void upload(files, "drop"), [upload])
   const handleRetry = useCallback((id: string) => void retry(id), [retry])
+  // Pasted files take the same queue as the picker. Capture phase so the
+  // textarea's own paste handler (which keeps files in a channel nothing
+  // reads) never sees them; a text-only paste is left alone.
+  const handlePasteCapture = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = filesFromClipboard(e.clipboardData)
+      if (files.length === 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      void upload(files, "paste")
+    },
+    [upload],
+  )
 
   // Wrap user removal so an in-flight upload is aborted before the
   // chip disappears from the store. Without this, a deleted file can
@@ -415,7 +461,7 @@ export function AttachmentZone({
 
   return (
     <div className="flex flex-col gap-2">
-      <AttachmentDropZone onFiles={handleFiles} className="rounded-xl">
+      <AttachmentDropZone onFiles={handleFiles} onPasteCapture={handlePasteCapture} className="rounded-xl">
         {children}
       </AttachmentDropZone>
       {showChips && sessionAttachments.length > 0 && (
@@ -423,6 +469,7 @@ export function AttachmentZone({
           attachments={sessionAttachments}
           onRemove={handleRemove}
           onRetry={handleRetry}
+          onCancel={cancel}
           className="px-2"
         />
       )}

@@ -593,6 +593,11 @@ Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditi
 
 Hovering over a user message reveals an "Edit" button. Editing the message rewrites that turn and **truncates** the conversation — every message after it is dropped. The new edit is sent as a fresh user turn. This matches the ChatGPT/Claude UX and lets operators reroll an agent's response without abandoning the whole session.
 
+
+### Attachments
+
+Files you pick, drop, paste or photograph go into one upload queue per conversation and upload one at a time, in the order you added them. Each file shows its state in words: **Waiting**, **Uploading**, **Failed** or **Cancelled**; none of them counts as attached until it is ready. **Cancel** stops a waiting or running upload and keeps the chip so **Retry** can queue it again; the remove button deletes it. At most 10 files and 25 MB per file go in one message; anything beyond that is refused with the reason. Sending is blocked while a file is still waiting or uploading. Pasting plain text behaves as usual; pasting a file attaches it.
+
 ## Message reactions
 
 An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.

@@ -56,7 +56,7 @@ export interface OutgoingAttachment {
   /** `attachments/<chatId>/<filename>`, from the upload response. */
   path?: string
   /** Only `"ready"` can be named in a message — see `sendableAttachments`. */
-  status?: "uploading" | "ready" | "error"
+  status?: "validating" | "uploading" | "ready" | "error" | "cancelled"
   /** The form field this upload answers, if any. See `AttachmentOwner`. */
   owner?: AttachmentOwner
 }
@@ -105,7 +105,7 @@ export function sendableAttachments(attachments: OutgoingAttachment[]): Outgoing
  *  files the user attached — which is the same defect this module fixes,
  *  just narrower. */
 export function hasPendingUploads(attachments: OutgoingAttachment[]): boolean {
-  return attachments.some((a) => a.status === "uploading")
+  return attachments.some((a) => a.status === "uploading" || a.status === "validating")
 }
 
 /**
