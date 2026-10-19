@@ -318,7 +318,9 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	HasDocument bool `json:"has_document"`
+	// Explicit audience classification; unfiled human ownership is not privacy.
+	PrivateAudience bool `json:"private_audience"`
+	HasDocument     bool `json:"has_document"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -654,7 +656,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		PrivateAudience: rec.PrivateAudience,
+		HasDocument:     rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
