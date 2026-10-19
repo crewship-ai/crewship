@@ -651,7 +651,12 @@ Capability events retain sorted `previous_capabilities` and `capabilities`
 sets in their durable, keyed journal payload. These are the effective sets
 used by the mutation, including the existing role-default interpretation of
 NULL or empty storage. The shared GET, SSE and WebSocket journal serializer
-omits both sets without altering the retained event or its chain. The feed
+omits both sets without altering the retained event or its chain. Automation
+preview samples, matcher diagnostics and observer matching/template inputs use
+the same public projection before evaluating an event. Page grant snapshots
+(`previous_grant`, `grant`) and folder ACL snapshots (`previous_acl`, `acl`,
+`previous_acl_version`) are also canonical-only; existing public event fields
+remain available. The feed
 continues to expose only the subject and action for capability changes.
 Current values remain available through the existing ADMIN-only capability
 endpoint; this change adds no administrative historical-values API.
