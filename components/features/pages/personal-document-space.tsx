@@ -15,7 +15,7 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
 }) {
   const { data: session } = useSessionSafe()
   const human = session?.user?.id
-  const { pages, loading, error } = usePages(workspaceId)
+  const { pages, loading, error } = usePages(workspaceId, "personal")
   const ownedDocuments = human && workspaceId && !error ? pages.filter(page =>
     page.ownerRef === `user/${human}` && page.hasDocument === true) : []
   const own = ownedDocuments.filter(page => page.privateAudience === true)
