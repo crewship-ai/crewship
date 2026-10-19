@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
@@ -192,6 +193,9 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 	case errors.Is(err, documents.ErrNotFound):
 		status = 404
 		message = "document not found"
+	case errors.Is(err, artifacts.ErrUnsupported):
+		status = 409
+		message = "unsupported document operation or schema"
 	case errors.Is(err, documents.ErrConflict), errors.Is(err, documents.ErrFence), errors.Is(err, documents.ErrSchema), errors.Is(err, documents.ErrDuplicate):
 		status = 409
 		message = err.Error()
@@ -253,18 +257,27 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		lease.Writer = in.Token
 	}
 	ctx := r.Context()
+	// The private authority is installed for the configured Docs runtime. This
+	// availability declaration grants no actor access: every operation retains
+	// the original live authority callback inside the fenced transaction.
+	registry := artifacts.NewRegistry(artifacts.EnabledTypes{"doc": true}, artifacts.NewDocumentAdapter(h.store, true))
+	operations, available := registry.Documents()
+	if !available {
+		replyError(w, 503, "document persistence unavailable")
+		return
+	}
 	var result any
 	var err error
 	switch op {
 	case "checkpoints":
-		result, err = h.store.Checkpoints(ctx, k, auth)
+		result, err = operations.Versions(ctx, k, auth)
 	case "state":
 		var s documents.State
-		s, err = h.store.Read(ctx, k, auth)
+		s, err = operations.Read(ctx, k, auth)
 		result = h.documentStateWire(s)
 	case "initialize":
 		var s documents.State
-		s, err = h.store.InitRequest(ctx, k, in.ID, in.Fingerprint, in.Schema, in.Snapshot, in.Blocks, auth)
+		s, err = operations.Create(ctx, k, artifacts.CreateDocument{ID: in.ID, Fingerprint: in.Fingerprint, Schema: in.Schema, Snapshot: in.Snapshot, Projection: in.Blocks}, auth)
 		result = h.documentStateWire(s)
 	case "lease":
 		var l documents.Lease
@@ -309,7 +322,7 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		if agent {
 			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
 		}
-		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: guard}, auth)
+		receipt, err = operations.Apply(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: guard}, auth)
 		result = documentReceiptWire(receipt)
 	case "checkpoint":
 		if in.Generation == nil {
@@ -321,7 +334,7 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		if a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); ok {
 			guard = h.pages.documentDraftGuard(a, k, "checkpoint", in.IfRev)
 		}
-		c, err = h.store.CheckpointRequestGuarded(ctx, k, lease, in.ID, in.Fingerprint, in.Snapshot, in.IfRev, in.Generation, auth, guard)
+		c, err = operations.Snapshot(ctx, k, artifacts.SnapshotDocument{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, Snapshot: in.Snapshot, IfRev: in.IfRev, Generation: in.Generation, Guard: guard}, auth)
 		result = map[string]any{"id": c.ID, "rev": c.Rev, "schema": c.Schema, "checkpoint": c.ID, "epoch": lease.Epoch}
 	case "checkpoint-read":
 		var c documents.Checkpoint
@@ -333,7 +346,7 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var receipt documents.Receipt
-		receipt, err = h.store.RestoreRequestWithFingerprintAtGeneration(ctx, k, lease, in.Checkpoint, in.ID, in.Fingerprint, in.IfRev, in.Generation, auth)
+		receipt, err = operations.Restore(ctx, k, artifacts.RestoreDocument{Lease: lease, Checkpoint: in.Checkpoint, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, Generation: in.Generation}, auth)
 		result = documentReceiptWire(receipt)
 	default:
 		replyError(w, 404, "unknown Docs authority operation")

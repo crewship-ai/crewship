@@ -240,13 +240,26 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	// asked for their tokens to be dead and would otherwise believe they are.
 	tokensRevoked := int64(0)
 	if req.RevokeCLITokens {
-		res, err := h.db.ExecContext(r.Context(),
-			"UPDATE cli_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", now, user.ID)
+		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			replyInternalError(w, h.logger, "revoke cli tokens on password change", err)
+			replyInternalError(w, h.logger, "revoke cli tokens: begin", err)
 			return
 		}
-		tokensRevoked, _ = res.RowsAffected()
+		defer tx.Rollback() //nolint:errcheck
+		ids, err := revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
+		if err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: audit", err)
+			return
+		}
+		tokensRevoked = int64(len(ids))
+		if err := ackCLITokenRevocationsTx(r.Context(), tx, ids, user.ID, now); err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: acknowledge", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: commit", err)
+			return
+		}
 		if h.streams != nil {
 			h.streams.NotifyTokensRevoked(user.ID)
 		}

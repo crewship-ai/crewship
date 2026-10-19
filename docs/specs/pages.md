@@ -30,6 +30,9 @@ and empty-folder requirements remain authoritative.
 ## 1. What a Page is
 
 A **Page** is a workspace-scoped, slug-addressable record holding an ordered list of **panels**.
+Native saved-result links can address `@<page-id>` instead of a slug. This explicit
+reference is resolved by immutable ID inside the same workspace and ACL checks;
+it never falls back to a reused slug when the original Page no longer exists.
 A panel declares:
 
 - a **schema** from a closed set of five (§3),
