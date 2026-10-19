@@ -41,6 +41,29 @@ func decodeGraph(j job) (frozenGraph, error) {
 	return g, nil
 }
 
+// loadLegacyGraphRecipe reads the body and selected authority together. A
+// publication may only enter its dedicated consumer, never the old invoker graph.
+// HEAD0 retains the historical unarchived contract; a positive HEAD must have
+// the exact legacy archive. Storage failures are not evidence of legacy status.
+func loadLegacyGraphRecipe(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, workspace, id string) (*graphRecipe, error) {
+	r := &graphRecipe{ID: id}
+	err := q.QueryRowContext(ctx, `SELECT p.definition_json,p.author_crew_id
+ FROM main.pipelines p LEFT JOIN main.pipeline_versions v
+ ON v.pipeline_id=p.id AND v.version=p.head_version
+ WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active'
+ AND (p.head_version=0 OR (p.head_version>0 AND v.id IS NOT NULL
+ AND typeof(v.authority_fingerprint)='text' AND v.authority_fingerprint='legacy-trusted:v1'
+ AND v.publication_authority_json IS NULL
+ AND v.definition_json=p.definition_json AND v.definition_hash=p.definition_hash))`, id, workspace).Scan(&r.Raw, &r.Crew)
+	if err != nil {
+		return nil, graphLookupError(err)
+	}
+	r.Hash = hash(r.Raw)
+	return r, nil
+}
+
 func (s *Service) checkGraph(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, j job) error {
@@ -51,7 +74,10 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 	var storedHash string
 	err = q.QueryRowContext(ctx, `SELECT graph_hash FROM restricted_workflow_jobs WHERE id=?`, j.ID).Scan(&storedHash)
 	stored := err == nil
-	if (err != nil && !errors.Is(err, sql.ErrNoRows)) || (stored && storedHash != j.GraphHash) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return graphLookupError(err)
+	}
+	if stored && storedHash != j.GraphHash {
 		return ErrDenied
 	}
 	seenRecipes := map[string]string{}
@@ -67,10 +93,14 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 			}
 		} else {
 			seenRecipes[r.ID] = r.Hash
-			var one int
-			if q.QueryRowContext(ctx, `SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND definition_json=? AND author_crew_id IS ? AND deleted_at IS NULL AND status='active'`, r.ID, j.Workspace, r.Raw, r.Crew).Scan(&one) != nil {
+			current, err := loadLegacyGraphRecipe(ctx, q, j.Workspace, r.ID)
+			if err != nil {
+				return err
+			}
+			if current.Raw != r.Raw || current.Crew != r.Crew {
 				return ErrDenied
 			}
+			var one int
 			if stored && q.QueryRowContext(ctx, `SELECT 1 FROM restricted_workflow_recipe_bindings WHERE job_id=? AND pipeline_id=? AND recipe_hash=? AND recipe_json=? AND author_crew_id IS ?`, j.ID, r.ID, r.Hash, r.Raw, r.Crew).Scan(&one) != nil {
 				return ErrDenied
 			}
@@ -180,11 +210,10 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		}
 		path[recipeID] = true
 		defer delete(path, recipeID)
-		r := &graphRecipe{ID: recipeID}
-		if err := s.db.QueryRowContext(ctx, `SELECT definition_json,author_crew_id FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND status='active'`, recipeID, workspace).Scan(&r.Raw, &r.Crew); err != nil {
-			return nil, graphLookupError(err)
+		r, err := loadLegacyGraphRecipe(ctx, s.db, workspace, recipeID)
+		if err != nil {
+			return nil, err
 		}
-		r.Hash = hash(r.Raw)
 		if !seenBytes[recipeID] {
 			bytes += len(r.Raw)
 			seenBytes[recipeID] = true

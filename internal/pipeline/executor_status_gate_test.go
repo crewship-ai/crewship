@@ -24,6 +24,9 @@ func TestExecutor_StatusGate_CallPipeline(t *testing.T) {
 		`{"dsl_version":"1.0","name":"disabled-child","steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"hi"}]}`,
 		"crew_a", "agent_lead")
 	disabled.Status = "disabled"
+	if err := materializeFakePipeline(t.Context(), store, disabled); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "disabled-child" {
 			return disabled, nil
@@ -61,6 +64,9 @@ func TestExecutor_StatusGate_RunDSL(t *testing.T) {
 		`{"dsl_version":"1.0","name":"disabled-direct","steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"hi"}]}`,
 		"crew_a", "agent_lead")
 	disabled.Status = "disabled"
+	if err := materializeFakePipeline(t.Context(), store, disabled); err != nil {
+		t.Fatal(err)
+	}
 	dsl, perr := Parse([]byte(disabled.DefinitionJSON))
 	if perr != nil {
 		t.Fatalf("parse: %v", perr)

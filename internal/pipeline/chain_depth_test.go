@@ -59,6 +59,9 @@ func TestExecutor_ChainDepth_NinthHopRefused(t *testing.T) {
 		`{"dsl_version":"1.0","name":"deep-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
 		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "deep-child" {
 			return child, nil
@@ -126,6 +129,9 @@ func TestExecutor_ChainDepth_UnderCapStillRuns(t *testing.T) {
 		`{"dsl_version":"1.0","name":"ok-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
 		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "ok-child" {
 			return child, nil

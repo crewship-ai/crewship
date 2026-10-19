@@ -411,13 +411,26 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 		return nil, fmt.Errorf("encrypt signing_secret: %w", err)
 	}
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		operation := "insert webhook"
+		if in.ID != "" {
+			operation = "update webhook"
+		}
+		return nil, fmt.Errorf("%s: begin: %w", operation, err)
+	}
+	defer tx.Rollback()
+	if err := checkGenericTrigger(ctx, tx, in.WorkspaceID, in.TargetPipelineID, in.TargetPipelineVersion); err != nil {
+		return nil, err
+	}
+
 	if in.ID == "" {
 		id := generateWebhookID()
 		token, err := generateWebhookToken()
 		if err != nil {
 			return nil, fmt.Errorf("mint webhook token: %w", err)
 		}
-		_, err = s.db.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 INSERT INTO pipeline_webhooks (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     token, token_hash, signing_secret, inputs_template,
@@ -437,6 +450,9 @@ INSERT INTO pipeline_webhooks (
 		if err != nil {
 			return nil, fmt.Errorf("insert webhook: %w", err)
 		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 		created, err := s.GetByID(ctx, id)
 		if err != nil {
 			return nil, err
@@ -447,7 +463,7 @@ INSERT INTO pipeline_webhooks (
 		return created, nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 UPDATE pipeline_webhooks
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     signing_secret = ?, inputs_template = ?, enabled = ?, rate_limit_per_min = ?,
@@ -459,6 +475,9 @@ WHERE id = ? AND deleted_at IS NULL`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update webhook: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return s.GetByID(ctx, in.ID)
 }

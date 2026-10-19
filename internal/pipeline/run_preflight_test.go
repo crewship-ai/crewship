@@ -57,6 +57,12 @@ func TestExecutor_CallPipeline_RefusedByPreflight(t *testing.T) {
 		`{"dsl_version":"1.0","name":"gated-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
 		"crew_child", "agent_lead")
+	if _, err := store.db.ExecContext(t.Context(), `INSERT INTO crews(id,workspace_id) VALUES('crew_child','ws_test')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+		t.Fatal(err)
+	}
 
 	gate := &stubPreflight{err: fmt.Errorf("%w: routine requires credential of type \"api_key\" not present in the vault", ErrRunPreflightBlocked)}
 	exec := NewExecutor(store, resolver, runner, nil).WithRunPreflight(gate)
@@ -115,6 +121,12 @@ func TestExecutor_CallPipeline_AllowedByPreflight(t *testing.T) {
 		`{"dsl_version":"1.0","name":"open-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
 		"crew_child", "agent_lead")
+	if _, err := store.db.ExecContext(t.Context(), `INSERT INTO crews(id,workspace_id) VALUES('crew_child','ws_test')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+		t.Fatal(err)
+	}
 
 	gate := &stubPreflight{}
 	exec := NewExecutor(store, resolver, runner, nil).WithRunPreflight(gate)

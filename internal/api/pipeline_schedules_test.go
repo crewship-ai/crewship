@@ -31,13 +31,14 @@ func scheduleHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string
 
 // seedPipelineRow inserts a minimal pipelines row so a schedule can
 // bind to it. The schedule API only consults id/slug/workspace_id —
-// definition_json can be a stub, definition_hash a placeholder.
+// definition_json can be a stub, definition_hash a placeholder. HEAD0 is
+// explicit because this minimal fixture creates no archived version.
 func seedPipelineRow(t *testing.T, db *sql.DB, wsID, id, slug string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, '{"name":"x","steps":[]}', 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES (?, ?, ?, ?, '{"name":"x","steps":[]}', 'hash', ?, ?, ?, 0)`,
 		id, wsID, slug, slug, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}

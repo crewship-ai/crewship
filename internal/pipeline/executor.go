@@ -769,6 +769,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
 	}
+	if in.Mode == ModeRun {
+		// Classify before origin, preflight, hooks, reservations or writes.
+		if err := checkGenericPublication(ctx, e.store.db, p.ID, in.WorkspaceID, in.PinnedVersion, "", ""); err != nil {
+			if errors.Is(err, ErrPinnedVersionNotFound) && in.PinnedVersion != nil {
+				return nil, fmt.Errorf("%w: routine %q has no version %d (was it deleted? update or unpin the trigger)",
+					ErrPinnedVersionNotFound, p.Slug, *in.PinnedVersion)
+			}
+			return nil, err
+		}
+	}
 	// Governance airbag — top-level chokepoint. Every real-run dispatch path
 	// that starts at Run() (HTTP Run/InternalRun/RunBatch, the cron scheduler,
 	// webhook dispatch, and the deferred-run dispatcher) funnels through here,
@@ -810,6 +820,15 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		pinned.DefinitionJSON = v.DefinitionJSON
 		pinned.DefinitionHash = v.DefinitionHash
 		p = &pinned
+	}
+	if in.PinnedVersion != nil {
+		selected := *in.PinnedVersion
+		p.genericVersion = &selected
+	}
+	if in.Mode == ModeRun && !in.resume {
+		if err := e.store.CheckGenericRun(ctx, p, in.PinnedVersion); err != nil {
+			return nil, err
+		}
 	}
 	if err := e.bindRunOrigin(ctx, &in, p); err != nil {
 		return nil, err
@@ -1000,6 +1019,25 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		in.resumeAdmitted()
 	}
 
+	if in.Mode == ModeRun {
+		raw, hash := p.DefinitionJSON, p.DefinitionHash
+		if in.resume {
+			raw, hash = "", ""
+		}
+		if err := checkGenericPublication(ctx, e.store.db, p.ID, in.WorkspaceID, p.genericVersion, raw, hash); err != nil {
+			// A cancel delivered by resumeAdmitted owns the resumed lifetime.
+			// Keep its terminal persistence on the cancellation path even if
+			// the fresh publication read observes the cancelled context first.
+			if in.resume {
+				return e.resumeAdmissionFailed(preallocRunID, p.ID, err)
+			}
+			if in.IdempotencyKey != "" && e.idempotency != nil {
+				return nil, errors.Join(err, e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey))
+			}
+			return nil, err
+		}
+	}
+
 	hookSlug := ""
 	if in.pipeline != nil {
 		hookSlug = in.pipeline.Slug
@@ -1055,6 +1093,11 @@ func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*R
 	// /test_run validate a draft before the author has pinned a crew.
 	if in.AuthorCrewID == "" && in.Mode != ModeDryRun {
 		return nil, errors.New("executor: author_crew_id required for RunDefinition")
+	}
+	if in.Mode == ModeRun && in.PipelineID != "" {
+		if err := checkGenericPublication(ctx, e.store.db, in.PipelineID, in.WorkspaceID, in.PinnedVersion, "", ""); err != nil {
+			return nil, err
+		}
 	}
 	in.dsl = dsl
 	in.pipeline = nil // unsaved
@@ -1358,6 +1401,18 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		return nil, ErrMaxDepthExceeded
 	}
 
+	if in.Mode == ModeRun && in.pipeline != nil {
+		raw, hash := in.pipeline.DefinitionJSON, in.pipeline.DefinitionHash
+		if in.resume {
+			raw, hash = "", ""
+		}
+		if err := checkGenericPublication(ctx, e.store.db, in.pipeline.ID, in.WorkspaceID, in.pipeline.genericVersion, raw, hash); err != nil {
+			if depth == 0 && in.IdempotencyKey != "" && e.idempotency != nil {
+				return nil, errors.Join(err, e.idempotency.Forget(ctx, in.WorkspaceID, in.pipeline.ID, in.IdempotencyKey))
+			}
+			return nil, err
+		}
+	}
 	dsl := in.dsl
 	if in.Mode != ModeDryRun {
 		if err := ValidateFormInputs(dsl, in.Inputs); err != nil {
@@ -2345,6 +2400,11 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			return "", 0, 0, fmt.Errorf("call_pipeline: %w (slug=%q)", ErrPipelineNotFound, step.PipelineSlug)
 		}
 		return "", 0, 0, fmt.Errorf("call_pipeline: lookup: %w", err)
+	}
+	if parent.Mode == ModeRun {
+		if err := e.store.CheckGenericRun(ctx, target, nil); err != nil {
+			return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
+		}
 	}
 	// Governance gate (#1417, belt-and-suspenders). runDSL enforces this
 	// too, but reject here as well so the sentinel wraps cleanly for

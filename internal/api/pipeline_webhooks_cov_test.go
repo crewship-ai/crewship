@@ -20,7 +20,7 @@ func covPWFixture(t *testing.T) (*PipelineHandler, string, string, string) {
 	h, db, userID, wsID := runsHandlerRig(t)
 	h.SetWebhookStore(pipeline.NewWebhookStore(db))
 	h.SetRunner(pipelineAgentRunnerStub{})
-	seedRunsPipeline(t, db, wsID, "covpw-pipe", "covpw-pipe")
+	seedWebhookPipeline(t, db, wsID, "covpw-pipe", "covpw-pipe")
 	return h, userID, wsID, "covpw-pipe"
 }
 

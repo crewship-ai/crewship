@@ -224,6 +224,10 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidTrigger) {
+			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
+			return
+		}
 		h.logger.Warn("create pipeline webhook", "error", err)
 		// #1254 item 1: the HMAC signing secret fails CLOSED when no
 		// encryption key is configured. Surface the misconfiguration with
@@ -374,6 +378,10 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidTrigger) {
+			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
+			return
+		}
 		h.logger.Warn("update pipeline webhook", "error", err)
 		if errors.Is(err, encryption.ErrPlaintextRefused) {
 			replyError(w, http.StatusInternalServerError, encryptionNotConfiguredMsg)

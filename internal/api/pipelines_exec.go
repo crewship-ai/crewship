@@ -213,6 +213,18 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.DefinitionJSON = v.DefinitionJSON
+		p.DefinitionHash = v.DefinitionHash
+	}
+
+	if err := h.store.CheckGenericRun(r.Context(), p, body.PinnedVersion); err != nil {
+		if errors.Is(err, pipeline.ErrPublicationGenericRun) {
+			replyError(w, http.StatusBadRequest, "publication requires bounded manual execution")
+		} else if errors.Is(err, pipeline.ErrGenericRecipeChanged) {
+			replyError(w, http.StatusConflict, "recipe changed; reload before running")
+		} else {
+			replyError(w, http.StatusInternalServerError, "check recipe execution boundary")
+		}
+		return
 	}
 
 	// invoking_crew_id / invoking_agent_id are NOT read from this

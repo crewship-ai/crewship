@@ -72,6 +72,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraft))))
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", roleInline, r.restrictedRoutineDraft)
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate", roleInline, r.routinePublicationValidate)
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish", roleInline, r.routinePublicationPublish)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))

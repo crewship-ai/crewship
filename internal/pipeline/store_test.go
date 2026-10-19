@@ -43,6 +43,7 @@ chat_origin_id TEXT,
     dsl_version              TEXT NOT NULL DEFAULT '1.0',
     definition_json          TEXT NOT NULL,
     definition_hash          TEXT NOT NULL,
+    head_version             INTEGER NOT NULL DEFAULT 0,
     ephemeral                INTEGER NOT NULL DEFAULT 0,
     workspace_visible        INTEGER NOT NULL DEFAULT 1,
     invocation_count         INTEGER NOT NULL DEFAULT 0,
@@ -67,6 +68,24 @@ chat_origin_id TEXT,
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     deleted_at               TEXT,
     UNIQUE (workspace_id, slug)
+);
+
+CREATE TABLE pipeline_versions (
+    id TEXT PRIMARY KEY,
+    pipeline_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    definition_json TEXT NOT NULL,
+    definition_hash TEXT NOT NULL,
+    author_type TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    parent_version INTEGER,
+    change_summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    chat_origin_id TEXT,
+    authority_fingerprint TEXT NOT NULL DEFAULT 'legacy-trusted:v1',
+    publication_authority_json TEXT,
+    UNIQUE(pipeline_id,version),
+    UNIQUE(pipeline_id,definition_hash,authority_fingerprint)
 );
 
 CREATE TABLE journal_entries (

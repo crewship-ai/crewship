@@ -48,7 +48,7 @@ func fixture(t *testing.T) (*Service, *restricteddispatch.TextRunner) {
 	}
 	exec(`INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('key','w','Key',?,'API_KEY','OPENAI','owner')`, cipher)
 	exec(`INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('key-grant','agent','key','OPENAI_API_KEY')`)
-	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('routine','w','private-work','Private',?,?,'crew','active')`, routine, hash(routine))
+	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status,head_version) VALUES('routine','w','private-work','Private',?,?,'crew','active',0)`, routine, hash(routine))
 	store := access.Store{DB: db}
 	for _, user := range []string{"h1", "h2"} {
 		m, err := store.Membership(t.Context(), user, "w")

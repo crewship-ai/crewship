@@ -684,14 +684,21 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 
 	// Target with unparseable DSL.
 	badTarget := fakePipeline(t, "bad-child", "not json", "crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, badTarget); err != nil {
+		t.Fatal(err)
+	}
+	goodTarget := fakePipeline(t, "good-child",
+		`{"dsl_version":"1.0","name":"good-child","inputs":[{"name":"a"},{"name":"b"}],"steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"a={{ inputs.a }}"}]}`,
+		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, goodTarget); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "bad-child" {
 			return badTarget, nil
 		}
 		if slug == "good-child" {
-			return fakePipeline(t, "good-child",
-				`{"dsl_version":"1.0","name":"good-child","inputs":[{"name":"a"},{"name":"b"}],"steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"a={{ inputs.a }}"}]}`,
-				"crew_a", "agent_lead"), nil
+			return goodTarget, nil
 		}
 		return nil, errors.New("backend exploded")
 	}))

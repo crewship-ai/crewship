@@ -41,8 +41,8 @@ func seedAgentRunPipeline(t *testing.T, db *sql.DB, wsID, id, slug string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	def := `{"name":"` + slug + `","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 0)`,
 		id, wsID, slug, slug, def, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}
@@ -363,8 +363,8 @@ func TestPipelineWebhooks_Fire_ApprovalWait_ParksWaiting(t *testing.T) {
 		`{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES ('pln_appr', ?, 'appr-hook', 'appr-hook', ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES ('pln_appr', ?, 'appr-hook', 'appr-hook', ?, 'hash', ?, ?, ?, 0)`,
 		wsID, def, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}
@@ -430,8 +430,8 @@ func seedConcurrencyGatedPipeline(t *testing.T, db *sql.DB, wsID, id, slug strin
 	now := time.Now().UTC().Format(time.RFC3339)
 	def := `{"name":"` + slug + `","concurrency_key":"serial","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 0)`,
 		id, wsID, slug, slug, def, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}

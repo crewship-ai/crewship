@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -14,6 +15,19 @@ import (
 // already covered by sibling tests. This fills the three CRUD/audit
 // methods the admin UI + dispatcher rely on.
 // ---------------------------------------------------------------------------
+
+// seedWebhookTarget creates ordinary legacy storage in the webhook's actual
+// workspace. It supplies no publication, execution receipt or paid-test proof.
+func seedWebhookTarget(t *testing.T, db *sql.DB, workspace, pipelineID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO workspaces(id) VALUES(?) ON CONFLICT(id) DO NOTHING`, workspace); err != nil {
+		t.Fatal(err)
+	}
+	const raw = `{"dsl_version":"1.0","name":"webhook-fixture","steps":[]}`
+	if _, err := db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,head_version) VALUES(?,?,?,?,?,?,0)`, pipelineID, workspace, pipelineID, pipelineID, raw, definitionHash(raw)); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func saveWebhookForTest(t *testing.T, store *WebhookStore, wsID, name, pipelineID string) *Webhook {
 	t.Helper()
@@ -50,7 +64,7 @@ func TestWebhookStore_List_OrdersByCreatedAtDesc(t *testing.T) {
 	// webhook lands first (admin UI shows newest at top).
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_list", "list-target")
+	seedWebhookTarget(t, db, "ws_list", "pln_list")
 	store := NewWebhookStore(db)
 
 	// Insert three; stagger created_at via direct UPDATE so the order
@@ -86,7 +100,7 @@ func TestWebhookStore_List_HidesSoftDeleted(t *testing.T) {
 	// A soft-deleted webhook must vanish from List entirely.
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_hide", "hide-target")
+	seedWebhookTarget(t, db, "ws_hide", "pln_hide")
 	store := NewWebhookStore(db)
 
 	keep := saveWebhookForTest(t, store, "ws_hide", "keep", "pln_hide")
@@ -110,11 +124,12 @@ func TestWebhookStore_List_HidesSoftDeleted(t *testing.T) {
 func TestWebhookStore_List_ScopedByWorkspace(t *testing.T) {
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_scope", "scope-target")
+	seedWebhookTarget(t, db, "ws_scope_a", "pln_scope")
+	seedWebhookTarget(t, db, "ws_scope_b", "pln_scope_b")
 	store := NewWebhookStore(db)
 
 	_ = saveWebhookForTest(t, store, "ws_scope_a", "ours", "pln_scope")
-	_ = saveWebhookForTest(t, store, "ws_scope_b", "theirs", "pln_scope")
+	_ = saveWebhookForTest(t, store, "ws_scope_b", "theirs", "pln_scope_b")
 
 	got, err := store.List(context.Background(), "ws_scope_a")
 	if err != nil {
@@ -133,7 +148,7 @@ func TestWebhookStore_SoftDelete_SetsFieldsAndDisables(t *testing.T) {
 	// signal. Pin all three.
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_sd", "sd-target")
+	seedWebhookTarget(t, db, "ws_sd", "pln_sd")
 	store := NewWebhookStore(db)
 
 	wh := saveWebhookForTest(t, store, "ws_sd", "to-delete", "pln_sd")
@@ -176,7 +191,7 @@ func TestWebhookStore_SoftDelete_AlreadyDeleted_ErrNotFound(t *testing.T) {
 	// twice in practice), but the error signal is the contract.
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_ad", "ad-target")
+	seedWebhookTarget(t, db, "ws_ad", "pln_ad")
 	store := NewWebhookStore(db)
 	wh := saveWebhookForTest(t, store, "ws_ad", "ad", "pln_ad")
 
@@ -194,7 +209,7 @@ func TestWebhookStore_SoftDelete_AlreadyDeleted_ErrNotFound(t *testing.T) {
 func TestWebhookStore_RecordFire_UpdatesLastFiredAtStatusRunIDAndCount(t *testing.T) {
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_rf", "rf-target")
+	seedWebhookTarget(t, db, "ws_rf", "pln_rf")
 	store := NewWebhookStore(db)
 	wh := saveWebhookForTest(t, store, "ws_rf", "rf", "pln_rf")
 
@@ -234,7 +249,7 @@ func TestWebhookStore_RecordFire_FireCountIncrementsPerCall(t *testing.T) {
 	// dispatch history audit.
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_inc", "inc-target")
+	seedWebhookTarget(t, db, "ws_inc", "pln_inc")
 	store := NewWebhookStore(db)
 	wh := saveWebhookForTest(t, store, "ws_inc", "inc", "pln_inc")
 
@@ -258,7 +273,7 @@ func TestWebhookStore_RecordFire_EmptyRunIDStoresNull(t *testing.T) {
 	// distinguishes "no run" from "empty run id".
 	db := openWebhookTestDB(t)
 	defer db.Close()
-	seedPipeline(t, db, "pln_null", "null-target")
+	seedWebhookTarget(t, db, "ws_null", "pln_null")
 	store := NewWebhookStore(db)
 	wh := saveWebhookForTest(t, store, "ws_null", "null", "pln_null")
 

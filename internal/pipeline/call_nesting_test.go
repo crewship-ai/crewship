@@ -89,9 +89,15 @@ func TestExecutor_RuntimeCycle_Rejected(t *testing.T) {
 	a := fakePipeline(t, "cyc-a",
 		`{"dsl_version":"1.0","name":"cyc-a","steps":[{"id":"cb","type":"call_pipeline","pipeline_slug":"cyc-b"}]}`,
 		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, a); err != nil {
+		t.Fatal(err)
+	}
 	b := fakePipeline(t, "cyc-b",
 		`{"dsl_version":"1.0","name":"cyc-b","steps":[{"id":"ca","type":"call_pipeline","pipeline_slug":"cyc-a"}]}`,
 		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, b); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		switch slug {
 		case "cyc-a":
@@ -140,6 +146,9 @@ func TestExecutor_ParentBudget_BoundsChild(t *testing.T) {
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"},`+
 			`{"id":"c2","type":"agent_run","agent_slug":"cagent","prompt":"2"}]}`,
 		"crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+		t.Fatal(err)
+	}
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "child-c" {
 			return child, nil

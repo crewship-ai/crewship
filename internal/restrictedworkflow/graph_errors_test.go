@@ -32,7 +32,9 @@ func TestGraphCompilationErrorClasses(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
-			_, err = db.Exec(`CREATE TABLE pipelines(id TEXT PRIMARY KEY,workspace_id TEXT,slug TEXT,definition_json TEXT,author_crew_id TEXT,deleted_at TEXT,status TEXT); CREATE TABLE agents(id TEXT,workspace_id TEXT,slug TEXT,restricted_execution_profile TEXT,crew_id TEXT,deleted_at TEXT)`)
+			_, err = db.Exec(`CREATE TABLE pipelines(id TEXT PRIMARY KEY,workspace_id TEXT,slug TEXT,definition_json TEXT,definition_hash TEXT,author_crew_id TEXT,deleted_at TEXT,status TEXT,head_version INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE pipeline_versions(id TEXT PRIMARY KEY,pipeline_id TEXT,version INTEGER,definition_json TEXT,definition_hash TEXT,authority_fingerprint TEXT NOT NULL DEFAULT 'legacy-trusted:v1',publication_authority_json TEXT);
+CREATE TABLE agents(id TEXT,workspace_id TEXT,slug TEXT,restricted_execution_profile TEXT,crew_id TEXT,deleted_at TEXT)`)
 			if err != nil {
 				t.Fatal(err)
 			}

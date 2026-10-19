@@ -40,6 +40,10 @@ func (e *Executor) PrewarmForRun(ctx context.Context, pipelineID, workspaceID st
 		prewarmDebug("load pipeline", pipelineID, err)
 		return
 	}
+	if err := e.store.CheckGenericRun(ctx, p, nil); err != nil {
+		prewarmDebug("publication boundary", pipelineID, err)
+		return
+	}
 	if !routineStatusRunnable(p.Status) || p.AuthorCrewID == "" {
 		return
 	}

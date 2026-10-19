@@ -100,7 +100,8 @@ func TestStoredSchedulePresetValidatesPinnedVersionAndStorageErrors(t *testing.T
 	}
 	// Only the version identity and definition are needed by this read boundary.
 	if _, err := db.Exec(`DROP TABLE IF EXISTS pipeline_versions; CREATE TABLE pipeline_versions (
-chat_origin_id TEXT,pipeline_id TEXT,version INTEGER,definition_json TEXT); INSERT INTO pipeline_versions(pipeline_id,version,definition_json) VALUES ('recipe',1,?)`, presetGateV1); err != nil {
+chat_origin_id TEXT,pipeline_id TEXT,version INTEGER,definition_json TEXT,
+definition_hash TEXT NOT NULL DEFAULT '',authority_fingerprint TEXT NOT NULL DEFAULT 'legacy-trusted:v1',publication_authority_json TEXT); INSERT INTO pipeline_versions(pipeline_id,version,definition_json) VALUES ('recipe',1,?)`, presetGateV1); err != nil {
 		t.Fatal(err)
 	}
 	v := 1
@@ -179,7 +180,7 @@ func TestEnabledScheduleRechecksChangedWakeInputsAndTargetIdentity(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	base := Schedule{Enabled: true, TargetPipelineID: "main", InputsJSON: `{"who":"Alice"}`, WakePipelineID: "wake", WakeInputsJSON: `{"who":"Alice"}`}
+	base := Schedule{WorkspaceID: "ws_test", Enabled: true, TargetPipelineID: "main", InputsJSON: `{"who":"Alice"}`, WakePipelineID: "wake", WakeInputsJSON: `{"who":"Alice"}`}
 	for _, tc := range []struct {
 		name    string
 		change  func(*Schedule)

@@ -51,6 +51,7 @@ func newGoldenScheduleDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// Direct legacy fixture inserts use HEAD0 because they create no archive.
 // goldenSeedAgentPipeline seeds a one-step agent_run pipeline (fires
 // through the real AgentRunner interface via the mockRunner below) —
 // the same shape internal/pipeline/schedules_test.go uses for its main
@@ -60,8 +61,8 @@ func goldenSeedAgentPipeline(t *testing.T, db *sql.DB, id, slug, agentSlug strin
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	def := fmt.Sprintf(`{"name":%q,"steps":[{"id":"s1","type":"agent_run","agent":%q,"prompt":"hi"}]}`, slug, agentSlug)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, last_test_run_passed)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 1)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, last_test_run_passed, head_version)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 1, 0)`,
 		id, goldenScheduleWS, slug, slug, def, now, now, now); err != nil {
 		t.Fatalf("seed pipeline %s: %v", slug, err)
 	}
@@ -78,8 +79,8 @@ func goldenSeedTransformPipeline(t *testing.T, db *sql.DB, id, slug, output stri
 		`{"dsl_version":"1.0","name":%q,"agentless":true,"steps":[{"id":"t","type":"transform","transform":{"input":%q,"expression":"."}}]}`,
 		slug, output)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, last_test_run_passed)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 1)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, last_test_run_passed, head_version)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 1, 0)`,
 		id, goldenScheduleWS, slug, slug, def, now, now, now); err != nil {
 		t.Fatalf("seed pipeline %s: %v", slug, err)
 	}
