@@ -1013,7 +1013,8 @@ func statusForBackupError(err error) int {
 	case errors.Is(err, backup.ErrAdminRequired):
 		return http.StatusForbidden
 	case errors.Is(err, backup.ErrAgentRunning),
-		errors.Is(err, backup.ErrLockHeld):
+		errors.Is(err, backup.ErrLockHeld),
+		errors.Is(err, backup.ErrPrivateArtifactTargetReplacement):
 		return http.StatusConflict
 	case errors.Is(err, backup.ErrFormatTooNew),
 		errors.Is(err, backup.ErrFormatTooOld),

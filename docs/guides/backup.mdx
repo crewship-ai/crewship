@@ -46,6 +46,13 @@ Crew bundles without the classification also require source migration evidence
 that they predate Document creation; missing evidence is refused, not inferred
 from omitted tables. Protected bundles require a migrated target schema.
 
+A valid older bundle cannot remove newer private conversation classification
+from its target. Workspace `--replace` refuses a target with retained private
+artifact conversations. Offline `recover --force` checks the existing database
+before replacing it and refuses such a target too; recover into an empty data
+directory instead. These operations do not replace per-agent diagnostic logs,
+so the retained audience proof must remain available.
+
 ## Key concepts
 
 | Term | What it means here |

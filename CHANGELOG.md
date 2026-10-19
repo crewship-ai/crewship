@@ -21,6 +21,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
 - Keep private Document output private in its source conversation, live delivery and agent diagnostics; audit foreign OWNER inspection before returning copied data.
+- Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
 
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
 
