@@ -91,3 +91,17 @@ it("partitions private cache by the current human before the next identity fetch
   expect(view.result.current.data).toBeUndefined()
   expect(client.getQueryData(["document-chat-results", "workspace", "chat", "human-b"])).toBeUndefined()
 })
+
+
+it("drops deleted result titles immediately even when refresh is unavailable", async () => {
+  const view = mount()
+  await waitFor(() => expect(view.result.current.data?.results).toEqual([row]))
+  let finish!: (value: Response) => void
+  vi.mocked(apiFetch).mockReturnValue(new Promise<Response>(resolve => { finish = resolve }))
+  await act(async () => { events.get("page.deleted")?.() })
+  await waitFor(() => expect(view.result.current.data?.results).toEqual([]))
+  await act(async () => finish(response({ error: "Temporarily unavailable" }, 503)))
+  await waitFor(() => expect(view.result.current.isError).toBe(true))
+  expect(view.result.current.data?.results).toEqual([])
+  expect(view.client.getQueryData(["document-chat-results", "ws /&", "chat /&", "human"])).toEqual({ results: [] })
+})
