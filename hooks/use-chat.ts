@@ -388,7 +388,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   const [deniedScope, setDeniedScope] = useState<string | null>(null)
   const deniedScopeRef = useRef(deniedScope)
   deniedScopeRef.current = deniedScope
-  const authorityReadable = authorityRef.current === authorityKey && deniedScope !== principalKey && deniedConversation !== authorityKey
+  const historyDenied = deniedScope === principalKey || deniedConversation === authorityKey
+  const authorityReadable = authorityRef.current === authorityKey && !historyDenied
     && (!knownHumanRef.current || !!currentUserId) && (!knownWorkspaceRef.current || !!workspaceId)
   const isCurrentAuthority = useCallback(() => authorityRef.current === authorityKey
     && deniedScopeRef.current !== principalKey && deniedConversationRef.current !== authorityKey && authorityReadable, [authorityKey, principalKey, authorityReadable])
@@ -1967,6 +1968,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     loadHistory,
     markHistoryUnavailable,
     markHistoryDenied,
+    historyDenied,
     resubscribeSession,
     isStreaming,
     connectionStatus: (executionProfile === "restricted" ? "connected" : realtimeEnabled ? status : "unavailable") as WSStatus,

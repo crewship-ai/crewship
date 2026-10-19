@@ -408,7 +408,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, resubscribeSession, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
@@ -1016,7 +1016,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const accessMode = useAccessMode()
   const isMobile = useIsMobile()
-  const verifiedChatReadScope = accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
+  const verifiedChatReadScope = !historyDenied && accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
   // Saved Documents have human Page identity, never an agent file/store target.
   const [documentPreview, setDocumentPreview] = useState<{ target: ViewerTarget; scope: string; activation: number } | null>(null)
   const [documentExpanded, setDocumentExpanded] = useState(false)
@@ -1233,7 +1233,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   // One conversation surface, rendered by both the mobile-chat and desktop
   // branches — the two copies had already drifted once; don't re-fork them.
-  const documentResultCards = currentUserId && workspaceId && sessionId && documentsAvailability.data === true
+  const documentResultCards = !historyDenied && currentUserId && workspaceId && sessionId && documentsAvailability.data === true
     ? <DocumentResultCards key={chatReadScope} workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} isStreaming={isStreaming} documentsEnabled onOpenDocument={documentPreviewEnabled ? openSavedDocument : undefined} />
     : null
   const conversationEl = useVirtualChat ? (

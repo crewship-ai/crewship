@@ -364,3 +364,32 @@ it("clears a denied conversation and rejects late data without denying another c
   act(() => hook.result.current.loadHistory([{ id: "allowed", role: "assistant", content: "Authorized other chat", timestamp: new Date() }]))
   expect(hook.result.current.turns[0].parts[0].content).toBe("Authorized other chat")
 })
+
+
+it("exposes sticky conversation denial without denying a new chat or principal", () => {
+  const hook = renderHook(({ session, human, workspace }) => useChat({ sessionId: session, currentUserId: human, workspaceId: workspace, wsUrl: "ws://test", getToken: async () => null }), { initialProps: { session: "s", human: "human", workspace: "workspace" } })
+  expect(hook.result.current.historyDenied).toBe(false)
+  act(() => hook.result.current.markHistoryDenied())
+  expect(hook.result.current.historyDenied).toBe(true)
+  act(() => hook.result.current.loadHistory([]))
+  act(() => hook.result.current.markHistoryUnavailable())
+  expect(hook.result.current.historyDenied).toBe(true)
+  const oldDeny = hook.result.current.markHistoryDenied
+  hook.rerender({ session: "other", human: "human", workspace: "workspace" })
+  expect(hook.result.current.historyDenied).toBe(false)
+  act(() => oldDeny())
+  expect(hook.result.current.historyDenied).toBe(false)
+  act(() => hook.result.current.markHistoryDenied())
+  hook.rerender({ session: "other", human: "other-human", workspace: "workspace" })
+  expect(hook.result.current.historyDenied).toBe(false)
+})
+
+it("exposes principal denial across chats and clears it only for another principal scope", () => {
+  const hook = renderHook(({ session, human, workspace }) => useChat({ sessionId: session, currentUserId: human, workspaceId: workspace, wsUrl: "ws://test", getToken: async () => null }), { initialProps: { session: "s", human: "human", workspace: "workspace" } })
+  act(() => window.dispatchEvent(new CustomEvent("auth:session-expired")))
+  expect(hook.result.current.historyDenied).toBe(true)
+  hook.rerender({ session: "other", human: "human", workspace: "workspace" })
+  expect(hook.result.current.historyDenied).toBe(true)
+  hook.rerender({ session: "other", human: "human", workspace: "other-workspace" })
+  expect(hook.result.current.historyDenied).toBe(false)
+})

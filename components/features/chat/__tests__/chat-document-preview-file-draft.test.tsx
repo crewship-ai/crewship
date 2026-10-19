@@ -9,7 +9,7 @@ const chat = vi.hoisted(() => ({
   turns: [{ id: "saved-turn", role: "assistant", parts: [], timestamp: new Date() }],
   sendMessage: vi.fn(), stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(),
   loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(),
-  isStreaming: false, connectionStatus: "connected",
+  historyDenied: false, isStreaming: false, connectionStatus: "connected",
 }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chat }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }) }))
@@ -35,6 +35,7 @@ import { useArtifactStore } from "@/stores/artifact-store"
 import { useDrawerStore } from "@/stores/drawer-store"
 
 beforeEach(() => {
+  chat.historyDenied = false
   useArtifactStore.getState().closeAll()
   useDrawerStore.setState({ open: true, activeTab: "artifacts" })
   global.fetch = vi.fn((input: RequestInfo | URL) => {
@@ -66,4 +67,19 @@ it.each(["File draft", "Context draft"])("retains the same unsaved %s input acro
   expect(screen.queryByRole("region", { name: "Document preview" })).not.toBeInTheDocument()
   expect(screen.getByRole("textbox", { name: label })).toBe(input)
   expect(input).toHaveValue("Unsaved work stays in this mounted child")
+})
+
+
+it("removes cached source titles and the open saved preview immediately after source denial", async () => {
+  const props = { agentId: "agent-1", agentSlug: "riley", sessionId: "sess-1", askForms: null }
+  const view = render(<ChatPanel {...props} />)
+  fireEvent.click(await screen.findByRole("link", { name: "Open document Creation title" }))
+  expect(await screen.findByRole("heading", { name: "Current saved title" })).toBeInTheDocument()
+  expect(screen.getByText("Saved current body")).toBeInTheDocument()
+  chat.historyDenied = true
+  view.rerender(<ChatPanel {...props} />)
+  expect(screen.queryByText("Creation title")).not.toBeInTheDocument()
+  expect(screen.queryByText("Current saved title")).not.toBeInTheDocument()
+  expect(screen.queryByText("Saved current body")).not.toBeInTheDocument()
+  expect(screen.queryByRole("region", { name: "Document preview" })).not.toBeInTheDocument()
 })
