@@ -108,7 +108,7 @@ func slidesHumanError(w http.ResponseWriter, err error) {
 	code, message := 500, "Slides authority failed"
 	switch {
 	case errors.Is(err, errSlidesHumanAccess):
-		code, message = 403, "Slides access denied"
+		code, message = 404, "Slides not found"
 	case errors.Is(err, slides.ErrNotFound):
 		code, message = 404, "Slides not found"
 	case errors.Is(err, slides.ErrConflict), errors.Is(err, slides.ErrDuplicate):

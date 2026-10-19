@@ -66,7 +66,7 @@ func TestSlidesHumanReadInitialize(t *testing.T) {
 		t.Fatalf("state %s", read.Body)
 	}
 	wantCode(t, call(f.boss, "GET", base+"/revisions/1", ""), 200, "exact revision")
-	wantCode(t, call(f.wsAdmin, "GET", base, ""), 403, "admin private denial")
+	wantCode(t, call(f.wsAdmin, "GET", base, ""), 404, "admin private denial")
 	wantCode(t, call(f.boss, "POST", base+"/initialize", strings.Replace(body, "init", "changed", 1)), 409, "changed mutation")
 	for _, op := range []string{"patch", "restore", "reorder"} {
 		if call(f.boss, "POST", base+"/"+op, body).Code == 200 {
@@ -198,7 +198,7 @@ func TestSlidesHumanScopedCredentials(t *testing.T) {
 	}
 	wantCode(t, f.do(readToken, "POST", base+"/initialize?workspace_id=ws-old", body), 403, "read-only cannot initialize")
 	wantCode(t, f.do(writeToken, "POST", base+"/initialize?workspace_id=ws-old", body), 200, "pages:write initialize")
-	wantCode(t, f.do(writeToken, "GET", base+"?workspace_id=ws-old", ""), 403, "write-only cannot read")
+	wantCode(t, f.do(writeToken, "GET", base+"?workspace_id=ws-old", ""), 404, "write-only cannot read")
 	wantCode(t, f.do(readToken, "GET", base+"?workspace_id=ws-old", ""), 200, "pages:read")
 	for _, header := range []string{"X-Internal-Token", actingAgentSlugHeader} {
 		req := httptest.NewRequest("GET", base+"?workspace_id=ws-old", nil)
@@ -206,7 +206,7 @@ func TestSlidesHumanScopedCredentials(t *testing.T) {
 		req.Header.Set(header, "synthetic-agent")
 		response := httptest.NewRecorder()
 		f.r.ServeHTTP(response, req)
-		wantCode(t, response, 403, "agent header denied")
+		wantCode(t, response, 404, "agent header denied")
 	}
 }
 
