@@ -1547,8 +1547,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
       <aside aria-label={documentTarget ? "Saved document panel" : undefined} hidden={!documentTarget}
         className={cn("min-h-0 min-w-0 shrink-0", documentExpanded ? "w-full" : "w-[45%] min-w-[20rem] max-w-full")}>{savedDocumentPanel}</aside>
-      {executionProfile === "trusted" && !documentTarget && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
-      {executionProfile === "trusted" && !documentTarget && (!artifactOpen || artifactFocus) && <RightDrawer>
+      <div style={{ display: documentTarget ? "none" : "contents" }} inert={Boolean(documentTarget)}>
+      {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         {(drawerActiveTab === "work" ? decisionPanel ?? proposalPanel ?? issuePanel : null) ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
@@ -1560,9 +1561,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         />
         }
       </RightDrawer>}
+      {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
+      </div>
       {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-
-      {executionProfile === "trusted" && !documentTarget && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}
