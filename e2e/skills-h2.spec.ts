@@ -90,14 +90,16 @@ test.describe("Skills desktop", () => {
     await expect(cli).not.toContainText("update --all")
   })
 
-  test("L01 bulk bar offers Give to crew only", async ({ page }) => {
+  // ODCH-SK-07 (#3694): Archive joined Give to crew once the server could archive.
+  test("L01 bulk bar offers Give to crew and Archive", async ({ page }) => {
     await seed(page)
     await page.goto("/skills")
     await rows(page).first().locator("[role=checkbox]").click()
     const bar = page.getByRole("toolbar", { name: "Selected skills" })
     await expect(bar).toContainText("1 selected")
     await expect(bar.getByRole("button", { name: "Give to crew" })).toBeVisible()
-    for (const gone of ["Update", "Move to folder", "Archive"]) await expect(bar.getByRole("button", { name: gone })).toHaveCount(0)
+    await expect(bar.getByRole("button", { name: "Archive" })).toBeVisible()
+    for (const gone of ["Update", "Move to folder"]) await expect(bar.getByRole("button", { name: gone })).toHaveCount(0)
     await bar.getByRole("button", { name: "Give to crew" }).click()
     await expect(page.locator("[data-slot=give-to-picker]")).toBeVisible()
   })
@@ -187,13 +189,15 @@ test.describe("Skills desktop", () => {
     await expect(page.locator("[data-slot=skill-md-source]")).toContainText("name:")
   })
 
-  test("L08 Activity button opens Activity with the skill filter (or Used by › Recent uses until then)", async ({ page }) => {
+  // ODCH-SK-14 (#3694): Activity can filter by skill, so the action opens it.
+  test("L08 Activity opens Activity filtered to the skill", async ({ page }) => {
     await seed(page)
     const { skills } = await api(page)
     await page.goto(`/skills?skill=${skills[0].id}`)
-    await page.getByRole("button", { name: "Skill activity" }).click()
-    await expect(page).toHaveURL(/tab=used/)
-    await expect(page.getByText("Recent uses")).toBeVisible()
+    await page.getByRole("link", { name: "Skill activity" }).click()
+    await expect(page).toHaveURL(/\/activity\?.*skill/)
+    // The filter stays on: a chip names the skill (not the unfiltered list).
+    await expect(page.getByText(/^Skill: /).first()).toBeVisible()
   })
 
   test("L09 Add skill › Write it opens the editor; Copy into this workspace pre-fills a new slug", async ({ page }) => {
