@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Preserve the configured v1 audit/journal root in encrypted instance recovery kits after secret re-encryption; successful envelope conversion does not authorize retiring that root.
+
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
