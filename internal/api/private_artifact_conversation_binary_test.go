@@ -62,6 +62,8 @@ func TestPrivateArtifactConversationAudienceThroughBinary(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build actual binary: %v %s", err, out)
 	}
+	// Even a broken audience gate must not scan an existing backup directory.
+	sandboxBackupsHome(t) // After the one binary build; does not relocate Go caches.
 	for _, user := range []string{author, admin, owner} {
 		t.Run(user, func(t *testing.T) {
 			session, err := sessions.NewDBStore(pages.db).Create(t.Context(), user, "fixture", "127.0.0.1", auth.RefreshTokenTTL)
@@ -104,6 +106,20 @@ func TestPrivateArtifactConversationAudienceThroughBinary(t *testing.T) {
 					}
 				} else if err != nil || !strings.Contains(string(output), result.Title) {
 					t.Fatalf("authorized binary %v response: %v", args[:2], err)
+				}
+				if user == admin && args[1] == "debug" {
+					// Actual SQL Page deletion/FK cascade, not HTTP-delete acceptance.
+					execOrFatal(t, pages.db, `DELETE FROM pages WHERE id=?`, result.PageID)
+					var privatePages int
+					if err := pages.db.QueryRow(`SELECT count(*) FROM pages WHERE workspace_id=? AND private_audience=1`, workspace).Scan(&privatePages); err != nil || privatePages != 0 {
+						t.Fatalf("last private Page deletion setup: count=%d err=%v", privatePages, err)
+					}
+					backupCmd := exec.CommandContext(ctx, binary, "backup", "list", "--format", "json")
+					backupCmd.Dir, backupCmd.Env = dir, cmd.Env
+					backupOutput, backupErr := backupCmd.CombinedOutput()
+					if backupErr == nil || !strings.Contains(string(backupOutput), "403") || strings.Contains(string(backupOutput), result.Title) || strings.Contains(string(backupOutput), result.Slug) {
+						t.Fatalf("ADMIN binary backup list ignored retained context: exit=%v", backupErr)
+					}
 				}
 				if user == owner {
 					var after int
