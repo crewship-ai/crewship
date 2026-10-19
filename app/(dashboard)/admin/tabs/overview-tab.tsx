@@ -257,7 +257,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 </a>
               )}
             </div>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-label text-muted-foreground [&>span]:whitespace-nowrap">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-label text-muted-foreground [&>span]:whitespace-nowrap">
               {version ? (
                 <>
                   {version.commit && <span title={version.commit}>{version.commit.slice(0, 9)}{version.dirty ? "+dirty" : ""}</span>}
@@ -268,7 +268,7 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : (
                 <Skeleton className="h-3.5 w-64" />
               )}
-            </p>
+            </div>
           </div>
           <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
             {health === null || posture === null ? (

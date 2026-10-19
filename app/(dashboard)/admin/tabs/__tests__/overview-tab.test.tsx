@@ -300,3 +300,12 @@ describe("PAR-094/095 one-line card headers", () => {
     }
   })
 })
+
+// A paragraph cannot hold a block: the build line's loading skeleton is a
+// <div>, so inside a <p> React reports a hydration error on every load.
+describe("valid markup while the build loads", () => {
+  it("puts no block element inside a paragraph", () => {
+    const { container } = renderTab({ version: null })
+    expect(container.querySelector("p div")).toBeNull()
+  })
+})
