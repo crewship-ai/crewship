@@ -47,6 +47,26 @@ const filters = () => screen.getByRole("group", { name: "Style categories" })
 // The owner, 19 Oct: 42 large previews made the card five screens long. The
 // gallery is now one live preview of the chosen style, category chips and a
 // compact grid of palettes; hovering a palette shows it in the preview.
+
+describe("Gaming packs (#3790)", () => {
+  it("offers a Gaming chip and an Afterglow palette that previews itself", () => {
+    render(<AppearanceSection />)
+    expect(within(filters()).getByRole("button", { name: "Gaming" })).toBeTruthy()
+    fireEvent.mouseEnter(within(gallery()).getByRole("radio", { name: "Afterglow" }))
+    expect(preview().getAttribute("data-style")).toBe("afterglow")
+    expect(screen.getByText("Dark only")).toBeTruthy()
+  })
+
+  it("picking Afterglow stores it, moves the theme to Dark and keeps the sail-blue accent", () => {
+    theme = "light"
+    render(<AppearanceSection />)
+    fireEvent.click(screen.getByRole("radio", { name: "Afterglow" }))
+    expect(stored().style).toBe("afterglow")
+    expect(setTheme).toHaveBeenCalledWith("dark")
+    expect(document.documentElement.getAttribute("data-style")).toBe("afterglow")
+    expect(document.documentElement.getAttribute("data-accent")).toBe("blue")
+  })
+})
 describe("the gallery (STY-01)", () => {
   it("is a Style card above Theme, with one compact palette per style", () => {
     render(<AppearanceSection />)
