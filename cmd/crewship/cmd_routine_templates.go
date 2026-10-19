@@ -8,6 +8,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // `crewship routine templates …` mirrors /workspaces/{ws}/pipeline-templates
@@ -154,10 +156,11 @@ var routineTemplatesDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := deleteJSON(client, templatesPath(client, "/"+url.PathEscape(args[0]))); err != nil {
+		if err := deleteJSON(client, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-templates/%s", client.GetWorkspaceID(), url.PathEscape(args[0]))); err != nil {
 			return err
 		}
-		fmt.Printf("Deleted template %s.\n", args[0])
+		// A receipt goes to stderr so `-f json | jq` stays clean (#2086).
+		cli.PrintSuccess(fmt.Sprintf("Deleted template %s.", args[0]))
 		return nil
 	},
 }

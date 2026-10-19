@@ -7,6 +7,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // Routine folders (ODCH-RT-01): `crewship routine folders …` mirrors
@@ -115,7 +117,8 @@ var routineFoldersDeleteCmd = &cobra.Command{
 		if err := deleteJSON(client, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-folders/%s", client.GetWorkspaceID(), url.PathEscape(args[0]))); err != nil {
 			return err
 		}
-		fmt.Printf("Deleted folder %s. Its routines are unfiled.\n", args[0])
+		// A receipt goes to stderr so `-f json | jq` stays clean (#2086).
+		cli.PrintSuccess(fmt.Sprintf("Deleted folder %s. Its routines are unfiled.", args[0]))
 		return nil
 	},
 }
