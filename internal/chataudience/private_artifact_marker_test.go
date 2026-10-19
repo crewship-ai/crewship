@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
@@ -14,7 +15,13 @@ func TestPrivateArtifactContextMigrationBackfillsAndCannotBeCleared(t *testing.T
 	db := testutil.NewMemDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := database.MigrateSkipping(t.Context(), db, logger, "private_artifact_conversation_context"); err != nil {
-		t.Fatal(err)
+		if !strings.Contains(err.Error(), `no migration is named "private_artifact_conversation_context"`) {
+			t.Fatal(err)
+		}
+		// RED before registration still uses a real fully migrated old schema.
+		if err := database.Migrate(t.Context(), db, logger); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, q := range []string{
 		`INSERT INTO workspaces(id,name,slug) VALUES('marker-ws','Marker','marker')`,
