@@ -108,11 +108,11 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	pending := object(map[string]any{
 		"id": str(), "pipeline_slug": str(), "pinned_version": nullable("integer"), "debounce_key": str(),
 		"priority": integer(), "fire_at": str(), "expires_at": nullable("string"), "next_attempt_at": nullable("string"),
-		"status": map[string]any{"type": "string", "enum": []string{"pending", "fired", "failed", "expired", "cancelled"}},
-		"run_id": str(), "dispatch_attempts": integer(), "last_error": str(), "can_cancel": boolean(),
+		"status":      map[string]any{"type": "string", "enum": []string{"pending", "fired", "failed", "expired", "cancelled"}},
+		"reason_code": str(), "run_id": str(), "dispatch_attempts": integer(), "last_error": str(), "can_cancel": boolean(),
 		"inputs": map[string]any{"type": "object", "additionalProperties": true, "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs."},
 	})
-	pending["required"] = []string{"inputs", "pinned_version", "id", "pipeline_slug", "priority", "fire_at", "expires_at", "next_attempt_at", "status", "run_id", "dispatch_attempts", "last_error", "can_cancel"}
+	pending["required"] = []string{"inputs", "pinned_version", "id", "pipeline_slug", "priority", "fire_at", "expires_at", "next_attempt_at", "status", "run_id", "dispatch_attempts", "last_error", "can_cancel", "reason_code"}
 	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", pending)
 	add("/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}", "WorkspacePendingRunResponseV1", pending)
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "WorkspacePipelineWebhooksResponseV1", object(map[string]any{

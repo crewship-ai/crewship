@@ -326,6 +326,7 @@ func pendingCapacityBackoff(attempt int) time.Duration {
 
 func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr PendingRun, runErr error) {
 	now := d.now().UTC()
+	pr.ReasonCode = "dispatch_failed"
 	status, reason := "failed", "Deferred start could not be dispatched. Check server logs using the pending ID."
 	var next *time.Time
 	// A dispatch cut short by cancellation (server shutdown or deploy) never
@@ -333,12 +334,15 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 	// being finalized as failed. fireOne only gets here without a run ID.
 	interrupted := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil
 	if errors.Is(runErr, ErrConcurrencyLimitReached) || interrupted {
+		pr.ReasonCode = "routine_capacity"
 		waiting := "Waiting for routine execution capacity."
 		if interrupted && !errors.Is(runErr, ErrConcurrencyLimitReached) {
+			pr.ReasonCode = "retry_backoff"
 			waiting = "Dispatch was interrupted before the run started; it will be retried."
 		}
 		switch {
 		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
+			pr.ReasonCode = "capacity_expired"
 			status, reason = "expired", "Deferred start expired before execution capacity became available."
 		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
 			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
@@ -351,8 +355,10 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 			next = &at
 		}
 	} else if errors.Is(runErr, ErrPinnedVersionNotFound) {
+		pr.ReasonCode = "version_missing"
 		reason = "The accepted recipe version is no longer available."
 	} else if errors.Is(runErr, ErrRoutineNotActive) {
+		pr.ReasonCode = "routine_inactive"
 		reason = "The routine is no longer active."
 	}
 	// Finalize even when the execution context was canceled at shutdown. This
