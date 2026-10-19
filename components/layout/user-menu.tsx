@@ -22,6 +22,7 @@ import { useSidebarOptional } from "@/components/ui/sidebar"
 import { buildLabel, editionName } from "@/lib/build-info"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
+import { afterSignOut } from "@/lib/signed-out"
 
 import { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL } from "@/lib/crewship-links"
 export { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL }
@@ -231,7 +232,7 @@ export function UserMenu({ placement = "toolbar" }: {
           <div className="p-1">
             <MenuSheetItem
               className={ITEM}
-              onClick={() => { signOut().then(() => window.location.href = "/login") }}
+              onClick={() => { signOut().then((ok) => { window.location.href = afterSignOut(ok) }) }}
             >
               <LogOut className={ICON} />
               Log out

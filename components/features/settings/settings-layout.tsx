@@ -32,6 +32,7 @@ import { useFocusSettingsCard } from "./use-focus-settings-card"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { SectionMoved } from "./sections/section-moved"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
+import { afterSignOut } from "@/lib/signed-out"
 
 interface Org {
   id: string
@@ -170,7 +171,7 @@ function RestrictedAccountSettings() {
         <SessionsSection
           restricted
           sessionExpires={session?.expires}
-          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+          onSignOut={() => signOut().then((ok) => { window.location.href = afterSignOut(ok) })}
         />
       </div>
     </div>
@@ -344,7 +345,7 @@ function SettingsPage() {
       return (
         <SessionsSection
           sessionExpires={session?.expires}
-          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+          onSignOut={() => signOut().then((ok) => { window.location.href = afterSignOut(ok) })}
         />
       )
     }

@@ -41,6 +41,17 @@ Clicking the pill opens **System status**: engine and real-time state separately
 
 Restricted sessions are not offered Notification preferences or Connect CLI.
 
+## When a session ends
+
+When a session ends, the app shows one of these full screens instead of a bare login form. **Sign in** opens the form, and after signing in you return to the address you were on.
+
+| Screen | When |
+|---|---|
+| **You're signed out** · "See you next time." with **Sign in again** and **Back to crewship.ai** | You pressed **Log out** in this browser, or in another tab of it. |
+| **Your session expired** · "Sign in again to pick up where you left off." | The session timed out. The screen says which account was signed in, with **Use another account**. If you had an unsent chat message, it adds "Your unsent message to <agent> is kept on this device": the draft stays in the browser and comes back when you sign in as the same person. |
+| **Signed out on this device** · "Someone signed you out from another device or an admin ended your session." | The server ended the session. This happens when it was signed out from Settings → Sessions & tokens or another device, revoked by an admin, the account was suspended, or its refresh token was reused. |
+| **Crewship is restarting** · "This usually takes under a minute. The page reconnects on its own." | The server cannot be reached while the app is opening. The screen counts down to the next try (every 10 s) and has **Try now**. Nobody is signed out. The sail pulses unless your system asks for reduced motion. |
+
 ## Settings → Appearance
 
 `/settings?tab=appearance`

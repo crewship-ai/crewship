@@ -33,6 +33,8 @@ import { AppearanceSync } from "@/components/layout/appearance-sync"
 import { WorkspaceAccentStyle } from "@/components/layout/workspace-accent"
 import { SidebarPreference } from "@/components/layout/sidebar-preference"
 import { useAppStore } from "@/lib/store"
+import { afterSignOut } from "@/lib/signed-out"
+import { RestartingScreen } from "@/components/branding/signed-out-screen"
 
 export default function DashboardLayout({
   children,
@@ -40,7 +42,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const { status, data: session } = useSession()
-  const { signOut } = useAuth()
+  const { signOut, unreachable, retryNow } = useAuth()
   useLayoutEffect(() => {
     if (status !== "loading") bindWorkspaceSession(status === "authenticated" ? session?.user.id ?? null : null)
   }, [status, session?.user.id])
@@ -100,6 +102,11 @@ export default function DashboardLayout({
   }, [status, unknownPath])
 
   if (status === "unauthenticated" && unknownPath) return <BareNotFound />
+  // The backend cannot be reached while the app opens (#3787): there is no
+  // shell to put a banner in yet, and nobody is signed out.
+  if (status === "loading" && unreachable) {
+    return <RestartingScreen retryAt={unreachable.retryAt} onRetry={() => retryNow?.()} />
+  }
   if (status === "loading" || status === "unauthenticated") {
     return <AppFrame />
   }
@@ -112,7 +119,7 @@ export default function DashboardLayout({
       <AppFrame
         state="error"
         onRetry={() => { void refreshWorkspaces() }}
-        onSignOut={() => { void signOut().then(() => { window.location.href = "/login" }) }}
+        onSignOut={() => { void signOut().then((ok) => { window.location.href = afterSignOut(ok) }) }}
       />
     ) : (
       <AppFrame />

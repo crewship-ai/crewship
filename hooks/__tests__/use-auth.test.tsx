@@ -98,14 +98,18 @@ describe("useAuth / AuthProvider", () => {
     expect(result.current.session).toBeNull()
   })
 
-  it("settles on 'unauthenticated' when a cold load can never reach the backend", async () => {
+  it("reports a cold load that can never reach the backend as unreachable, not signed out (#3787)", async () => {
     // Persistent network error on the very first (cold) load — no session was
-    // ever established, so after exhausting retries the UI must fall back to
-    // 'unauthenticated' and offer login rather than spin forever.
+    // ever established. Falling back to 'unauthenticated' sent the person to a
+    // login form that could not work either; the provider now stays
+    // 'loading', reports `unreachable` (the app shows "Crewship is
+    // restarting") and keeps trying. use-auth-signed-out.test.tsx covers the
+    // retry loop.
     mockFetch.mockRejectedValue(new Error("conn refused"))
 
     const { result } = renderHook(() => useAuth(), { wrapper })
-    await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
+    await waitFor(() => expect(result.current.unreachable).not.toBeNull())
+    expect(result.current.status).toBe("loading")
     expect(result.current.session).toBeNull()
   })
 

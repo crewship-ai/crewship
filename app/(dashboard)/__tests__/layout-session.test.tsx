@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { loginRedirectUrl } from "@/lib/login-redirect"
 
-const auth = vi.hoisted(() => ({ status: "loading" as string, signOut: vi.fn(async () => {}) }))
+const auth = vi.hoisted(() => ({ status: "loading" as string, signOut: vi.fn(async () => {}), unreachable: null as { retryAt: number } | null, retryNow: vi.fn() }))
 vi.mock("@/hooks/use-auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-auth")>()
   const session = { user: { id: "u-1", name: "Pavel", email: "p@example.test", avatar_url: "", is_instance_admin: false }, expires: "2099-01-01" }
@@ -18,7 +18,7 @@ vi.mock("@/hooks/use-auth", async (importOriginal) => {
     ...actual,
     useSession: () => ({ data: data(), status: auth.status }),
     useSessionSafe: () => ({ data: data(), status: auth.status }),
-    useAuth: () => ({ session: data(), status: auth.status, signIn: vi.fn(), signOut: auth.signOut, refresh: vi.fn() }),
+    useAuth: () => ({ session: data(), status: auth.status, signIn: vi.fn(), signOut: auth.signOut, refresh: vi.fn(), unreachable: auth.unreachable, retryNow: auth.retryNow }),
     useIsInstanceAdmin: () => false,
   }
 })
@@ -55,6 +55,8 @@ beforeEach(() => {
   vi.useFakeTimers()
   auth.status = "loading"
   auth.signOut.mockClear()
+  auth.unreachable = null
+  auth.retryNow.mockClear()
   workspacesStatus = 200
   _resetWorkspaceStoreForTests()
   replaced = null
@@ -88,13 +90,31 @@ describe("dashboard layout — before the session", () => {
     expect(replaced).toBe("/login?redirect=%2Fissues%2FCRE-12%3Ftab%3Dactivity")
   })
 
-  it("an explicit Log out goes to the plain login page", () => {
+  it("an explicit Log out goes to the signed-out screen (#3787)", () => {
     auth.status = "authenticated"
     workspacesStatus = 500
     const view = mount()
     auth.status = "unauthenticated"
     view.rerender(<QueryClientProvider client={new QueryClient()}><DashboardLayout><div /></DashboardLayout></QueryClientProvider>)
-    expect(replaced).toBe("/login")
+    expect(replaced).toBe("/login?reason=signed-out")
+  })
+
+  it("a backend that cannot be reached while the app opens shows Crewship is restarting, with the next try and Try now (#3787)", () => {
+    vi.setSystemTime(1_000_000)
+    auth.unreachable = { retryAt: Date.now() + 12_000 }
+    mount()
+    const state = screen.getByRole("heading", { level: 1, name: "Crewship is restarting" }).closest("[data-slot=signed-out-screen]")!
+    expect(state).toHaveAttribute("data-state", "restarting")
+    expect(state).toHaveTextContent("This usually takes under a minute. The page reconnects on its own.")
+    expect(state).toHaveTextContent("Next try in 12 s · Try now")
+    act(() => { vi.advanceTimersByTime(2_000) })
+    expect(state).toHaveTextContent("Next try in 10 s")
+    // The sail pulses only where motion is allowed (globals.css).
+    expect(state.querySelector(".signed-out-pulse")).not.toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Try now" }))
+    expect(auth.retryNow).toHaveBeenCalledOnce()
+    expect(replaced).toBeNull()
+    expect(document.querySelector(".app-frame")).toBeNull()
   })
 
   it("workspaces error renders the error card with Retry in the frame and keeps Log out reachable", async () => {
@@ -159,7 +179,7 @@ describe("loginRedirectUrl", () => {
     ["/", "", false, "/login"],
     ["/login", "?x=1", false, "/login"],
     ["//evil.example", "", false, "/login"],
-    ["/issues", "", true, "/login"],
+    ["/issues", "", true, "/login?reason=signed-out"],
   ])("%s%s (had session: %s) → %s", (path, search, had, expected) => {
     expect(loginRedirectUrl(path, search, had)).toBe(expected)
   })
