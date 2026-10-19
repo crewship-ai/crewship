@@ -9,11 +9,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/retention"
 )
 
@@ -78,6 +78,19 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	// Creating one's own workspace keeps its existing route contract, but
+	// stale authenticated context cannot bypass current account restrictions.
+	var activeTrusted bool
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.suspended_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM workspace_members m WHERE m.user_id=u.id AND m.access_mode='restricted'))`, user.ID).Scan(&activeTrusted); err != nil {
+		replyInternalError(w, h.logger, "check workspace creator", err)
+		return
+	}
+	if !activeTrusted {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	_, err = tx.ExecContext(r.Context(),
 		"INSERT INTO workspaces (id, name, slug, preferred_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
@@ -96,7 +109,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
+	memberResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'OWNER', ?, ?)",
 		memberID, wsID, user.ID, now, now)
 	if err != nil {
@@ -104,9 +117,19 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	notify, err := appendWorkspaceOwnerAudit(r.Context(), tx, h.policyJournal, memberResult, wsID, memberID, user.ID, "workspace_create")
+	if err != nil {
+		replyInternalError(w, h.logger, "audit initial workspace owner", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit tx", err)
 		return
+	}
+
+	if notify != nil {
+		notify()
 	}
 
 	writeJSON(w, http.StatusCreated, workspaceResponse{

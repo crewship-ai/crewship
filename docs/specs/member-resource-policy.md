@@ -633,6 +633,30 @@ journal records who changed whose access and when; it cannot reconstruct old
 capability sets. This contract does not add chained auditing for instance-level
 CLI token creation or revocation.
 
+### Initial workspace ownership audit
+
+Workspace creation, signup without a redeemed invitation, and initial bootstrap
+append `member.access_changed` with `action=owner_created` in the same transaction
+as the first OWNER membership. The actor and subject are the actual inserted
+owner. The stored event has `old_membership=null`, the exact new membership
+(including native timestamp defaults and nullable capabilities), its sorted
+effective capabilities, and `creation_path` identifying the three entry points.
+Workspace creation rechecks the current account and global trusted ceiling in
+that transaction; the new OWNER row is not evidence of a prior grant.
+
+Audit failure, ignored writes, altered final membership or commit failure roll
+back creation. Notifications run only after commit, including bootstrap's
+committed `session_pending` response. Bootstrap retains its instance CLI-token
+audit and final token acknowledgement; invitation signup still joins the invited
+workspace without a personal-owner event. Generic signup responses retain their
+existing anti-enumeration behavior.
+
+General journal GET/SSE/WebSocket serialization exposes only `member_id`,
+`subject_user_id`, `action` and `creation_path` for this event. It leaves the
+canonical payload unchanged and provides no new administrative snapshot reader.
+No email, password, token or invitation proof enters the owner audit. This does
+not add audit coverage to onboarding crew creation or Page/folder ACL writers.
+
 ### Per-frame realtime authorization cost
 
 Workspace, keeper, journal, crew, files, agent, mission and page channels resolve

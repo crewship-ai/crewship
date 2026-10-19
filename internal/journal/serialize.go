@@ -46,6 +46,16 @@ func SerializeEntry(e Entry) map[string]any {
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
 		payload := maps.Clone(e.Payload)
+		if e.Type == EntryMemberAccessChanged && payload["action"] == "owner_created" {
+			// Only fixed public identifiers belong in a workspace-wide feed.
+			// Keep the complete membership snapshot in the canonical entry.
+			payload = map[string]any{}
+			for _, key := range []string{"member_id", "subject_user_id", "action", "creation_path"} {
+				if value, ok := e.Payload[key]; ok {
+					payload[key] = value
+				}
+			}
+		}
 		_, receiptOrigin := payload["human_authority"]
 		_, delegatedOrigin := payload["chat_origin_id"]
 		if receiptOrigin || delegatedOrigin {
