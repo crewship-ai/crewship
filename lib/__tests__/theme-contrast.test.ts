@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
-import { ACCENTS, DEFAULT_ACCENT, accentBlock, type AccentId } from "@/lib/theme/accents"
+import { ACCENTS, DEFAULT_ACCENT, STYLE_ACCENTS, accentBlock, type AccentId, type StyleAccentId } from "@/lib/theme/accents"
 
 // Guards the WCAG AA (4.5:1) contrast of the dark-theme brand tokens in
 // app/globals.css. The app renders dark-only (<html className="dark">),
@@ -105,7 +105,7 @@ function block(theme: Theme): string {
   return css.slice(start, end)
 }
 
-function token(theme: Theme, name: string, accent: AccentId = DEFAULT_ACCENT): string {
+function token(theme: Theme, name: string, accent: AccentId | StyleAccentId = DEFAULT_ACCENT): string {
   const m = block(theme).match(new RegExp(`--${name}:\\s*([^;]+);`))
   expect(m, `--${name} present in the ${theme} theme`).toBeTruthy()
   const value = (m as RegExpMatchArray)[1].trim()
@@ -116,7 +116,7 @@ function token(theme: Theme, name: string, accent: AccentId = DEFAULT_ACCENT): s
   return brand as string
 }
 
-function tokenRgb(theme: Theme, name: string, accent?: AccentId): [number, number, number] {
+function tokenRgb(theme: Theme, name: string, accent?: AccentId | StyleAccentId): [number, number, number] {
   const value = token(theme, name, accent)
   const hex = value.match(/^#([0-9a-fA-F]{6})$/)
   if (hex) return hexToRgb(value)
@@ -127,7 +127,9 @@ function tokenRgb(theme: Theme, name: string, accent?: AccentId): [number, numbe
 }
 
 const WHITE = luminanceFromRgb([1, 1, 1])
-const ACCENT_IDS = ACCENTS.map((a) => a.id)
+// The picker's accents and the hidden ones a style carries: all on Harbor too,
+// since the accent outlives a switch of style.
+const ACCENT_IDS = [...ACCENTS.map((a) => a.id), ...STYLE_ACCENTS.map((a) => a.id)]
 
 // The dark theme carries the full axe-parity suite (the app is dark by default).
 describe.each(ACCENT_IDS)("accent %s — dark theme WCAG AA contrast (axe color-contrast parity)", (accent) => {

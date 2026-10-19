@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
-import { ACCENTS, accentBlock, type AccentId } from "@/lib/theme/accents"
+import { ACCENTS, accentBlock, isAccentId, type AccentId, type StyleAccentId } from "@/lib/theme/accents"
 import { STYLES, HARBOR } from "@/lib/theme/appearance-style"
 
 // STY-04 (PRD): every style passes the same AA gate as Harbor, or it does not
@@ -79,7 +79,7 @@ describe("the shipped styles", () => {
   })
 })
 
-describe.each(shipped.flatMap((s) => s.schemes.map((scheme) => [s.id, scheme] as const)))("style %s — %s", (id, scheme) => {
+describe.each(shipped.flatMap((s) => s.schemes.map((scheme) => [s.id, scheme, s.accent] as const)))("style %s — %s", (id, scheme, ownAccent) => {
   const own = styleBlock(id, scheme)
   const tokens = new Map([...BASE[scheme], ...own])
   const get = (name: string): RGB => rgbOf(tokens.get(name) ?? (() => { throw new Error(`--${name} missing`) })())
@@ -116,8 +116,9 @@ describe.each(shipped.flatMap((s) => s.schemes.map((scheme) => [s.id, scheme] as
     for (const tone of ["warn", "ok"]) expect(ratio(fg(), get(`chip-${tone}-bg`)), tone).toBeGreaterThanOrEqual(4.5)
   })
 
-  it.each(ACCENTS.map((a) => a.id))("accent %s: brand text on background and card, text on the selection tint ≥ 4.5:1", (accent: AccentId) => {
-    const brand = accentBlock(accentsCss, accent, scheme)
+  // Every picker accent, plus the hidden accent this style carries.
+  it.each([...ACCENTS.map((a) => a.id as string), ...(isAccentId(ownAccent) ? [] : [ownAccent as string])])("accent %s: brand text on background and card, text on the selection tint ≥ 4.5:1", (accent) => {
+    const brand = accentBlock(accentsCss, accent as AccentId | StyleAccentId, scheme)
     const rgb = (n: string) => rgbOf(brand.get(n)!)
     for (const n of ["brand", "brand-ink"]) {
       for (const s of ["background", "card"]) expect(ratio(rgb(n), get(s)), `${n} on ${s}`).toBeGreaterThanOrEqual(4.5)

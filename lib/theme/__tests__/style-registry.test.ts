@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 
-import { isAccentId } from "@/lib/theme/accents"
+import { ACCENTS, isAccentChoice, STYLE_ACCENTS } from "@/lib/theme/accents"
 import {
   STYLES,
   HARBOR,
@@ -35,12 +35,51 @@ const BRANDS = [
   "claude", "anthropic", "openai", "chatgpt", "linear", "gitlab", "github", "miro", "cloudflare", "cursor", "notion", "framer", "lovable", "vercel", "stripe", "slack",
   "supabase", "railway", "sentry", "raycast", "perplexity", "mistral", "v0", "coda", "height", "attio", "arc", "superhuman", "figma", "pitch", "discord", "intercom",
   "datadog", "grafana", "atlassian", "jira", "fluent", "microsoft", "posthog", "macos", "apple", "ios", "android", "google", "windows", "gnome", "ubuntu", "kde",
+  "confluence", "pajamas", "primer", "geist", "segoe", "roboto", "yaru", "breeze", "libadwaita", "plasma", "material", "sequoia", "tahoe", "mica", "canonical",
 ]
+
+// Wireframe v67 shows 42 styles under product names. The app carries each one
+// under a neutral name: wireframe id -> app id. Harbor and Harbor Night are
+// Crewship's own and have no counterpart.
+const WIREFRAME_PORTS: Record<string, string> = {
+  openai: "ink", lovable: "blush", mistral: "sunrise", v0: "pewter", linear: "slate", vercel: "mono", github: "cool-grey", railway: "plum",
+  raycast: "ember", height: "lilac", attio: "quartz", pitch: "orchid", intercom: "charcoal", grafana: "signal",
+  claude: "terracotta", cloudflare: "beacon", cursor: "carbon", supabase: "meadow", gitlab: "heather", sentry: "aubergine", perplexity: "lagoon",
+  notion: "parchment", coda: "coral", arc: "iris", superhuman: "twilight", miro: "marigold", framer: "cobalt", figma: "studio", slack: "mulberry",
+  discord: "console", stripe: "bluebell", datadog: "regal", atlassian: "cerulean", fluent: "denim", posthog: "sandstone", macos: "frost", ios: "pebble",
+  android: "wisteria", windows: "pane", gnome: "dove", ubuntu: "tangerine", kde: "skyline",
+}
 
 describe("registry (STY-01, STY-04)", () => {
   it("Harbor is first and the default; the first batch follows", () => {
     expect(STYLES[0]).toBe(HARBOR)
     expect(STYLES.length).toBeGreaterThanOrEqual(13)
+  })
+
+  it("carries every wireframe v67 style under a neutral name: 42 ports + Harbor + Harbor Night", () => {
+    expect(Object.keys(WIREFRAME_PORTS)).toHaveLength(42)
+    expect(STYLES).toHaveLength(44)
+    const ids = new Set(STYLES.map((s) => s.id))
+    for (const [wireframe, id] of Object.entries(WIREFRAME_PORTS)) expect(ids.has(id), `${wireframe} -> ${id}`).toBe(true)
+    expect(new Set(Object.values(WIREFRAME_PORTS)).size).toBe(42)
+    expect(new Set(STYLES.map((s) => s.name)).size).toBe(STYLES.length)
+  })
+
+  it("styles are listed grouped by category, in gallery order", () => {
+    const order = STYLES.map((s) => STYLE_CATEGORIES.indexOf(s.category))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
+
+  it("each style carries its own accent from the design; the hidden ones are not in the picker", () => {
+    const style = (id: string) => STYLES.find((s) => s.id === id)!
+    expect(style("terracotta").accent).toBe("clay")
+    expect(ACCENTS.map((a) => a.id as string)).not.toContain("clay")
+    const hidden = new Set(STYLE_ACCENTS.map((a) => a.id as string))
+    const carried = STYLES.filter((s) => s.id !== "harbor" && s.id !== "harbor-night").map((s) => s.accent as string)
+    for (const a of carried) expect(hidden.has(a), a).toBe(true)
+    // Every hidden accent belongs to some style; one spare is not allowed.
+    expect([...hidden].filter((a) => !carried.includes(a))).toEqual([])
+    expect(new Set(carried).size).toBeGreaterThanOrEqual(40)
   })
 
   it("ids are unique and well-formed", () => {
@@ -62,7 +101,7 @@ describe("registry (STY-01, STY-04)", () => {
       expect(s.name.length, s.id).toBeGreaterThan(1)
       expect(s.blurb.length, s.id).toBeGreaterThan(10)
       expect(STYLE_CATEGORIES, s.id).toContain(s.category)
-      expect(isAccentId(s.accent), s.id).toBe(true)
+      expect(isAccentChoice(s.accent), s.id).toBe(true)
       expect(s.swatch, s.id).toHaveLength(4)
       for (const c of s.swatch) expect(c).toMatch(/^#[0-9A-F]{6}$/)
     }
