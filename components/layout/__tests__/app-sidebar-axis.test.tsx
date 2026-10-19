@@ -32,6 +32,8 @@ describe("one axis", () => {
     expect(rule("  .rail-row")).toMatch(/height: 36px !important;[^}]*padding: 0 6px !important;/)
     expect(rule('  [data-collapsible="icon"] .rail-row')).toMatch(/width: 40px !important;[^}]*padding: 0 6px !important;/)
     expect(rule("  .rail-tile > svg")).toMatch(/width: 18px; height: 18px;/)
+    // The panel's inset is 8 px, not p-2 (which follows --spacing): 8 + 6 + 14 = 28.
+    expect(css).toMatch(/\[data-variant="inset"\] > \[data-slot="sidebar-container"\] \{ padding: 8px !important; \}/)
   })
 
   it("search has no border and wears a rail tile like the rows", () => {
