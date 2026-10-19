@@ -70,17 +70,19 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     const gallery = page.getByRole("radiogroup", { name: "Style" })
     await expect(gallery).toBeVisible()
     await expect(gallery.getByRole("radio", { name: "Harbor", exact: true })).toHaveAttribute("aria-checked", "true")
-    const harborGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    // Plum and Harbor share a white page; the rail is what differs.
+    const ground = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--sidebar").trim())
+    const harborGround = await ground()
 
     await gallery.getByRole("radio", { name: "Plum", exact: true }).click()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
     expect(await page.evaluate((k) => localStorage.getItem(k), STYLE_KEY)).toContain('"style":"plum"')
-    await expect.poll(() => attr(page, "data-accent")).toBe("violet")
+    await expect.poll(() => attr(page, "data-accent")).toBe("grape") // Plum carries its own hidden accent, not the nearest picker one
 
     await page.reload()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
     await expect(page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Plum", exact: true })).toHaveAttribute("aria-checked", "true")
-    const plumGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    const plumGround = await ground()
     expect(plumGround).not.toBe(harborGround)
 
     await page.getByRole("button", { name: "Reset style" }).click()
@@ -91,6 +93,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
     const radius = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-slot='card'], .rounded-card")!).borderTopLeftRadius))
+    await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
     const before = await radius()
     await page.getByRole("group", { name: "Corners" }).getByRole("button", { name: "Sharp" }).click()
     await expect.poll(() => attr(page, "data-knob-radius")).toBe("sharp")
