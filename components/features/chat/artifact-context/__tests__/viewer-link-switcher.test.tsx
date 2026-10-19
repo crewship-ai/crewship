@@ -5,7 +5,7 @@ import { switchableLinks, type ConversationLink, type LinkedViewerTarget } from 
 
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
-const t = (pageId: string, revision?: number): LinkedViewerTarget => revision === undefined ? { workspaceId: "w", pageId, mode: "latest" } : { workspaceId: "w", pageId, mode: "revision", revision }
+const t = (pageId: string, revision?: number): LinkedViewerTarget => revision === undefined ? { workspaceId: "w", pageId, mode: "latest" } : { workspaceId: "w", pageId, mode: "revision", revision, checkpointId: `cp-${pageId}-${revision}` }
 const links: ConversationLink[] = [
   { target: t("a", 1), title: "Plan", accessible: true },
   { target: t("a"), title: "Plan", accessible: true },
@@ -48,4 +48,8 @@ it("announces the target label politely and renders nothing with the flag off", 
   view.unmount()
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "")
   expect(render(<ViewerLinkSwitcher links={links} current={t("a", 1)} onSwitch={() => {}} />).container.innerHTML).toBe("")
+})
+it("a pinned revision without a checkpoint id is not a valid target", () => {
+  const bad = { workspaceId: "w", pageId: "a", mode: "revision", revision: 1, checkpointId: "" } as LinkedViewerTarget
+  expect(switchableLinks([{ target: bad, title: "Plan", accessible: true }])).toEqual([])
 })
