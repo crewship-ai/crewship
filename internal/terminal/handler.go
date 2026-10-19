@@ -236,18 +236,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	// Before resource admission only credential checks apply. Afterwards every
+	// emitted info/error/pong also requires a fresh resource snapshot.
+	var resourceUser, resourceCrew string
+	current := func(ctx context.Context) bool {
+		if resourceUser == "" {
+			return auth.StreamCredentialCurrent(ctx)
+		}
+		return h.streamAccessCurrent(ctx, resourceUser, resourceCrew)
+	}
 	writeError := func(message string) {
-		if auth.StreamCredentialCurrent(r.Context()) {
+		if current(r.Context()) {
 			h.writeError(ws, message)
 		}
 	}
 	writeInfo := func(message string) {
-		if auth.StreamCredentialCurrent(r.Context()) {
+		if current(r.Context()) {
 			h.writeInfo(ws, message)
 		}
 	}
 	ws.SetPingHandler(func(message string) error {
-		if !auth.StreamCredentialCurrent(r.Context()) {
+		if !current(r.Context()) {
 			return context.Canceled
 		}
 		return ws.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second))
@@ -369,6 +378,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resourceUser, resourceCrew = userID, init.CrewID
+
 	// Resolve actual crew slug from DB to prevent slug spoofing.
 	// Fail closed: if DB is available but lookup fails, reject the request.
 	var actualSlug string
@@ -394,7 +405,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer h.containerHolder(init.CrewID)()
 	}
 
-	if !auth.StreamCredentialCurrent(r.Context()) {
+	if !current(r.Context()) {
 		return
 	}
 
@@ -580,7 +591,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !auth.StreamCredentialCurrent(r.Context()) {
+	if !current(r.Context()) {
 		return
 	}
 	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
@@ -598,7 +609,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer execResult.Conn.Close()
-	if !auth.StreamCredentialCurrent(r.Context()) {
+	if !current(r.Context()) {
 		return
 	}
 
@@ -618,18 +629,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Store(sessionID, session)
 	defer h.sessions.Delete(sessionID)
 
-	// Ongoing revocation poll for browser sessions: mirror
-	// ws/client.go watchSessionRevocation. Every 30s re-check the session
-	// row and tear the live shell down (cancel the session ctx) if it has
-	// been revoked mid-session, so a force-logout kills an already-open
-	// shell rather than letting it run until the exec exits. Transient
-	// (non-ErrNotFound) lookup errors are TOLERATED — a DB blip must not
-	// kill an active shell. The goroutine exits on ctx.Done() (session /
-	// connection teardown) so it never leaks. CLI (empty sid) and nil-store
-	// paths don't start it.
-	if claims.Sid != "" && h.sessionStore != nil {
-		go h.watchSessionRevocation(ctx, cancel, claims.Sid)
-	}
+	// One existing periodic watcher now covers standing resource authority for
+	// every shell, including CLI. Browser-session polling retains its separate
+	// transient-error behavior; resource checks always fail closed.
+	go h.watchSessionRevocation(ctx, cancel, claims.Sid, userID, init.CrewID)
 
 	h.logger.Info("terminal session started",
 		"session_id", sessionID,
@@ -651,7 +654,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, err := execResult.Conn.Read(buf)
 			if n > 0 {
-				if !auth.StreamCredentialCurrent(ctx) {
+				if !current(ctx) {
 					return
 				}
 				if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
@@ -674,7 +677,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			if !auth.StreamCredentialCurrent(ctx) {
+			if !current(ctx) {
 				return
 			}
 			switch msgType {
@@ -722,7 +725,9 @@ func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error
 	var role string
 	err := h.db.QueryRowContext(ctx, `
 		SELECT wm.role FROM workspace_members wm
-		JOIN crews c ON c.workspace_id = wm.workspace_id
+		JOIN crews c ON c.workspace_id = wm.workspace_id AND c.deleted_at IS NULL
+		JOIN workspaces w ON w.id = wm.workspace_id AND w.deleted_at IS NULL
+		JOIN users u ON u.id = wm.user_id AND u.suspended_at IS NULL
 		WHERE wm.user_id = ? AND c.id = ? AND wm.access_mode = 'trusted'
 		AND NOT EXISTS (SELECT 1 FROM workspace_members restricted
 		  WHERE restricted.user_id=wm.user_id AND restricted.access_mode='restricted')
@@ -781,19 +786,28 @@ func (h *Handler) NotifyUserRevoked(userID string) {
 	})
 }
 
-// watchSessionRevocation polls user_sessions every 30s for the given sid
-// and cancels the terminal session (tearing down the live shell) once the
-// row is definitively revoked — gone (ErrNotFound) or !Active. It mirrors
-// ws/client.go watchSessionRevocation, including the crucial transient-
-// error tolerance: a lookup error that is NOT ErrNotFound (DB timeout,
-// momentary unavailability) is logged and skipped so a backend hiccup
-// doesn't kill a working shell. The next tick retries; if the row really
-// is revoked, ErrNotFound on a later tick closes it cleanly.
-//
-// The goroutine exits when ctx is done (the session/connection ended) so
-// it does not leak. cancel() unblocks the main handler's <-ctx.Done(),
-// which force-closes the exec conn and the websocket.
-func (h *Handler) watchSessionRevocation(ctx context.Context, cancel context.CancelFunc, sid string) {
+// streamAccessCurrent is a conservative security fallback, not a cached H1
+// authority lease: one fresh composed SQL query per data/control delivery.
+// Failure closes the stream; it never mutates/revokes a source credential.
+func (h *Handler) streamAccessCurrent(ctx context.Context, userID, crewID string) bool {
+	if !auth.StreamCredentialCurrent(ctx) {
+		return false
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := h.verifyAccess(checkCtx, userID, crewID); err != nil {
+		h.logger.Debug("terminal standing access check failed", "error", err)
+		return false
+	}
+	return auth.StreamCredentialCurrent(ctx)
+}
+
+// watchSessionRevocation checks idle standing authority on a 30s default
+// cadence with a configured 5s query context deadline. Native SQLite busy
+// handling can outlast cancellation; no hard elapsed closure bound is promised.
+// CLI has no session row but still checks resources. A resource error closes fail-closed;
+// browser-session lookup errors retain the existing retry behavior.
+func (h *Handler) watchSessionRevocation(ctx context.Context, cancel context.CancelFunc, sid, userID, crewID string) {
 	interval := h.revokePollInterval
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -806,6 +820,13 @@ func (h *Handler) watchSessionRevocation(ctx context.Context, cancel context.Can
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !h.streamAccessCurrent(ctx, userID, crewID) {
+				cancel()
+				return
+			}
+			if sid == "" || h.sessionStore == nil {
+				continue
+			}
 			lookupCtx, lookupCancel := context.WithTimeout(ctx, 5*time.Second)
 			sess, err := h.sessionStore.Get(lookupCtx, sid)
 			lookupCancel()
