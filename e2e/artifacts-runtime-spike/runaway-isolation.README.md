@@ -6,6 +6,20 @@ Existing `supportsPageApplications` remains desktop-Chromium-only. Author code
 receives the exact Go `pagebuild.ServeRuntime` response, including its unchanged
 `worker-src 'none'`, expected-parent binding, nonce and isolation headers.
 
+The original failed run `39174810362` reached both local HTTPS URLs in Firefox
+157 and WebKit 27.2 but recorded zero completed checks and a lifecycle deadline.
+That report does not distinguish failed bootstrap/port admission from starvation
+after runaway starts. It proves neither successful Stop nor a frozen host.
+The diagnostic first requires a finite author canary through the real bootstrap,
+then an independent host probe/child MessagePort ACK, before a separate command
+enters the unchanged marker-plus-infinite-loop body. Node records completed
+phases immediately. Failure triggers a separately bounded host-channel probe;
+no answer is reported as unresponsive-or-disconnected, not OS CPU evidence.
+Canary/ACK success never substitutes for the actual loop marker or any of the
+original seven success checks. All deadlines still fail closed, and original
+failed artifacts remain separate evidence. This is diagnostic qualification of
+the existing #3670 spike, with full R1 acceptance still false.
+
 The small Go fixture uses a response recorder; the Node TLS fixture replays those
 actual headers/body at `https://runtime.artifacts.test` for a trusted local host
 `https://studio.crewship.test`. A loopback-only CONNECT tunnel admits just these

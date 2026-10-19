@@ -84,7 +84,11 @@ function fixture() {
 }
 
 async function iframeChecks(page, result) {
+  result.iframePhases = [];
+  const phase = name => { result.iframePhase = name; result.iframePhases.push({ name, nodeTime: Date.now() }); };
+  phase('host-navigation');
   await page.goto(studio, { timeout: 5000 });
+  phase('mount-real-bootstrap');
   await page.evaluate(({ runtimeURL }) => {
     window.events = []; window.framesCreated = 0; window.oldPortClosed = false;
     const fresh = `window.__crewshipPagesPort.addEventListener('message',e=>{if(e.data?.type==='probe')window.__crewshipPagesPort.postMessage({type:'fresh-probe',id:e.data.id})});window.__crewshipPagesPort.postMessage({type:'fresh-executed'});`;
@@ -103,22 +107,44 @@ async function iframeChecks(page, result) {
       document.querySelector('iframe').remove();
     };
     document.querySelector('#restart').onclick = () => window.mount(fresh);
-    window.mount("window.__crewshipPagesPort.postMessage({type:'iframe-loop-started'});while(true){}");
+    // Finite author code proves bootstrap/nonce/parent/port admission before
+    // runaway is requested. No alternate bootstrap or capability is installed.
+    window.mount(`const port=window.__crewshipPagesPort;
+      port.addEventListener('message',event=>{
+        if(event.data?.type==='phase-probe'&&event.data.id==='stop-spike-ready')port.postMessage({type:'phase-ack',id:event.data.id});
+        if(event.data?.type==='start-loop'&&event.data.id==='stop-spike-loop'){port.postMessage({type:'iframe-loop-started'});while(true){}}
+      });
+      port.postMessage({type:'finite-canary-ready'});`);
   }, { runtimeURL: runtime + runtimePath });
+  phase('await-finite-canary');
+  await bounded(page.waitForFunction(() => window.events.some(event => event.type === 'finite-canary-ready'), undefined, { timeout: 2000 }), 2500, 'finite canary');
+  result.finiteCanary = { admitted: true };
+  phase('await-independent-port-ack');
+  await page.evaluate(() => window.activePort.postMessage({ type: 'phase-probe', id: 'stop-spike-ready' }));
+  await bounded(page.waitForFunction(() => window.events.some(event => event.type === 'phase-ack' && event.id === 'stop-spike-ready'), undefined, { timeout: 2000 }), 2500, 'port phase ACK');
+  result.finiteCanary.portAcknowledged = true;
+  phase('issue-separate-start-loop');
+  // The loop still starts synchronously in the child message handler. Do not
+  // replace the loop with a timer or count its scheduling as actual execution.
+  await bounded(page.evaluate(() => window.activePort.postMessage({ type: 'start-loop', id: 'stop-spike-loop' })), 1500, 'host loop dispatch');
+  phase('await-actual-loop-marker');
   await page.waitForFunction(() => window.events.some(event => event.type === 'iframe-loop-started'), undefined, { timeout: 3000 });
   result.checks.push('iframe-loop-actually-started');
+  phase('host-response-during-loop');
   const ticks = await page.evaluate(() => window.ticks);
   await page.waitForFunction(before => window.ticks > before + 5, ticks, { timeout: 2000 });
   result.checks.push('host-responsive-during-iframe-loop');
   const child = page.frames().find(frame => frame.parentFrame());
   assert.ok(child, 'Expected actual runtime frame');
   let detached = false; page.on('framedetached', frame => { if (frame === child) detached = true; });
+  phase('click-stop');
   await page.locator('#stop').click({ timeout: 2000 });
   assert.equal(detached, true, 'Browser did not report context detachment');
   assert.equal(child.isDetached(), true);
   assert.equal(await page.locator('iframe').count(), 0);
   assert.equal(await page.evaluate(() => window.oldPortClosed), true);
   result.checks.push('stop-detaches-context-and-closes-old-port');
+  phase('restart-and-probe');
   await page.locator('#restart').click({ timeout: 2000 });
   await page.waitForFunction(() => window.events.some(event => event.type === 'fresh-executed'), undefined, { timeout: 3000 });
   await page.evaluate(() => {
@@ -135,6 +161,7 @@ async function iframeChecks(page, result) {
   result.checks.push('host-responsive-after-stop-and-restart');
   result.iframeObservations = await page.evaluate(() => ({ events: window.events, oldPortClosed: window.oldPortClosed, framesCreated: window.framesCreated }));
   await page.evaluate(() => { window.activePort.close(); document.querySelector('iframe').remove(); });
+  phase('iframe-lifecycle-complete');
 }
 
 async function workerControl(page, context, result) {
@@ -175,7 +202,7 @@ async function workerControl(page, context, result) {
 let failed = false;
 for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
   const result = { browser: name, checks: [], unexpected: [], status: 'not-run' }; report.browsers.push(result);
-  let lab, server, browser, watchdog;
+  let lab, server, browser, watchdog, page;
   try {
     lab = await fixture();
     server = await engine.launchServer({ headless: true, timeout: 10000 });
@@ -188,14 +215,28 @@ for (const [name, engine] of [['firefox', firefox], ['webkit', webkit]]) {
       if ([`${studio}/`, runtime + runtimePath].includes(route.request().url())) return route.continue();
       result.unexpected.push(route.request().url()); return route.abort();
     });
-    const page = await context.newPage(); page.setDefaultTimeout(3000);
+    page = await context.newPage(); page.setDefaultTimeout(3000);
+    result.pageErrors = [];
+    page.on('pageerror', error => { if (result.pageErrors.length < 8) result.pageErrors.push(String(error.message).slice(0, 512)); });
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     await bounded(iframeChecks(page, result), 14000, 'iframe lifecycle');
     await bounded(workerControl(page, context, result), 7000, 'host worker control');
     assert.deepEqual(result.unexpected, []); assert.deepEqual(lab.blocked, []);
     assert.equal(result.watchdogKilled, undefined);
     result.status = 'pass';
-  } catch (error) { failed = true; result.status = browser ? 'fail' : 'environment-blocked'; result.error = String(error.message); }
+  } catch (error) {
+    failed = true; result.status = browser ? 'fail' : 'environment-blocked'; result.error = String(error.message);
+    if (page) {
+      // A Node-owned timer remains independent of the page event loop. Failure
+      // to answer is a channel observation, not proof of OS/process CPU state.
+      try {
+        const observation = await bounded(page.evaluate(() => ({ ticks: window.ticks, events: window.events ?? [], framesCreated: window.framesCreated })), 1000, 'post-failure host probe');
+        result.failureHostProbe = { status: 'responsive', observation };
+      } catch (probeError) {
+        result.failureHostProbe = { status: 'unresponsive-or-disconnected', error: String(probeError.message) };
+      }
+    }
+  }
   finally {
     clearTimeout(watchdog);
     result.assertionCount = result.checks.length;
