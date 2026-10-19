@@ -70,15 +70,14 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     const gallery = page.getByRole("radiogroup", { name: "Style" })
     await expect(gallery).toBeVisible()
     await expect(gallery.getByRole("radio", { name: "Harbor", exact: true })).toHaveAttribute("aria-checked", "true")
-    // Plum and Harbor share a white content ground in light; their app ground
-    // (the sidebar, --sidebar: #F3F4F6 vs #F7F5FB) is what differs.
-    const ground = () => page.evaluate(() => getComputedStyle(document.querySelector("[data-slot=sidebar-inner]")!).backgroundColor)
+    // Plum and Harbor share a white page; the rail is what differs.
+    const ground = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--sidebar").trim())
     const harborGround = await ground()
 
     await gallery.getByRole("radio", { name: "Plum", exact: true }).click()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
     expect(await page.evaluate((k) => localStorage.getItem(k), STYLE_KEY)).toContain('"style":"plum"')
-    await expect.poll(() => attr(page, "data-accent")).toBe("violet")
+    await expect.poll(() => attr(page, "data-accent")).toBe("grape") // Plum carries its own hidden accent, not the nearest picker one
 
     await page.reload()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
@@ -95,6 +94,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
     await page.goto("/settings?tab=appearance")
     await expect(page.getByRole("group", { name: "Corners" })).toBeVisible()
     const radius = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-slot='card'], .rounded-card")!).borderTopLeftRadius))
+    await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
     const before = await radius()
     await page.getByRole("group", { name: "Corners" }).getByRole("button", { name: "Sharp" }).click()
     await expect.poll(() => attr(page, "data-knob-radius")).toBe("sharp")
