@@ -42,6 +42,7 @@ import { VaultHealth, buildVaultHealth } from "@/components/features/credentials
 import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
 import { BulkDeleteDialog, BulkTierDialog } from "@/components/features/credentials/bulk-actions"
 import { NewFolderDialog } from "@/components/features/credentials/new-folder-dialog"
+import { EditFolderDialog } from "@/components/features/credentials/edit-folder-dialog"
 import { VaultSpaceCrumb } from "@/components/features/credentials/vault-space-crumb"
 import { VaultCliDialog } from "@/components/features/credentials/vault-cli-dialog"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
@@ -99,7 +100,7 @@ import {
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { useCredentialFolders } from "@/hooks/use-credential-folders"
-import { folderSelectionIds } from "@/lib/credentials/folders"
+import { folderSelectionIds, type CredentialFolder } from "@/lib/credentials/folders"
 
 interface Credential extends VaultSecret {
   description: string | null
@@ -198,6 +199,7 @@ export default function CredentialsPage() {
   const [addOpen, setAddOpen] = React.useState(false)
   const [newPoolOpen, setNewPoolOpen] = React.useState(false)
   const [newFolderOpen, setNewFolderOpen] = React.useState(false)
+  const [editFolder, setEditFolder] = React.useState<CredentialFolder | null>(null)
   const [providerDialog, setProviderDialog] = React.useState<{ initial?: WizardInitial } | null>(null)
   const [cliOpen, setCliOpen] = React.useState(false)
   const [addInitial, setAddInitial] = React.useState<WizardInitial | undefined>(undefined)
@@ -869,6 +871,7 @@ export default function CredentialsPage() {
                 crewsById={readiness.crewsById}
                 folders={folderApi.folders}
                 onNewFolder={canEdit ? () => setNewFolderOpen(true) : undefined}
+                onEditFolder={canEdit ? setEditFolder : undefined}
                 spaces={spaces}
               />
             )}
@@ -885,6 +888,18 @@ export default function CredentialsPage() {
         folders={folderApi.folders}
         canSetPolicy={canBind}
         onCreate={folderApi.create}
+      />
+
+      <EditFolderDialog
+        folder={editFolder}
+        onOpenChange={(o) => { if (!o) setEditFolder(null) }}
+        canSetPolicy={canBind}
+        onSave={async (id, patch) => {
+          const saved = await folderApi.update(id, patch)
+          // Raising the floor can lift secrets already inside.
+          if (patch.min_security_level !== undefined) handleRefresh()
+          return saved
+        }}
       />
 
       {workspaceId && (

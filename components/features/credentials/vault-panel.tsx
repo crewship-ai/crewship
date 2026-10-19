@@ -14,7 +14,7 @@
 
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
-import { AlertTriangle, Clock, CircleDashed, Folder, FolderPlus, KeyRound, PackageX, Sparkles } from "lucide-react"
+import { AlertTriangle, Clock, CircleDashed, Folder, FolderCog, FolderPlus, KeyRound, PackageX, Sparkles } from "lucide-react"
 
 import {
   SidebarActiveChip,
@@ -110,6 +110,8 @@ export interface VaultPanelProps {
   folders?: CredentialFolder[]
   /** Opens the New folder dialog; omitted for people who cannot create folders. */
   onNewFolder?: () => void
+  /** Opens Edit folder for the open folder; omitted for people who cannot edit folders. */
+  onEditFolder?: (folder: CredentialFolder) => void
   spaces: React.ReactNode
 }
 
@@ -130,9 +132,12 @@ export function VaultPanel({
   crewsById,
   folders = [],
   onNewFolder,
+  onEditFolder,
   spaces,
 }: VaultPanelProps) {
   const facets = useSidebarFacets()
+  // Edit folder acts on the one folder that is open.
+  const openFolder = filters.folder.length === 1 ? folders.find((f) => f.id === filters.folder[0]) : undefined
   const set = (patch: Partial<CredentialFilters>) => onFiltersChange({ ...filters, ...patch })
   const toggle = (key: ListKey, value: string) => {
     const list = filters[key]
@@ -257,16 +262,31 @@ export function VaultPanel({
           <SidebarSection
             label="Folders"
             count={folders.length || undefined}
-            actions={onNewFolder ? (
-              <button
-                type="button"
-                onClick={onNewFolder}
-                aria-label="New folder"
-                title="New folder"
-                className="kit-tap inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"
-              >
-                <FolderPlus className="size-3.5" aria-hidden />
-              </button>
+            actions={onNewFolder || (onEditFolder && openFolder) ? (
+              <>
+                {onEditFolder && openFolder && (
+                  <button
+                    type="button"
+                    onClick={() => onEditFolder(openFolder)}
+                    aria-label={`Edit folder ${openFolder.name}`}
+                    title="Edit folder"
+                    className="kit-tap inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"
+                  >
+                    <FolderCog className="size-3.5" aria-hidden />
+                  </button>
+                )}
+                {onNewFolder && (
+                  <button
+                    type="button"
+                    onClick={onNewFolder}
+                    aria-label="New folder"
+                    title="New folder"
+                    className="kit-tap inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"
+                  >
+                    <FolderPlus className="size-3.5" aria-hidden />
+                  </button>
+                )}
+              </>
             ) : undefined}
           >
             {buildFolderTree(folders).map(({ folder, depth, total }) => {
