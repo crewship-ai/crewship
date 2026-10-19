@@ -21,7 +21,7 @@ automation_loop_ready() {
   automation_loop_cli "$deadline" routine records "$1" --limit 500 -f json > "$WORKDIR/cap-a.json" || return 1
   automation_loop_cli "$deadline" routine records "$2" --limit 500 -f json > "$WORKDIR/cap-b.json" || return 1
   automation_loop_cli "$deadline" journal --type automation.depth_exceeded --lines 500 -f json > "$WORKDIR/cap-events.json" || return 1
-  python3 - "$WORKDIR" "$1" "$2" "$3" "$4" "$MAX_CHAIN_DEPTH" <<'PY'
+  python3 - "$WORKDIR" "$1" "$2" "$3" "$4" "$MAX_CHAIN_DEPTH" <<'PY' || return 1
 import json,sys
 try:
     directory,a,b,aid,bid,limit=sys.argv[1:]; limit=int(limit)
@@ -50,7 +50,7 @@ try:
 except (ValueError,TypeError,KeyError,OSError):
     sys.exit(1)
 PY
-  [[ "$?" == 0 ]] && (( $(automation_loop_now) < deadline ))
+  (( $(automation_loop_now) < deadline ))
 }
 
 automation_loop_wait_for_cap() {
