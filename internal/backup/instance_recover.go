@@ -193,6 +193,11 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	rep.Incomplete = append(rep.Incomplete, m.Contents.Incomplete...)
 
 	// 2. The target.
+	if opts.Force {
+		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir); err != nil {
+			return rep, err
+		}
+	}
 	if err := prepareDataDir(dataDir, opts.Force); err != nil {
 		return rep, err
 	}

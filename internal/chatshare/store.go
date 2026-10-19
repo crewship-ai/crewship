@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 const (
@@ -83,7 +85,7 @@ func (s *Store) Create(ctx context.Context, workspaceID, agentID, chatID, issuer
 		  AND c.mode='CHAT' AND (c.origin IS NULL OR c.origin IN ('UI','CLI'))
 		  AND c.created_by IS NOT NULL
 		  AND (a.crew_id IS NULL OR cr.id IS NOT NULL)
-		  AND (c.created_by=? OR wm.role IN ('OWNER','ADMIN'))`,
+		  AND (c.created_by=? OR wm.role IN ('OWNER','ADMIN')) AND (`+chataudience.NoPrivateArtifactContextSQL+`)`,
 		grant.ID, issuerID, hash[:], formatTime(now), formatTime(grant.ExpiresAt),
 		issuerID, chatID, agentID, workspaceID, issuerID)
 	if err != nil {
@@ -191,7 +193,7 @@ func (s *Store) Validate(ctx context.Context, id, token string) (Grant, error) {
 		  AND (c.origin IS NULL OR c.origin IN ('UI','CLI'))
 		  AND c.created_by IS NOT NULL
 		  AND (a.crew_id IS NULL OR cr.id IS NOT NULL)
-		  AND (c.created_by=sh.issued_by_user_id OR wm.role IN ('OWNER','ADMIN'))`, id).
+		  AND (c.created_by=sh.issued_by_user_id OR wm.role IN ('OWNER','ADMIN')) AND (`+chataudience.NoPrivateArtifactContextSQL+`)`, id).
 		Scan(&g.ID, &g.WorkspaceID, &g.AgentID, &g.ChatID, &g.IssuedByUserID,
 			&hash, &created, &expires, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
