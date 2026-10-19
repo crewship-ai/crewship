@@ -51,6 +51,10 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 var ErrExecRefused = errors.New("agent exec refused at the creation gate; no process was created")
 
 type AgentRunRequest struct {
+	// CapturedExit is called only with a validated protected capture timestamp.
+	// It is not populated from model output and never grants terminal authority.
+	CapturedExit func(completedAt string)
+
 	// RuntimeUse pins the concrete container acquired by the caller. RunAgent
 	// retains its own handle, so callers may release theirs after RunAgent
 	// returns even when a detached process still needs the container.
