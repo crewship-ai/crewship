@@ -105,9 +105,9 @@ export function WorkspaceSwitcher() {
               >
                 {workspace ? (
                   <WorkspaceMark name={triggerLabel} logoUrl={shown.logo}
-                    className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
+                    className="rail-tile rail-ws size-7 rounded-lg bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
                 ) : (
-                  <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
+                  <span className="rail-tile rail-ws size-7 rounded-lg bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
                 )}
                 {/* The name gets the whole row, up to two lines. The rail row is
                     36px and the name had ~120px beside the tile and chevron,
