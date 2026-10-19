@@ -114475,6 +114475,11 @@
                             },
                             "type": "object"
                           },
+                          "private_audience": {
+                            "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                            "readOnly": true,
+                            "type": "boolean"
+                          },
                           "publication_version": {
                             "type": "integer"
                           },
@@ -115780,6 +115785,11 @@
                           },
                           "type": "object"
                         },
+                        "private_audience": {
+                          "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "publication_version": {
                           "type": "integer"
                         },
@@ -116112,6 +116122,11 @@
                             }
                           },
                           "type": "object"
+                        },
+                        "private_audience": {
+                          "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                          "readOnly": true,
+                          "type": "boolean"
                         },
                         "publication_version": {
                           "type": "integer"
@@ -116457,6 +116472,11 @@
                               }
                             },
                             "type": "object"
+                          },
+                          "private_audience": {
+                            "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                            "readOnly": true,
+                            "type": "boolean"
                           },
                           "publication_version": {
                             "type": "integer"
@@ -116886,6 +116906,11 @@
                           }
                         },
                         "type": "object"
+                      },
+                      "private_audience": {
+                        "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                        "readOnly": true,
+                        "type": "boolean"
                       },
                       "publication_version": {
                         "type": "integer"
