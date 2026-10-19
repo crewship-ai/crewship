@@ -44,6 +44,12 @@ is redacted, and older records without summary provenance show **Reasoning
 unavailable**. Displayed duration comes from completed server-recorded intervals;
 legacy content does not acquire an estimated timer.
 
+Changing the signed-in user or conversation clears the previous transcript before
+the new source appears. A definitive access denial clears protected history and
+rejects late events, including in restricted chats that use polling. A missing
+new draft is treated as empty; a missing previously confirmed source is denied.
+Temporary server failures preserve the current user’s verified history.
+
 Activity uses correlated tool identities, including nested calls. Failed,
 denied, interrupted and unknown outcomes remain distinct from success. Open a
 step for its permitted details; bounded output and diff previews indicate when

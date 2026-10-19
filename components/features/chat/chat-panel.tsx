@@ -29,6 +29,7 @@ import {
 import { renderAskTemplate } from "@/lib/ask-template"
 import { playSoundOnce } from "@/lib/notification-sound-coordinator"
 import { useChat, type ChatTurn, type HistoryPart } from "@/hooks/use-chat"
+import { checkpointSchema } from "@/lib/chat-event-contract"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
@@ -407,7 +408,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, resubscribeSession, isStreaming, connectionStatus } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
@@ -516,6 +517,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       role: string
       content: string
       parts?: HistoryPart[]
+      checkpoint?: unknown
       run_id?: string
       ts: string
       // The server has always returned this and this type has never named it,
@@ -543,10 +545,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // reading it as existence is what skipped the create and lost the
     // conversation. Only messages that actually came back are proof, and that
     // is recorded below.
-    const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry"> => {
+    const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry" | "denied"> => {
       try {
+        const sourceWasConfirmed = confirmedRowsRef.current.has(chatReadScope)
         const r = await apiFetch(`/api/v1/chats/${sessionSegment}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (r.status === 404) return { messages: [] }
+        if (r.status === 401 || r.status === 403) return "denied"
+        if (r.status === 404) return sourceWasConfirmed ? "denied" : { messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
         return { messages: (data?.messages ?? []) as HistoryMessage[] }
@@ -556,13 +560,20 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     }
 
     const run = async () => {
-      let result: { messages: HistoryMessage[] } | "retry" = "retry"
+      let result: { messages: HistoryMessage[] } | "retry" | "denied" = "retry"
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
         if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
         result = await fetchOnce()
         if (result !== "retry") break
       }
       if (cancelled) return
+
+      if (result === "denied") {
+        markHistoryDenied()
+        setHistoryLoading(false)
+        historySignatureRef.current = "denied"
+        return
+      }
 
       if (result === "retry") {
         // All attempts failed — do NOT wipe existing turns; only stop the
@@ -589,6 +600,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         role: m.role as "user" | "assistant" | "system" | "tool",
         content: m.content,
         parts: m.parts,
+        checkpoint: checkpointSchema.safeParse(m.checkpoint).data,
         runId: m.run_id,
         timestamp: new Date(m.ts),
         metadata: m.metadata,
@@ -598,7 +610,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, chatReadScope, loadHistory, markHistoryUnavailable, historyReloadNonce])
+  }, [sessionId, workspaceId, chatReadScope, loadHistory, markHistoryUnavailable, markHistoryDenied, historyReloadNonce])
 
   // No WebSocket for this chat — a restricted chat never opens one, and a
   // restricted account has none at all — so messages this tab did not send
@@ -610,6 +622,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     workspaceId,
     paused: isStreaming,
     getKnownSignature: () => historySignatureRef.current,
+    isSourceConfirmed: () => confirmedRowsRef.current.has(chatReadScope),
+    onDenied: markHistoryDenied,
     onChange: requestHistoryReload,
   })
 
@@ -950,7 +964,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const handleSlashCommand = useCallback((id: string) => {
     if (id === "regenerate") regenerateWithPin()
-    else if (id === "clear") loadHistory([])
+    else if (id === "clear") loadHistory([], { reset: true })
     else if (id === "search") setSearchOpen(true)
     else if (id === "export") setExportOpen(true)
   }, [regenerateWithPin, loadHistory])

@@ -8,7 +8,7 @@ vi.mock("../virtual-conversation", () => ({ virtualChatEnabled: () => false, Vir
 const chat = vi.hoisted(() => ({
   turns: [{ id: "saved-turn", role: "assistant", parts: [], timestamp: new Date() }],
   sendMessage: vi.fn(), stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(),
-  loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession: vi.fn(),
+  loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(),
   isStreaming: false, connectionStatus: "connected",
 }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chat }))
