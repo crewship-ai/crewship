@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -797,6 +798,76 @@ Examples:
 	},
 }
 
+// inboxCountsResponse mirrors GET /api/v1/inbox/counts.
+type inboxCountsResponse struct {
+	Total  int                         `json:"total" yaml:"total"`
+	Unread int                         `json:"unread" yaml:"unread"`
+	Spaces inboxSpaceCounts            `json:"spaces" yaml:"spaces"`
+	ByKind map[string]inboxSpaceCounts `json:"by_kind" yaml:"by_kind"`
+}
+
+type inboxSpaceCounts struct {
+	Action  int `json:"action" yaml:"action"`
+	Updates int `json:"updates" yaml:"updates"`
+	History int `json:"history" yaml:"history"`
+}
+
+// inboxCountsCmd is the scriptable mirror of GET /api/v1/inbox/counts — the
+// totals the Inbox page labels its spaces and kind filter with, without
+// walking every page of the list.
+var inboxCountsCmd = &cobra.Command{
+	Use:   "counts",
+	Short: "Print inbox totals per space (to handle / updates / history) and per kind",
+	Long: `Return how many inbox items you can see in each space and kind. Backed by
+GET /api/v1/inbox/counts — one request, same visibility as 'inbox list'.
+
+  to handle   active, with a real action behind it (approvals, proposals, blocking items)
+  updates     active, informational
+  history     resolved
+
+Counts are inbox items only; approvals-queue rows and issue tasks that the web
+page merges in are not included.
+
+Examples:
+  crewship inbox counts
+  crewship inbox counts --format json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/inbox/counts")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body inboxCountsResponse
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(body, func() {
+			fmt.Printf("%d items · %d unread\n\n", body.Total, body.Unread)
+			fmt.Printf("%-34s %9s %9s %9s\n", "", "to handle", "updates", "history")
+			fmt.Printf("%-34s %9d %9d %9d\n", "all kinds", body.Spaces.Action, body.Spaces.Updates, body.Spaces.History)
+			kinds := make([]string, 0, len(body.ByKind))
+			for k := range body.ByKind {
+				kinds = append(kinds, k)
+			}
+			sort.Strings(kinds)
+			for _, k := range kinds {
+				c := body.ByKind[k]
+				fmt.Printf("%-34s %9d %9d %9d\n", k, c.Action, c.Updates, c.History)
+			}
+		})
+	},
+}
+
 // inboxBulkCmd groups multi-item state transitions. It submits the id set to
 // the server-side POST /api/v1/inbox/bulk endpoint (one request flips many
 // rows) in chunks of 500 — the endpoint's id cap. The server SKIPS, never
@@ -986,5 +1057,6 @@ func init() {
 	inboxCmd.AddCommand(inboxActCmd)
 	inboxCmd.AddCommand(inboxArchiveCmd)
 	inboxCmd.AddCommand(inboxCountCmd)
+	inboxCmd.AddCommand(inboxCountsCmd)
 	inboxCmd.AddCommand(inboxBulkCmd)
 }

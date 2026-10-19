@@ -525,6 +525,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	r.mux.Handle("GET /api/v1/inbox/counts", authed(wsCtx(http.HandlerFunc(ih.Counts))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.authedMut("PATCH", "/api/v1/inbox/{id}", roleSelf, ih.PatchState)
 	// Acting on a run_needs_human card (B15, #2389): answer resumes the

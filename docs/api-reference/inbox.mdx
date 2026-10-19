@@ -28,6 +28,7 @@ the workspace `OWNER` or `ADMIN` role.
 |---|---|---|
 | GET | [`/api/v1/inbox`](#get-apiv1inbox) | List items (newest-first, with unread count) |
 | GET | [`/api/v1/inbox/count`](#get-apiv1inboxcount) | Unread count for the bell badge |
+| GET | [`/api/v1/inbox/counts`](#get-apiv1inboxcounts) | Totals per space and per kind, for tab and filter labels |
 | GET | [`/api/v1/inbox/{id}`](#get-apiv1inboxid) | Fetch a single item (full body + payload) |
 | PATCH | [`/api/v1/inbox/{id}`](#patch-apiv1inboxid) | Flip an item's state |
 | POST | [`/api/v1/inbox/{id}/act`](#post-apiv1inboxidact) | Act on a `run_needs_human` card: answer (resumes the run), take over, dismiss |
@@ -159,6 +160,32 @@ Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no J
 ```json
 { "unread_count": 7 }
 ```
+
+### `GET /api/v1/inbox/counts`
+
+**Request:** no body. **Response:** `200 OK`; `401` without authenticated workspace context; `500` on a database failure (a partial aggregate is never returned).
+
+How many items the caller can see in each Inbox space and kind, in one request, so a client does not have to walk every page of the list to label its tabs. Same visibility predicate and the same per-caller `unread` definition as List.
+
+```json
+{
+  "total": 6,
+  "unread": 4,
+  "spaces": { "action": 2, "updates": 3, "history": 1 },
+  "by_kind": {
+    "waitpoint":  { "action": 2, "updates": 0, "history": 0 },
+    "failed_run": { "action": 0, "updates": 3, "history": 1 }
+  }
+}
+```
+
+| Space | Items counted |
+|---|---|
+| `action` | Not resolved, and a real source action is behind the item: every `waitpoint`; an `escalation` that is a skill or routine proposal, carries an `escalation_type`, or is an access request with a `request_id`; a `memory_consolidation` with a `proposal_id`; a `schedule_missed` or `schedule_circuit_breaker_tripped` with a `schedule_id`; any other kind with `blocking` set. |
+| `updates` | Not resolved and nothing to act on. |
+| `history` | Resolved. |
+
+`by_kind` has an entry only for kinds that have at least one visible item; an empty inbox returns `{}`. Counts are **inbox items**: approvals-queue rows and issue tasks that the web page merges into its feed, and the page's grouping of repeated advisories, are not included.
 
 ### `GET /api/v1/inbox/{id}`
 
