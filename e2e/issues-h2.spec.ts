@@ -65,8 +65,13 @@ test.describe("S01 desktop", () => {
     expect(text.indexOf("Projects")).toBeLessThan(text.indexOf("Saved views"))
     await page.locator("body").press("1")
     await expect(page.locator("header h1")).toContainText("My work")
-    await page.locator("body").press("2")
-    await expect(page.locator("header h1")).toContainText("All issues")
+    // Keys 1-6 follow v67's order: My work, Needs my reply, Agents working,
+    // Waiting for my review, Blocked, All issues.
+    const views = ["My work", "Needs my reply", "Agents working", "Waiting for my review", "Blocked", "All issues"]
+    for (const [i, name] of views.entries()) {
+      await page.locator("body").press(String(i + 1))
+      await expect(page.locator("header h1")).toContainText(name)
+    }
   })
 
   test("S01 row height 38 and toolbar 48 at 1440", async ({ page }) => {
