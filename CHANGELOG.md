@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Workspace default look.** An owner or admin can set a default style, accent and theme for the workspace (Settings › Appearance › Workspace default, `crewship workspace update --appearance-default`, `PATCH /api/v1/workspaces/{id}` field `appearance_default`). Members inherit every value they have not chosen themselves; Appearance shows which is which and offers Use workspace default. Appearance sync now saves only values you changed, instead of your whole look.
+
 - **Harbor 2: Settings details.** Appearance › Sidebar now uses the rail's own names (Expanded, Expand on hover, Collapsed). An old `/settings?tab=audit` link opened by a Member or Manager lands on the Audit log page, which says who may read it, instead of silently showing Profile. The Account security page for restricted sessions uses the same 820 px column as the rest of Settings. The CLI calls behind Members, Crew links and the journal check are now covered by acceptance tests.
 
 - **One name: Artifacts.** The command palette, the Dashboard strip, the Artifacts overview card and the Activity filter now say Artifacts where they said Pages (addresses and commands are unchanged).

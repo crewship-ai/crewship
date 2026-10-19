@@ -16,6 +16,7 @@ import { HARBOR, KNOBS, STYLES, allowedSchemes, knobValue, type Scheme } from "@
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
 import { SettingsCard, SettingsRow, SettingsSegmented } from "../shared"
 import { StyleGallery } from "./style-gallery"
+import { InheritChip, WorkspaceDefaultCard } from "./workspace-default-card"
 
 // Settings › Account › Appearance.
 //
@@ -257,14 +258,18 @@ export function AppearanceSection() {
 
   return (
     <div className="space-y-5">
+      <WorkspaceDefaultCard />
       <SettingsCard
         icon={Shapes}
         title="Style"
         description="The surfaces, corners and colours of the whole app. Choosing one also suggests an accent."
         actions={
-          <Button variant="outline" size="xs" onClick={resetStyle} disabled={atDefault} className="coarse:h-[44px]">
-            Reset style
-          </Button>
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            <InheritChip field="style" />
+            <Button variant="outline" size="xs" onClick={resetStyle} disabled={atDefault} className="coarse:h-[44px]">
+              Reset style
+            </Button>
+          </span>
         }
       >
         <StyleGallery state={style} scheme={scheme} onPick={pickStyle} />
@@ -277,12 +282,12 @@ export function AppearanceSection() {
         </div>
       </SettingsCard>
 
-      <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system">
+      <SettingsCard icon={Contrast} title="Theme" description="Dark, light, or follow your system" actions={<InheritChip field="theme" />}>
         <ThemeTiles value={theme} onChange={setTheme} allowed={allowedSchemes(styleId)} />
         <SchemeHint styleId={styleId} onSwitch={() => pickStyle(HARBOR.id)} />
       </SettingsCard>
 
-      <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus">
+      <SettingsCard icon={Palette} title="Accent" description="Buttons, links, selection and focus" actions={<InheritChip field="accent" />}>
         <SettingsRow label="Colour">
           <AccentSwatches value={accent} onChange={setAccent} />
         </SettingsRow>
