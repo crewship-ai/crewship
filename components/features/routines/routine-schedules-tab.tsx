@@ -24,6 +24,7 @@ import { Card, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { scheduleLastStatusLabel } from "@/lib/routine-schedule-status"
 import { RoutineOnceSchedule } from "./routine-once-schedule"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import {
@@ -332,7 +333,12 @@ export function RoutineSchedulesTab({
                               {formatRoutineTime(s.last_run_at, s.timezone)}
                             </span>
                             {s.last_status && (
-                              <span className="ml-1 text-muted-foreground">({s.last_status})</span>
+                              <span
+                                className="ml-1 text-muted-foreground"
+                                data-testid={`schedule-last-status-${s.id}`}
+                              >
+                                ({scheduleLastStatusLabel(s)})
+                              </span>
                             )}
                           </span>
                         )}
