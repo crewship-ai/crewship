@@ -40,6 +40,8 @@ exception in the other direction: it prints YAML unless you ask for
 | Command | Purpose |
 |---|---|
 | `list` | List pages in the workspace |
+| `board init @PageID --mutation-id <id>` | Initialize a private empty Board with a stable retry ID |
+| `board show <slug-or-@id>` | Read a confirmed empty Board |
 | `get <slug>` | Show one page's definition and panels; `get @<page-id>` reads an immutable identity with the same access checks |
 | `create --file <file>` | Create a page from a YAML definition |
 | `update <slug>` | Change an existing page's definition, or its icon and colour |
@@ -139,6 +141,27 @@ present rather than on other fields being absent: a serialisation bug and a
 permission decision are opposite failures, and only one of them is safe.
 
 ---
+
+## `crewship page board init @PageID`
+
+This experimental boundary requires `CREWSHIP_BOARD_ENABLED=true`; it defaults
+to disabled and does not enable a drawing editor. The target must already be
+an empty private human-owned Page. This command does not create the Page or
+change its audience. Its human custodian needs a current `pages:write` token.
+
+Retain the original `@PageID` and `--mutation-id` if confirmation is lost, then
+retry those exact values. Slugs are refused for initialization so replacement
+Pages cannot receive an earlier retry. `POST /api/v1/pages/{slug}/board` accepts
+only the stable mutation ID and returns the confirmed empty format.
+
+## `crewship page board show <slug-or-@id>`
+
+Read through `GET /api/v1/pages/{slug}/board` with a current `pages:read` token.
+The human custodian and workspace OWNER can read; another author’s OWNER read
+is audited before content is returned. Other principals receive 404. The result
+contains immutable Page ID, pinned format, sequence zero, empty scene arrays
+and `can_write: false`. A newer scene/profile is refused with 409. Drawing,
+agent editing, sharing and Dashboard behavior are separate features.
 
 ## `crewship page create --file <file>`
 
