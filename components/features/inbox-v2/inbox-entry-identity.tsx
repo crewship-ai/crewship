@@ -66,14 +66,34 @@ export function agentByRef(lookup: InboxLookup, ref: string): InboxAgentRef | nu
   return lookup.agentById.get(ref) ?? lookup.agentBySlug.get(ref) ?? null
 }
 
-/** Search the names shown on screen, and use the same crew resolution for filtering. */
-export function filterInboxEntries(entries: InboxV2Entry[], filters: InboxV2Filters, lookup: InboxLookup, sort: InboxSort = "urgency") {
+/**
+ * Search the names shown on screen, and use the same crew resolution for filtering.
+ *
+ * `serverMatches` is the set of inbox item ids the server's search returned
+ * for this text (GET /api/v1/inbox?q=): it searches every row, not just the
+ * loaded ones, so an inbox row (or a group of them) answers to it instead of
+ * to the text. Approval-queue rows and issue tasks are not inbox rows, are
+ * fully loaded, and are still matched here. Null: no server search, match
+ * everything here.
+ */
+export function filterInboxEntries(
+  entries: InboxV2Entry[],
+  filters: InboxV2Filters,
+  lookup: InboxLookup,
+  sort: InboxSort = "urgency",
+  serverMatches: ReadonlySet<string> | null = null,
+) {
   const search = filters.search.trim().toLowerCase()
   const kept = filterEntries(entries, { ...filters, crew: null, search: "" }).filter((entry) => {
     const { crew, agent, name } = entryIdentity(entry, lookup)
     if (filters.crew && crew?.id !== filters.crew) return false
     if (filters.agent && !entryFromAgent(entry, filters.agent, lookup)) return false
-    return !search || matchesSearch(entry, search) || `${crew?.name || ""} ${crew?.slug || ""} ${agent?.name || ""} ${agent?.slug || ""} ${name}`.toLowerCase().includes(search)
+    if (!search) return true
+    if (serverMatches) {
+      const ids = entry.groupedItems?.map((item) => item.id) ?? (entry.inboxItem ? [entry.inboxItem.id] : null)
+      if (ids) return ids.some((id) => serverMatches.has(id))
+    }
+    return matchesSearch(entry, search) || `${crew?.name || ""} ${crew?.slug || ""} ${agent?.name || ""} ${agent?.slug || ""} ${name}`.toLowerCase().includes(search)
   })
   return sortInboxEntries(kept, sort, (entry) => entryIdentity(entry, lookup).crew?.name ?? "")
 }

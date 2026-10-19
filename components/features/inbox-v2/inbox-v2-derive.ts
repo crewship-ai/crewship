@@ -1,4 +1,4 @@
-import type { InboxItem } from "@/hooks/use-inbox"
+import type { InboxCounts, InboxItem } from "@/hooks/use-inbox"
 import type { ApprovalRow } from "@/lib/types/approvals"
 import type { Mission } from "@/lib/types/mission"
 
@@ -327,8 +327,10 @@ export function matchesSearch(entry: InboxV2Entry, search: string): boolean {
 /**
  * Facet counts.
  *
- * Counted over the whole feed, which is exact ONLY because inbox-v2 loads
- * every page before rendering (`useInbox(..., { loadAll: true })`). The day
+ * Counted over the whole feed, which is exact once inbox-v2 has loaded every
+ * page (`useInbox(..., { loadAll: true })` shows page one at once and appends
+ * the rest in the background, so these converge while `loadingMore` is true;
+ * the API returns no per-facet totals to use instead). The day
  * the feed becomes lazily paginated these numbers stop being counts and
  * become "counts of what happens to be downloaded" — at which point they have
  * to come from the server as a GROUP BY, the way Routines gets its bucket
@@ -353,6 +355,40 @@ export function facetCounts(entries: InboxV2Entry[], now = Date.now()) {
     if (entry.unread) unread += 1
   }
   return { type, deadline, attention, unread, total: entries.length }
+}
+
+export type FacetCounts = ReturnType<typeof facetCounts>
+
+/**
+ * Facet counts for one space from the server's own, plus the entries the
+ * server cannot count.
+ *
+ * The inbox counts endpoint counts inbox rows over the whole space — not the
+ * part that happens to be downloaded — so the type, attention, deadline and
+ * unread facets stay exact however much history is loaded. Approval-queue rows
+ * and issue tasks are merged in by the page, never stored as inbox rows; they
+ * are small, fully loaded, and counted here (`rest`, the page's entries of
+ * those sources). A server without the facet maps returns null from
+ * `serverFacetCounts`: the caller keeps counting its loaded entries.
+ */
+export function serverFacetCounts(server: InboxCounts | null, space: keyof InboxCounts["spaces"], rest: FacetCounts): FacetCounts | null {
+  if (!server?.by_attention || !server.by_deadline) return null
+  const type = { ...rest.type }
+  for (const t of INBOX_V2_TYPES) {
+    const n = server.by_kind[t.key]?.[space] ?? 0
+    type[t.key] = (type[t.key] ?? 0) + n
+  }
+  const attention = { ...rest.attention }
+  for (const key of Object.keys(attention) as InboxAttentionKey[]) attention[key] += server.by_attention[key] ?? 0
+  const deadline = { ...rest.deadline }
+  for (const key of Object.keys(deadline) as InboxV2DeadlineKey[]) deadline[key] += server.by_deadline[key] ?? 0
+  return {
+    type,
+    attention,
+    deadline,
+    unread: rest.unread + server.unread,
+    total: rest.total + server.spaces[space],
+  }
 }
 
 /**
@@ -699,4 +735,11 @@ export function outcomeStatus(outcome: string | null | undefined): string | null
     case "resolved": return "RESOLVED"
     default: return outcome
   }
+}
+
+/** The end of the caller's local day, for the server's deadline buckets (it does not know our time zone). */
+export function endOfLocalDay(now = new Date()): string {
+  const end = new Date(now)
+  end.setHours(23, 59, 59, 999)
+  return end.toISOString()
 }

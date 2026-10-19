@@ -17,17 +17,20 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { SubBar } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
-import { useInbox, useInboxItem } from "@/hooks/use-inbox"
+import { useInbox, useInboxCounts, useInboxItem } from "@/hooks/use-inbox"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { useInboxPages } from "@/hooks/use-inbox-pages"
 import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
+import { fetchAllMissions } from "./inbox-v2-missions"
 import { inboxBulk } from "@/lib/api/inbox"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import type { Mission } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
 
 import {
-  approvalEntry, EMPTY_INBOX_V2_FILTERS, entryKindPill, INBOX_SORTS, INBOX_V2_TYPES,
+  approvalEntry, EMPTY_INBOX_V2_FILTERS, endOfLocalDay, entryKindPill, facetCounts, serverFacetCounts, INBOX_SORTS, INBOX_V2_TYPES,
   groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
   type InboxSort, type InboxV2Filters,
 } from "./inbox-v2-derive"
@@ -89,13 +92,36 @@ export function InboxV2() {
   // separate server truths this hook does not yet fold in — see the PR
   // description for what B10 shipped here and what is still open.
   const all = useInbox(workspaceId, "all", { loadAll: true })
+  // What the walk does not load is read from the server page by page:
+  //  - History, past the newest page ("Load more");
+  //  - a search, over EVERY row rather than the loaded ones.
+  // Both need a server that searches and pages, which also breaks counts down
+  // by attention and deadline; on an older one the loaded rows are the feed.
+  const serverFeatures = Boolean(useInboxCounts(workspaceId).data?.by_attention)
+  const searchText = useDebouncedValue(filters.search.trim(), 300)
+  const searching = serverFeatures && searchText !== ""
+  const pagesSpace = attention ? undefined : chosenView ?? undefined
+  const pagesWanted = serverFeatures && (searching || chosenView === "history")
+  const pages = useInboxPages(workspaceId, { space: pagesSpace, q: searching ? searchText : "" }, pagesWanted)
+  const inboxItems = useMemo(() => {
+    if (!pages.items.length) return all.items
+    const have = new Set(all.items.map((it) => it.id))
+    return [...all.items, ...pages.items.filter((it) => !have.has(it.id))]
+  }, [all.items, pages.items])
+  // The ids the server returned for the text that has settled. While the text
+  // is still being typed, or the first page is on its way, the loaded rows
+  // answer at once (null) and the server's answer refines it.
+  const serverMatches = useMemo<ReadonlySet<string> | null>(
+    () => (searching && filters.search.trim() === searchText && !pages.loading && !pages.error ? new Set(pages.items.map((it) => it.id)) : null),
+    [searching, filters.search, searchText, pages.loading, pages.error, pages.items],
+  )
   const active = useMemo(
-    () => ({ ...all, items: all.items.filter((it) => it.state !== "resolved") }),
-    [all],
+    () => ({ ...all, items: inboxItems.filter((it) => it.state !== "resolved") }),
+    [all, inboxItems],
   )
   const resolved = useMemo(
-    () => ({ ...all, items: all.items.filter((it) => it.state === "resolved") }),
-    [all],
+    () => ({ ...all, items: inboxItems.filter((it) => it.state === "resolved") }),
+    [all, inboxItems],
   )
   // GET /api/v1/approvals is now roleManage (#2233) — a MEMBER/MANAGER
   // fetch would 403. Rather than surface that as a permanent error banner
@@ -114,23 +140,7 @@ export function InboxV2() {
   })
   const missions = useQuery<Mission[]>({
     queryKey: ["inbox-v2-missions", workspaceId ?? ""],
-    queryFn: async ({ signal }) => {
-      const rows: Mission[] = []
-      const pageSize = 100
-      let offset = 0
-      do {
-        const res = await apiFetch(
-          `/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId!)}&limit=${pageSize}&offset=${offset}&include_tasks=true`,
-          { signal },
-        )
-        if (!res.ok) throw new Error(`mission signals: ${res.status}`)
-        const page = (await res.json()) as Mission[]
-        rows.push(...page)
-        if (page.length < pageSize) break
-        offset += page.length
-      } while (true)
-      return rows
-    },
+    queryFn: ({ signal }) => fetchAllMissions(workspaceId!, signal),
     enabled: Boolean(workspaceId),
     retry: false,
     refetchInterval: 30_000,
@@ -212,13 +222,35 @@ export function InboxV2() {
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
+  // Resolved history is the bulk of the inbox and is no longer walked in full
+  // when the server can count it: the number comes from the server (plus the
+  // approvals the page merges in) and the list holds the newest part. A server
+  // without counts gives null here and the loaded rows are the count, as before.
+  const serverCounts = useInboxCounts(workspaceId).data ?? null
+  const historyCount = serverCounts
+    ? Math.max(feeds.history.length, serverCounts.spaces.history + (feeds.history.length - resolved.items.length))
+    : feeds.history.length
+  const historyNote = serverCounts && feeds.history.length < historyCount
+    ? `Showing the latest ${feeds.history.length} of ${historyCount} in history`
+    : null
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
   const currentEntries = useMemo(
     () => attention ? [...feeds.action, ...feeds.updates].filter((entry) => matchesInboxAttention(entry, attention)) : feeds[view],
     [attention, feeds, view],
   )
-  const visible = useMemo(() => filterInboxEntries(currentEntries, filters, lookup, sort), [currentEntries, filters, lookup, sort])
+  const visible = useMemo(
+    () => filterInboxEntries(currentEntries, filters, lookup, sort, serverMatches),
+    [currentEntries, filters, lookup, sort, serverMatches],
+  )
+  // Facet counts come from the server for the viewed space, so they stay exact
+  // while history is only partly loaded. Approval-queue rows and issue tasks
+  // are not inbox rows; the page counts those itself and adds them.
+  const facetServerCounts = useInboxCounts(workspaceId, { space: view, dayEnd: endOfLocalDay() }).data ?? null
+  const facetOverride = useMemo(
+    () => attention ? null : serverFacetCounts(facetServerCounts, view, facetCounts(currentEntries.filter((entry) => entry.source !== "inbox" && entry.source !== "group"))),
+    [attention, facetServerCounts, view, currentEntries],
+  )
   useEffect(() => {
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
@@ -616,7 +648,12 @@ export function InboxV2() {
           <InboxV2Explorer
             view={view}
             onView={showView}
-            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
+            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: historyCount }}
+            historyNote={historyNote}
+            facetCounts={facetOverride}
+            canLoadMore={pagesWanted && pages.hasMore}
+            loadingMore={pages.loadingMore}
+            onLoadMore={pages.loadMore}
             entries={currentEntries}
             visible={visible}
             attention={attention}
