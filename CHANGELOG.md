@@ -98,6 +98,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
+- Prepare a strict native Board model and atomic in-memory operation validator; persistent Board editing and delivery remain unavailable.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
