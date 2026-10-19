@@ -37,6 +37,7 @@ const (
 	EntryMemberCapabilitiesChanged EntryType = "member.capabilities_changed"
 	EntryMemberRemoved             EntryType = "member.removed"
 	EntryMemberAdded               EntryType = "member.added"
+	EntryCrewMemberChanged         EntryType = "crew.member_changed"
 	EntryMemberRoleChanged         EntryType = "member.role_changed"
 
 	EntryInvitationCreated  EntryType = "invitation.created"
