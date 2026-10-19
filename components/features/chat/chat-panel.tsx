@@ -67,9 +67,8 @@ import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
 import { RunPreflight } from "./run-preflight"
 import { DocumentResultCards } from "./document-result-cards"
-import { DocumentViewer, type ViewerTarget } from "./artifact-viewer/document-viewer"
-import { DocumentReadonly } from "../pages/document-readonly/document-readonly"
-import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
+import type { ViewerTarget } from "./artifact-viewer/types"
+import { SavedDocumentPanel } from "./artifacts/saved-document-panel"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
@@ -1025,8 +1024,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const documentPreviewEnabled = verifiedChatReadScope && documentsAvailability.data === true
   const documentTarget = documentPreviewEnabled && documentPreview?.scope === artifactScope ? documentPreview.target : null
   useEffect(() => { setDocumentPreview(null) }, [artifactScope, mobilePanel])
-  const documentRead = useDocumentViewerRead({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", currentUserId,
-    activationKey: documentPreview ? String(documentPreview.activation) : "", target: documentTarget, enabled: documentPreviewEnabled })
   const openSavedDocument = useCallback((target: ViewerTarget, opener: HTMLAnchorElement) => {
     if (!documentPreviewEnabled || target.workspaceId !== workspaceId) return
     documentOpener.current = opener
@@ -1038,10 +1035,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     window.addEventListener(AUTH_EVENT, clear)
     return () => window.removeEventListener(AUTH_EVENT, clear)
   }, [])
-  const savedDocumentPanel = <DocumentViewer target={documentTarget} scopeKey={documentRead.scopeKey} read={documentRead.read}
+  const savedDocumentPanel = <SavedDocumentPanel workspaceId={workspaceId ?? ""} chatId={sessionId ?? ""} currentUserId={currentUserId}
+    activationKey={documentPreview ? String(documentPreview.activation) : ""} target={documentTarget} enabled={documentPreviewEnabled}
     layout={mobilePanel === "chat" ? "mobile" : "side"} expanded={documentExpanded} onExpandedChange={setDocumentExpanded}
-    onClose={() => setDocumentPreview(null)} openerRef={documentOpener}
-    renderBody={read => <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel="Saved document body" />} />
+    onClose={() => setDocumentPreview(null)} openerRef={documentOpener} />
   const entities = useChatEntityRefs({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
     enabled: verifiedChatReadScope && canChat })
   const proposals = useChatE2Cards({ kind: "proposal", workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
