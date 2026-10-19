@@ -633,6 +633,26 @@ journal records who changed whose access and when; it cannot reconstruct old
 capability sets. This contract does not add chained auditing for instance-level
 CLI token creation or revocation.
 
+### Crew membership mutation audit
+
+The crew member add, remove and role-update HTTP handlers append a keyed
+`crew.member_changed` event in the same transaction as the membership write.
+They recheck the live caller, workspace and crew on that writer, retaining the
+existing role floors and grant ceilings. The event identifies the actor, crew,
+membership and subject user, with `previous_membership` and `membership` role
+snapshots. A missing membership is NULL; a present membership with a NULL role
+inherits the workspace role. Those states are distinct. No credential or user
+profile data is included.
+
+The final membership must survive audit append and readback before commit.
+Audit insert/commit failures, ignored writes or audit-trigger state changes
+roll back the entire mutation. Observers are notified only after commit; an
+unchanged role override emits no change event. Existing response shapes and
+duplicate/not-found behavior remain. These events use the general journal;
+this change adds no dedicated Settings Audit projection or history endpoint.
+The separate onboarding initial-membership writer and other F1 mutation paths
+remain outside this scoped contract.
+
 ### Per-frame realtime authorization cost
 
 Workspace, keeper, journal, crew, files, agent, mission and page channels resolve

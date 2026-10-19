@@ -36,6 +36,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
+	crews.policyJournal = r.journal
 	crewSocket := r.socketPath
 	if crewSocket == "" {
 		crewSocket = config.DefaultSocketPath()
