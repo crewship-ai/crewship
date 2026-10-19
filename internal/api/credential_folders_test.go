@@ -9,22 +9,22 @@ import (
 	"testing"
 )
 
-type folderRig struct {
+type credFolderRig struct {
 	h    *CredentialFolderHandler
 	cred *CredentialHandler
 	ws   string
 	uid  string
 }
 
-func newFolderRig(t *testing.T) *folderRig {
+func newCredFolderRig(t *testing.T) *credFolderRig {
 	t.Helper()
 	ch, db := newCredHandler(t)
 	uid := seedTestUser(t, db)
 	ws := seedTestWorkspace(t, db, uid)
-	return &folderRig{h: NewCredentialFolderHandler(db, ch.logger), cred: ch, ws: ws, uid: uid}
+	return &credFolderRig{h: NewCredentialFolderHandler(db, ch.logger), cred: ch, ws: ws, uid: uid}
 }
 
-func (g *folderRig) req(method, path, role, body string) *http.Request {
+func (g *credFolderRig) req(method, path, role, body string) *http.Request {
 	var rd *bytes.Buffer
 	if body != "" {
 		rd = bytes.NewBufferString(body)
@@ -37,7 +37,7 @@ func (g *folderRig) req(method, path, role, body string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-func (g *folderRig) create(t *testing.T, role, body string) (int, credentialFolderResponse) {
+func (g *credFolderRig) create(t *testing.T, role, body string) (int, credentialFolderResponse) {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	g.h.Create(rr, g.req("POST", "/api/v1/credential-folders", role, body))
@@ -47,7 +47,7 @@ func (g *folderRig) create(t *testing.T, role, body string) (int, credentialFold
 }
 
 func TestCredentialFolders_CreateRules(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	_, prod := g.create(t, "OWNER", `{"name":"Production"}`)
 	if prod.ID == "" {
 		t.Fatal("seed folder not created")
@@ -87,7 +87,7 @@ func TestCredentialFolders_CreateRules(t *testing.T) {
 	}
 }
 
-func (g *folderRig) mustRoot(t *testing.T, name string) string {
+func (g *credFolderRig) mustRoot(t *testing.T, name string) string {
 	t.Helper()
 	code, f := g.create(t, "OWNER", `{"name":"`+name+`"}`)
 	if code != http.StatusCreated {
@@ -97,7 +97,7 @@ func (g *folderRig) mustRoot(t *testing.T, name string) string {
 }
 
 func TestCredentialFolders_WorkspaceIsolation(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	id := g.mustRoot(t, "Mine")
 
 	// A second workspace must neither list nor patch nor delete it.
@@ -109,7 +109,7 @@ func TestCredentialFolders_WorkspaceIsolation(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other')`, otherWS); err != nil {
 		t.Fatal(err)
 	}
-	other := &folderRig{h: g.h, cred: g.cred, ws: otherWS, uid: otherUser}
+	other := &credFolderRig{h: g.h, cred: g.cred, ws: otherWS, uid: otherUser}
 
 	rr := httptest.NewRecorder()
 	other.h.List(rr, other.req("GET", "/api/v1/credential-folders", "OWNER", ""))
@@ -133,7 +133,7 @@ func TestCredentialFolders_WorkspaceIsolation(t *testing.T) {
 }
 
 func TestCredentialFolders_UpdateAndDelete(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	id := g.mustRoot(t, "Prod")
 	child := func() string {
 		_, c := g.create(t, "OWNER", `{"name":"Pay","parent_id":"`+id+`"}`)
@@ -190,7 +190,7 @@ func TestCredentialFolders_UpdateAndDelete(t *testing.T) {
 	}
 }
 
-func (g *folderRig) seedCred(t *testing.T, id, name, folderID string) {
+func (g *credFolderRig) seedCred(t *testing.T, id, name, folderID string) {
 	t.Helper()
 	var f any
 	if folderID != "" {
@@ -203,7 +203,7 @@ func (g *folderRig) seedCred(t *testing.T, id, name, folderID string) {
 }
 
 func TestCredentialFolders_ListCounts(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	id := g.mustRoot(t, "Prod")
 	_, c := g.create(t, "OWNER", `{"name":"Pay","parent_id":"`+id+`"}`)
 	g.seedCred(t, "a", "A", id)

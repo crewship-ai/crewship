@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func (g *folderRig) postCred(t *testing.T, role, body string) (int, credentialResponse) {
+func (g *credFolderRig) postCred(t *testing.T, role, body string) (int, credentialResponse) {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	g.cred.Create(rr, g.req("POST", "/api/v1/credentials", role, body))
@@ -18,7 +18,7 @@ func (g *folderRig) postCred(t *testing.T, role, body string) (int, credentialRe
 	return rr.Code, out
 }
 
-func (g *folderRig) patchCred(t *testing.T, role, id, body string) (int, credentialResponse) {
+func (g *credFolderRig) patchCred(t *testing.T, role, id, body string) (int, credentialResponse) {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	r := g.req("PATCH", "/api/v1/credentials/"+id, role, body)
@@ -30,7 +30,7 @@ func (g *folderRig) patchCred(t *testing.T, role, id, body string) (int, credent
 }
 
 func TestCredentialCreate_FolderAndTierRules(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	plain := g.mustRoot(t, "Plain")
 	_, locked := g.create(t, "OWNER", `{"name":"Locked","min_security_level":3,"default_security_level":3}`)
 
@@ -74,7 +74,7 @@ func TestCredentialCreate_FolderAndTierRules(t *testing.T) {
 }
 
 func TestCredentialUpdate_MoveBetweenFolders(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	plain := g.mustRoot(t, "Plain")
 	other := g.mustRoot(t, "Other")
 	_, sealed := g.create(t, "OWNER", `{"name":"Sealed","reveal_policy":"nobody"}`)
@@ -111,7 +111,7 @@ func TestCredentialUpdate_MoveBetweenFolders(t *testing.T) {
 }
 
 func TestCredentialUpdate_TierFloorOfFolder(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	_, locked := g.create(t, "OWNER", `{"name":"Locked","min_security_level":3}`)
 	g.seedCred(t, "c1", "tok", locked.ID)
 	if code, _ := g.patchCred(t, "ADMIN", "c1", `{"security_level":2}`); code != 400 {
@@ -123,7 +123,7 @@ func TestCredentialUpdate_TierFloorOfFolder(t *testing.T) {
 }
 
 func TestCredentialList_FolderFilterAndReplaceDue(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	_, f := g.create(t, "OWNER", `{"name":"Rotating","remind_after_days":30}`)
 	g.seedCred(t, "old", "old-key", f.ID)
 	g.seedCred(t, "fresh", "fresh-key", f.ID)
@@ -212,7 +212,7 @@ func TestReveal_FolderPolicyOnlyTightens(t *testing.T) {
 
 // A subfolder is never looser than the folder it sits in.
 func TestCredentialFolders_SubfolderInheritsParentPolicy(t *testing.T) {
-	g := newFolderRig(t)
+	g := newCredFolderRig(t)
 	_, parent := g.create(t, "OWNER", `{"name":"Prod","reveal_policy":"admins","min_security_level":3}`)
 	_, child := g.create(t, "OWNER", `{"name":"Pay","parent_id":"`+parent.ID+`"}`)
 
