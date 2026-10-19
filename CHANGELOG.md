@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Crews: New crew opens the crew it created** (#3762). After Create crew, /crews kept the crew it had auto-opened on load on the canvas; it now opens the new one.
 - **Dashboard sparklines for Success and P95.** `GET /api/v1/metrics/timeseries` accepts `metric=success_rate` and `metric=p95_duration_ms` (per bucket, from the same rules as the run insights); a bucket in which no run finished has no value. `crewship metrics --series` now sends `--window` and `--bucket` (the old `--range` was never read by the server and still works as the window).
 - **Calendar: agents and .ics.** Every event of `GET /api/v1/workspaces/{id}/pipelines/calendar` now lists the `agents` its routine's steps run (for the Agents view and the agent filter), and `GET .../pipelines/calendar.ics` (`crewship routine calendar --ics`) returns the same window as an iCalendar file. A signed subscription URL that calendar apps can poll is not part of this.
 - **Crew monthly budget and Release now.** `GET/PUT/DELETE /api/v1/crews/{id}/budget` and `crewship crew budget get|set|clear` set a crew's monthly spend limit (Admin and above; tiered by default: warn from 80 %, stop new runs at 100 %). `POST /api/v1/agents/{id}/release` and `crewship release` end a temporary hire before its expiry; it becomes an expired hire and Rehire brings it back. ⚠️ A hard or tiered limit makes admission refuse unmetered legacy proxy traffic for that crew.

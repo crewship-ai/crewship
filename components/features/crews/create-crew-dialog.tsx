@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
 import { Check, Cpu, Users, HardDrive, Package, Boxes, Network } from "lucide-react"
 
@@ -40,7 +39,8 @@ export interface CreateCrewDialogProps {
   workspaceId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreated: () => void
+  /** The crew's slug; the host opens it (the dialog does not navigate). */
+  onCreated: (slug: string) => void
   crew?: CrewRecord
   /** New crew: how it starts (the New menu's three entries, ?new=crew). */
   initialStart?: CrewStart
@@ -59,7 +59,6 @@ function crewSteps(start: CrewStart): CreateSurfaceStep[] {
 const CREATE_DESCRIPTION = "A team of agents that share one container, memory and network rules."
 
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, crew, initialStart = "suggest" }: CreateCrewDialogProps) {
-  const router = useRouter()
   const [section, setSection] = useState("identity")
   const [step, setStep] = useState<WizardStep>(1)
   const [start, setStartRaw] = useState<CrewStart>(initialStart)
@@ -124,8 +123,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         toast.success(`Crew "${result.name}" ${crew ? "updated" : "created"}`)
       }
       onOpenChange(false)
-      onCreated()
-      router.replace(`/crews?crew=${encodeURIComponent(result.slug)}`)
+      onCreated(result.slug)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       setRefusal(`Could not save crew: ${message}`)

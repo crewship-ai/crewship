@@ -62,7 +62,8 @@ export function CrewsCreateProvider({
   crews: CreateCrewLite[]
   /** The open crew; New agent and the A key put the agent there. */
   currentCrewSlug?: string | null
-  onCrewCreated: () => void
+  /** The new crew's slug; the host refreshes and opens it. */
+  onCrewCreated: (slug: string) => void
   onAgentCreated: (slug: string) => void
   children?: React.ReactNode
 }) {
