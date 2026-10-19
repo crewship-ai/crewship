@@ -11,23 +11,26 @@ describe("calendar-week", () => {
     entry({ id: "a", at: at(2026, 10, 15, 8), slug: "scan" }),
     entry({ id: "b", at: at(2026, 10, 15, 2), slug: "triage", kind: "run", status: "failed" }),
     entry({ id: "c", at: at(2026, 10, 16, 14), slug: "scan", kind: "pending" }),
-    ...Array.from({ length: 5 }, (_, i) => entry({ id: `d${i}`, at: at(2026, 10, 17, 9, i * 10), slug: "triage" })),
+    ...Array.from({ length: 5 }, (_, i) => entry({ id: `d${i}`, at: at(2026, 10, 17, 9, 0), slug: "triage" })),
+    entry({ id: "h", at: at(2026, 10, 14, 7, 30), slug: "scan" }),
   ])
 
-  it("shows only hours with items, caps a cell and plans from an empty slot", () => {
+  it("has a row for each time that has an item (07:30, not 07:00), caps a cell and plans from an empty slot", () => {
     const onOpenDay = vi.fn()
     const onPlan = vi.fn()
     render(<CalendarWeek items={week} from={MONDAY} selectedId={null} onPick={vi.fn()} onOpenDay={onOpenDay} onPlan={onPlan} now={NOW} />)
     const grid = screen.getByRole("grid", { name: "Week" })
-    expect([...grid.querySelectorAll("[data-hour-label]")].map((n) => n.textContent)).toEqual(["02:00", "08:00", "09:00", "14:00"])
+    expect([...grid.querySelectorAll("[data-hour-label]")].map((n) => n.textContent)).toEqual(["02:00", "07:30", "08:00", "09:00", "14:00"])
     // No date-only items yet: no All day row.
     expect(within(grid).queryByText("All day")).toBeNull()
-    const busy = screen.getByTestId("week-cell-2026-10-17-9")
+    const busy = screen.getByTestId("week-cell-2026-10-17-09:00")
     expect(within(busy).getAllByRole("button", { pressed: false })).toHaveLength(3)
     fireEvent.click(within(busy).getByRole("button", { name: "+2" }))
     expect(onOpenDay).toHaveBeenCalledWith("2026-10-17")
     fireEvent.click(screen.getByRole("button", { name: "Schedule a start on Fri 16 Oct at 14:00" }))
-    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 16, 14))
+    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 16, 14, 0))
+    fireEvent.click(screen.getByRole("button", { name: "Schedule a start on Wed 14 Oct at 07:30" }))
+    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 14, 7, 30))
   })
 
   it("draws the now line only in the current week", () => {
@@ -40,7 +43,7 @@ describe("calendar-week", () => {
   it("names an item's state with an icon label, not colour alone, and picks it", () => {
     const onPick = vi.fn()
     render(<CalendarWeek items={week} from={MONDAY} selectedId={null} onPick={onPick} onOpenDay={vi.fn()} now={NOW} />)
-    const failed = screen.getByTestId("week-cell-2026-10-15-2")
+    const failed = screen.getByTestId("week-cell-2026-10-15-02:00")
     expect(within(failed).getByRole("img", { name: "Could not finish" })).toBeInTheDocument()
     fireEvent.click(within(failed).getByRole("button", { name: /Nightly triage/ }))
     expect(onPick).toHaveBeenCalledWith("run:b")

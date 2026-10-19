@@ -101,20 +101,20 @@ export function CalendarWeek({
   onPlan?: (at: Date) => void
   now?: Date
 }) {
-  const { days, allDay, timed, hours } = weekLayout(items, from)
+  const { days, allDay, timed, times } = weekLayout(items, from)
   const todayKey = dateKey(now)
   const thisWeek = days.some((d) => dateKey(d) === todayKey)
-  const nowAfter = thisWeek ? nowLineAfter(hours, now) : null
+  const nowAfter = thisWeek ? nowLineAfter(times, now) : null
   const todayCol = days.findIndex((d) => dateKey(d) === todayKey)
   const GRID = "grid grid-cols-[56px_repeat(7,minmax(0,1fr))]"
-  const cell = (list: CalendarItem[], day: Date, hour: number | null) => {
+  const cell = (list: CalendarItem[], day: Date, time: string | null) => {
     const key = dateKey(day)
     const shown = list.slice(0, CELL_CAP)
     const more = list.length - shown.length
     return (
       <div
         key={key}
-        data-testid={hour == null ? `week-allday-${key}` : `week-cell-${key}-${hour}`}
+        data-testid={time == null ? `week-allday-${key}` : `week-cell-${key}-${time}`}
         className={cn("group relative flex min-h-11 min-w-0 flex-col gap-1 border-l border-border p-1", key === todayKey && "bg-primary/[0.04]")}
       >
         {shown.map((i) => (
@@ -125,11 +125,11 @@ export function CalendarWeek({
             +{more}
           </button>
         )}
-        {onPlan && hour != null && (
+        {onPlan && time != null && (
           <button
             type="button"
-            aria-label={`Schedule a start on ${day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} at ${String(hour).padStart(2, "0")}:00`}
-            onClick={() => onPlan(new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour))}
+            aria-label={`Schedule a start on ${day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} at ${time}`}
+            onClick={() => onPlan(new Date(day.getFullYear(), day.getMonth(), day.getDate(), Number(time.slice(0, 2)), Number(time.slice(3, 5))))}
             className="kit-tap mt-auto grid min-h-6 place-items-center rounded-md border border-dashed border-border text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 coarse:hidden"
           >
             <Plus className="size-3" aria-hidden />
@@ -165,21 +165,21 @@ export function CalendarWeek({
             </div>
           )}
           {nowAfter === -1 && nowLine}
-          {hours.map((h, idx) => (
-            <div key={h} role="row">
+          {times.map((t, idx) => (
+            <div key={t} role="row">
               <div className={cn(GRID, "border-b border-border")}>
-                <span data-hour-label className="px-1.5 py-2 text-right font-mono text-micro text-muted-foreground">{String(h).padStart(2, "0")}:00</span>
-                {days.map((d) => cell(timed.filter((i) => i.day === dateKey(d) && i.at.getHours() === h), d, h))}
+                <span data-hour-label className="px-1.5 py-2 text-right font-mono text-micro text-muted-foreground">{t}</span>
+                {days.map((d) => cell(timed.filter((i) => i.day === dateKey(d) && i.time === t), d, t))}
               </div>
               {nowAfter === idx && nowLine}
             </div>
           ))}
-          {!hours.length && !allDay.length && (
+          {!times.length && !allDay.length && (
             <p className="px-4 py-6 text-center text-body text-muted-foreground">Nothing this week.</p>
           )}
         </div>
       </div>
-      <p className="text-label text-muted-foreground">Only hours with something in them are shown.</p>
+      <p className="text-label text-muted-foreground">Only times with something in them are shown.</p>
     </div>
   )
 }

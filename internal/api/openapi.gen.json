@@ -15172,6 +15172,28 @@
       },
       "RoutineCalendarEvent": {
         "properties": {
+          "agents": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "slug",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "at": {
             "type": "string"
           },
@@ -155050,22 +155072,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -155139,8 +155145,62 @@
               }
             },
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
           },
-          "500": {
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipelines calendar",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/calendar.ics": {
+      "get": {
+        "description": "List workspace pipelines calendar.ics (GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_calendar.ics",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
@@ -155156,7 +155216,43 @@
                 }
               }
             },
-            "description": "Internal Server Error"
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -155170,7 +155266,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get workspace pipelines calendar",
+        "summary": "List workspace pipelines calendar.ics",
         "tags": [
           "workspaces",
           "routines"

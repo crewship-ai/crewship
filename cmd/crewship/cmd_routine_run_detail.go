@@ -50,6 +50,14 @@ type routineCalendarEvent struct {
 	Timezone      string          `json:"timezone,omitempty" yaml:"timezone,omitempty"`
 	Status        string          `json:"status,omitempty" yaml:"status,omitempty"`
 	Outcome       string          `json:"outcome,omitempty" yaml:"outcome,omitempty"`
+	// The agents of the routine's agent_run steps.
+	Agents []routineCalendarAgent `json:"agents,omitempty" yaml:"agents,omitempty"`
+}
+
+type routineCalendarAgent struct {
+	ID   string `json:"id" yaml:"id"`
+	Slug string `json:"slug" yaml:"slug"`
+	Name string `json:"name" yaml:"name"`
 }
 
 type routineCalendarResponse struct {
@@ -73,6 +81,7 @@ Examples:
   crewship routine calendar
   crewship routine calendar --from 2026-10-01T00:00:00Z --to 2026-10-08T00:00:00Z
   crewship routine calendar --to 2026-09-20T00:00:00Z -f json
+  crewship routine calendar --ics > crewship.ics
 `,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -102,6 +111,19 @@ Examples:
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+		if ics, _ := cmd.Flags().GetBool("ics"); ics {
+			resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/calendar.ics%s", ws,
+				queryString("from", from, "to", to)))
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			_, err = io.Copy(os.Stdout, resp.Body)
+			return err
+		}
 		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/calendar%s", ws,
 			queryString("from", from, "to", to)))
 		if err != nil {
@@ -454,6 +476,7 @@ func formatByteCount(n int) string {
 }
 
 func init() {
+	routineCalendarCmd.Flags().Bool("ics", false, "Write the window as an iCalendar (.ics) file to stdout instead of a table")
 	routineCalendarCmd.Flags().String("from", "", "RFC3339 start of the window (default: now)")
 	routineCalendarCmd.Flags().String("to", "", "RFC3339 end of the window, at most 32 days after --from (default: --from + 7 days)")
 	routineExecutionsCmd.Flags().String("after", "", "cursor from the previous page's next_cursor")

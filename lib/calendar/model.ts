@@ -236,20 +236,21 @@ export function needYouSoon(items: CalendarItem[], now = new Date(), cap = 4): C
 
 /* ------------------------------------------------------------------- views */
 
-/** Week: the days, an All day row for date-only items, and only the hours that have something. */
+/** Week: the days, an All day row for date-only items, and a row for each exact time ("07:30") that has something. */
 export function weekLayout(items: CalendarItem[], from: Date) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(from, i))
   const keys = new Set(days.map(dateKey))
   const inWeek = items.filter((i) => keys.has(i.day))
-  const hours = [...new Set(inWeek.filter((i) => i.time).map((i) => i.at.getHours()))].sort((a, b) => a - b)
-  return { days, allDay: inWeek.filter((i) => !i.time), timed: inWeek.filter((i) => i.time), hours }
+  const times = [...new Set(inWeek.flatMap((i) => (i.time ? [i.time] : [])))].sort()
+  return { days, allDay: inWeek.filter((i) => !i.time), timed: inWeek.filter((i) => i.time), times }
 }
 
-/** Where the "now" line sits: after the last shown hour at or before now; -1 = above the first row. */
-export function nowLineAfter(hours: number[], now: Date): number {
+/** Where the "now" line sits: after the last shown time at or before now; -1 = above the first row. */
+export function nowLineAfter(times: string[], now: Date): number {
+  const clock = clockOf(now)
   let at = -1
-  hours.forEach((h, idx) => {
-    if (h <= now.getHours()) at = idx
+  times.forEach((t, idx) => {
+    if (t <= clock) at = idx
   })
   return at
 }

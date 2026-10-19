@@ -139,13 +139,13 @@ describe("views", () => {
     "me",
   )
 
-  it("week shows only hours with items and an All day row for date-only items", () => {
+  it("week has a row for each time that has an item (07:30, 07:45) and an All day row for date-only items", () => {
     const week = weekLayout(many, new Date(2026, 9, 12))
-    expect(week.hours).toEqual([7, 10, 11, 12, 13, 14])
+    expect(week.times).toEqual(["07:30", "07:45", "10:00", "11:00", "12:00", "13:00", "14:00"])
     expect(week.allDay).toEqual([])
     expect(week.days).toHaveLength(7)
-    expect(nowLineAfter(week.hours, new Date(2026, 9, 15, 8, 16))).toBe(0)
-    expect(nowLineAfter(week.hours, new Date(2026, 9, 15, 6))).toBe(-1)
+    expect(nowLineAfter(week.times, new Date(2026, 9, 15, 8, 16))).toBe(1)
+    expect(nowLineAfter(week.times, new Date(2026, 9, 15, 7, 29))).toBe(-1)
   })
 
   it("month caps three items per day with +N more and a risk dot", () => {

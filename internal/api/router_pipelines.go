@@ -211,6 +211,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/calendar", authed(wsCtx(http.HandlerFunc(pipes.RoutineCalendar))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics", authed(wsCtx(http.HandlerFunc(pipes.RoutineCalendarICS))))
 	// #1844. The #863 sub-span I/O gate is read in resolveIOStep
 	// (pipeline_runs.go), not in GetRun's body, so neither name reached the
 	// spec. ?include_io=1 inlines every span's input/output, ?io_step=<stepId>

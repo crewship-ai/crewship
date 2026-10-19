@@ -149,7 +149,7 @@ preview (`{}` when empty); historical `run` events omit it. Planned presets
 are not run results or a guarantee of success. Preview maps retain safe primitives;
 credential, file and recognized secret values become `{type: "credential"}`,
 `{type: "file"}` or `{type: "redacted"}`. Other objects/arrays become empty
-containers, preserving field counts without exposing contents. Never replay a preview as inputs. `truncated` is true when the window held more than the endpoint
+containers, preserving field counts without exposing contents. Never replay a preview as inputs. Every event also carries `agents` (`[{id, slug, name}]`, omitted when empty): the live agents named by the `agent_run` steps of the routine's current definition, each once, in slug order; a slug that names no live agent is left out. The Calendar's Agents view and agent filter read it. `truncated` is true when the window held more than the endpoint
 will return, in which case narrow `from`/`to` rather than paging.
 
 | Method | Path | Auth | Request | Response | Status |
@@ -157,6 +157,7 @@ will return, in which case narrow `from`/`to` rather than paging.
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/executions` | member (`read`) | No body; optional `?execution_id=`, `?after=` | `{ rows[], next_cursor }`, or `{ id, output }` for one execution | `200`, `400`, `403`, `404`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/artifacts` | member (`read`) | No body; optional `?artifact_id=`, `?download=`, `?after=` | `{ artifacts[], truncated, next_cursor }`, `{ id, content }` for one artifact, or the raw bytes for a download | `200`, `400`, `403`, `404`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/calendar` | member (`read`) | No body; `?from=` and `?to=` are required RFC3339 instants spanning at most 32 days | `{ events[], truncated }` | `200`, `400`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/calendar.ics` | member (`read`) | Same `?from=` / `?to=` window as the calendar | The same events as an iCalendar file (`text/calendar`, one `VEVENT` per event, 15 minutes long, UID `<event id>@crewship`) | `200`, `400`, `403`, `500` |
 
 A run outside `{workspaceId}` is `404`, as is a named execution or artifact
 that does not belong to the run. A malformed cursor, a missing or unparseable

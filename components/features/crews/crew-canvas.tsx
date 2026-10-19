@@ -17,6 +17,7 @@ import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 
 import { CanvasShell, CanvasTabPanel, CanvasTabs, useEntityFetch, usePatchEntity } from "./canvas-base"
 import { CrewPageBar } from "./crews-bar"
+import { useCrewYaml } from "./crew-yaml"
 import { useCrewsCreate } from "./crews-create"
 import { CREW_TABS, type AgentTab, type CrewTab } from "./crews-tabs"
 import { crewStatus } from "./crews-panel-model"
@@ -119,6 +120,8 @@ export function CrewCanvas({
   const spend = useCrewSpend(workspaceId, crewId, isAdmin)
 
   useRealtimeEvent("crew.updated", useCallback(() => setTick((n) => n + 1), []))
+  // The crew options menu offers the same YAML as Settings > Command line.
+  const menuYaml = useCrewYaml(workspaceId, { slug: crew?.slug ?? "", name: crew?.name ?? "" })
 
   // Everything the head, Overview and Health read, per crew. A failed call
   // contributes nothing rather than a false "all fine".
@@ -265,6 +268,8 @@ export function CrewCanvas({
         onTerminal={onOpenTerminal}
         onHire={canUpdate ? () => setHireOpen(true) : undefined}
         onRestartAgents={canUpdate ? () => setConfirmRestart(true) : undefined}
+        onViewYaml={menuYaml.view}
+        onDownloadYaml={() => void menuYaml.download()}
         onDelete={isAdmin ? () => setConfirmDelete(true) : undefined}
       />
       <CanvasShell loading={false} error={null} notLoadedLabel="">
@@ -396,6 +401,7 @@ export function CrewCanvas({
         extend={extendingHire}
         onRehired={() => { void roster.refresh(); onCrewChanged() }}
       />
+      {menuYaml.surface}
       <ConfirmDialog
         open={confirmRestart}
         onOpenChange={setConfirmRestart}

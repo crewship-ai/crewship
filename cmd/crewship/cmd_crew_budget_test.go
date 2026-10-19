@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -106,5 +107,29 @@ func TestAgentReleaseRunE(t *testing.T) {
 	err = releaseCmd.RunE(releaseCmd, []string{"pager"})
 	if err == nil || !strings.Contains(err.Error(), "running") {
 		t.Errorf("a refused release must surface the server's reason, got %v", err)
+	}
+}
+
+func TestRoutineCalendarICSFlag(t *testing.T) {
+	stub := covSetupCli5(t)
+	path := "/api/v1/workspaces/" + covWSCli5 + "/pipelines/calendar.ics"
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+	stub.OnGet(path, func(r *http.Request, body []byte) (int, []byte, string) {
+		return 200, []byte(ics), "text/calendar; charset=utf-8"
+	})
+	covSetFlagCli8(t, routineCalendarCmd, "from", "2030-03-01T00:00:00Z")
+	covSetFlagCli8(t, routineCalendarCmd, "to", "2030-03-08T00:00:00Z")
+	covSetFlagCli8(t, routineCalendarCmd, "ics", "true")
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = routineCalendarCmd.RunE(routineCalendarCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if out != ics {
+		t.Errorf("stdout = %q, want the file verbatim", out)
+	}
+	calls := stub.CallsFor("GET", path)
+	if len(calls) != 1 || !strings.Contains(calls[0].Query, "from=2030-03-01T00%3A00%3A00Z") {
+		t.Errorf("calls = %+v", calls)
 	}
 }
