@@ -41,6 +41,7 @@ import { SecretsTable, type VaultSecret } from "@/components/features/credential
 import { VaultHealth, buildVaultHealth } from "@/components/features/credentials/vault-health"
 import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
 import { BulkDeleteDialog, BulkTierDialog } from "@/components/features/credentials/bulk-actions"
+import { NewFolderDialog } from "@/components/features/credentials/new-folder-dialog"
 import { VaultSpaceCrumb } from "@/components/features/credentials/vault-space-crumb"
 import { VaultCliDialog } from "@/components/features/credentials/vault-cli-dialog"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
@@ -64,7 +65,7 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useSubscriptionUsage } from "@/hooks/use-paymaster"
+import { useCredentialSpendThisMonth, useSubscriptionUsage } from "@/hooks/use-paymaster"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import {
@@ -97,6 +98,8 @@ import {
 } from "@/lib/credentials/vault-url-state"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { useCredentialFolders } from "@/hooks/use-credential-folders"
+import { folderSelectionIds } from "@/lib/credentials/folders"
 
 interface Credential extends VaultSecret {
   description: string | null
@@ -194,6 +197,7 @@ export default function CredentialsPage() {
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
   const [newPoolOpen, setNewPoolOpen] = React.useState(false)
+  const [newFolderOpen, setNewFolderOpen] = React.useState(false)
   const [providerDialog, setProviderDialog] = React.useState<{ initial?: WizardInitial } | null>(null)
   const [cliOpen, setCliOpen] = React.useState(false)
   const [addInitial, setAddInitial] = React.useState<WizardInitial | undefined>(undefined)
@@ -205,6 +209,8 @@ export default function CredentialsPage() {
   const [linked, setLinked] = React.useState<{ id: string; state: "loading" | "missing" | "error"; row?: Credential } | null>(null)
 
   const readiness = useCredentialReadiness(workspaceId)
+  const folderApi = useCredentialFolders(workspaceId, space === "secrets")
+  const folderIds = React.useMemo(() => folderSelectionIds(folderApi.folders, url.filters.folder), [folderApi.folders, url.filters.folder])
   const agentDirectory = useWorkspaceAgentDirectory(workspaceId ?? undefined)
   const agentCrew = React.useMemo(() => {
     const m = new Map<string, string>()
@@ -308,9 +314,11 @@ export default function CredentialsPage() {
       setProviderDialog({ initial })
       return
     }
-    setAddInitial(initial)
+    // Adding while a folder is open files the new secret there.
+    const openFolder = url.filters.folder.length === 1 ? url.filters.folder[0] : undefined
+    setAddInitial(initial ?? (openFolder ? { folderId: openFolder } : undefined))
     setAddOpen(true)
-  }, [canBind])
+  }, [canBind, url.filters.folder])
   /** Add AI provider, optionally with the provider already chosen (a provider's page). */
   const openAddProvider = React.useCallback((provider?: string) => {
     if (!provider) { openAdd({ itemType: "PROVIDER_LOGIN" }); return }
@@ -369,7 +377,7 @@ export default function CredentialsPage() {
   }), [secrets, readiness.crewNames])
 
   const visible = React.useMemo(() => {
-    const out = applyCredentialFilters(secrets, filters, missing, { agentCrew })
+    const out = applyCredentialFilters(secrets, filters, missing, { agentCrew, folderIds })
     // Broken first, then most recently used — "what is wrong" before "what is busy".
     const rank = { rejected: 0, pending: 1, expiring: 2, ready: 3, unused: 4 } as const
     return out.sort((a, b) => {
@@ -379,7 +387,7 @@ export default function CredentialsPage() {
       const bt = b.last_used_at ? Date.parse(b.last_used_at) : 0
       return bt - at || a.name.localeCompare(b.name)
     })
-  }, [secrets, filters, missing, agentCrew])
+  }, [secrets, filters, missing, agentCrew, folderIds])
 
   // Only what is on screen can be acted on — a tick made under another filter
   // must not delete a secret the person can no longer see.
@@ -404,15 +412,28 @@ export default function CredentialsPage() {
   // Account groups: the panel's list, and their members for the Group column.
   const inProviders = space === "providers" && canBind && Boolean(workspaceId)
   const subUsage = useSubscriptionUsage("30d", 0, inProviders)
+  const keySpend = useCredentialSpendThisMonth(0, inProviders)
   const accountUsage = React.useMemo(() => {
     const m: Record<string, AccountTokenUsage> = {}
     for (const r of subUsage.data?.rows ?? []) {
       if (!r.credential_id) continue
       const cur = m[r.credential_id] ?? { tokens: 0, calls: 0 }
-      m[r.credential_id] = { tokens: cur.tokens + r.input_tokens + r.output_tokens, calls: cur.calls + r.call_count }
+      m[r.credential_id] = { ...cur, tokens: cur.tokens + r.input_tokens + r.output_tokens, calls: cur.calls + r.call_count }
+    }
+    // An API key with no spend yet this month reads $0.00, not "no data".
+    if (keySpend.data && !keySpend.error) {
+      for (const login of providerLogins) {
+        if (login.login?.mode !== "api_key") continue
+        const cur = m[login.id] ?? { tokens: 0, calls: 0 }
+        m[login.id] = { ...cur, spendUsd: 0 }
+      }
+      for (const r of keySpend.data.rows) {
+        const cur = m[r.credential_id] ?? { tokens: 0, calls: 0 }
+        m[r.credential_id] = { ...cur, spendUsd: r.cost_usd }
+      }
     }
     return m
-  }, [subUsage.data])
+  }, [subUsage.data, keySpend.data, keySpend.error, providerLogins])
   const poolsApi = useProviderPools(workspaceId ?? "", inProviders)
   const poolItems: ProviderPool[] | undefined = poolsApi.pools?.items
   const poolDetails = useQueries({
@@ -846,6 +867,8 @@ export default function CredentialsPage() {
                 {...facets}
                 crews={crewFacet}
                 crewsById={readiness.crewsById}
+                folders={folderApi.folders}
+                onNewFolder={canEdit ? () => setNewFolderOpen(true) : undefined}
                 spaces={spaces}
               />
             )}
@@ -855,6 +878,14 @@ export default function CredentialsPage() {
           <div className={cn(isPage ? "h-full" : "mx-auto w-full max-w-6xl p-4 md:p-6")}>{content}</div>
         </div>
       </div>
+
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        folders={folderApi.folders}
+        canSetPolicy={canBind}
+        onCreate={folderApi.create}
+      />
 
       {workspaceId && (
         <AddSecretSheet

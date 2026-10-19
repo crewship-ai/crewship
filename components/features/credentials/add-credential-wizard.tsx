@@ -38,6 +38,8 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useCredentialFolders } from "@/hooks/use-credential-folders"
+import { buildFolderTree, folderIsRestricted } from "@/lib/credentials/folders"
 import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
 import { detectPastedValue } from "@/lib/credentials/paste-detect"
@@ -144,6 +146,8 @@ export interface WizardInitial {
   signIn?: SignInMethod
   step?: Step
   name?: string
+  /** Vault folder to file the new secret in (the folder open in the panel). */
+  folderId?: string
 }
 
 export interface AddCredentialWizardProps {
@@ -202,6 +206,13 @@ export function AddCredentialWizard({
   // slot for it, so the step is hidden from them rather than offered and 403'd.
   const canBind = abilities.can("manage", "Credential")
   const session = useSessionSafe()
+
+  const { folders } = useCredentialFolders(workspaceId)
+  const [folderId, setFolderId] = React.useState(initial?.folderId ?? "")
+  // Filing into a folder with a reveal policy or tier floor is reserved for
+  // owners and admins (the server repeats the check), so the others are not offered it.
+  const fileableFolders = folders.filter((f) => canBind || !folderIsRestricted(f))
+  const chosenFolder = fileableFolders.find((f) => f.id === folderId)
 
   const originWorkspace = React.useRef(workspaceId)
   const [chosenType, setChosenType] = React.useState(Boolean(initial?.itemType))
@@ -527,7 +538,8 @@ export function AddCredentialWizard({
         }
         // Provider accounts use server policy, like device-code-created accounts.
         // Ordinary secrets retain the explicitly selected Keeper tier.
-        if (!login) body.security_level = securityLevel
+        if (!login) body.security_level = chosenFolder ? Math.max(securityLevel, chosenFolder.min_security_level) : securityLevel
+        if (!login && chosenFolder) body.folder_id = chosenFolder.id
         if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
         if (accountLabel.trim()) body.account_label = accountLabel.trim()
         // Only when set — an absent key leaves the column NULL, which is what a
@@ -863,6 +875,25 @@ export function AddCredentialWizard({
                 <details className="rounded-lg border border-border/60 p-3">
                   <summary className="cursor-pointer text-xs text-muted-foreground">Description, account label & tags <span className="ml-1">· optional</span></summary>
                   <div className="mt-3 space-y-3">
+                {fileableFolders.length > 0 && !login && (
+                  <CreateSurfaceField label="Folder" hint="optional" htmlFor="cred-folder">
+                    <select
+                      id="cred-folder"
+                      value={chosenFolder?.id ?? ""}
+                      onChange={(e) => {
+                        const f = fileableFolders.find((x) => x.id === e.target.value)
+                        setFolderId(e.target.value)
+                        if (f) setSecurityLevel((lvl) => Math.max(lvl, f.default_security_level ?? 1, f.min_security_level))
+                      }}
+                      className={cn(FIELD, "w-full")}
+                    >
+                      <option value="">No folder</option>
+                      {buildFolderTree(fileableFolders).map(({ folder, depth }) => (
+                        <option key={folder.id} value={folder.id}>{depth ? "\u00a0\u00a0" : ""}{folder.name}</option>
+                      ))}
+                    </select>
+                  </CreateSurfaceField>
+                )}
                 <CreateSurfaceField label="Description" hint="optional" htmlFor="cred-description"><Textarea id="cred-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this credential used for?" /></CreateSurfaceField>
                 <CreateSurfaceField label="Account label" hint="optional" htmlFor="cred-account-label">
                   <Input

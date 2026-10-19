@@ -512,3 +512,67 @@ func TestMissionBelongsToWorkspace(t *testing.T) {
 		t.Errorf("missing mission: ok=%v err=%v, want false,nil", ok, err)
 	}
 }
+
+// ---- CredentialSpend (Vault AI-provider cards: "$ this month") ----
+
+func TestPaymaster_CredentialSpend(t *testing.T) {
+	h := newPaymasterTestHandler(t)
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for _, ws := range []string{"ws-a", "ws-b"} {
+		if _, err := h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, ?, ?)`, ws, ws, ws); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, row := range []struct {
+		id, ws, cred string
+		ts           time.Time
+		cost         float64
+	}{
+		{"l1", "ws-a", "key-1", monthStart.Add(time.Minute), 4.5},
+		{"l2", "ws-a", "key-1", monthStart.Add(-time.Hour), 40}, // last month: outside range=month
+		{"l3", "ws-b", "key-9", monthStart.Add(time.Minute), 11},
+	} {
+		if _, err := h.db.Exec(`INSERT INTO cost_ledger (id, workspace_id, ts, provider, model, input_tokens, output_tokens, cost_usd, credential_id)
+			VALUES (?, ?, ?, 'anthropic', 'm', 1, 1, ?, ?)`, row.id, row.ws, row.ts.Format(time.RFC3339), row.cost, row.cred); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name, role, ws string
+		want           int
+		wantCost       float64
+	}{
+		{"owner sees the calendar month", "OWNER", "ws-a", http.StatusOK, 4.5},
+		{"admin too", "ADMIN", "ws-a", http.StatusOK, 4.5},
+		{"manager is refused", "MANAGER", "ws-a", http.StatusForbidden, 0},
+		{"member is refused", "MEMBER", "ws-a", http.StatusForbidden, 0},
+		{"other workspace sees only its own", "OWNER", "ws-b", http.StatusOK, 11},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/paymaster/credential-spend?range=month", nil)
+			req = req.WithContext(withWorkspace(req.Context(), tc.ws, tc.role))
+			rr := httptest.NewRecorder()
+			h.CredentialSpend(rr, req)
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d (%s)", rr.Code, tc.want, rr.Body.String())
+			}
+			if tc.want != http.StatusOK {
+				return
+			}
+			var body struct {
+				Rows []struct {
+					CredentialID string  `json:"credential_id"`
+					CostUSD      float64 `json:"cost_usd"`
+				} `json:"rows"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Rows) != 1 || body.Rows[0].CostUSD != tc.wantCost {
+				t.Fatalf("rows = %+v, want one row of $%v", body.Rows, tc.wantCost)
+			}
+		})
+	}
+}

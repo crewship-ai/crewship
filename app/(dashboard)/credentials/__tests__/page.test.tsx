@@ -49,7 +49,10 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
-vi.mock("@/hooks/use-paymaster", () => ({ useSubscriptionUsage: () => ({ data: { rows: [] }, loading: false, error: null, notConfigured: false }) }))
+vi.mock("@/hooks/use-paymaster", () => ({
+  useSubscriptionUsage: () => ({ data: { rows: [] }, loading: false, error: null, notConfigured: false }),
+  useCredentialSpendThisMonth: () => ({ data: { rows: [] }, loading: false, error: null, notConfigured: false }),
+}))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 vi.mock("next/link", () => ({
@@ -624,8 +627,9 @@ describe("the panel is the shared SecondaryPanel", () => {
     expect(panel).toHaveAttribute("data-panel-id", "vault")
     expect(within(panel).getByRole("navigation", { name: "Vault spaces" })).toBeInTheDocument()
     expect(within(panel).getByText("All secrets")).toBeInTheDocument()
-    // Folders and external vaults have no backend yet.
-    expect(within(panel).queryByText(/folders|external vaults/i)).not.toBeInTheDocument()
+    // Folders are real (an owner can start one); external vaults still have no backend.
+    expect(within(panel).getByRole("button", { name: "New folder" })).toBeInTheDocument()
+    expect(within(panel).queryByText(/external vaults/i)).not.toBeInTheDocument()
   })
 
   it("on a phone the panel is the sheet, and a space switch sits above the content", async () => {

@@ -62,6 +62,17 @@ describe("AccountCard", () => {
     expect(document.body.textContent).not.toMatch(/\$\d/)
   })
 
+  it("an API key shows what it cost this month; a subscription seat never shows a price", () => {
+    const { rerender } = render(<AccountCard c={acc("k", { mode: "api_key" })} usage={{ tokens: 900, calls: 1, spendUsd: 41.2 }} onOpen={() => {}} />)
+    expect(screen.getByText("$41.20 this month")).toBeInTheDocument()
+    // No spend yet this month is a real $0.00, not "no data".
+    rerender(<AccountCard c={acc("k", { mode: "api_key" })} usage={{ tokens: 0, calls: 0, spendUsd: 0 }} onOpen={() => {}} />)
+    expect(screen.getByText("$0.00 this month")).toBeInTheDocument()
+    expect(screen.queryByText("No usage data yet")).not.toBeInTheDocument()
+    rerender(<AccountCard c={acc("s", { mode: "subscription" })} usage={{ tokens: 900, calls: 1, spendUsd: 12 }} onOpen={() => {}} />)
+    expect(document.body.textContent).not.toMatch(/\$\d/)
+  })
+
   it("quota bars and usage line sit together when both exist", () => {
     render(<AccountCard c={acc("a", { quota: { window_5h_pct: 10, window_weekly_pct: 20, resets_at: null } })} usage={{ tokens: 900, calls: 1 }} onOpen={() => {}} />)
     expect(screen.getAllByRole("progressbar")).toHaveLength(2)

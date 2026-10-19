@@ -232,6 +232,60 @@ func SubscriptionUsageByPlan(ctx context.Context, db *sql.DB, workspaceID string
 	return out, rows.Err()
 }
 
+// CredentialSpend is one API key's metered spend in a window: what the Vault's
+// AI provider cards show as "$ this month". Flat-rate seats have no $ figure
+// (see SubscriptionUsage) and rows without a credential attribution are not
+// invented into one.
+type CredentialSpend struct {
+	CredentialID string    `json:"credential_id"`
+	CostUSD      float64   `json:"cost_usd"`
+	CallCount    int64     `json:"call_count"`
+	InTokens     int64     `json:"input_tokens"`
+	OutTokens    int64     `json:"output_tokens"`
+	LastTS       time.Time `json:"last_ts"`
+}
+
+// SpendByCredential rolls up metered ledger rows in the workspace per
+// credential_id for the window, highest spend first.
+func SpendByCredential(ctx context.Context, db *sql.DB, workspaceID string, since, until time.Time) ([]CredentialSpend, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("paymaster: workspace_id required")
+	}
+	conds := []string{"workspace_id = ?", "billing_mode = 'metered'", "credential_id IS NOT NULL", "credential_id != ''"}
+	args := []any{workspaceID}
+	if !since.IsZero() {
+		conds = append(conds, "ts >= ?")
+		args = append(args, since.UTC().Format(tsLayout))
+	}
+	if !until.IsZero() {
+		conds = append(conds, "ts < ?")
+		args = append(args, until.UTC().Format(tsLayout))
+	}
+	rows, err := db.QueryContext(ctx, `SELECT credential_id, COALESCE(SUM(cost_usd), 0), COUNT(*),
+			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(MAX(ts), '')
+		FROM cost_ledger WHERE `+joinAnd(conds)+`
+		GROUP BY credential_id ORDER BY SUM(cost_usd) DESC, credential_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("paymaster: query credential spend: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialSpend
+	for rows.Next() {
+		var c CredentialSpend
+		var last string
+		if err := rows.Scan(&c.CredentialID, &c.CostUSD, &c.CallCount, &c.InTokens, &c.OutTokens, &last); err != nil {
+			return nil, fmt.Errorf("paymaster: scan credential spend: %w", err)
+		}
+		if last != "" {
+			if t, err := time.Parse(tsLayout, last); err == nil {
+				c.LastTS = t
+			}
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // TopSpenders returns the top-N agents ordered by cost in the workspace since
 // `since`. Used by the leaderboard widget on the workspace dashboard. limit
 // is clamped to [1, 100] so a misconfigured caller can't drag in megabytes

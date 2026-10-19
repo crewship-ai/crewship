@@ -74,6 +74,8 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// FolderID files the credential in a Vault folder (credential_folders).
+	FolderID *string `json:"folder_id"`
 	// Attribution (v98). Together these answer "who created this
 	// credential row?" — the existing `created_by` column captures
 	// the calling user, but Crewship now also writes credentials on
@@ -445,6 +447,39 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		secLevel = *req.SecurityLevel
 	}
 
+	// Vault folder: must be this workspace's. A folder's tier floor binds the
+	// member, its default tier fills in when the caller named none, and a folder
+	// that carries a reveal policy or tier floor is an access decision, so
+	// filing into it needs the manage tier.
+	var folderArg any
+	if req.FolderID != nil && *req.FolderID != "" {
+		fp, err := loadFolderPolicy(r.Context(), h.db, workspaceID, *req.FolderID)
+		if err != nil {
+			replyInternalError(w, h.logger, "load credential folder", err)
+			return
+		}
+		if fp == nil {
+			replyError(w, http.StatusBadRequest, "Invalid folder_id")
+			return
+		}
+		if fp.restricted() && !canRole(role, "manage") {
+			replyError(w, http.StatusForbidden, msgFolderPolicyNeedsManage)
+			return
+		}
+		if req.SecurityLevel == nil && fp.defLevel != nil {
+			secLevel = *fp.defLevel
+		}
+		if secLevel < fp.minLevel {
+			if req.SecurityLevel == nil {
+				secLevel = fp.minLevel
+			} else {
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("This folder requires Keeper tier L%d or higher", fp.minLevel))
+				return
+			}
+		}
+		folderArg = fp.id
+	}
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin tx", err)
@@ -471,12 +506,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email, username,
 			token_expires_at, security_level, status, tags, created_by, created_at, updated_at,
-			created_by_actor_type, created_by_actor_id, provisioned_for_service)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_by_actor_type, created_by_actor_id, provisioned_for_service, folder_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
 		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now,
-		actorType, actorID, provisionedForService)
+		actorType, actorID, provisionedForService, folderArg)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -603,7 +638,17 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedByActorType:    actorTypeResp,
 		CreatedByActorID:      actorID,
 		ProvisionedForService: provisionedForService,
+		SecurityLevel:         secLevel,
+		SecurityLevelLabel:    keeper.SecurityLevel(secLevel).Label(),
+		FolderID:              respFolder(folderArg),
 	})
+}
+
+func respFolder(v any) *string {
+	if s, ok := v.(string); ok {
+		return &s
+	}
+	return nil
 }
 
 // Get returns a single credential by ID (without the secret value).
@@ -793,11 +838,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Doubles as the existence + workspace-scoping check that
 	// credentialExists used to do — single round-trip, same gate.
 	var currentType, currentProvider string
-	var currentUsername sql.NullString
+	var currentUsername, currentFolder sql.NullString
+	var currentLevel int
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT type, username, COALESCE(provider, '') FROM credentials
+		`SELECT type, username, COALESCE(provider, ''), folder_id, COALESCE(security_level, 1) FROM credentials
 		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&currentType, &currentUsername, &currentProvider)
+		credID, workspaceID).Scan(&currentType, &currentUsername, &currentProvider, &currentFolder, &currentLevel)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -1006,6 +1052,75 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		body["security_level"] = n
 	}
 
+	// Vault folder move. Moving into or out of a folder that carries a reveal
+	// policy or tier floor changes who may reveal the value, so it needs the
+	// manage tier; the target folder's tier floor must hold for the level the
+	// row ends up with, so a move cannot park a low-tier secret in a strict
+	// folder.
+	movedFrom, movedTo := "", ""
+	folderChanged := false
+	if raw, ok := body["folder_id"]; ok {
+		target := ""
+		switch v := raw.(type) {
+		case nil:
+		case string:
+			target = v
+		default:
+			replyError(w, http.StatusBadRequest, "folder_id must be a string or null")
+			return
+		}
+		movedFrom = currentFolder.String
+		movedTo = target
+		folderChanged = movedFrom != movedTo
+		delete(body, "folder_id")
+	}
+	if folderChanged || (currentFolder.Valid && body["security_level"] != nil) {
+		effective := currentFolder.String
+		if folderChanged {
+			effective = movedTo
+			for _, id := range []string{movedFrom, movedTo} {
+				if id == "" {
+					continue
+				}
+				fp, err := loadFolderPolicy(r.Context(), h.db, workspaceID, id)
+				if err != nil {
+					replyInternalError(w, h.logger, "load credential folder", err)
+					return
+				}
+				if id == movedTo && fp == nil {
+					replyError(w, http.StatusBadRequest, "Invalid folder_id")
+					return
+				}
+				if fp.restricted() && !canRole(role, "manage") {
+					replyError(w, http.StatusForbidden, msgFolderPolicyNeedsManage)
+					return
+				}
+			}
+		}
+		if effective != "" {
+			fp, err := loadFolderPolicy(r.Context(), h.db, workspaceID, effective)
+			if err != nil {
+				replyInternalError(w, h.logger, "load credential folder", err)
+				return
+			}
+			level := currentLevel
+			if n, ok := body["security_level"].(int); ok {
+				level = n
+			}
+			if fp != nil && level < fp.minLevel {
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("This folder requires Keeper tier L%d or higher", fp.minLevel))
+				return
+			}
+		}
+		if folderChanged {
+			if movedTo == "" {
+				ub.SetNull("folder_id")
+			} else {
+				ub.Set("folder_id", movedTo)
+			}
+		}
+	}
+
 	// JSON-shape gate for the generic allowed map. type/value/username
 	// already got their explicit assertions above; this loop catches
 	// the rest (provider/scope/crew_id/account_label/account_email/
@@ -1038,7 +1153,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set(col, val)
 	}
 
-	if ub.Empty() && !updateCrewIDs {
+	if ub.Empty() && !updateCrewIDs && !folderChanged {
 		replyError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
@@ -1089,6 +1204,16 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// it. INSIDE the tx (audit reliability): the value swap and its
 	// ROTATE event commit or roll back together, so the timeline can
 	// never miss a rotation that actually happened.
+	if folderChanged {
+		if recErr := RecordCredentialEventTx(r.Context(), tx, credID, AuditEventMoved, "", clientIP(r),
+			map[string]any{"from_folder_id": movedFrom, "to_folder_id": movedTo}); recErr != nil {
+			tx.Rollback()
+			h.logger.Error("record MOVED audit event", "error", recErr, "credential_id", credID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+
 	if valueRotated {
 		var rotatedBy string
 		if u := UserFromContext(r.Context()); u != nil {

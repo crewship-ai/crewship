@@ -159,6 +159,14 @@ type credentialResponse struct {
 	// present on a PROVIDER_LOGIN row and, derived, on an AI_CLI_TOKEN or
 	// API_KEY row of a model provider; absent on every other credential.
 	Login *loginView `json:"login,omitempty"`
+	// FolderID is the Vault folder the credential is filed in (nil = unfiled).
+	FolderID *string `json:"folder_id"`
+	// ReplaceDue is true when the folder's replace-reminder has elapsed since
+	// the value was created or last rotated. ReplaceAfter is the RFC3339 moment
+	// it elapses (nil when the folder sets no reminder). Nothing rotates on its
+	// own; this only feeds the "needs attention" view.
+	ReplaceDue   bool    `json:"replace_due"`
+	ReplaceAfter *string `json:"replace_after"`
 }
 
 // Batch loaders and junction-table helpers live in credentials_loaders.go
@@ -195,6 +203,15 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		where += ` AND (c.name LIKE ? ESCAPE '\' OR IFNULL(c.description,'') LIKE ? ESCAPE '\')`
 		like := "%" + escapeLikeWildcards(search) + "%"
 		whereArgs = append(whereArgs, like, like)
+	}
+	// ?folder_id=<id> lists one Vault folder's credentials directly;
+	// ?folder_id=none the unfiled ones. A folder of another workspace simply
+	// matches nothing.
+	if folder := strings.TrimSpace(q.Get("folder_id")); folder == "none" {
+		where += " AND c.folder_id IS NULL"
+	} else if folder != "" {
+		where += " AND c.folder_id = ?"
+		whereArgs = append(whereArgs, folder)
 	}
 	if tag := strings.TrimSpace(q.Get("tag")); tag != "" {
 		// tags is a JSON array TEXT column (migration v72), not a junction
@@ -400,7 +417,10 @@ func (h *CredentialHandler) enrichCredentials(ctx context.Context, result []cred
 	crewIDsMap := h.loadCrewIDsBatch(ctx, credIDs)
 	agentRefsMap := h.loadAgentRefsBatch(ctx, credIDs)
 	mcpUsedSet := h.loadMCPUsedBatch(ctx, credIDs)
+	folders := h.loadFolderInfoBatch(ctx, credIDs)
+	now := time.Now().UTC()
 	for i := range result {
+		applyFolderInfo(&result[i], folders[result[i].ID], now)
 		if ids, ok := crewIDsMap[result[i].ID]; ok {
 			result[i].CrewIDs = ids
 		} else {
@@ -511,6 +531,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)
 	c.AgentNames, c.AgentIDs = splitAgentRefs(h.loadAgentRefsBatch(r.Context(), []string{c.ID})[c.ID])
 	c.MCPUsed = h.loadMCPUsedBatch(r.Context(), []string{c.ID})[c.ID]
+	applyFolderInfo(&c, h.loadFolderInfoBatch(r.Context(), []string{c.ID})[c.ID], time.Now().UTC())
 	writeJSON(w, http.StatusOK, c)
 }
 

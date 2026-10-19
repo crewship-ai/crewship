@@ -40,6 +40,8 @@ type credRow struct {
 	// (which, until the create path was fixed, is exactly what happened to
 	// anything marked 4).
 	SecurityLevel         int     `json:"security_level" yaml:"security_level"`
+	FolderID              *string `json:"folder_id" yaml:"folder_id"`
+	ReplaceDue            bool    `json:"replace_due" yaml:"replace_due"`
 	SecurityLevelLabel    *string `json:"security_level_label" yaml:"security_level_label"`
 	CreatedByActorType    *string `json:"created_by_actor_type" yaml:"created_by_actor_type"`
 	ProvisionedForService *string `json:"provisioned_for_service" yaml:"provisioned_for_service"`
@@ -175,6 +177,19 @@ every page. --search and --tag filter server-side.`,
 		}
 
 		client := newAPIClient()
+		// --folder narrows to one Vault folder ("none" = unfiled).
+		folderFilter := ""
+		if ref, _ := flags.GetString("folder"); ref != "" {
+			if ref == "none" {
+				folderFilter = "none"
+			} else {
+				id, err := resolveCredentialFolderID(client, ref)
+				if err != nil {
+					return err
+				}
+				folderFilter = id
+			}
+		}
 		buildURL := func(cur string) string {
 			q := url.Values{}
 			// --offset is the one convention every list command shares
@@ -205,6 +220,9 @@ every page. --search and --tag filter server-side.`,
 			}
 			if kind != "" {
 				q.Set("kind", kind)
+			}
+			if folderFilter != "" {
+				q.Set("folder_id", folderFilter)
 			}
 			if cur != "" {
 				q.Set("cursor", cur)
@@ -367,6 +385,11 @@ var credGetCmd = &cobra.Command{
 			CreatedAt string     `json:"created_at" yaml:"created_at"`
 			CrewID    *string    `json:"crew_id" yaml:"crew_id"`
 			Login     *credLogin `json:"login,omitempty" yaml:"login,omitempty"`
+			// Vault folder, Keeper tier and the folder's replace-reminder.
+			SecurityLevel int     `json:"security_level" yaml:"security_level"`
+			FolderID      *string `json:"folder_id" yaml:"folder_id"`
+			ReplaceDue    bool    `json:"replace_due" yaml:"replace_due"`
+			ReplaceAfter  *string `json:"replace_after" yaml:"replace_after"`
 		}
 		if err := cli.ReadJSON(resp, &cred); err != nil {
 			return err
@@ -385,6 +408,27 @@ var credGetCmd = &cobra.Command{
 		// A provider login says who owns the seat, what it pays for and
 		// whether the server can keep it alive — rows a secret does not have.
 		pairs = append(pairs, loginPairs(cred.Login)...)
+		if cred.SecurityLevel > 0 {
+			pairs = append(pairs, []string{"Keeper tier", fmt.Sprintf("L%d", cred.SecurityLevel)})
+		}
+		if cred.FolderID != nil {
+			label := *cred.FolderID
+			if all, err := listCredentialFolders(client); err == nil {
+				for _, fo := range all {
+					if fo.ID == *cred.FolderID {
+						label = folderPath(all, fo)
+					}
+				}
+			}
+			pairs = append(pairs, []string{"Folder", label})
+		}
+		if cred.ReplaceDue {
+			due := "yes"
+			if cred.ReplaceAfter != nil {
+				due = "yes, since " + *cred.ReplaceAfter
+			}
+			pairs = append(pairs, []string{"Replace due", due})
+		}
 		return f.AutoDetail(cred, pairs)
 	},
 }
@@ -834,6 +878,7 @@ func init() {
 	credListCmd.Flags().Int("limit", 0, "Page size (1-500; enables cursor pagination)")
 	credListCmd.Flags().String("cursor", "", "Opaque cursor from a previous page's output")
 	credListCmd.Flags().String("search", "", "Filter by a substring of the name or description (server-side)")
+	credListCmd.Flags().String("folder", "", "Only credentials in this Vault folder (name, Parent/Child path or id); \"none\" lists the unfiled ones")
 	credListCmd.Flags().String("tag", "", "Filter to credentials carrying this exact tag (server-side)")
 	credListCmd.Flags().Bool("all", false, "Fetch every page by following the cursor")
 	credListCmd.Flags().Int("offset", 0, "Rows to skip before the first one shown (positional paging; not with --all/--cursor)")
@@ -864,6 +909,8 @@ func init() {
 	credCreateCmd.Flags().String("oauth-token-url", "", "Token endpoint; overrides --oauth-provider, and required without it")
 	credCreateCmd.Flags().String("oauth-scopes", "", "Space-separated scopes to request; defaults to the catalogue's for --oauth-provider")
 
+	credCreateCmd.Flags().String("folder", "", "File the credential in this Vault folder (name, Parent/Child path or id)")
+	credUpdateCmd.Flags().String("folder", "", "Move the credential to this Vault folder; pass an empty value to take it out of its folder. Moving into or out of a folder with a reveal policy or tier floor needs OWNER or ADMIN")
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")

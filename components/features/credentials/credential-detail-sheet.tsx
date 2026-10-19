@@ -65,6 +65,8 @@ import { GiveToAgentsDialog } from "./give-to-agents-dialog"
 import { PaysForPanel } from "./pays-for-panel"
 import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
 import { CredentialTierBadge } from "./credential-tier-badge"
+import { useCredentialFolders } from "@/hooks/use-credential-folders"
+import { buildFolderTree } from "@/lib/credentials/folders"
 import { BrandTile } from "./secrets-table"
 import { SecretSettings } from "./secret-settings"
 import { SecretValueHistory } from "./secret-value-history"
@@ -124,6 +126,11 @@ interface CredentialSummary {
    *  server, which the badge renders as unclassified rather than as L1. */
   security_level?: number
   security_level_label?: string
+  /** Vault folder the secret is filed in; null/absent = unfiled. */
+  folder_id?: string | null
+  /** The folder's replace-reminder has elapsed; `replace_after` is when it did. */
+  replace_due?: boolean
+  replace_after?: string | null
   /** The seat this row is, when it pays for a model — PRD provider-logins
    *  §10.1. Absent on a secret and on a server that predates the tab. */
   login?: ProviderLogin | null
@@ -249,6 +256,7 @@ export function CredentialDetailSheet({
   const [auditError, setAuditError] = React.useState(false)
   const [auditExpanded, setAuditExpanded] = React.useState(false)
   const [tierSaving, setTierSaving] = React.useState(false)
+  const [folderSaving, setFolderSaving] = React.useState(false)
   const [renewing, setRenewing] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ valid: boolean; supported?: boolean; error?: string } | null>(null)
@@ -293,6 +301,7 @@ export function CredentialDetailSheet({
     return state === "allowed" || state === "conditional"
   }
   const canUpdate = canAct("edit")
+  const { folders } = useCredentialFolders(workspaceId, canUpdate)
   const canRotate = canAct("rotate")
   // A manager who may edit but not rotate still replaces the value — at once, without grace.
   const canReplace = canRotate || canUpdate
@@ -511,6 +520,28 @@ export function CredentialDetailSheet({
       toastSwitchError("Keeper tier", "Network error", () => void setTier(level))
     } finally {
       setTierSaving(false)
+    }
+  }
+
+  const moveToFolder = async (folderId: string) => {
+    if (folderSaving || (credential.folder_id ?? "") === folderId) return
+    setFolderSaving(true)
+    try {
+      const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_id: folderId || null }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toastSwitchError("Folder", typeof data?.error === "string" ? data.error : `HTTP ${res.status}`, () => void moveToFolder(folderId))
+        return
+      }
+      onRefresh()
+    } catch {
+      toastSwitchError("Folder", "Network error", () => void moveToFolder(folderId))
+    } finally {
+      setFolderSaving(false)
     }
   }
 
@@ -839,8 +870,32 @@ export function CredentialDetailSheet({
       {canUpdate && (
         <DetailCard title="Protection" icon={ShieldCheck}>
           <div className="flex flex-col divide-y divide-border">
-            {isSecret && (
+            {isSecret && folders.length > 0 && (
               <div className="flex flex-wrap items-center gap-3 pb-3">
+                <div className="min-w-0 flex-1">
+                  <b className="text-control font-medium">Folder</b>
+                  <p className="text-label text-muted-foreground">
+                    {credential.replace_due
+                      ? `Past the folder's replace reminder${credential.replace_after ? ` (${new Date(credential.replace_after).toLocaleDateString()})` : ""}. Replace the value to clear it.`
+                      : "Folders can limit who reveals a value, set a lowest Keeper tier and remind you to replace it."}
+                  </p>
+                </div>
+                <select
+                  aria-label="Folder"
+                  value={credential.folder_id ?? ""}
+                  disabled={folderSaving}
+                  onChange={(e) => void moveToFolder(e.target.value)}
+                  className="h-8 max-w-[14rem] rounded-md border border-border bg-background px-2 text-control text-foreground outline-none focus:border-primary coarse:min-h-[44px]"
+                >
+                  <option value="">No folder</option>
+                  {buildFolderTree(folders).map(({ folder, depth }) => (
+                    <option key={folder.id} value={folder.id}>{depth ? "\u00a0\u00a0" : ""}{folder.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {isSecret && (
+              <div className={cn("flex flex-wrap items-center gap-3 pb-3", folders.length > 0 && "pt-3")}>
                 <div className="min-w-0 flex-1">
                   <b className="text-control font-medium">Keeper tier</b>
                   <p className="text-label text-muted-foreground">{tierLevel ? tierMeta(tierLevel).consequence : "This server did not report a tier."}</p>
