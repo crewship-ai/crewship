@@ -1,4 +1,4 @@
-import type { WorkCardModel } from "./types"
+import type { WorkCardModel } from "../types"
 
 const base: WorkCardModel = {
   id: "work-1", runState: "applied", saved: { kind: "saved", revision: 2 }, freshness: "current", problem: null, load: "ready",
