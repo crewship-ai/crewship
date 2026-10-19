@@ -78,7 +78,7 @@ func TestFireWebhook_ValidatesInputsBeforeAcceptance(t *testing.T) {
 	if status != "completed" || output != "9" {
 		t.Fatalf("corrected run = %s/%q", status, output)
 	}
-	if id, status := waitForWebhookFire(t, db, wh.ID, time.Second); id != accepted.RunID || status != "COMPLETED" {
+	if id, status := waitForWebhookFire(t, db, wh.ID, time.Second, accepted.RunID); id != accepted.RunID || status != "COMPLETED" {
 		t.Fatalf("webhook record = %s/%s", id, status)
 	}
 	if err := db.QueryRow(`SELECT consecutive_fire_failures FROM pipeline_webhooks WHERE id=?`, wh.ID).Scan(&failures); err != nil {

@@ -104,10 +104,11 @@ func (b *blockingRunner) callCount() int {
 }
 
 // waitForWebhookFire polls the webhook row until RecordFire has
-// stamped a last_status, then returns (last_run_id, last_status).
+// stamped a last_status, then returns (last_run_id, last_status). An optional
+// expected run ID excludes an older delivery outcome on the same webhook.
 // Fails the test after the deadline — a terminal record must always
 // land, however the run ends.
-func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline time.Duration) (string, string) {
+func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline time.Duration, expectedRunID ...string) (string, string) {
 	t.Helper()
 	stop := time.Now().Add(deadline)
 	for {
@@ -115,7 +116,7 @@ func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline tim
 		err := db.QueryRow(
 			`SELECT last_run_id, last_status FROM pipeline_webhooks WHERE id = ?`, webhookID,
 		).Scan(&runID, &status)
-		if err == nil && status.String != "" {
+		if err == nil && status.String != "" && (len(expectedRunID) == 0 || runID.String == expectedRunID[0]) {
 			return runID.String, status.String
 		}
 		if time.Now().After(stop) {
