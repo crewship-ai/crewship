@@ -31,6 +31,17 @@ const PAGES = [
 ]
 
 async function scan(page: Page, testInfo: import("@playwright/test").TestInfo) {
+  // Contrast is a property of the settled page. Rows and panels fade in, and
+  // a scan mid-fade measures the text at partial opacity (nightly 39195624399
+  // read #4B5363 at ~78% as #727884). Looping pulses never settle; skip them.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  )
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa"])
     .analyze()

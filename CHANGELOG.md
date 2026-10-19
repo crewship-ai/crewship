@@ -93,17 +93,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
 - **Harbor 2: Spend respects the role.** The dashboard no longer asks for the cost ledger or draws the Spend tile below ADMIN, and Activity › Spend shows "Spend is unavailable: only workspace owners and admins can see costs." instead of failed-load cards if the server answers 403 (#3662 on the new layout).
+### Fixed
+
+- **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
+- Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
+
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
 ### Fixed
 
 - ⚠️ **Behaviour change: cost figures are readable by workspace OWNER and ADMIN only.** `GET /api/v1/paymaster/spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders` and `GET /api/v1/journal/spend` (and so `crewship cost`, `crewship paymaster` and `crewship spend`) now answer `403` to MANAGER, MEMBER, VIEWER and GUEST; before, the web app hid Spend but any member could read it from the API. An empty window returns `"rows": []` instead of `null`. The dashboard and Activity no longer ask for, or show, spend for other roles.
+- Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
+- Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
+
 - ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.
 - **Agent details now show the configured provider and model** in table, JSON and YAML output; these settings remain distinct from evidence of the model serving a run.
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
 ### Added
+
+- Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
+
+- Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
+
+- Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
+
+- Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
 
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
@@ -169,6 +185,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Administrative member-access reads include server-computed preset selection provenance. Saved intent remains separate from effective permissions; manual edits cannot forge selections and personal access responses omit this metadata. The new selection fields keep their API names in CLI YAML. OpenAPI reuses the existing grant-provenance shape without changing authority.
 
 ### Changed
+
+- Reduce workspace and entity WebSocket delivery authorization to one current SQL snapshot per frame, retaining immediate account, membership and restricted-profile revocation checks, including the private-page owner or workspace OWNER audience.
 
 - OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.
 

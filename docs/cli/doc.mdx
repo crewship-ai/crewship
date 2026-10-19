@@ -15,6 +15,10 @@ saving. Scoped credentials need `pages:read` for reads and both `pages:read` and
 `pages:write` for editing; `pages:*` covers both. These scopes do not grant access
 to somebody else's document.
 
+A reader refuses unsupported saved document schemas, including initialization
+retries, without returning their content. Use a compatible document service;
+confirmed data stays retained rather than being silently replaced.
+
 ## `crewship doc create --file <request.json>`
 
 Create a populated document during a run admitted for one human's creation
@@ -29,7 +33,12 @@ Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
 {"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team and review feedback."}]}
 ```
 
-The result identifies the saved document and its link. If confirmation is lost,
+The result identifies the saved document and its link. An ordinary card click
+opens its current saved content beside the trusted conversation, after checking
+your current read access. Closing the preview preserves your unsent chat message;
+on a phone, use Back to chat. Modified clicks and native links open that saved
+identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
+If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
 owner. A one-shot admission grants no later access. If the original human request
@@ -95,6 +104,10 @@ object of at most 2 MiB. Keep the same operation ID and contents when retrying
 an operation whose confirmation was lost.
 
 ## `crewship doc read <page-slug>`
+
+For a saved Document identity, `crewship doc read @<page-id>` keeps the original
+object bound to the request. A deleted identity returns 404 even if another
+document reuses its former slug. Current workspace and access checks still apply.
 
 Read the currently confirmed document, content tree, block outline and revision.
 Use the returned opaque `epoch`, `rev` and target block hash when preparing an
