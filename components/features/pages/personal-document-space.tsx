@@ -28,7 +28,7 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
       : error ? <p role="alert" className="px-6">Your Documents are unavailable.</p>
       : <>
         {unknown && <p role="status" className="px-6">Document audience information is unavailable for some of your Documents.</p>}
-        {own.length > 0 && <DocumentCatalog pages={own} onSelect={onSelect} />}
+        {own.length > 0 && <DocumentCatalog pages={own} onSelect={onSelect} immutableTargets />}
         {!own.length && !unknown && <p role="status" className="px-6">No private Documents in your space.</p>}
       </>}
   </section>
