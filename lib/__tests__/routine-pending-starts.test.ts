@@ -19,7 +19,7 @@ describe("pendingStartPresentation", () => {
   // it into an ETA or a queue position.
   it("names capacity as the reason it waits, with the next try as an earliest time", () => {
     const p = pendingStartPresentation(
-      start({ fire_at: at(-5), dispatch_attempts: 3, next_attempt_at: at(1), expires_at: at(60) }),
+      start({ fire_at: at(-5), reason_code: "routine_capacity", dispatch_attempts: 3, next_attempt_at: at(1), expires_at: at(60) }),
       NOW,
     )
     expect(p).toMatchObject({ label: "Waiting for capacity", tone: "warn" })
@@ -45,8 +45,28 @@ describe("pendingStartPresentation", () => {
   })
 
   it("tells capacity waiting apart from waiting for its time", () => {
-    expect(isWaitingForCapacity(start({ dispatch_attempts: 1 }))).toBe(true)
+    expect(isWaitingForCapacity(start({ reason_code: "routine_capacity", dispatch_attempts: 1 }))).toBe(true)
     expect(isWaitingForCapacity(start())).toBe(false)
     expect(isWaitingForCapacity(start({ status: "failed", dispatch_attempts: 10 }))).toBe(false)
+  })
+})
+
+
+describe("stable pending reason codes", () => {
+  it.each([undefined, "unknown", "future_code"])("does not infer capacity from attempts for %s", reason_code => {
+    const row = start({ reason_code, dispatch_attempts: 2, fire_at: at(-1) })
+    expect(isWaitingForCapacity(row)).toBe(false)
+    expect(pendingStartPresentation(row, NOW).label).toBe("Waiting")
+  })
+  it.each([["paused", "Paused"], ["retry_backoff", "Waiting to retry"], ["recovered", "Recovered"], ["recovery_unknown", "Needs attention"]])("presents %s", (reason_code, label) => {
+    expect(pendingStartPresentation(start({reason_code}), NOW).label).toBe(label)
+  })
+  it("never labels a terminal start paused, or an ambiguous recovery as started", () => {
+    expect(pendingStartPresentation(start({status:"failed", reason_code:"paused"}), NOW).label).toBe("Did not run")
+    expect(pendingStartPresentation(start({status:"fired", reason_code:"recovery_unknown"}), NOW).label).toBe("Needs attention")
+    expect(pendingStartPresentation(start({status:"fired", run_id:""}), NOW).label).toBe("Dispatching")
+  })
+  it.each(["capacity_expired", "expired", "version_missing", "routine_inactive", "dispatch_failed"])("keeps terminal %s truthful", reason_code => {
+    expect(pendingStartPresentation(start({status:"failed", reason_code}), NOW).label).toBe("Did not run")
   })
 })
