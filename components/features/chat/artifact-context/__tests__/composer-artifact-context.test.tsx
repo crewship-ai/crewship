@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { ComposerArtifactContextStrip } from "../composer/composer-artifact-context"
-import { addAttachment, attachmentId, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
+import { addAttachment, attachmentId, buildSubmission, classifySubmit, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
 
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 const item = (pageId: string, revision?: number, patch: Partial<AttachedArtifact> = {}): AttachedArtifact => {
-  const target = revision === undefined ? { workspaceId: "w", pageId, mode: "latest" as const } : { workspaceId: "w", pageId, mode: "revision" as const, revision }
-  return { id: attachmentId(target), target, title: pageId.toUpperCase(), access: "readable", resultType: "Document", audience: { kind: "personal" }, ...patch }
+  const target = revision === undefined ? { workspaceId: "w", pageId, mode: "latest" as const } : { workspaceId: "w", pageId, mode: "revision" as const, revision, checkpointId: `cp-${pageId}-${revision}` }
+  return { id: attachmentId(target), target, title: pageId.toUpperCase(), access: "readable", resultType: "Document", audience: { kind: "personal" }, expected: { schema: 3, rev: revision ?? 5, generation: 2 }, ...patch }
 }
 const ctx = (patch: Partial<ComposerArtifactContext> = {}): ComposerArtifactContext => ({ attachments: [item("a", 3)], mode: null, updateTargetId: null, executor: "Ada", createAudience: { kind: "personal" }, createResultType: "Document", online: true, ...patch })
 const noop = () => {}
@@ -94,4 +94,25 @@ it("the mode picker is a native radio group and reports choices", () => {
 it("renders nothing with the flag off", () => {
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "")
   expect(strip(ctx()).container.innerHTML).toBe("")
+})
+it("an update needs the confirmed schema, revision and generation", () => {
+  expect(sendBlock(ctx({ mode: "update", attachments: [item("a", 1, { expected: null })] }))).toBe("state_unknown")
+})
+it("builds the submission from ids and expected state only, once the choices are made", () => {
+  const two = [item("a", 1), item("b")]
+  expect(buildSubmission(ctx({ attachments: two }), "sub-1")).toBeNull()
+  expect(buildSubmission(ctx({ attachments: two, mode: "update" }), "sub-1")).toBeNull()
+  const submission = buildSubmission(ctx({ attachments: two, mode: "update", updateTargetId: two[1].id }), "sub-1")
+  expect(submission).toEqual({
+    submission_id: "sub-1", edit_mode: "update", update_page_id: "b",
+    context: [{ page_id: "a", expected: { schema: 3, rev: 1, generation: 2 }, checkpoint_id: "cp-a-1" }, { page_id: "b", expected: { schema: 3, rev: 5, generation: 2 } }],
+  })
+  expect(JSON.stringify(submission)).not.toMatch(/"A"|"B"|title/)
+  expect(buildSubmission(ctx({ mode: "reply_only" }), "")).toBeNull()
+  expect(buildSubmission(ctx({ mode: "reply_only" }), "sub-2")?.update_page_id).toBeUndefined()
+})
+it("a retry keeps the same submission id, and a stale or unreadable answer is handled apart from an unknown one", () => {
+  const c = ctx({ mode: "create" })
+  expect(buildSubmission(c, "sub-3")?.submission_id).toBe(buildSubmission(c, "sub-3")?.submission_id)
+  expect([200, 202, 409, 404, 503, "network"].map(code => classifySubmit(code as number | "network"))).toEqual(["accepted", "accepted", "stale", "unreadable", "unknown", "unknown"])
 })

@@ -18,7 +18,11 @@ export interface AttachedArtifact {
   resultType: string
   /** Where an update of this item lands. */
   audience: Audience
+  /** Schema, revision and generation the server reported when the item was attached. Null until known. */
+  expected: ExpectedState | null
 }
+
+export interface ExpectedState { schema: number; rev: number; generation: number }
 
 export interface ComposerArtifactContext {
   attachments: AttachedArtifact[]
@@ -32,7 +36,7 @@ export interface ComposerArtifactContext {
   online: boolean
 }
 
-export type SendBlock = "attachment_lost" | "offline" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
+export type SendBlock = "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
 
 export const attachmentId = (target: LinkedViewerTarget) => targetKey(target)
 
@@ -61,6 +65,7 @@ export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
     if (ctx.attachments.length === 0) return "need_attachment"
     const target = updateTarget(ctx)
     if (!target) return "choose_target"
+    if (!target.expected) return "state_unknown"
     if (!ctx.executor) return "no_executor"
     return target.audience.kind === "unknown" ? "audience_unknown" : null
   }
@@ -71,6 +76,7 @@ export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
 export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
   attachment_lost: "You no longer have access to an attached item. Remove it to continue.",
   offline: "You are offline. Reconnect to send.",
+  state_unknown: "The current version of the item to update is not confirmed yet. Wait or reattach it.",
   choose_mode: "Choose what the agent should do with the attached item.",
   need_attachment: "Attach the item you want to update.",
   choose_target: "Choose which attached item to update.",
@@ -89,4 +95,43 @@ export function audienceText(audience: Audience, mode: EditMode | null): string 
 export function pinnedUpdateWarning(ctx: ComposerArtifactContext): string | null {
   const target = ctx.mode === "update" ? updateTarget(ctx) : null
   return target?.target.mode === "revision" ? `You attached revision ${target.target.revision}. The update applies to the latest revision and may conflict with newer changes.` : null
+}
+
+/** Wire shape proposed to the backend (FE-REQ-F2-5). Ids and expected state only: no titles, no model-supplied tokens. */
+export interface ArtifactSubmission {
+  submission_id: string
+  edit_mode: EditMode
+  /** Attached context items, in order. */
+  context: { page_id: string; expected: ExpectedState | null; checkpoint_id?: string }[]
+  /** The page to update; present only for update. */
+  update_page_id?: string
+}
+
+/** One id per send intent. Reuse it when retrying so the server can deduplicate. */
+export const newSubmissionId = () => crypto.randomUUID()
+
+/** Null while sending is blocked, so nothing can be dispatched without the explicit choices. */
+export function buildSubmission(ctx: ComposerArtifactContext, submissionId: string): ArtifactSubmission | null {
+  if (!ctx.mode || sendBlock(ctx) || !submissionId) return null
+  const target = ctx.mode === "update" ? updateTarget(ctx) : null
+  return {
+    submission_id: submissionId,
+    edit_mode: ctx.mode,
+    context: ctx.attachments.map(item => ({ page_id: item.target.pageId, expected: item.expected, ...(item.target.mode === "revision" ? { checkpoint_id: item.target.checkpointId } : {}) })),
+    ...(target ? { update_page_id: target.target.pageId } : {}),
+  }
+}
+
+export type SubmitOutcome = "accepted" | "stale" | "unreadable" | "unknown"
+
+/**
+ * 409 means the item changed since it was attached: re-confirm, keep the same
+ * draft. 404 means it can no longer be read: drop it. Anything else (503,
+ * timeout) is unknown: retry with the SAME submission id, never a new one.
+ */
+export function classifySubmit(status: number | "network"): SubmitOutcome {
+  if (status === 200 || status === 201 || status === 202) return "accepted"
+  if (status === 409) return "stale"
+  if (status === 404) return "unreadable"
+  return "unknown"
 }
