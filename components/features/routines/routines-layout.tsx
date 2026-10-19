@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react"
+import { isCostShown } from "@/lib/cost-visibility"
 import { motion, AnimatePresence } from "motion/react"
 import { Workflow, Plus, Upload, List, HelpCircle } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -74,7 +75,8 @@ function IntroPane({ workspaceId, onNew, onOverview }: { workspaceId: string; on
     return {
       runs: k.total,
       finishedPct: k.successPct,
-      spendUsd: summary ? summary.total_spent_usd : null,
+      // Below ADMIN the summary has no amount (#3590): no figure, not $0.
+      spendUsd: summary && isCostShown(summary.total_spent_usd) ? summary.total_spent_usd : null,
       month: summary?.month ? new Date(`${summary.month}-01T12:00:00Z`).toLocaleString("en-GB", { month: "long" }) : "this month",
     }
   }, [runs, summary])
