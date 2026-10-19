@@ -260,6 +260,7 @@ env:
     e2e/harbor2-workspace-default.spec.ts
     e2e/harbor2-phone-pilot.spec.ts
     e2e/harbor2-signed-out.spec.ts
+    e2e/avatars-voxel.spec.ts
 
 jobs:
   build-tools:
