@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart.
+
 - Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
 
