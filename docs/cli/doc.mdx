@@ -100,6 +100,10 @@ schema 2; initialization does not silently upgrade an existing document.
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
 an operation whose confirmation was lost.
 
+The native editor's **History** button opens a separate read-only view of retained
+checkpoints. Selecting an older checkpoint and closing history preserve your
+current editor and unsaved draft. Browsing does not restore or overwrite content.
+
 ## `crewship doc checkpoints <page-slug>`
 
 `crewship doc checkpoints <page-slug>` lists at most the latest 1,000 retained
