@@ -10,7 +10,8 @@ import { stylePreviewAttrs } from "@/lib/theme/style-preview"
 // The Style card's gallery (owner, 19 Oct: 42 big previews made it five
 // screens long). One live preview shows the chosen style, or the one under
 // the pointer, with its name and blurb; below it category chips and a compact
-// grid of palettes. The preview is a small page drawn with the app's own
+// grid of palettes that follows the card's width (container queries: a
+// tablet's Settings column is narrow at a desk-sized window). The preview is a small page drawn with the app's own
 // tokens inside an element that wears the style (stylePreviewAttrs), so it
 // shows the real palette, corners and accent of that style in the scheme the
 // style will have, not a picture that can drift from the stylesheet. The
@@ -93,7 +94,8 @@ export function StyleGallery({ state, scheme, onPick }: { state: StyleState | nu
         ))}
       </div>
 
-      <div role="radiogroup" aria-label="Style" data-testid="style-grid" className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+      <div className="@container">
+      <div role="radiogroup" aria-label="Style" data-testid="style-grid" className="grid grid-cols-2 gap-2 @lg:grid-cols-4 @2xl:grid-cols-6">
         {tiles.map((style) => {
           const checked = style.id === active
           return (
@@ -124,6 +126,7 @@ export function StyleGallery({ state, scheme, onPick }: { state: StyleState | nu
             </button>
           )
         })}
+      </div>
       </div>
     </div>
   )

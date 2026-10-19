@@ -212,13 +212,17 @@ describe("reset and knobs (APR-04, STY-03)", () => {
 })
 
 describe("phone and tablet (390 and 1024 px)", () => {
-  it("the palettes sit two to a row on a phone, four on a tablet, six on a desktop", () => {
+  it("the palettes follow the card's width, not the window's: two, then four, then six to a row", () => {
     render(<AppearanceSection />)
+    // A tablet's Settings column is narrow at a desk-sized window, so the
+    // grid reads its container (Tailwind container queries).
+    expect(gallery().parentElement!.className).toMatch(/(^|\s)@container(\s|$)/)
     const cls = gallery().className
     expect(gallery().getAttribute("data-testid")).toBe("style-grid")
     expect(cls).toContain("grid-cols-2")
-    expect(cls).toMatch(/\bsm:grid-cols-4\b/)
-    expect(cls).toMatch(/\blg:grid-cols-6\b/)
+    expect(cls).toMatch(/(^|\s)@lg:grid-cols-4(\s|$)/)
+    expect(cls).toMatch(/(^|\s)@2xl:grid-cols-6(\s|$)/)
+    expect(cls).not.toMatch(/(^|\s)(sm|lg):grid-cols-/)
   })
 
   it("tiles and reset are 44 px on a coarse pointer, written in px", () => {
