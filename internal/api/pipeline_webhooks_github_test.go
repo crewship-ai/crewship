@@ -13,7 +13,7 @@ import (
 
 func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 	h, token, secret, _ := routineAcceptanceRig(t)
-	defer h.WaitWebhookDispatches()
+	defer waitPendingWebhookDispatches(t, h)
 	if _, err := h.db.Exec(`UPDATE pipeline_webhooks SET ingress_profile='github'`); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 // must collide on the body fingerprint inside the acceptance transaction.
 func TestPipelineWebhooks_GitHubConcurrentIDsReserveOneRun(t *testing.T) {
 	h, token, secret, _ := routineAcceptanceRig(t)
-	defer h.WaitWebhookDispatches()
+	defer waitPendingWebhookDispatches(t, h)
 	if _, err := h.db.Exec(`UPDATE pipeline_webhooks SET ingress_profile='github'`); err != nil {
 		t.Fatal(err)
 	}

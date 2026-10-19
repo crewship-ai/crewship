@@ -500,3 +500,66 @@ func TestAcceptance_RoutineFixtureTest_Remote(t *testing.T) {
 		t.Fatalf("expected the endpoint's 400 for an unknown step, got err=%v:\n%s", err, noStep)
 	}
 }
+
+// The accepted durable queue state is observed through the built CLI against
+// a real router/DB, then a real dispatcher produces that very same run ID.
+func TestAcceptance_RoutineLogsDurableQueuedIdentity(t *testing.T) {
+	cfg, db := startRoutineDetailAcceptanceServer(t)
+	saveRoutineDetailV1(t, cfg)
+	store := pipeline.NewStore(db)
+	recipe, err := store.GetBySlug(t.Context(), routineDetailAcceptanceWorkspaceID, "acceptance-detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const planned = "run_durable_cli_planned"
+	pending := pipeline.NewPendingRunStore(db)
+	_, _, err = pending.Enqueue(t.Context(), pipeline.PendingRun{ID: "pending-cli-durable", TriggeredVia: pipeline.TriggeredViaManual, InvokingUserID: "dtl-owner", InvocationAuthority: pipeline.RoutineRunAuthority, WorkspaceID: routineDetailAcceptanceWorkspaceID, PipelineID: recipe.ID, PipelineSlug: recipe.Slug, RunID: planned, IdempotencyKey: "cli-durable-key", InputsJSON: `{"who":"alice"}`, FireAt: time.Now().Add(-time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE pending_runs SET reason_code='scheduled' WHERE id='pending-cli-durable'`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runRoutineDetailCLI(t, cfg, "routine", "logs", planned, "-f", "json")
+	if err != nil {
+		t.Fatalf("queued poll: %v %s", err, out)
+	}
+	var queued map[string]any
+	if err := json.Unmarshal([]byte(out), &queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued["id"] != planned || queued["status"] != "QUEUED" || queued["pending_id"] != "pending-cli-durable" || queued["started_at"] != nil {
+		t.Fatalf("false start evidence: %s", out)
+	}
+	pretty, err := runRoutineDetailCLI(t, cfg, "routine", "logs", planned)
+	if err != nil || !strings.Contains(pretty, "QUEUED") || strings.Contains(pretty, "Started:") || strings.Contains(pretty, "<nil>") {
+		t.Fatalf("queued display: %v %s", err, pretty)
+	}
+	executor := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{Store: store, Resolver: pipeline.NewResolver(db), Runner: unusedAgentRunner{}, DB: db, RunStore: pipeline.NewRunStore(db), Runs: pipeline.NewRunRegistry()})
+	dispatcher := pipeline.NewPendingRunDispatcher(pending, executor, slog.Default())
+	ctx, cancel := context.WithCancel(t.Context())
+	dispatcher.Start(ctx)
+	defer func() { cancel(); dispatcher.Stop() }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		row, getErr := pipeline.NewRunStore(db).Get(t.Context(), planned)
+		if getErr == nil && row.Status == pipeline.RunStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("durable CLI work did not finish: %+v %v", row, getErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	out, err = runRoutineDetailCLI(t, cfg, "routine", "logs", planned, "-f", "json")
+	var actual map[string]any
+	if err != nil {
+		t.Fatalf("completed poll: %v %s", err, out)
+	}
+	if err := json.Unmarshal([]byte(out), &actual); err != nil {
+		t.Fatal(err)
+	}
+	if actual["id"] != planned || actual["status"] != "completed" {
+		t.Fatalf("identity changed: %s", out)
+	}
+}
