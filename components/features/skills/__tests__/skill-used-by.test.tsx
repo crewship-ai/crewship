@@ -58,6 +58,8 @@ describe("Activity button", () => {
     // The top bar already has the shell's "Activity" (live runs) button.
     expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
     const link = screen.getByRole("link", { name: "Skill activity" })
+    // ODCH-SK-14: on a phone too (an icon there, like the bar's other actions).
+    expect(link.className).not.toMatch(/max-sm:hidden/)
     const href = link.getAttribute("href") ?? ""
     expect(href).toMatch(/^\/activity\?/)
     // The link carries the skill as a walk stop, which the Activity page turns

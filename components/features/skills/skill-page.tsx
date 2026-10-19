@@ -727,9 +727,9 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
         actions={
           <>
             {/* Named apart from the shell's own Activity button in the same bar. */}
-            <SubBarSecondary asChild icon={Activity} className="max-sm:hidden">
-              <Link href={skillActivityHref(skill.id, skillName(skill))} aria-label="Skill activity">
-                Activity
+            <SubBarSecondary asChild icon={Activity}>
+              <Link href={skillActivityHref(skill.id, skillName(skill))} aria-label="Skill activity" title="Activity">
+                <span className="max-xl:sr-only">Activity</span>
               </Link>
             </SubBarSecondary>
             <DropdownMenu>
