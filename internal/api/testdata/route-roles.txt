@@ -34,6 +34,7 @@ DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId} roleSelf
 DELETE /api/v1/checkpoints/{id} roleCreate
 DELETE /api/v1/conversations/{conversationId}/agents/{agentId} roleSelf
 DELETE /api/v1/conversations/{conversationId}/participants/{userId} roleSelf
+DELETE /api/v1/credential-folders/{folderId} roleManage
 DELETE /api/v1/credential-rotations/{rotationId} roleInline
 DELETE /api/v1/credentials/bindings/{bindingId} roleManage
 DELETE /api/v1/credentials/{credentialId} roleManage
@@ -113,6 +114,7 @@ PATCH /api/v1/agents/{agentId}/learning roleManage
 PATCH /api/v1/agents/{agentId}/peers/{userId} roleSelf
 PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/chats/{chatId}/proposals/{sourceId} roleInline
+PATCH /api/v1/credential-folders/{folderId} roleInline
 PATCH /api/v1/credentials/{credentialId} roleCreate
 PATCH /api/v1/crews/{crewId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -241,6 +243,7 @@ POST /api/v1/conversations/{conversationId}/messages roleSelf
 POST /api/v1/conversations/{conversationId}/mute roleSelf
 POST /api/v1/conversations/{conversationId}/participants roleSelf
 POST /api/v1/conversations/{conversationId}/read roleSelf
+POST /api/v1/credential-folders roleInline
 POST /api/v1/credentials roleInline
 POST /api/v1/credentials/bindings roleManage
 POST /api/v1/credentials/test roleSelf

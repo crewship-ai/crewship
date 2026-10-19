@@ -519,6 +519,11 @@ func TestPaymaster_CredentialSpend(t *testing.T) {
 	h := newPaymasterTestHandler(t)
 	now := time.Now().UTC()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for _, ws := range []string{"ws-a", "ws-b"} {
+		if _, err := h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, ?, ?)`, ws, ws, ws); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, row := range []struct {
 		id, ws, cred string
 		ts           time.Time
