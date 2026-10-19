@@ -348,6 +348,11 @@ func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string
 // Returns the reason on refusal so the 403, the journal entry and the owner's
 // notification all say the same thing.
 func (h *PageHandler) mayProduce(ctx context.Context, wsID, userID, role string, rec *pageRecord, panel *panelRecord) (bool, string) {
+	// Read visibility must never turn role management or an ordinary legacy
+	// produce grant into control of another human's private output.
+	if rec.PrivateAudience && !privatePageViewer(rec, &pageViewer{UserID: userID, Role: role}) {
+		return false, "private output production requires its custodian or workspace OWNER"
+	}
 	viewer, err := h.loadViewer(ctx, wsID, userID)
 	if err != nil {
 		return false, "the caller's crew membership could not be read"
