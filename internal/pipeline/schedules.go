@@ -1791,15 +1791,12 @@ func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched 
 		expires := now.Add(time.Hour)
 		_, _, err = pending.Enqueue(ctx, PendingRun{
 			ID: pendingID, WorkspaceID: sched.WorkspaceID, PipelineID: target.ID, PipelineSlug: target.Slug,
-			RunID: NewRunID(), IdempotencyKey: in.IdempotencyKey, DueAt: in.DueAt,
+			RunID: NewRunID(), IdempotencyKey: in.IdempotencyKey, DueAt: in.DueAt, ReasonCode: "routine_capacity",
 			InputsJSON: sched.InputsJSON, FireAt: now, ExpiresAt: &expires,
 			PinnedVersion: sched.TargetPipelineVersion, ChatOriginID: sched.ChatOriginID,
 			TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID,
 		})
 		if err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE pending_runs SET reason_code='routine_capacity' WHERE workspace_id=? AND id=?`, sched.WorkspaceID, pendingID); err != nil {
 			return err
 		}
 	} else {

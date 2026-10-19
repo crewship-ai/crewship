@@ -66,6 +66,13 @@ func TestScheduleCapacityQueuesWithoutFailureOrBreaker(t *testing.T) {
 	if pending != 1 {
 		t.Fatalf("pending=%d want1", pending)
 	}
+	rows, err := NewPendingRunStore(db).ListPending(t.Context(), goldenScheduleWS, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("accepted receipt: rows=%+v err=%v", rows, err)
+	}
+	if rows[0].ReasonCode != "routine_capacity" || rows[0].FiredRunID != "" || rows[0].DispatchAttempts != 0 {
+		t.Fatalf("waiting receipt invented a confirmed start or lost capacity reason: %+v", rows[0])
+	}
 }
 
 func TestScheduleQueuedOccurrenceRetainsIdentityAcrossDuplicateTicks(t *testing.T) {
