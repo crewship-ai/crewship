@@ -45,7 +45,7 @@ type Schedule struct {
 	// LastStatus is the outcome of the last main-routine fire:
 	//   COMPLETED — run finished successfully
 	//   FAILED    — run errored (a MANAGER inbox alert was raised)
-	//   SKIPPED   — target routine not active (proposed/disabled)
+	//   SKIPPED   — target inactive, or capacity full with an occurrence already waiting
 	//   WAITING   — run parked on a human approval gate (healthy,
 	//               non-terminal; resumes when the approval lands)
 	//   DEDUPED   — a re-fire of the same occurrence hit the idempotency
@@ -1282,7 +1282,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 	// (duplicate tick / restart before next_run_at advanced, or a
 	// CatchupAll loop re-run after a crash) dedupes at the idempotency
 	// chokepoint, while each distinct occurrence in a backlog gets its own
-	// key and actually runs.
+	// key; capacity admission may skip newer occurrences behind a waiting one.
 	occBucket := occurrence.UTC().Format(time.RFC3339)
 	dueAt := occurrence.UTC()
 
@@ -1772,7 +1772,8 @@ func boolToInt(b bool) int {
 }
 
 // queueScheduledOccurrence commits admission and the schedule cursor together.
-// QUEUED is an admission result, not an execution failure or breaker event.
+// QUEUED and SKIPPED are admission results, not execution failures or breaker events.
+// Keep the oldest accepted occurrence intact; never coalesce its inputs or identity.
 func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched *Schedule, target *Pipeline, in RunInput, nextRun time.Time, missedCount int) error {
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1786,18 +1787,37 @@ func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched 
 		return err
 	}
 	confirmedRunID := ""
+	status := "QUEUED"
 	if existing == nil {
 		now := s.now().UTC()
-		expires := now.Add(time.Hour)
-		_, _, err = pending.Enqueue(ctx, PendingRun{
-			ID: pendingID, WorkspaceID: sched.WorkspaceID, PipelineID: target.ID, PipelineSlug: target.Slug,
-			RunID: NewRunID(), IdempotencyKey: in.IdempotencyKey, DueAt: in.DueAt, ReasonCode: "routine_capacity",
-			InputsJSON: sched.InputsJSON, FireAt: now, ExpiresAt: &expires,
-			PinnedVersion: sched.TargetPipelineVersion, ChatOriginID: sched.ChatOriginID,
-			TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID,
-		})
+		// Include a claimed but not yet linked start, so dispatch cannot open a
+		// window for another waiting occurrence. Confirmed/expired/cancelled
+		// starts do not occupy the waiting slot. Keep unknown claims held.
+		var waiting bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS (
+SELECT 1 FROM pending_runs
+WHERE workspace_id=? AND triggered_via=? AND triggered_by_id=?
+  AND ((status='pending' AND (expires_at IS NULL OR expires_at>?))
+       OR (status='fired' AND COALESCE(fired_run_id,'')=''))
+)`, sched.WorkspaceID, TriggeredViaSchedule, sched.ID, formatRFC3339(now)).Scan(&waiting)
 		if err != nil {
 			return err
+		}
+		if waiting {
+			status = "SKIPPED"
+			missedCount++ // The current occurrence, in addition to catch-up misses.
+		} else {
+			expires := now.Add(time.Hour)
+			_, _, err = pending.Enqueue(ctx, PendingRun{
+				ID: pendingID, WorkspaceID: sched.WorkspaceID, PipelineID: target.ID, PipelineSlug: target.Slug,
+				RunID: NewRunID(), IdempotencyKey: in.IdempotencyKey, DueAt: in.DueAt, ReasonCode: "routine_capacity",
+				InputsJSON: sched.InputsJSON, FireAt: now, ExpiresAt: &expires,
+				PinnedVersion: sched.TargetPipelineVersion, ChatOriginID: sched.ChatOriginID,
+				TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID,
+			})
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		confirmedRunID = existing.FiredRunID
@@ -1805,10 +1825,10 @@ func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched 
 	now := tsformat.Format(s.now())
 	cursor := tsformat.Format(nextRun)
 	result, err := tx.ExecContext(ctx, `UPDATE pipeline_schedules
-SET last_run_at=?,last_status='QUEUED',last_run_id=?,
+SET last_run_at=?,last_status=?,last_run_id=?,
     next_run_at=CASE WHEN next_run_at IS NULL OR next_run_at < ? THEN ? ELSE next_run_at END,
     last_missed_count=?,updated_at=?
-WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, now, nullStr(confirmedRunID), cursor, cursor, missedCount, now, sched.WorkspaceID, sched.ID)
+WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, now, status, nullStr(confirmedRunID), cursor, cursor, missedCount, now, sched.WorkspaceID, sched.ID)
 	if err != nil {
 		return err
 	}
