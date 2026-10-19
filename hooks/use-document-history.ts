@@ -150,12 +150,12 @@ export function useDocumentHistoryRestore(input: RestoreScope) {
   const key = JSON.stringify([workspaceId, humanId, pageId, activationKey])
   const latest = useRef(input); latest.current = input
   const current = useRef(key); current.current = key
-  const inFlight = useRef<AbortController>()
+  const inFlight = useRef<AbortController | undefined>(undefined)
   useEffect(() => {
     current.current = key
     return () => { if (current.current === key) current.current = ""; inFlight.current?.abort() }
   }, [key])
-  const request = useRef<{ key: string; packet: RestorePacket; busy: boolean }>()
+  const request = useRef<{ key: string; packet: RestorePacket; busy: boolean } | undefined>(undefined)
   const [result, setResult] = useState<{ key: string; status: RestoreStatus }>({ key, status: "idle" })
   const status = result.key === key ? result.status : "idle"
   const allowed = enabled === true && nonempty(workspaceId) && nonempty(humanId) && identifier(pageId) && nonempty(activationKey)
