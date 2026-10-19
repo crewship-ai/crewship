@@ -2,7 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { toPageView } from "@/hooks/use-pages"
+import { toPageView, usePages } from "@/hooks/use-pages"
 import { PersonalDocumentSpace } from "../personal-document-space"
 
 const identity = vi.hoisted(() => ({ userId: "human-a" as string | null }))
@@ -31,6 +31,8 @@ it("reuses the catalog for own explicitly private Documents only", async () => {
  const view = mount()
  fireEvent.click(await screen.findByRole("button", { name: "Own private Doc" }))
  expect(view.select).toHaveBeenCalledWith("@immutable-own")
+ const requested = new URL(request.mock.calls[0][0], "http://localhost")
+ expect(requested.searchParams.get("audience")).toBe("personal")
  for (const name of ["Own legacy", "Own shared", "Foreign custody", "Not Document"]) expect(screen.queryByText(name)).toBeNull()
  expect(screen.getByRole("region", { name: "My space" })).toBeTruthy()
 })
@@ -60,4 +62,21 @@ it.each([false, true])("reports unknown own Document classification without clai
  expect(screen.queryByText("No private Documents in your space.")).toBeNull()
  expect(screen.queryByText("Unknown audience title")).toBeNull()
  if (mixed) expect(screen.getByRole("button", { name: "Known private Doc" })).toBeTruthy()
+})
+
+function AllPages() {
+ const { pages } = usePages("workspace-a")
+ return <p>All catalog count: {pages.length}</p>
+}
+it("keeps the personal server projection separate from the all-pages cache", async () => {
+ request.mockImplementation(async (input: string) => {
+  const personal = new URL(input, "http://localhost").searchParams.get("audience") === "personal"
+  return Response.json([row("Own private", { private_audience: true }), ...(personal ? [] : [row("Shared page", { private_audience: false })])])
+ })
+ const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client)
+ render(<QueryClientProvider client={client}><AllPages /><PersonalDocumentSpace workspaceId="workspace-a" onSelect={vi.fn()} /></QueryClientProvider>)
+ await screen.findByText("All catalog count: 2")
+ await screen.findByRole("button", { name: "Own private Doc" })
+ expect(request).toHaveBeenCalledTimes(2)
+ expect(client.getQueryCache().getAll().filter(query => query.queryKey[0] === "pages")).toHaveLength(2)
 })
