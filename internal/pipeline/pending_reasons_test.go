@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,6 +59,50 @@ func TestPendingExpiryDoesNotInventCapacity(t *testing.T) {
 			}
 			if row.ReasonCode != want {
 				t.Fatalf("got %+v", row)
+			}
+		})
+	}
+}
+
+func TestPendingInterruptedExhaustionDoesNotInventCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		expiry bool
+		code   string
+	}{
+		{"interrupted expiry", context.Canceled, true, "expired"},
+		{"capacity expiry", ErrConcurrencyLimitReached, true, "capacity_expired"},
+		{"interrupted attempts", context.Canceled, false, "dispatch_failed"},
+		{"capacity attempts", ErrConcurrencyLimitReached, false, "routine_capacity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := enqueueDue(t, 1)
+			if !tc.expiry {
+				if _, err := s.db.ExecContext(t.Context(), `UPDATE pending_runs SET dispatch_attempts=9`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now := time.Now().UTC()
+			claim, err := s.ClaimDue(t.Context(), "pa", now)
+			if err != nil || claim == nil {
+				t.Fatalf("claim=%+v err=%v", claim, err)
+			}
+			if tc.expiry {
+				expired := now.Add(-time.Second)
+				claim.ExpiresAt = &expired
+			}
+			d := NewPendingRunDispatcher(s, rejectedPendingExecutor{tc.err}, nil)
+			d.recordDispatchError(t.Context(), *claim, tc.err)
+			row, err := s.Get(t.Context(), "w", "pa")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.ReasonCode != tc.code {
+				t.Fatalf("receipt=%+v want code %s", row, tc.code)
+			}
+			if errors.Is(tc.err, context.Canceled) && strings.Contains(strings.ToLower(row.LastError), "capacity") {
+				t.Fatalf("invented capacity: %+v", row)
 			}
 		})
 	}

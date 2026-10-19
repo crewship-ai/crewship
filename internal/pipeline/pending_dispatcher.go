@@ -333,19 +333,29 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 	// produced a run, so it is retried like a capacity refusal instead of
 	// being finalized as failed. fireOne only gets here without a run ID.
 	interrupted := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil
-	if errors.Is(runErr, ErrConcurrencyLimitReached) || interrupted {
+	capacity := errors.Is(runErr, ErrConcurrencyLimitReached)
+	if capacity || interrupted {
 		pr.ReasonCode = "routine_capacity"
 		waiting := "Waiting for routine execution capacity."
-		if interrupted && !errors.Is(runErr, ErrConcurrencyLimitReached) {
+		if interrupted && !capacity {
 			pr.ReasonCode = "retry_backoff"
 			waiting = "Dispatch was interrupted before the run started; it will be retried."
 		}
 		switch {
 		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
-			pr.ReasonCode = "capacity_expired"
-			status, reason = "expired", "Deferred start expired before execution capacity became available."
+			pr.ReasonCode = "expired"
+			status, reason = "expired", "Deferred start expired before dispatch."
+			if capacity {
+				pr.ReasonCode = "capacity_expired"
+				reason = "Deferred start expired before execution capacity became available."
+			}
 		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
-			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			pr.ReasonCode = "dispatch_failed"
+			reason = "Dispatch remained interrupted after 10 attempts; no TTL was supplied."
+			if capacity {
+				pr.ReasonCode = "routine_capacity"
+				reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			}
 		default:
 			status, reason = "pending", waiting
 			at := now.Add(pendingCapacityBackoff(pr.DispatchAttempts))
