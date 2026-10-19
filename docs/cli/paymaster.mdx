@@ -8,6 +8,10 @@ tag: Stable
 
 # crewship paymaster
 
+<Note>
+Cost figures are readable by workspace `OWNER` and `ADMIN` only. For any other role the server answers `403` ("Spend requires OWNER or ADMIN") and the command prints that reason.
+</Note>
+
 View LLM spend rolled up by crew, agent, or mission. Reads from the `cost_ledger` table populated by the [Paymaster middleware](/guides/paymaster).
 
 ```bash

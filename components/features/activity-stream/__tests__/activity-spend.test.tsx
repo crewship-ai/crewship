@@ -128,4 +128,15 @@ describe("ActivitySpendView (J04, v67 spendView)", () => {
     expect(await screen.findByText("Could not load spend by crew")).toBeVisible()
     expect(screen.getByRole("link", { name: /CRW-139 Rotate certs/ })).toBeVisible()
   })
+
+  // #3590: below ADMIN the server answers 403. That is a quiet note, not an
+  // error card or a toast.
+  it("a 403 reads as one quiet note, not as failed loads", async () => {
+    route(json({ error: "Spend requires OWNER or ADMIN" }, 403), json({ error: "Spend requires OWNER or ADMIN" }, 403))
+    render(<ActivitySpendView workspaceId="ws" />)
+    expect(await screen.findByText("Spend is unavailable: only workspace owners and admins can see costs.")).toBeVisible()
+    expect(screen.queryByText("Could not load the last 24 hours")).toBeNull()
+    expect(screen.queryByText("Could not load spend by crew")).toBeNull()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
 })

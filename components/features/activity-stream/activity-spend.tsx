@@ -86,6 +86,22 @@ export function ActivitySpendView({ workspaceId }: { workspaceId: string }) {
   const crews = React.useMemo(() => [...(byCrew.data?.rows ?? [])].sort((a, b) => b.cost_usd - a.cost_usd), [byCrew.data])
   const monthTotal = crews.reduce((n, r) => n + r.cost_usd, 0)
 
+  // The cost reads are OWNER/ADMIN on the server (#3590). A 403 here (the page
+  // already hides this view from other roles) is one quiet note, not a failed
+  // load: no error cards, no toast.
+  if (day.error === "HTTP 403" || byCrew.error === "HTTP 403") {
+    return (
+      <div className="mx-auto grid min-w-0 max-w-7xl gap-3.5 p-4 md:p-6">
+        <header className="min-w-0">
+          <h1 className="text-title font-semibold tracking-tight">Spend</h1>
+        </header>
+        <p className="rounded-xl border border-border bg-card px-4 py-3 text-body text-muted-foreground">
+          Spend is unavailable: only workspace owners and admins can see costs.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto grid min-w-0 max-w-7xl gap-3.5 p-4 md:p-6">
       <header className="min-w-0">
