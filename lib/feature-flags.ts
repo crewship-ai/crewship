@@ -25,3 +25,14 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Gates the chat artifact-context surfaces (work result cards, linked
+ * viewer switching, composer artifact context, conversation library).
+ *
+ * Default OFF: the server run-state, library and output-link endpoints they
+ * read are a proposed contract and not yet served.
+ */
+export function chatArtifactContext(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT === "true"
+}
