@@ -75,6 +75,96 @@ func TestScheduleCapacityQueuesWithoutFailureOrBreaker(t *testing.T) {
 	}
 }
 
+// Advancing the injected clock holds one real registry slot for five cron
+// occurrences without sleeping or invoking an external agent/provider.
+func TestScheduleCapacityKeepsOneWaitingOccurrenceAcrossMinutes(t *testing.T) {
+	db, store, scheduler, schedule, _ := cronCapacityRig(t)
+	first := scheduler.now()
+	scheduler.fireOne(t.Context(), schedule)
+	pending := NewPendingRunStore(db)
+	rows, err := pending.ListPending(t.Context(), goldenScheduleWS, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("first admission: rows=%+v err=%v", rows, err)
+	}
+	accepted := rows[0]
+	for minute := 1; minute <= 4; minute++ {
+		now := first.Add(time.Duration(minute) * time.Minute)
+		scheduler.nowFn = func() time.Time { return now }
+		current, err := store.GetByID(t.Context(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduler.fireOne(t.Context(), current)
+		rows, err = pending.ListPending(t.Context(), goldenScheduleWS, 10)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("minute %d: pending=%d want1 err=%v", minute, len(rows), err)
+		}
+		if rows[0].RunID != accepted.RunID || rows[0].ID != accepted.ID || rows[0].InputsJSON != accepted.InputsJSON || rows[0].DueAt == nil || !rows[0].DueAt.Equal(*accepted.DueAt) {
+			t.Fatalf("newer occurrence replaced accepted work: %+v", rows[0])
+		}
+		updated, err := store.GetByID(t.Context(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.LastStatus != "SKIPPED" || updated.LastMissedCount != 1 || updated.LastRunID != "" || updated.ConsecutiveFailures != 2 || !updated.Enabled || updated.DisabledReason != "" || updated.NextRunAt == nil || !updated.NextRunAt.Equal(now.Add(time.Minute)) {
+			t.Fatalf("minute %d: incorrect skipped occurrence bookkeeping: %+v", minute, updated)
+		}
+	}
+	var alerts, runs int
+	if err := db.QueryRow(`SELECT count(*) FROM inbox_items`).Scan(&alerts); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM pipeline_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if alerts != 0 || runs != 0 {
+		t.Fatalf("capacity skip produced alerts=%d runs=%d", alerts, runs)
+	}
+}
+
+func TestScheduleCapacityWaitingSlotLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		update     string
+		wantStatus string
+		wantRows   int
+	}{
+		{"claimed", `status='fired',fired_run_id=''`, "SKIPPED", 1},
+		{"uncertain", `status='fired',fired_run_id='',reason_code='recovery_unknown'`, "SKIPPED", 1},
+		{"confirmed", `status='fired',fired_run_id=run_id`, "QUEUED", 2},
+		{"expired", `status='expired'`, "QUEUED", 2},
+		{"cancelled", `status='cancelled'`, "QUEUED", 2},
+		{"other_schedule", `triggered_by_id='another-schedule'`, "QUEUED", 2},
+		{"other_trigger", `triggered_via='webhook'`, "QUEUED", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, store, scheduler, schedule, _ := cronCapacityRig(t)
+			scheduler.fireOne(t.Context(), schedule)
+			if _, err := db.Exec(`UPDATE pending_runs SET ` + tc.update); err != nil {
+				t.Fatal(err)
+			}
+			now := scheduler.now().Add(time.Minute)
+			scheduler.nowFn = func() time.Time { return now }
+			current, err := store.GetByID(t.Context(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduler.fireOne(t.Context(), current)
+			updated, err := store.GetByID(t.Context(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if updated.LastStatus != tc.wantStatus || count != tc.wantRows {
+				t.Fatalf("status=%s rows=%d want %s/%d", updated.LastStatus, count, tc.wantStatus, tc.wantRows)
+			}
+		})
+	}
+}
+
 func TestScheduleQueuedOccurrenceRetainsIdentityAcrossDuplicateTicks(t *testing.T) {
 	db, _, scheduler, schedule, release := cronCapacityRig(t)
 	scheduler.fireOne(t.Context(), schedule)
@@ -170,8 +260,9 @@ func TestScheduleCatchupAllKeepsFirstUnacceptedOccurrenceDue(t *testing.T) {
 	if _, err := db.Exec(`UPDATE pipeline_schedules SET next_run_at=?,catchup_policy='all' WHERE id=?`, tsformatForTest(first), schedule.ID); err != nil {
 		t.Fatal(err)
 	}
-	blockedKey := ScheduledFireIdempotencyKey("sched", schedule.ID, second.UTC().Format(time.RFC3339))
-	trigger := fmt.Sprintf(`CREATE TRIGGER refuse_second_occurrence BEFORE INSERT ON pending_runs WHEN NEW.idempotency_key='%s' BEGIN SELECT RAISE(ABORT,'second occurrence unavailable'); END`, blockedKey)
+	// After accepting the first occurrence, the second is skipped. A failed
+	// skip/cursor write must still leave that occurrence due for retry.
+	trigger := `CREATE TRIGGER refuse_second_occurrence BEFORE UPDATE ON pipeline_schedules WHEN NEW.last_status='SKIPPED' BEGIN SELECT RAISE(ABORT,'second occurrence unavailable'); END`
 	if _, err := db.Exec(trigger); err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +289,8 @@ func TestScheduleCatchupAllKeepsFirstUnacceptedOccurrenceDue(t *testing.T) {
 	if updated.NextRunAt == nil || !updated.NextRunAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("backlog did not advance after acceptance: %+v", updated)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != 3 {
-		t.Fatalf("backlog lost or duplicated: count=%d err=%v", count, err)
+	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("backlog waiting limit violated: count=%d err=%v", count, err)
 	}
 }
 
@@ -222,7 +313,7 @@ func TestScheduleCatchupAllPreservesBacklogBeyondPerTickCap(t *testing.T) {
 		t.Fatalf("capped backlog skipped: cursor=%v want %v", updated.NextRunAt, expected)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != maxCatchupFireOccurrences+1 {
+	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("first tick count=%d err=%v", count, err)
 	}
 	scheduler.fireOne(t.Context(), updated)
@@ -233,7 +324,7 @@ func TestScheduleCatchupAllPreservesBacklogBeyondPerTickCap(t *testing.T) {
 	if updated.NextRunAt == nil || !updated.NextRunAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("remaining backlog not consumed: %+v", updated)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != maxCatchupFireOccurrences+6 {
+	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("remaining backlog lost or duplicated: count=%d err=%v", count, err)
 	}
 }
