@@ -579,6 +579,57 @@ func TestAcceptance_RoutineFolders(t *testing.T) {
 	}
 }
 
+// #3768: the folder menu's Icon, New subfolder and Move to through the CLI:
+// create with --icon and --parent, move a folder with update --parent, back to
+// the top with --parent "", and a cycle is refused.
+func TestAcceptance_RoutineFolderTree(t *testing.T) {
+	cfgPath, _ := startReliabilityAcceptanceServer(t)
+	type folder struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Icon     string `json:"icon"`
+		ParentID string `json:"parent_id"`
+	}
+	run := func(args ...string) folder {
+		t.Helper()
+		out, err := runReliabilityCLI(t, cfgPath, append([]string{"-f", "json", "routine", "folders"}, args...)...)
+		if err != nil {
+			t.Fatalf("routine folders %v: %v\n%s", args, err, out)
+		}
+		var f folder
+		if err := json.Unmarshal([]byte(out), &f); err != nil {
+			t.Fatalf("decode %v: %v\n%s", args, err, out)
+		}
+		return f
+	}
+	ops := run("create", "Ops", "--icon", "rocket")
+	if ops.Icon != "rocket" || ops.ParentID != "" {
+		t.Fatalf("create with icon: %+v", ops)
+	}
+	daily := run("create", "Daily", "--parent", ops.ID)
+	if daily.ParentID != ops.ID {
+		t.Fatalf("subfolder: %+v", daily)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "folders", "create", "Bad", "--icon", "no-such-icon"); err == nil {
+		t.Fatalf("an unknown icon must be refused, got:\n%s", out)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "folders", "update", ops.ID, "--parent", daily.ID); err == nil {
+		t.Fatalf("a folder inside its own subfolder must be refused, got:\n%s", out)
+	}
+	moved := run("update", daily.ID, "--parent", "", "--icon", "briefcase")
+	if moved.ParentID != "" || moved.Icon != "briefcase" {
+		t.Fatalf("to the top with a new icon: %+v", moved)
+	}
+	back := run("update", daily.ID, "--parent", ops.ID)
+	if back.ParentID != ops.ID || back.Icon != "briefcase" {
+		t.Fatalf("back inside Ops, icon kept: %+v", back)
+	}
+	human, err := runReliabilityCLI(t, cfgPath, "routine", "folders", "list")
+	if err != nil || !strings.Contains(human, "Ops / Daily") {
+		t.Fatalf("human list shows the path: %v\n%s", err, human)
+	}
+}
+
 // ODCH-RT-07: `routine health` prints what the Health table shows — the last
 // outcomes, the success rate over the finished runs, and runs and spend in a
 // rolling window.

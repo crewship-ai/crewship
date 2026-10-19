@@ -156,10 +156,18 @@ crewship routine folders list
 crewship routine folders move weekly-scan daily-news --folder <folder_id>
 crewship routine folders move weekly-scan --none      # take it out of its folder
 crewship routine folders update <folder_id> --name "Intel"
-crewship routine folders delete <folder_id>           # routines are kept, unfiled
+crewship routine folders create "Daily" --parent <folder_id> --icon rocket   # a subfolder
+crewship routine folders update <folder_id> --icon briefcase   # --icon "" clears it
+crewship routine folders update <folder_id> --parent <other_id> # move the folder
+crewship routine folders update <folder_id> --parent ""         # back to the top level
+crewship routine folders delete <folder_id>           # routines are kept, unfiled; subfolders move up
 ```
 
 `create` and `update` refuse a name another folder already has (ignoring case).
+`--icon` takes a name from the crew icon registry (the same set as page
+folders); any other is refused with the list's shape. Folders nest at most
+three levels deep, and a folder cannot go inside itself or one of its
+subfolders. `list` shows each folder as its path (`Ops / Daily`).
 `move` is all-or-nothing and takes up to 200 routines. Creating, renaming and
 moving need MANAGER or above.
 

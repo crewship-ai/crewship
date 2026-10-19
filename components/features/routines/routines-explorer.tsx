@@ -47,11 +47,15 @@ import {
   sortRoutines,
   type RoutineGroupBy,
   type RoutineTriggerKind,
+  type PanelFolder,
   type RoutinePanelIndex,
   type RoutineSort,
 } from "@/lib/routine-panel-index"
+import type { RoutineFolderPatch } from "@/hooks/use-routine-folders"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 import { RoutineGlyph } from "./routine-glyph"
 import { RoutineFolderDialog } from "./routine-folder-dialog"
+import { RoutineFolderMenu } from "./routine-folder-menu"
 import { toast } from "@/lib/toast"
 import type { PeekRun } from "./routine-run-peek"
 import { runBarTone } from "@/lib/routine-page"
@@ -67,7 +71,8 @@ import { formatDurationMs } from "@/lib/activity-stream"
 // schedule, webhook, budget and chat command lists (lib/routine-panel-index).
 // Folders (ODCH-RT-01) are the first grouping once one exists: New folder in
 // the toolbar, Move in the selection bar. A workspace without folders groups
-// by crew until the first one is made.
+// by crew until the first one is made. Each folder heading carries its own ⋯
+// menu (#3768) and its subfolders are listed under it, indented.
 
 export type RoutinesView = "overview" | "needs" | "live" | "runs" | "drafts"
 
@@ -110,10 +115,14 @@ interface RoutinesExplorerProps {
   }
   /** Routine folders. `onCreate` is absent when the role cannot create. */
   folders?: {
-    list: { id: string; name: string }[]
-    onCreate?: (name: string) => Promise<string | null>
+    list: PanelFolder[]
+    /** A parent makes it a subfolder; resolves to a refusal message or null. */
+    onCreate?: (name: string, parentId?: string | null) => Promise<string | null>
     /** File routines in a folder, or out of any with null; resolves to a refusal message or null. */
     onMove?: (slugs: string[], folderId: string | null) => Promise<string | null>
+    /** Rename, icon and colour, move a folder. With onCreate and onDelete it draws the folder's menu. */
+    onUpdate?: (id: string, patch: RoutineFolderPatch) => Promise<string | null>
+    onDelete?: (id: string) => Promise<string | null>
   }
   /** Slugs found by the text of their steps (GET /pipelines?q=), added to the name match. */
   stepMatches?: ReadonlySet<string> | null
@@ -357,7 +366,10 @@ function RoutinesList({
   const [storedSort, setSortBy] = useUserPreference<RoutineSort>("routines.panel.sort", "recent")
   // A stored value from another version of the panel falls back, never breaks it.
   const chosenGroup = GROUPS.some((g) => g.id === storedGroup) ? storedGroup : "folder"
-  const folderById = useMemo(() => new Map((folders?.list ?? []).map((f) => [f.id, f])), [folders?.list])
+  const folderById = useMemo(() => new Map<string, PanelFolder>((folders?.list ?? []).map((f) => [f.id, f])), [folders?.list])
+  const folderMenu = folders?.onCreate && folders.onUpdate && folders.onDelete
+    ? { onCreate: folders.onCreate, onUpdate: folders.onUpdate, onDelete: folders.onDelete }
+    : null
   // Without a folder yet, Folder would be one "No folder" section: show the crews instead.
   const groupBy: RoutineGroupBy = chosenGroup === "folder" && folderById.size === 0 ? "crew" : chosenGroup
   const sortBy = SORTS.some((o) => o.id === storedSort) ? storedSort : "recent"
@@ -548,9 +560,28 @@ function RoutinesList({
           </div>
         </SidebarSection>
 
-        {groups.map((g) => (
-          <SidebarSection key={g.id} label={g.label} count={g.rows.length}>
-            <div role="group" aria-label={g.label}>
+        {groups.map((g) => {
+          const folder = g.folderId ? folderById.get(g.folderId) : undefined
+          const depth = Math.min(g.depth ?? 0, 2)
+          return (
+          <SidebarSection
+            key={g.id}
+            className={folder ? "group/section" : undefined}
+            headerClassName={cn(depth === 1 && "pl-5", depth === 2 && "pl-8")}
+            label={
+              folder ? (
+                <span className="inline-flex min-w-0 items-center gap-1" data-folder-depth={depth}>
+                  <FolderGlyph icon={folder.icon} color={folder.color} className="h-3 w-3" />
+                  <span className="truncate">{g.label}</span>
+                </span>
+              ) : (
+                g.label
+              )
+            }
+            count={g.rows.length}
+            actions={folder && folderMenu ? <RoutineFolderMenu folder={folder} folders={folderById} {...folderMenu} /> : undefined}
+          >
+            <div role="group" aria-label={g.label} className={cn(depth === 1 && "pl-3", depth === 2 && "pl-6")}>
               {g.rows.map((routine) => {
                 const state = routineRowState(routine, liveBySlug.get(routine.slug))
                 const content = (
@@ -603,7 +634,8 @@ function RoutinesList({
               })}
             </div>
           </SidebarSection>
-        ))}
+          )
+        })}
 
         {displayed.length === 0 && (
           <p className="px-4 py-6 text-center text-xs text-muted-foreground-soft">
@@ -659,7 +691,7 @@ function RoutinesList({
           </Button>
         </div>
       )}
-      {folders?.onCreate && <RoutineFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} onCreate={folders.onCreate} />}
+      {folders?.onCreate && <RoutineFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} onCreate={(name) => folders.onCreate!(name)} />}
       <ConfirmDialog
         open={confirmOff}
         onOpenChange={setConfirmOff}
