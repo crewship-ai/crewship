@@ -59,11 +59,11 @@ const buttonVariants = cva(
  * target, so neighbours keep 44 px each in the layout and cannot overlap, which
  * an invisible ::after ring can (and a parent's overflow can clip). A fine
  * pointer gets the inner's own size: nothing changes on a desktop.
- * Not for `asChild`: the inner is a span inside the button.
+ * Not for `asChild`: the inner is a span inside the button. The coarse sizes
+ * are in globals.css (`button[data-tap]`), so Button stays on the control tokens.
  */
 const TAP_OUTER =
-  "group/tap relative inline-flex shrink-0 items-center justify-center rounded-md outline-none disabled:pointer-events-none coarse:min-h-[44px] coarse:min-w-[44px] focus-visible:[&>[data-slot=button-inner]]:ring-[3px] focus-visible:[&>[data-slot=button-inner]]:ring-ring/50"
-const ICON_SIZES = new Set(["icon", "icon-xs", "icon-sm", "icon-lg"])
+  "group/tap relative inline-flex shrink-0 items-center justify-center rounded-md outline-none disabled:pointer-events-none focus-visible:[&>[data-slot=button-inner]]:ring-[3px] focus-visible:[&>[data-slot=button-inner]]:ring-ring/50"
 
 function Button({
   className,
@@ -79,7 +79,6 @@ function Button({
     tap?: boolean
   }) {
   if (tap && !asChild) {
-    const icon = ICON_SIZES.has(size ?? "default")
     return (
       <button
         data-slot="button"
@@ -94,7 +93,6 @@ function Button({
           className={cn(
             buttonVariants({ variant, size }),
             "group-disabled/tap:opacity-50",
-            icon ? "coarse:size-8" : "coarse:h-8",
             className,
           )}
         >

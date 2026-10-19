@@ -1949,6 +1949,19 @@ body {
     min-height: 44px;
   }
 
+  /* Button `tap` (phone pilot): the button box is the 44 × 44 target and the
+     drawn inner keeps 32 px, so neighbours cannot overlap. */
+  button[data-tap] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  button[data-tap] > [data-slot="button-inner"] {
+    height: calc(var(--spacing) * 8);
+  }
+  button[data-tap][data-size^="icon"] > [data-slot="button-inner"] {
+    width: calc(var(--spacing) * 8);
+  }
+
   /* Harbor 2: every control is a finger-sized target on a touch device, at
      any width (#3333). Zero-specificity :where() so a component that already
      sizes itself for touch is not fought; min-height/min-width only ever
