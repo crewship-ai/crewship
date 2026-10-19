@@ -124,7 +124,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           setStatus("Temporarily rate limited · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && cause.status === 409) {
           blocked = true; setRecovery(true); setStatus("Document changed. Recover your draft before reopening.")
-        } else setStatus(queue.length ? "Disconnected · changes are unsaved" : "Disconnected")
+        } else setStatus(queue.length ? "Reconnecting… · changes are unsaved" : "Reconnecting…") // the poll retries every 500 ms
         setError(cause instanceof Error ? cause.message : "Could not sync document.")
       } finally { polling = false }
     }

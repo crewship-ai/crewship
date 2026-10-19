@@ -22,8 +22,8 @@ export type AppBannerKind = "realtime" | "offline" | "runtime" | "update"
 
 /**
  * Realtime > a page's offline banner > Runtime > Update. The app's realtime
- * banner outranks the page's: both say the same thing, and the app's one is
- * the one that turns into "Reconnected" when the socket returns.
+ * banner outranks the page's (and the chat's reconnect banner, which claims
+ * the "offline" kind): they say the same thing, so the app's one speaks.
  */
 export const APP_BANNER_PRIORITY: Record<AppBannerKind, number> = {
   realtime: 4,
@@ -105,7 +105,8 @@ export function useAppBannerSlot(kind: AppBannerKind, wanted: boolean): boolean 
   return wanted && queue.winner === id
 }
 
-export type AppBannerTone = "warn" | "ok" | "info" | "bad"
+/** `neutral`: the app is coping (Reconnecting…); not a warning colour. */
+export type AppBannerTone = "warn" | "ok" | "info" | "neutral" | "bad"
 
 /**
  * The banner's look in a page, without the app slot's inset (COM-03): a

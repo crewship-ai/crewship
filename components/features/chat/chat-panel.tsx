@@ -85,7 +85,6 @@ import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
-import { ConnectionBadge } from "./messages/connection-badge"
 import { AgentStrip, type AgentStripAgent } from "./agent-strip"
 import { ChatEmptyState } from "./chat-empty-state"
 import type { ChatKind } from "./chat-kind"
@@ -405,7 +404,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
@@ -432,7 +431,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   useEffect(() => {
     const waiters = connectionWaitersRef.current
     if (!waiters.length) return
-    const failed = connectionStatus === "error" || connectionStatus === "unavailable"
+    // "offline": the fast retries are spent, so a send waiting on the socket
+    // is told now rather than at its timeout. The socket keeps retrying.
+    const failed = connectionStatus === "error" || connectionStatus === "unavailable" || connectionStatus === "offline"
     if (connectionStatus !== "connected" && !failed) return
     connectionWaitersRef.current = []
     for (const w of waiters) w.resolve(!failed && w.session === currentSessionRef.current)
@@ -1338,10 +1339,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: documentTarget ? "none" : undefined }} inert={Boolean(documentTarget)}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-        <ReconnectBanner status={connectionStatus} />
+        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
-          <ConnectionBadge status={connectionStatus} />
           {isGroupChat && (
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
               <Users className="h-3 w-3" />
@@ -1440,12 +1440,14 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   return (
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", (documentTarget ? documentExpanded : executionProfile === "trusted" && artifactFocus && artifactOpen) ? "hidden" : "flex-1")}>
-        <ReconnectBanner status={connectionStatus} />
+        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
-            agent (face, status, role, crew, model, skills, credentials); the
-            connection badge still appears when the socket is not connected,
-            and the origin chip says where a machine-started chat came from.
+            agent (face, status, role, crew, model, skills, credentials), and
+            the origin chip says where a machine-started chat came from. A
+            lost connection is the reconnect banner's alone (#3783): a header
+            pill said "Disconnected" a second time, in red, from the first
+            second of every restart.
             The session id left the header: it is the URL, and "Copy link"
             hands it over in the form a person can use. */}
         <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
@@ -1455,7 +1457,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
               className="min-w-0 flex-1"
               trailing={
                 <>
-                  <ConnectionBadge status={connectionStatus} />
                   <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
                   {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
@@ -1465,7 +1466,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
             />
           ) : (
             <>
-              <ConnectionBadge status={connectionStatus} />
               <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
               <div className="ml-auto flex items-center gap-2">
                 {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}

@@ -39,13 +39,13 @@ const DOT: Record<StatusTone, string> = {
 export function ActivitySystemStatus({ onNavigate }: { onNavigate: () => void }) {
   const workspaceId = useTrustedWorkspaceId()
   const { status: engineStatus } = useEngineStatus(workspaceId)
-  const { status: wsStatus } = useRealtime()
+  const { status: wsStatus, reason: wsReason = null } = useRealtime()
   const crews = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
   const [open, setOpen] = React.useState(false)
   const panelId = React.useId()
 
-  const description = describeSystemStatus(engineStatus, wsStatus, crews)
+  const description = describeSystemStatus(engineStatus, wsStatus, crews, wsReason)
   const { connection, fleetKnown } = description
   const builds = provisioning ? provisioningNeedingAttention(provisioning) : []
 
@@ -78,6 +78,7 @@ export function ActivitySystemStatus({ onNavigate }: { onNavigate: () => void })
             description={description}
             engineStatus={engineStatus}
             wsStatus={wsStatus}
+            wsReason={wsReason}
             crews={crews}
             workspaceId={workspaceId}
             onNavigate={onNavigate}

@@ -1,16 +1,17 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 
 import { ReconnectBanner } from "../messages/reconnect-banner"
-import { ConnectionBadge } from "../messages/connection-badge"
 
 // a11y.spec.ts "Chat page" (nightly 39130662018): when the chat socket is not
 // connected, the Disconnected banner was text-warn on bg-warn/20 — 4.44:1 in
 // light — and the header badge text-destructive on bg-destructive/30 — 3.98:1
 // in dark. Both are small text and need 4.5:1. They use the chip pairs, whose
-// colours are chosen for text in both schemes.
+// colours are chosen for text in both schemes. The header badge is gone
+// (#3783: the banner is the one indicator); the banner's neutral and warn
+// states are both checked.
 
 const globals = readFileSync(path.resolve(__dirname, "../../../../app/globals.css"), "utf8")
 const lightBlock = globals.slice(globals.indexOf(":root {\n  /* ── Light surfaces"), globals.indexOf("\n.dark {"))
@@ -43,14 +44,13 @@ function expectReadable(el: HTMLElement) {
 }
 
 describe("chat connection states are readable (WCAG 1.4.3)", () => {
-  for (const status of ["connecting", "disconnected"]) {
-    it(`the ${status} banner`, () => {
-      render(<ReconnectBanner status={status} />)
+  afterEach(() => { cleanup(); vi.useRealTimers() })
+  for (const [status, reason] of [["connecting", "retrying"], ["offline", "unreachable"], ["offline", "browser-offline"]] as const) {
+    it(`the ${status}/${reason} banner`, () => {
+      vi.useFakeTimers()
+      render(<ReconnectBanner status={status} reason={reason} />)
+      act(() => { vi.advanceTimersByTime(4_000) })
       expectReadable(screen.getByRole("status"))
-    })
-    it(`the ${status} header badge`, () => {
-      const { container } = render(<ConnectionBadge status={status} />)
-      expectReadable(container.firstElementChild as HTMLElement)
     })
   }
 })

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
-import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
+import { useWebSocket, type WSReason, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
@@ -1344,7 +1344,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     subscribeAndResume()
   }, [subscribeAndResume])
 
-  const { status, send } = useWebSocket({
+  const { status, reason, send, retry } = useWebSocket({
     enabled: realtimeEnabled && executionProfile !== "restricted" && executionProfile !== "pending",
     url: wsUrl,
     getToken,
@@ -1703,5 +1703,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     resubscribeSession,
     isStreaming,
     connectionStatus: (executionProfile === "restricted" ? "connected" : realtimeEnabled ? status : "unavailable") as WSStatus,
+    /** Why the socket is not up (WSReason), for the reconnect banner. */
+    connectionReason: (executionProfile !== "restricted" && realtimeEnabled ? reason : null) as WSReason | null,
+    /** "Retry now": every socket in the tab tries at once. */
+    retryConnection: retry,
   }
 }
