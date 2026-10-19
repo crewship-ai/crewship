@@ -120,7 +120,11 @@ func TestDocumentPrivateOwnerAuditCustodyFence(t *testing.T) {
 					t.Fatalf("custody schedule failed: owner=%s err=%v", currentOwner, err)
 				}
 				if rejectAudit {
-					if response.Code != http.StatusInternalServerError || privateSuccess || strings.Contains(response.Body.String(), "Private checkpoint marker") || strings.Contains(response.Body.String(), "snapshot") || strings.Contains(response.Body.String(), pin) {
+					wantStatus := http.StatusInternalServerError
+					if operation != "state" {
+						wantStatus = http.StatusServiceUnavailable
+					}
+					if response.Code != wantStatus || privateSuccess || strings.Contains(response.Body.String(), "Private checkpoint marker") || strings.Contains(response.Body.String(), "snapshot") || strings.Contains(response.Body.String(), pin) {
 						t.Fatalf("required audit rejection released private history: status=%d private200=%v response=%s", response.Code, privateSuccess, response.Body)
 					}
 				} else if response.Code != http.StatusOK || !privateSuccess || !auditBeforeBytes {
@@ -149,4 +153,27 @@ func (w *documentAuditGateWriter) Write(value []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseRecorder.Write(value)
+}
+
+// An authorization capture is not permission to publish or audit a failed
+// Store result. In particular, a populated/zero State wire must not escape.
+func TestDocumentPrivateOwnerAuditFailedStoreReturnsNoRead(t *testing.T) {
+	rig := pagesTransferSetup(t)
+	const page = "failed-store-private-document"
+	rig.seedPage(t, page, page, "Private fixture", rig.userID, "")
+	execOrFatal(t, rig.db, `UPDATE pages SET private_audience=1 WHERE id=?`, page)
+	pages := NewPageHandler(rig.db, nil, newTestLogger())
+	handler := &documentAuthority{pages: pages, store: documents.New(rig.db, documents.Options{})}
+	request := ownershipRequest(t, rig, "POST", "/", `{}`)
+	request.SetPathValue("page", page)
+	request.SetPathValue("operation", "state")
+	response := httptest.NewRecorder()
+	handler.operation(response, request)
+	if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "snapshot") {
+		t.Fatalf("failed Store released a state: %d %s", response.Code, response.Body)
+	}
+	var count int
+	if err := rig.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND entity_id=?`, page).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed read was audited as access: count=%d err=%v", count, err)
+	}
 }
