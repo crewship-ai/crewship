@@ -1,8 +1,12 @@
 "use client"
 
+import * as React from "react"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { usePages } from "@/hooks/use-pages"
+import type { PageView } from "@/hooks/use-pages"
 import { DocumentCatalog } from "./document-catalog"
+import { duplicatePage } from "@/lib/pages/catalog-duplicate"
+import { ShareToFolderDialog } from "./share-to-folder-dialog"
 
 /** Documents-only view of this workspace, not another workspace or grant.
  * usePages keys and masks data by current human/workspace. Missing server
@@ -16,6 +20,13 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
   const { data: session } = useSessionSafe()
   const human = session?.user?.id
   const { pages, loading, error } = usePages(workspaceId, "personal")
+  const [copyError, setCopyError] = React.useState<string | null>(null)
+  const duplicate = (page: PageView) => {
+    if (!workspaceId || !page.immutablePageId) return
+    setCopyError(null)
+    duplicatePage(workspaceId, page.immutablePageId).then(copy => onSelect(`@${copy.id}`), error => setCopyError(error instanceof Error ? error.message : "The copy could not be made."))
+  }
+  const [sharing, setSharing] = React.useState<PageView[] | null>(null)
   const ownedDocuments = human && workspaceId && !error ? pages.filter(page =>
     page.ownerRef === `user/${human}` && page.hasDocument === true) : []
   const own = ownedDocuments.filter(page => page.privateAudience === true)
@@ -28,8 +39,11 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
       : error ? <p role="alert" className="px-6">Your Documents are unavailable.</p>
       : <>
         {unknown && <p role="status" className="px-6">Document audience information is unavailable for some of your Documents.</p>}
-        {own.length > 0 && <DocumentCatalog pages={own} onSelect={onSelect} immutableTargets />}
+        {own.length > 0 && <DocumentCatalog pages={own} onSelect={onSelect} immutableTargets filterable onShare={workspaceId ? setSharing : undefined} onDuplicate={duplicate} />}
+        {copyError && <p role="alert" className="px-6">{copyError}</p>}
         {!own.length && !unknown && <p role="status" className="px-6">No private Documents in your space.</p>}
       </>}
+    {workspaceId && sharing && <ShareToFolderDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setSharing(null) }}
+      subjects={sharing.map(page => ({ slug: page.slug, name: page.name, pagesVersion: page.pagesVersion }))} />}
   </section>
 }
