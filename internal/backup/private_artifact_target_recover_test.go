@@ -110,7 +110,7 @@ func TestPrivateArtifactTargetForceRecoverThroughBinary(t *testing.T) {
 			if ctx.Err() != nil {
 				t.Fatalf("offline binary exceeded bounded invocation: %v", ctx.Err())
 			}
-			if kind == "consent" && (commandErr == nil || !bytes.Contains(bytes.ToLower(output), []byte("private artifact"))) {
+			if kind != "ordinary" && (commandErr == nil || !bytes.Contains(bytes.ToLower(output), []byte("private artifact"))) {
 				t.Errorf("actual CLI must refuse protected target: exit_error=%v privacy_refusal=%v", commandErr != nil, bytes.Contains(bytes.ToLower(output), []byte("private artifact")))
 			}
 			target, err = database.Open("file:" + report.DatabasePath)
