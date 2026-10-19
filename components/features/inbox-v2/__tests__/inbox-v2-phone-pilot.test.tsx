@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -147,6 +148,13 @@ describe("Inbox on a phone: the list's state", () => {
     show()
     expect(searchBox().value).toBe("newsletter")
     expect(screen.getByRole("button", { name: "Remove filter State: Unread only" })).toBeInTheDocument()
+  })
+
+  it("keeps the restored search under React's development double-run (and does not save over it)", () => {
+    sessionStorage.setItem(listDetailKey("inbox", "ws-a"), JSON.stringify({ detail: "/inbox?item=n1", state: { filters: { search: "newsletter" }, view: "updates" } }))
+    render(<StrictMode><QueryClientProvider client={client()}><InboxV2 /></QueryClientProvider></StrictMode>)
+    expect(searchBox().value).toBe("newsletter")
+    expect(JSON.parse(sessionStorage.getItem(listDetailKey("inbox", "ws-a"))!).state.filters.search).toBe("newsletter")
   })
 
   it("opens fresh when the inbox is entered anew (no detail under it)", () => {

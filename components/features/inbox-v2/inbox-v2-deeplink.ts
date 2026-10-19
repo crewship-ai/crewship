@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from "react"
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react"
 
 import type { InboxV2Filters } from "./inbox-v2-derive"
 
@@ -25,6 +25,11 @@ import type { InboxV2Filters } from "./inbox-v2-derive"
  * No effect fights the user: each re-runs only when the URL value itself
  * changes, so typing in the search box, picking a facet or clicking a row —
  * none of which touches the query string — is never clobbered.
+ *
+ * The search and the agent apply on a CHANGE of the URL, not on mount: the
+ * page's useState already starts from them, and re-applying the same empty
+ * value on mount (or on React's development double-run of effects) wiped the
+ * search the list came back with after a detail or a reload (phone pilot).
  */
 export function useInboxV2DeepLink(
   requestedID: string | null,
@@ -39,12 +44,17 @@ export function useInboxV2DeepLink(
     setSelectedKey(requestedID ? `request:${requestedID}` : null)
   }, [requestedID, setSelectedKey])
 
+  const appliedSearch = useRef(requestedSearch)
   useEffect(() => {
+    if (appliedSearch.current === requestedSearch) return
+    appliedSearch.current = requestedSearch
     setFilters((current) => (current.search === requestedSearch ? current : { ...current, search: requestedSearch }))
   }, [requestedSearch, setFilters])
 
+  const appliedAgent = useRef(requestedAgent)
   useEffect(() => {
-    if (requestedAgent === undefined) return
+    if (requestedAgent === undefined || appliedAgent.current === requestedAgent) return
+    appliedAgent.current = requestedAgent
     setFilters((current) => (current.agent === requestedAgent ? current : { ...current, agent: requestedAgent }))
   }, [requestedAgent, setFilters])
 }

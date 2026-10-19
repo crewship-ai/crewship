@@ -72,7 +72,12 @@ export function InboxV2() {
   // the URL after mount.
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
-  const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch, agent: requestedAgent })
+  const [filters, setFilters] = useState<InboxV2Filters>({
+    ...EMPTY_INBOX_V2_FILTERS,
+    search: requestedSearch,
+    agent: requestedAgent,
+    type: INBOX_V2_TYPES.find((entry) => entry.key === requestedKind)?.key ?? null,
+  })
   const isMobile = useIsMobile()
   const wide = useWideDetail()
   const [railSlot, setRailSlot] = useState<HTMLElement | null>(null)
@@ -267,10 +272,20 @@ export function InboxV2() {
     () => attention ? null : serverFacetCounts(facetServerCounts, view, facetCounts(currentEntries.filter((entry) => entry.source !== "inbox" && entry.source !== "group"))),
     [attention, facetServerCounts, view, currentEntries],
   )
+  // The URL's view and kind follow later navigations; the first render
+  // already started from them (and a remembered list may have its own).
+  const appliedView = useRef<string | null | undefined>(undefined)
   useEffect(() => {
+    const first = appliedView.current === undefined
+    if (!first && appliedView.current === requestedView) return
+    appliedView.current = requestedView
+    if (first && !requestedView) return
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
+  const appliedKind = useRef(requestedKind)
   useEffect(() => {
+    if (appliedKind.current === requestedKind) return
+    appliedKind.current = requestedKind
     const type = INBOX_V2_TYPES.find((entry) => entry.key === requestedKind)?.key ?? null
     setFilters((current) => ({ ...current, type }))
   }, [requestedKind])
@@ -284,6 +299,7 @@ export function InboxV2() {
   // workspace switch starts clean: one workspace's search and filters never
   // show in another. A plain entry into the Inbox opens its default.
   const listWorkspace = useRef<string | null>(null)
+  const pendingRestore = useRef<InboxV2Filters | null>(null)
   useEffect(() => {
     if (!workspaceId) return
     const previous = listWorkspace.current
@@ -291,13 +307,17 @@ export function InboxV2() {
     if (previous === null) {
       const stored = phone.returning() ? phone.readList() : null
       if (stored?.filters) {
-        setFilters((current) => ({
-          ...current,
+        const restored: InboxV2Filters = {
+          ...filters,
           ...stored.filters,
           // What the link itself names wins over what was remembered.
           ...(requestedSearch ? { search: requestedSearch } : {}),
           ...(requestedAgent ? { agent: requestedAgent } : {}),
-        }))
+        }
+        // Until this renders, the filters on screen are the ones from before
+        // the restore: they must not be saved over it.
+        pendingRestore.current = restored
+        setFilters(restored)
       }
       if (stored?.view && !requestedView) setView(stored.view)
       if (!requestedID) phone.settle()
@@ -314,6 +334,10 @@ export function InboxV2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
   useEffect(() => {
+    if (pendingRestore.current) {
+      if (filters !== pendingRestore.current) return
+      pendingRestore.current = null
+    }
     if (listWorkspace.current === workspaceId) phone.saveList({ filters, view: chosenView })
   }, [phone, workspaceId, filters, chosenView])
 
@@ -613,11 +637,24 @@ export function InboxV2() {
 
   const phoneDetail = isMobile && (Boolean(selectedKey) || phoneOverview)
   // Back on the list (phone): its scroll comes back once its rows are there.
-  const scrollPending = useRef(true)
+  // The list may mount more than once while it settles (a banner, a refresh),
+  // so for a moment each new scroller gets the position.
+  const wasDetail = useRef(phoneDetail)
   useEffect(() => {
-    if (phoneDetail) { scrollPending.current = true; return }
-    if (scrollPending.current && phone.restoreScroll(listScroller.current)) scrollPending.current = false
-  }, [phone, phoneDetail, visible.length])
+    const returned = wasDetail.current && !phoneDetail
+    wasDetail.current = phoneDetail
+    if (!returned) return
+    const until = Date.now() + 1500
+    let frame = 0
+    let done: HTMLElement | null = null
+    const attempt = () => {
+      const el = listScroller.current
+      if (el && el !== done && phone.restoreScroll(el)) done = el
+      if (Date.now() < until) frame = requestAnimationFrame(attempt)
+    }
+    attempt()
+    return () => cancelAnimationFrame(frame)
+  }, [phone, phoneDetail])
   const firstLoad = !feedsSettled && allEntries.length === 0
   const inboxFailed = feedsSettled && allEntries.length === 0 && Boolean(active.error)
   const empty = feedsSettled && !sourceState.degraded && allEntries.length === 0

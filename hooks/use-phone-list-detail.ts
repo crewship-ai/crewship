@@ -55,13 +55,17 @@ function here(): string {
   return typeof window === "undefined" ? "" : window.location.pathname + window.location.search
 }
 
-// A reload restores the list once, on the first mount after the page loaded.
-let reloadUnused = true
-function reloadedOnce(): boolean {
-  if (!reloadUnused || typeof performance === "undefined") return false
-  reloadUnused = false
-  const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined
-  return nav?.type === "reload"
+// A reload brings the list back: the address the page was reloaded at counts
+// as returning for as long as it is the address (the page may mount more than
+// once while it loads); a client navigation elsewhere ends it.
+let reloadedAt: string | null | undefined
+function reloadedHere(): boolean {
+  if (typeof window === "undefined" || typeof performance === "undefined") return false
+  if (reloadedAt === undefined) {
+    const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined
+    reloadedAt = nav?.type === "reload" ? here() : null
+  }
+  return reloadedAt !== null && reloadedAt === here()
 }
 
 export interface PhoneListDetail<S> {
@@ -110,7 +114,7 @@ export function usePhoneListDetail<S>({
     else router.replace(listHref)
   }, [key, listHref, router])
 
-  const returning = useCallback(() => read<S>(key).detail != null || reloadedOnce(), [key])
+  const returning = useCallback(() => read<S>(key).detail != null || reloadedHere(), [key])
   const settle = useCallback(() => write<S>(key, { detail: null }), [key])
 
   const saveList = useCallback((state: S) => write<S>(key, { state }), [key])
