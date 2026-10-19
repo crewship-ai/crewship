@@ -24,6 +24,8 @@ vi.mock("@/hooks/use-inbox", () => ({
     refresh: vi.fn(async () => {}), patch: m.patch, actOnInboxItem: vi.fn(async () => {}),
   }),
   useInboxItem: () => ({ data: undefined, isFetching: false }),
+  // Server counts (#3675): absent here, so the page counts what it loaded.
+  useInboxCounts: () => ({ data: null }),
 }))
 vi.mock("@/hooks/use-approvals", () => ({
   useApprovals: () => ({ rows: [], loading: false, error: m.approvalsError, notConfigured: false, refresh: m.refreshApprovals, patchRow: vi.fn() }),
