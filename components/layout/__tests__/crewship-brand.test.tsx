@@ -67,3 +67,18 @@ describe("Crewship brand in the rail", () => {
     expect(rule).toMatch(/box-shadow:.*rgb\(27 117 254/)
   })
 })
+
+// Owner, 19 Oct: the workspace is the main divide of the rail, so its mark is
+// as large as the person's avatar at the foot (size-7), folded or open.
+describe("workspace mark size", () => {
+  it("matches the account avatar in the rail", () => {
+    const ws = readFileSync(path.resolve(__dirname, "../workspace-switcher.tsx"), "utf8")
+    const me = readFileSync(path.resolve(__dirname, "../user-menu.tsx"), "utf8")
+    expect(me).toMatch(/UserAvatar[^\n]*className="size-7"/)
+    const marks = ws.match(/className="rail-tile rail-ws[^"]*"/g) ?? []
+    expect(marks.length).toBe(2)
+    for (const m of marks) expect(m).toMatch(/\bsize-7\b/)
+    const css = readFileSync(path.resolve(__dirname, "../../../app/globals.css"), "utf8")
+    expect(css).toMatch(/\.rail-tile\.rail-ws\s*\{[^}]*width:\s*auto/)
+  })
+})

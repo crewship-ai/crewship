@@ -1163,6 +1163,10 @@ body {
   .rail-tile > svg { width: 16px; height: 16px; }
   .rail-row:hover .rail-tile,
   .rail-row[data-active="true"] .rail-tile { color: var(--foreground); }
+  /* The workspace mark at the top of the rail is as large as the account
+     avatar at its foot (size-7): the workspace is the rail's main divide. */
+  .rail-tile.rail-ws { width: auto; height: auto; }
+  .rail-tile.rail-ws > img { width: 100%; height: 100%; }
   /* The Crewship sail at the foot of the rail (owner, 19 Oct): the brand's
      own blue tile, lit, the same in every style, theme and accent. */
   .rail-tile.rail-brand,
