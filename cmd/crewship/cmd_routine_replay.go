@@ -17,11 +17,15 @@ import (
 
 var routineReplayCmd = &cobra.Command{
 	Use:   "replay <run_id>",
-	Short: "Re-run a prior run with its original inputs (marked is_replay)",
+	Short: "Re-run a prior run, optionally replacing inputs, tags and metadata",
 	Long: `Loads the run's captured inputs and invokes the routine again. The
 new run is stamped is_replay=true + replay_of=<run_id> so steps can
 short-circuit side effects via {{ env.is_replay }}, and it inherits the
 original run's tags so it groups with the source.
+
+--inputs and --metadata replace the inherited objects (inline JSON or
+@file.json). --tags replaces the inherited tags with a JSON array;
+use [] to clear tags. Omitted flags inherit the original values.
 
 --version pins the replay to an immutable routine version's definition
 instead of head — a single-run version of what "crewship routine
@@ -37,8 +41,35 @@ guarantee: this never changes head_version or which version is live).`,
 		}
 		version, _ := cmd.Flags().GetInt("version")
 		body := map[string]any{}
+		if cmd.Flags().Changed("version") && version < 1 {
+			return fmt.Errorf("--version must be a positive archive version")
+		}
 		if version > 0 {
 			body["pinned_version"] = version
+		}
+		for _, name := range []string{"inputs", "metadata"} {
+			if !cmd.Flags().Changed(name) {
+				continue
+			}
+			raw, _ := cmd.Flags().GetString(name)
+			value, err := parseInputFixture(raw)
+			if err != nil || value == nil {
+				return fmt.Errorf("--%s must be a JSON object (inline or @file.json)", name)
+			}
+			body[name] = value
+		}
+		if cmd.Flags().Changed("tags") {
+			raw, _ := cmd.Flags().GetString("tags")
+			var tags []any
+			if err := json.Unmarshal([]byte(raw), &tags); err != nil || tags == nil {
+				return fmt.Errorf("--tags must be a JSON array of strings")
+			}
+			for _, tag := range tags {
+				if _, ok := tag.(string); !ok {
+					return fmt.Errorf("--tags must be a JSON array of strings")
+				}
+			}
+			body["tags"] = tags
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
@@ -190,6 +221,9 @@ var routineBulkReplayCmd = &cobra.Command{
 
 func init() {
 	routineReplayCmd.Flags().Int("version", 0, "pin the replay to this routine version instead of head (read-only — never changes head_version)")
+	routineReplayCmd.Flags().String("inputs", "", "replace captured inputs with a JSON object (inline or @file.json)")
+	routineReplayCmd.Flags().String("metadata", "", "replace captured metadata with a JSON object (inline or @file.json)")
+	routineReplayCmd.Flags().String("tags", "", "replace captured tags with a JSON string array; [] clears tags")
 	routineErrorsCmd.Flags().Int("limit", 50, "max fingerprint groups to list")
 	routineBulkReplayCmd.Flags().String("fingerprint", "", "error fingerprint to replay (REQUIRED; from `routine errors`)")
 	routineBulkReplayCmd.Flags().Int("limit", 50, "max runs to replay from the group")
