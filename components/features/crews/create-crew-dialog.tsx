@@ -24,7 +24,7 @@ import { EditorLayout, EditorPanel } from "./editor-layout"
 import { StepContainer, type EnvironmentSection } from "./create-crew/step-container"
 import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
 import { ImportCrewPanel } from "./create-crew/import-panel"
-import { CrewIcon } from "@/components/ui/crew-icon"
+import { CrewTile } from "./crew-tile"
 import { CREW_ICON_CATEGORIES, GRADIENT_PALETTES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
 import { asCrewColor } from "./create-crew/types"
 import { ProviderPicker } from "./create-agent/agent-model-settings"
@@ -252,7 +252,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         )}
         {panel === "icon" && (
           <CreateSurfacePicker
-            preview={<CrewIcon icon={state.icon} color={state.color} size="xl" />}
+            preview={<CrewTile icon={state.icon} color={state.color} size={48} />}
             previewHint={`${getCrewIconDef(state.icon).label} · ${state.color}`}
             palette={{
               value: state.color,

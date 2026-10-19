@@ -1,5 +1,6 @@
 "use client"
 
+import { CrewTile } from "@/components/features/crews/crew-tile"
 import { IconPickerDialog } from "@/components/ui/icon-picker-dialog"
 
 export interface CrewIconPickerDialogProps {
@@ -39,6 +40,8 @@ export function CrewIconPickerDialog({
       color={color}
       onSave={onSave}
       concept="crews"
+      // The header draws the crew as a 48 px CrewTile; so does the preview.
+      renderPreview={(i, c) => <CrewTile icon={i} color={c} size={48} />}
       description="Pick an icon and a colour. The same icon reused across crews with different colours is a quick visual differentiator."
     />
   )

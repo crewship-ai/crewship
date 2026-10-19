@@ -1,5 +1,6 @@
 "use client"
 
+import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import {
   CreateSurface,
@@ -32,6 +33,11 @@ export interface IconPickerDialogProps {
   /** Icon shown when `icon` is null — what the thing is drawn as today. */
   defaultIcon?: string
   defaultColor?: string
+  /**
+   * Draws the big preview. Defaults to `CrewIcon`; a crew passes its own tile
+   * so the preview is the thing that will be saved (the header's CrewTile).
+   */
+  renderPreview?: (icon: string, color: string) => React.ReactNode
 }
 
 const DEFAULT_DESCRIPTION =
@@ -70,6 +76,7 @@ export function IconPickerDialog({
   description = DEFAULT_DESCRIPTION,
   defaultIcon = "briefcase",
   defaultColor = "blue",
+  renderPreview,
 }: IconPickerDialogProps) {
   const [draftIcon, setDraftIcon] = useState(icon ?? defaultIcon)
   const [draftColor, setDraftColor] = useState(color ?? defaultColor)
@@ -117,7 +124,7 @@ export function IconPickerDialog({
 
       <CreateSurfaceBody>
         <CreateSurfacePicker
-          preview={<CrewIcon icon={draftIcon} color={draftColor} size="xl" />}
+          preview={renderPreview ? renderPreview(draftIcon, draftColor) : <CrewIcon icon={draftIcon} color={draftColor} size="xl" />}
           previewHint={`${getCrewIconDef(draftIcon).label} · ${draftColor}`}
           palette={{
             value: draftColor,

@@ -1,7 +1,7 @@
 "use client"
 
 import { Pencil } from "lucide-react"
-import { CrewIcon } from "@/components/ui/crew-icon"
+import { CrewTile } from "@/components/features/crews/crew-tile"
 import {
   CreateSurfaceDescriptionInput,
   CreateSurfaceField,
@@ -56,7 +56,7 @@ export function StepIdentity({ state, setState, onPickIcon, start, onStart }: Pr
               className="group relative shrink-0 rounded-xl outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-primary"
               aria-label="Pick icon and color"
             >
-              <CrewIcon icon={state.icon} color={state.color} size="lg" className="border border-foreground/10" />
+              <CrewTile icon={state.icon} color={state.color} size={48} />
               <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-card">
                 <Pencil className="h-3 w-3" strokeWidth={2.5} />
               </span>

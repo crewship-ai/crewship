@@ -10,7 +10,7 @@ vi.mock("@/lib/api-fetch", async (orig) => ({
       ? ({ ok: true, status: 200, json: async () => ({ crew_id: "c1", window: "month", limit_usd: null, spent_usd: 0, state: "none" }) } as Response)
       : ({ ok: true, status: 200, json: async () => [] } as Response)),
 }))
-vi.mock("../crew-canvas-tabs/settings-tab", () => ({ SettingsTab: () => <div>profile</div> }))
+vi.mock("../crew-canvas-tabs/settings-tab", () => ({ SettingsTab: ({ trailing }: { trailing?: React.ReactNode }) => <div>profile{trailing}</div> }))
 vi.mock("../crew-members", () => ({ CrewMembers: () => <div>members</div> }))
 vi.mock("../crew-yaml", () => ({ CrewCommandLine: () => <div>cli</div>, crewCommands: () => [] }))
 
