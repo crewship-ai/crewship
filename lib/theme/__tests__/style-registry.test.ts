@@ -27,6 +27,7 @@ const read = (f: string) => readFileSync(path.join(root, f), "utf8")
 const stylesCss = read("app/styles/styles.css")
 const globals = read("app/globals.css")
 const bare = stylesCss.replace(/\/\*[\s\S]*?\*\//g, "")
+const globalsBare = globals.replace(/\/\*[\s\S]*?\*\//g, "")
 
 // Names of the products the first batch was drawn from (ODCH-10): none of
 // them may appear in an id, a name, a description or the stylesheet.
@@ -142,14 +143,33 @@ describe("token blocks (STY-02)", () => {
     const decls = (body: string) => new Map([...body.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()] as const))
     const blockOf = (selector: string) => [...bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, sel]) => sel.trim() === selector)![2]
     const base = {
-      light: decls(globals.slice(globals.indexOf(":root {\n  /* ── Light surfaces"), globals.indexOf("\n.dark {"))),
-      dark: decls(globals.slice(globals.indexOf("\n.dark {"), globals.indexOf("@theme inline"))),
+      // Comments stripped: a comment that mentions "--card: 1=4.78" is not
+      // the token (the block was once copied from the commented source).
+      light: decls(globals.slice(globals.indexOf(":root {\n  /* ── Light surfaces"), globals.indexOf("\n.dark {")).replace(/\/\*[\s\S]*?\*\//g, "")),
+      dark: decls(globals.slice(globals.indexOf("\n.dark {"), globals.indexOf("@theme inline")).replace(/\/\*[\s\S]*?\*\//g, "")),
     }
     for (const [scheme, selector] of [["light", '[data-style="harbor"]:not(.dark)'], ["dark", '.dark[data-style="harbor"]']] as const) {
       const own = decls(blockOf(selector))
       expect(own.size, scheme).toBeGreaterThan(15)
       for (const [name, value] of own) expect(value, `--${name} (${scheme})`).toBe(base[scheme].get(name))
     }
+  })
+
+  it("every token in a style block is one CSS value: no comment text leaked into it", () => {
+    // a11y.spec.ts New Agent dialog (nightly 39130662018): --card in Harbor
+    // held "1=4.78/4.69, …" from a chart comment, so bg-card was transparent
+    // and every dialog read its text against the scrim.
+    for (const m of stylesCss.matchAll(/([^{}]*data-style="[^{}]*)\{([^{}]*)\}/g)) {
+      for (const d of m[2].matchAll(/--([a-z0-9-]+):\s*([^;]*);/g)) {
+        expect(d[2], `${m[1].trim()} --${d[1]}`).not.toMatch(/\/\*|\*\/|\n\s*\*|=/)
+      }
+    }
+  })
+
+  it("Harbor's card is the base card colour in both schemes", () => {
+    expect(globalsBare).toMatch(/:root \{[\s\S]*?--card: #FFFFFF;/)
+    expect(bare).toMatch(/\[data-style="harbor"\]:not\(\.dark\) \{[^}]*--card: #FFFFFF;/)
+    expect(bare).toMatch(/\.dark\[data-style="harbor"\] \{[^}]*--card: #181A1F;/)
   })
 
   it("globals.css loads the styles after the accents", () => {

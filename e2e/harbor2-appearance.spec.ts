@@ -92,6 +92,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
   test("a corner knob changes the radius tokens and nothing else", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await expect(page.getByRole("group", { name: "Corners" })).toBeVisible()
     const radius = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-slot='card'], .rounded-card")!).borderTopLeftRadius))
     await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
     const before = await radius()
