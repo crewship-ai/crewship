@@ -25,3 +25,13 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Chat search "Files" tab (CH-25). There is no file-search endpoint yet; with
+ * the flag on, the tab runs against a fixture client so the states can be
+ * reviewed. Default OFF: the tab then says plainly that file search is not
+ * available.
+ */
+export function chatSearchFilesFixtures(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES === "true"
+}

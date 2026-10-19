@@ -179,3 +179,23 @@ SQLite FTS5 external-content index. Search joins the index, filters by the
 agent set the API resolved, and orders by BM25. The JSONL files remain authoritative; the
 index is a rebuildable mirror, so a transient write failure costs at most the
 searchability of a single turn, never the turn itself.
+
+## Searching from the chat sidebar
+
+The chat sidebar has a search button (also **Ctrl/Cmd+Shift+F**; Ctrl/Cmd+K
+stays the global palette). The dialog has three tabs:
+
+- **This chat** — matches inside the open agent session.
+- **All chats** — every agent conversation you can see.
+- **Files** — not available yet; the tab says so rather than showing zero results.
+
+Type free text plus optional filters: `from:ada` (or `from:user`),
+`in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,
+`before:2026-10-31`. An unknown filter is reported, not ignored. Use the arrow
+keys to move through results and Enter to open the exact message; Escape closes.
+
+Only `in:` is applied by the server. `from:`, `has:`, the date filters and
+**This chat** are applied to the server's 50 best matches, so when that page
+was full the dialog says the result is **partial** instead of claiming nothing
+matched. Rooms and direct messages with people are not covered by this search
+yet.

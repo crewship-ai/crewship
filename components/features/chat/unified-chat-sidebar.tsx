@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { motion } from "motion/react"
-import { ChevronDown, ChevronRight, MailOpen, Plus, Radio, X } from "lucide-react"
+import { ChevronDown, ChevronRight, MailOpen, Plus, Radio, Search, X } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +19,7 @@ import { useFavoriteRooms } from "./use-favorite-rooms"
 import { useSidebarSessionSearch } from "./use-sidebar-session-search"
 import { FavoriteButton, useChatFavorites } from "./chat-favorites"
 import { ChatCrewPicker } from "./chat-crew-picker"
+import { ChatSearchDialog, useChatSearchHotkey } from "./search/chat-search-dialog"
 import type { Props, ConversationRow } from "./conversations-sidebar"
 import type { ChatTreeAgent } from "./chat-tree-data"
 import { cn } from "@/lib/utils"
@@ -66,6 +67,8 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
   const activeThreadId = chat?.selectedId ? null : previousThreadId
   const draftConversation = chat?.selectedId ? null : previousDraft
   const [picking, setPicking] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  useChatSearchHotkey(() => setSearchOpen(true))
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { const saved = readFlags(`${stateKey}:agents`); const id = Object.keys(saved).find((id) => saved[id]); return id ? { [id]: true } : {} })
   const { favorites, toggle: toggleFavorite } = useChatFavorites(stateKey)
   const [closed, setClosed] = useState<Record<string, boolean>>(() => readFlags(`${stateKey}:sections`))
@@ -181,11 +184,14 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
           </div>
   }) }
 
+  const activeRow = activeThreadId ? rows.find((row) => row.thread.id === activeThreadId) : undefined
   return <div className={cn("flex h-full min-h-0 flex-col", props.className)}>
+    {searchOpen && <ChatSearchDialog open={searchOpen} onOpenChange={setSearchOpen} workspaceId={chat?.workspaceId} roster={roster} current={activeRow ? { agentId: activeRow.agent.id, sessionId: activeRow.thread.id } : null} />}
     <SidebarToolbar>
       <div data-chat-search className="min-w-0 flex-1">
         <SidebarSearch value={query} onValueChange={setQuery} aria-label={picking ? "Search agents" : "Search conversations"} placeholder={picking ? "Find an agent…" : "Search names, sessions…"} onKeyDown={(event) => { if (event.key === "Escape") { setPicking(false); setQuery("") } }} />
       </div>
+      <button type="button" aria-label="Search all chats (Ctrl+Shift+F)" title="Search messages and files" onClick={() => setSearchOpen(true)} className="kit-tap flex size-8 coarse:size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"><Search aria-hidden className="size-3.5" /></button>
       {!picking && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={resetFilters}>
         <SidebarFacet label="Show" resetLabel="All conversations" resetActive={sectionFilter === "all"} onReset={() => setSectionFilter("all")} first>
           {([['agents', 'Agent sessions'], ['people', 'People'], ['rooms', 'Team spaces']] as const).map(([id, label]) => <SidebarFacetOption key={id} active={sectionFilter === id} onToggle={() => setSectionFilter(sectionFilter === id ? "all" : id)}>{label}</SidebarFacetOption>)}
