@@ -181,6 +181,7 @@ var BackupTables = []string{
 	"issue_work",
 	"issue_executions",
 	"crew_templates",
+	"credential_folders", // credentials.folder_id → credential_folders, so folders land first (ODCH-VLT-01)
 	"credentials",
 	// Depth 2: workspace via crews
 	"crew_members",

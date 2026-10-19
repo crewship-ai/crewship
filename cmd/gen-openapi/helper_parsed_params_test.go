@@ -99,7 +99,7 @@ var helperParsedQueryParameters = []struct {
 	// through the helper; chats also reads its source and title-search filters inline.
 	{"GET", "/api/v1/crews", "parsePagination+listSearchClause", []string{"limit", "offset", "order", "q"}},
 	{"GET", "/api/v1/agents", "parsePagination+listSearchClause", []string{"crew_id", "include_setup", "limit", "offset", "q"}},
-	{"GET", "/api/v1/credentials", "parsePagination", []string{"kind", "limit", "offset", "paginate", "q", "search", "tag"}},
+	{"GET", "/api/v1/credentials", "parsePagination", []string{"folder_id", "kind", "limit", "offset", "paginate", "q", "search", "tag"}},
 	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"chat_id", "counts", "kind", "limit", "offset", "q", "routine_id", "source"}},
 
 	// resolveIOStep (pipeline_runs.go) — the #863 sub-span I/O gate.

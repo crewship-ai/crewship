@@ -128,6 +128,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	// === Credentials & secrets (round-trip; cipher preserved) ========
 	"credentials":          IntentInclude,
+	"credential_folders":   IntentInclude, // Vault folders and their reveal policy (ODCH-VLT-01)
 	"agent_credentials":    IntentInclude,
 	"credential_audit":     IntentInclude,
 	"credential_rotations": IntentInclude,
