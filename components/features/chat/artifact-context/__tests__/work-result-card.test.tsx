@@ -1,11 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { WorkResultCard } from "../work-result-card"
 import { deriveWorkCardView } from "../work-card-view"
-import { workCard } from "../fixtures"
+import { workCard } from "./fixtures"
 import type { WorkRunState, WorkProblem } from "../types"
 
-afterEach(cleanup)
+beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 const ids = (patch: Parameters<typeof workCard>[0]) => deriveWorkCardView(workCard(patch)).actions.map(action => action.id)
 
 it.each<[WorkRunState, string[]]>([
@@ -42,10 +43,51 @@ it.each<[WorkProblem, string, string]>([
   expect(view.headline).toBe(headline)
   expect(view.actions.map(item => item.id)).toContain(action)
 })
+it("stopped has its own action regardless of run state, and only when granted", () => {
+  expect(ids({ problem: "stopped", runState: "applied" })).toEqual(["retry", "open"])
+  expect(ids({ problem: "stopped", runState: "applied", can: { cancel: false, retry: false, compare: false, open: true } })).toEqual(["open"])
+})
+it("exact action sets for conflict, broken preview and missing runtime", () => {
+  expect(ids({ problem: "conflict", runState: "conflicted" })).toEqual(["open", "compare"])
+  expect(ids({ problem: "broken_preview", runState: "applied" })).toEqual(["retry_preview"])
+  expect(ids({ problem: "missing_runtime", runState: "failed" })).toEqual(["change_executor", "open"])
+})
+it("keeps Open for a confirmed revision while disconnected or unknown, but never Cancel or Retry", () => {
+  expect(ids({ problem: "disconnected", runState: "running" })).toEqual(["reconnect", "open"])
+  expect(ids({ problem: "unknown_result", runState: "failed" })).toEqual(["check_result", "open"])
+})
+it("temporary unavailability is distinct from revoked: keeps the title, offers Try again", () => {
+  const view = deriveWorkCardView(workCard({ load: "unavailable" }))
+  expect(view.headline).toBe("Temporarily unavailable")
+  expect(view.title).toBe("Quarterly plan")
+  expect(view.actions.map(a => a.id)).toEqual(["refresh", "open"])
+})
+it("an auth denial drops cached content like a revoke; loading shows no state or actions", () => {
+  const denied = deriveWorkCardView(workCard({ load: "denied" }))
+  expect([denied.restricted, denied.title, denied.actions.map(a => a.id)]).toEqual([true, "Restricted item", ["dismiss"]])
+  const loading = deriveWorkCardView(workCard({ load: "loading" }))
+  expect([loading.headline, loading.actions]).toEqual(["Loading", []])
+  render(<WorkResultCard card={workCard({ load: "loading" })} onAction={() => {}} />)
+  expect(screen.getByRole("article").getAttribute("aria-busy")).toBe("true")
+})
+it("restriction comes from the model: a readable item named Restricted item is still readable", () => {
+  const view = deriveWorkCardView(workCard({ access: { status: "readable", title: "Restricted item", typeLabel: "Document" } }))
+  expect(view.restricted).toBe(false)
+  render(<WorkResultCard card={workCard({ access: { status: "readable", title: "Restricted item", typeLabel: "Document" } })} onAction={() => {}} />)
+  expect(screen.getByText("Document · Ada · On behalf of you")).toBeTruthy()
+})
+it("only changing cards are live regions", () => {
+  render(<><WorkResultCard card={workCard({ runState: "applied" })} onAction={() => {}} /><WorkResultCard card={workCard({ runState: "running", saved: { kind: "none" } })} onAction={() => {}} /></>)
+  expect(screen.getAllByRole("status")).toHaveLength(1)
+})
+it("renders nothing when the feature flag is off", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "")
+  const { container } = render(<WorkResultCard card={workCard()} onAction={() => {}} />)
+  expect(container.innerHTML).toBe("")
+})
 it("does not offer Retry while the result is unknown, and no Open after revoke", () => {
-  expect(ids({ problem: "unknown_result", runState: "failed" })).toEqual(["check_result"])
+  expect(ids({ problem: "unknown_result", runState: "failed" })).toEqual(["check_result", "open"])
   expect(ids({ problem: "revoked", runState: "applied" })).toEqual(["dismiss"])
-  expect(ids({ problem: "disconnected", runState: "running" })).toEqual(["reconnect"])
 })
 it("shows no private title after revoke or for a restricted link", () => {
   expect(deriveWorkCardView(workCard({ problem: "revoked" })).title).toBe("Restricted item")
