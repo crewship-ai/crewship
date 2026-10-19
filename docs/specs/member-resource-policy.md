@@ -678,6 +678,19 @@ continues to expose only the subject and action for capability changes.
 Current values remain available through the existing ADMIN-only capability
 endpoint; this change adds no administrative historical-values API.
 
+Search compatibility limit: journal `q` searches only the summary for
+`member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
+`page.folder_acl_changed`, including historical rows. Previously public payload
+IDs, actions and ACL versions therefore no longer match free-text search for
+these types. Explicit filters and non-search reads remain available; other event
+types retain summary-and-payload search. List and Count use the same boundary,
+without rewriting canonical payloads, FTS indexes or keyed audit history.
+Transactional journal appends acknowledge the exact surviving native INSERT
+tuple, including its configured-key hash, before the business transaction can
+commit; post-insert removal or alteration aborts the mutation and notification.
+Background batching retains its existing query path.
+
+
 Role and capability writes acknowledge their final stored state after the
 audit append. An append or commit failure rolls back the mutation; observers
 are notified only after commit. Member removal requires exactly one deleted

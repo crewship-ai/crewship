@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -82,6 +83,43 @@ func TestAuthorizationAuditPreviewDoesNotExposeCapabilitySets(t *testing.T) {
 		if _, exposed := response.Samples[0].Payload[key]; exposed {
 			t.Errorf("manager preview exposed private audit field %s", key)
 		}
+	}
+	// Selection/count must not become an oracle for fields omitted from the body.
+	for _, tc := range []struct {
+		name, query string
+		want        int
+	}{
+		{"summary-positive", "Member capabilities", 1},
+		{"private-old-capability", "routine.create", 0},
+		{"private-new-capability", "issue.create", 0},
+		{"private-field-name", "previous_capabilities", 0},
+		{"column-scope-payload", "payload:issue", 0},
+		{"column-scope-summary", "summary:issue", 0},
+		{"column-scope-or", `" OR payload:issue`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := url.Values{"entry_type": {"member.capabilities_changed"}, "q": {tc.query}}.Encode()
+			for _, endpoint := range []string{"/api/v1/journal", "/api/v1/journal/count"} {
+				rr := request("GET", endpoint+"?"+query, "")
+				if rr.Code != 200 {
+					t.Fatalf("native journal search status %d", rr.Code)
+				}
+				var result struct {
+					Entries []map[string]any `json:"entries"`
+					Total   int              `json:"total"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				got := len(result.Entries)
+				if endpoint == "/api/v1/journal/count" {
+					got = result.Total
+				}
+				if got != tc.want {
+					t.Errorf("private audit FTS selection via %s: got %d want %d", endpoint, got, tc.want)
+				}
+			}
+		})
 	}
 	var after string
 	if err := f.db.QueryRow(`SELECT payload FROM journal_entries WHERE workspace_id=? AND entry_type='member.capabilities_changed'`, f.workspace).Scan(&after); err != nil {

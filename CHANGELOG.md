@@ -17,7 +17,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged.
+- Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
 
 - Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
 
