@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -13,6 +15,25 @@ import (
 // grants cannot silently widen it. Ownership succession changes the custodian.
 func privatePageViewer(rec *pageRecord, viewer *pageViewer) bool {
 	return viewer != nil && (rec.OwnerUserID == viewer.UserID || viewer.Role == "OWNER")
+}
+
+// Custody is a read audience, not a grant of trusted workspace power. A
+// restricted membership suppresses the OWNER override, while the live human
+// custodian can still read their own output. Missing membership is a denial;
+// operational database failures remain errors for the caller.
+func (h *PageHandler) livePrivatePageReader(ctx context.Context, workspace, user string) (*pageViewer, error) {
+	var role string
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted') THEN '' ELSE m.role END
+FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
+JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL
+WHERE m.workspace_id=? AND m.user_id=?`, workspace, user).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pageViewer{UserID: user, Role: role}, nil
 }
 
 // Audit before releasing another human's private metadata or content. Use the

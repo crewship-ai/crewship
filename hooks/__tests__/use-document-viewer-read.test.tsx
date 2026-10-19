@@ -163,3 +163,29 @@ it("fails closed for malformed JSON and encodes the Page identity as one path se
   await waitFor(()=>expect(result.current.read.status).toBe("unavailable"))
   expect(vi.mocked(apiFetch).mock.calls[1][0]).toBe("/api/v1/pages/%40page%20%2F%26/document?workspace_id=ws+%2F%26")
 })
+
+
+it("conceals a deleted Page's ready title and body before authorization refresh completes", async () => {
+  const { result } = renderHook(() => useDocumentViewerRead(input()))
+  await waitFor(() => expect(result.current.read.status).toBe("ready"))
+  const denied = deferred()
+  vi.mocked(apiFetch).mockReturnValue(denied.promise)
+  act(() => events.get("page.deleted")?.())
+  expect(result.current.read).toEqual({ status: "loading" })
+  expect(result.current.read).not.toHaveProperty("title")
+  expect(result.current.read).not.toHaveProperty("content")
+  await act(async () => denied.resolve(response({ error: "Page unavailable" }, 404)))
+  await waitFor(() => expect(result.current.read).toEqual({ status: "denied" }))
+})
+
+it("ignores a pre-deletion body that arrives after a denied current read", async () => {
+  const old = deferred()
+  vi.mocked(apiFetch).mockResolvedValueOnce(response(metadata())).mockReturnValueOnce(old.promise)
+  const { result } = renderHook(() => useDocumentViewerRead(input()))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
+  vi.mocked(apiFetch).mockResolvedValue(response({ error: "Page unavailable" }, 404))
+  act(() => events.get("page.deleted")?.())
+  await waitFor(() => expect(result.current.read).toEqual({ status: "denied" }))
+  await act(async () => old.resolve(response(saved())))
+  expect(result.current.read).toEqual({ status: "denied" })
+})
