@@ -10,9 +10,11 @@ const availability=vi.hoisted(()=>({enabled:true}))
 const account=vi.hoisted(()=>({id:"document-test-human"}))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({data:availability.enabled,isPending:false}) }))
+const recoveryJournal=vi.hoisted(()=>({drafts:[] as import("@/lib/document-queue").DocumentDraft[],remove:vi.fn(async()=>{})}))
+vi.mock("@/lib/document-queue", async importOriginal => ({...await importOriginal<typeof import("@/lib/document-queue")>(),openDocumentDrafts:async()=>({load:async()=>recoveryJournal.drafts,put:async()=>{},remove:recoveryJournal.remove,close:()=>{}})}))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: account.id } } }) }))
-afterEach(() => { cleanup(); request.mockReset();availability.enabled=true;account.id="document-test-human" })
+afterEach(() => { cleanup(); request.mockReset();availability.enabled=true;account.id="document-test-human";recoveryJournal.drafts=[];recoveryJournal.remove.mockClear() })
 it("hydrates saved CRDT content before binding the editor without manufacturing a local write", async () => {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "saved-paragraph")
@@ -243,4 +245,24 @@ it("drops the former human's history immediately on account change without auto-
     expect(screen.queryByRole("region",{name:"Confirmed revision 2"})).toBeNull()
     expect(request.mock.calls.filter(([url])=>url.includes("/checkpoints"))).toHaveLength(count)
   } finally {f.view.unmount();f.saved.destroy()}
+})
+it("downloads the persisted recovery content and explicitly discards it before reopening",async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema")
+ const confirmed=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Confirmed head"}]}]},3)
+ const draft=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Pending browser draft"}]}]},3)
+ recoveryJournal.drafts=[{id:"pending",schema:3,epoch:"previous-epoch",attempted:true,update:"bytes",snapshot:documentSchema.snapshot(draft)}]
+ request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:3,rev:1,epoch:"current-epoch",can_write:true,snapshot:documentSchema.snapshot(confirmed)}}))
+ const blobs:Blob[]=[]
+ const create=vi.spyOn(URL,"createObjectURL").mockImplementation(blob=>{blobs.push(blob as Blob);return "blob:recovery"})
+ const revoke=vi.spyOn(URL,"revokeObjectURL").mockImplementation(()=>{})
+ const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
+ try{
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  fireEvent.click(await screen.findByRole("button",{name:"Download unsaved draft"}))
+  expect(await blobs[0].text()).toContain("Pending browser draft")
+  fireEvent.click(screen.getByRole("button",{name:"Discard recovered drafts and reopen"}))
+  await waitFor(()=>expect(recoveryJournal.remove).toHaveBeenCalledWith("pending"))
+  await waitFor(()=>expect(screen.queryByRole("button",{name:"Download unsaved draft"})).toBeNull())
+  expect(request.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+ }finally{create.mockRestore();revoke.mockRestore();click.mockRestore();confirmed.destroy();draft.destroy()}
 })

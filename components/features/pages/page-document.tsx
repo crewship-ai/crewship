@@ -92,7 +92,18 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><span role="status" aria-live="polite" className="text-sm">{restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}</span></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
-    {(sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your local draft is retained in this tab. Download it before reopening the current document.</p><Button onClick={() => download(`${slug}-recovery.json`, JSON.stringify(editor?.getJSON(), null, 2))}>Download unsaved draft</Button><Button variant="outline" onClick={() => window.location.reload()}>Reopen saved document</Button></div>}
+    {!sync.denied && (sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your unsaved draft is retained privately in this browser. Download it before discarding it.</p><Button onClick={() => {
+      try {
+        const recovered = sync.recoveredDrafts.map(draft => {
+          const local = documentSchema.load(draft.snapshot)
+          try { return { schema: draft.schema, content: documentSchema.project(local) } } finally { local.destroy() }
+        })
+        download(`${slug}-recovery.json`, JSON.stringify(recovered.length ? recovered : editor?.getJSON(), null, 2))
+      } catch { setActionError("Could not read the recovery draft. It remains retained in this browser.") }
+    }}>Download unsaved draft</Button><Button variant="outline" onClick={() => {
+      if (sync.recoveredDrafts.length) void sync.discardRecoveredDrafts().catch(() => setActionError("Could not discard the recovery draft."))
+      else window.location.reload()
+    }}>{sync.recoveredDrafts.length ? "Discard recovered drafts and reopen" : "Reopen saved document"}</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}
