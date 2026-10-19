@@ -235,7 +235,7 @@ func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 	from := "FROM journal_entries"
 	if match := fts5Query(q.FTSQuery); match != "" {
 		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
-		conds = append(conds, "journal_entries_fts MATCH ?")
+		conds = append(conds, "journal_entries_fts MATCH ?", publicFolderSearchSQL)
 		args = append(args, match)
 	}
 	return conds, args, from

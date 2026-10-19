@@ -16,6 +16,7 @@ import (
 // it directly. Empty optional ids/maps are omitted rather than sent as ""
 // / {} to keep frames small and match the zod schema's optional fields.
 func SerializeEntry(e Entry) map[string]any {
+	e = PublicFolderMembership(e)
 	row := map[string]any{
 		"id":           e.ID,
 		"workspace_id": e.WorkspaceID,

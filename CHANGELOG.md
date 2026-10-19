@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Privacy change: folder moves no longer expose private Page identities in workspace events, journal feeds, automation previews or automation inputs.** Canonical audit targets remain intact. Historical folder-move entries without a valid classification, including ordinary Pages, now use a generic public projection and are excluded from full-text search; newly classified ordinary Page events retain their metadata.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.

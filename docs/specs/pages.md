@@ -1305,3 +1305,23 @@ are not required to build, test or use the product.
 
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+
+### Folder membership event privacy
+
+Folder add, move, remove and batch move retain their canonical journal target
+Page ID and summary. Their workspace invalidations use the existing Page output
+classification: private chat audiences disclose no Page identity; Documents and
+empty human staging Pages expose only opaque IDs. Failed or missing native
+classification discloses neither identity nor descriptive metadata.
+
+Folder membership journal producers record two internal boolean classifications.
+The shared public projection removes these markers and preserves canonical input.
+It is applied to journal List/Get/SSE/WS serialization, before automation preview
+matching and before runtime automation matching/rendering. Only newly classified
+ordinary events retain their public descriptive metadata. Historical unclassified
+(including ordinary), missing or malformed classifications receive a generic
+projection without Page identity. Full-text List/Count excludes private-output and
+unclassified folder entries before matching, preventing title confirmation.
+Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
+this does not introduce Page folder ACL mutation auditing or change its atomicity.
