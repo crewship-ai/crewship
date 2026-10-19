@@ -217,11 +217,13 @@ export interface InboxItem {
   }
 }
 
-interface InboxListResponse {
+export interface InboxListResponse {
   rows: InboxItem[]
   count: number
   unread_count: number
   has_more?: boolean
+  /** Opaque keyset position for the next page (?cursor=); set exactly when has_more is. */
+  next_cursor?: string
   /** Exact per-kind counts of the caller's visible not-resolved items (#2187). */
   active_by_kind?: Record<string, number>
   decision_count?: number
@@ -247,7 +249,7 @@ export const inboxKeys = {
   completeList: (ws: string, state: StateFilter) => ["inbox", ws, "complete-list", { state }] as const,
   detail: (ws: string, id: string) => ["inbox", ws, "detail", id] as const,
   count: (ws: string) => ["inbox", ws, "count"] as const,
-  counts: (ws: string) => ["inbox", ws, "counts"] as const,
+  counts: (ws: string, scope = "") => ["inbox", ws, "counts", scope] as const,
 }
 
 /** Items per Inbox space; the keys are the page's view ids. */
@@ -267,6 +269,22 @@ export interface InboxCounts {
   unread: number
   spaces: InboxSpaceCounts
   by_kind: Record<string, InboxSpaceCounts>
+  /** Active items per attention class. Present only on a server that also
+   *  searches and pages (q, cursor): its absence means "count and search the
+   *  loaded rows yourself". */
+  by_attention?: Record<string, number>
+  /** Items per deadline bucket (hour / today / soon / none; soon overlaps). */
+  by_deadline?: Record<string, number>
+}
+
+/** Narrows the counts to one space; `dayEnd` is the end of the caller's local day. */
+export interface InboxCountsParams {
+  space?: keyof InboxSpaceCounts
+  dayEnd?: string
+}
+
+function countsScope(params?: InboxCountsParams): string {
+  return params ? `${params.space ?? ""}|${params.dayEnd ?? ""}` : ""
 }
 
 function isSpaceCounts(v: unknown): v is InboxSpaceCounts {
@@ -279,13 +297,19 @@ function isSpaceCounts(v: unknown): v is InboxSpaceCounts {
  * without the route, or any failure). Null is the signal to keep counting
  * from the rows the client walked itself — never to show zeros.
  */
-export async function fetchInboxCounts(workspaceId: string, signal?: AbortSignal): Promise<InboxCounts | null> {
+export async function fetchInboxCounts(workspaceId: string, signal?: AbortSignal, params?: InboxCountsParams): Promise<InboxCounts | null> {
   try {
-    const res = await apiFetch(`/api/v1/inbox/counts?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+    const query = new URLSearchParams({ workspace_id: workspaceId })
+    if (params?.space) query.set("space", params.space)
+    if (params?.dayEnd) query.set("day_end", params.dayEnd)
+    const res = await apiFetch(`/api/v1/inbox/counts?${query.toString()}`, { signal })
     if (!res.ok) return null
     const body = (await res.json()) as Partial<InboxCounts> | null
     if (!body || typeof body.total !== "number" || typeof body.unread !== "number" || !isSpaceCounts(body.spaces)) return null
-    return { total: body.total, unread: body.unread, spaces: body.spaces, by_kind: body.by_kind ?? {} }
+    const counts: InboxCounts = { total: body.total, unread: body.unread, spaces: body.spaces, by_kind: body.by_kind ?? {} }
+    if (body.by_attention) counts.by_attention = body.by_attention
+    if (body.by_deadline) counts.by_deadline = body.by_deadline
+    return counts
   } catch (err) {
     if (signal?.aborted) throw err
     return null
@@ -293,10 +317,10 @@ export async function fetchInboxCounts(workspaceId: string, signal?: AbortSignal
 }
 
 /** Server-side inbox counts; `data` is null on a server without them. */
-export function useInboxCounts(workspaceId: string | null | undefined) {
+export function useInboxCounts(workspaceId: string | null | undefined, params?: InboxCountsParams) {
   return useQuery<InboxCounts | null>({
-    queryKey: inboxKeys.counts(workspaceId ?? ""),
-    queryFn: ({ signal }) => fetchInboxCounts(workspaceId!, signal),
+    queryKey: inboxKeys.counts(workspaceId ?? "", countsScope(params)),
+    queryFn: ({ signal }) => fetchInboxCounts(workspaceId!, signal, params),
     enabled: Boolean(workspaceId),
     retry: false,
   })
