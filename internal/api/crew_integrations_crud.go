@@ -6,6 +6,8 @@ package api
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -305,6 +307,8 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
+	defer tx.Rollback()
+
 	// Collect credential IDs from bindings — retire OAuth credentials
 	// that were created specifically for this integration (auto-connect flow).
 	var credIDs []string
@@ -312,19 +316,24 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		`SELECT DISTINCT ab.credential_id FROM agent_mcp_bindings ab
 		 JOIN credentials c ON c.id = ab.credential_id
 		 WHERE ab.mcp_server_id = ? AND ab.mcp_server_scope = 'crew'
-		   AND c.type = 'OAUTH2' AND c.name LIKE '%oauth%'`,
-		id)
-	if err == nil {
-		for rows.Next() {
-			var cid string
-			if rows.Scan(&cid) == nil && cid != "" {
-				credIDs = append(credIDs, cid)
-			}
+		   AND c.type = 'OAUTH2' AND c.name LIKE '%oauth%' AND c.deleted_at IS NULL AND c.workspace_id = ?`,
+		id, workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "list integration credentials", err)
+		return
+	}
+	for rows.Next() {
+		var cid string
+		if err := rows.Scan(&cid); err != nil {
+			rows.Close()
+			replyInternalError(w, h.logger, "read integration credential", err)
+			return
 		}
-		if err := rows.Err(); err != nil {
-			h.logger.Error("iterate credential IDs for deletion", "error", err)
-		}
-		rows.Close()
+		credIDs = append(credIDs, cid)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		replyInternalError(w, h.logger, "read integration credentials", err)
+		return
 	}
 
 	// Delete agent bindings for this crew server
@@ -340,8 +349,8 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		var remaining int
 		if err := tx.QueryRowContext(r.Context(),
 			"SELECT COUNT(*) FROM agent_mcp_bindings WHERE credential_id = ?", cid).Scan(&remaining); err != nil {
-			h.logger.Warn("check credential bindings", "credential_id", cid, "error", err)
-			continue
+			replyInternalError(w, h.logger, "check credential bindings", err)
+			return
 		}
 		if remaining > 0 {
 			continue // still referenced elsewhere
@@ -349,11 +358,41 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		res, err := tx.ExecContext(r.Context(),
 			"UPDATE credentials SET deleted_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339), cid, workspaceID)
 		if err != nil {
-			h.logger.Warn("retire OAuth credential", "credential_id", cid, "error", err)
-			continue
+			replyInternalError(w, h.logger, "retire OAuth credential", err)
+			return
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			continue
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			replyInternalError(w, h.logger, "retire OAuth credential", fmt.Errorf("retirement not acknowledged: affected=%d error=%v", n, err))
+			return
+		}
+		if err := RecordCredentialEventTx(r.Context(), tx, cid, AuditEventRevoke, "", clientIP(r), map[string]any{"soft_delete": true, "reason": "integration_deleted", "crew_id": crewID}); err != nil {
+			replyInternalError(w, h.logger, "audit OAuth credential retirement", err)
+			return
+		}
+		var erased bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM credentials
+		 WHERE id=? AND workspace_id=? AND deleted_at IS NOT NULL AND
+            COALESCE(encrypted_value,'')='' AND
+            COALESCE(oauth_resource,'')='' AND
+            COALESCE(oauth_issuer,'')='' AND
+            COALESCE(encrypted_refresh_token,'')='' AND
+            COALESCE(oauth_client_secret_enc,'')='' AND
+            COALESCE(oauth_refresh_token_enc,'')='' AND
+            COALESCE(username,'')='' AND
+            COALESCE(account_email,'')='' AND
+            COALESCE(account_label,'')='' AND
+            COALESCE(description,'')='' AND
+            COALESCE(last_error,'')='' AND
+            COALESCE(last_used_ips,'')='' AND
+            COALESCE(tags,'')='' AND
+            COALESCE(oauth_client_id,'')='' AND
+            COALESCE(oauth_auth_url,'')='' AND
+            COALESCE(oauth_token_url,'')='' AND
+            COALESCE(oauth_scopes,'')='' AND
+            COALESCE(oauth_token_expires_at,'')='' AND
+            COALESCE(token_expires_at,'')='') AND NOT EXISTS(SELECT 1 FROM credential_fields WHERE credential_id=?) AND NOT EXISTS(SELECT 1 FROM oauth_states WHERE credential_id=?)`, cid, workspaceID, cid, cid).Scan(&erased); err != nil || !erased {
+			replyInternalError(w, h.logger, "verify retired OAuth credential", fmt.Errorf("retirement postcondition failed: %v", err))
+			return
 		}
 		// Retain the historical row, but release the live assignments and slot
 		// claims that the former hard-delete cascade removed.

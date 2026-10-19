@@ -42,7 +42,7 @@ func TestCredentialTombstoneAuditBackupRoundtrip(t *testing.T) {
 	if err := target.QueryRow(`SELECT c.encrypted_value,c.deleted_at,a.metadata_json FROM credentials c JOIN credential_audit a ON a.credential_id=c.id WHERE c.id='history-c' AND a.id='history-a'`).Scan(&cipher, &deleted, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if cipher != "unchanged-cipher" || deleted != "2026-01-01T00:00:00Z" || metadata != `{"original":true}` {
+	if cipher != "" || deleted != "2026-01-01T00:00:00Z" || metadata != `{"original":true}` {
 		t.Fatal("restore changed tombstone/history")
 	}
 	active, err := ExportEncryptedCredentials(ctx, target)
