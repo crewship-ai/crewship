@@ -40,7 +40,7 @@ func TestProviderLoginStartupShutdownWaitsForRecoveryQuery(t *testing.T) {
 			if _, err := rand.Read(key); err != nil {
 				t.Fatal(err)
 			}
-			router, err := NewRouter(reader, hex.EncodeToString(key), newTestLogger())
+			router, err := NewRouter(reader, hex.EncodeToString(key), newTestLogger(), WithInternalToken(hex.EncodeToString(key)))
 			if err != nil {
 				t.Fatal(err)
 			}
