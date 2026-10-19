@@ -27,10 +27,10 @@ it("keeps absent and malformed audience classification unknown rather than priva
  expect(toPageView(row("shared", { private_audience: false })).privateAudience).toBe(false)
 })
 it("reuses the catalog for own explicitly private Documents only", async () => {
- request.mockResolvedValue(Response.json([row("Own private", { private_audience: true }), row("Own legacy"), row("Own shared", { private_audience: false }), row("Foreign custody", { private_audience: true, owner: "user/other" }), row("Not Document", { private_audience: true, has_document: false })]))
+ request.mockResolvedValue(Response.json([row("Own private", { id: "immutable-own", slug: "reused-address", private_audience: true }), row("Own legacy"), row("Own shared", { private_audience: false }), row("Foreign custody", { private_audience: true, owner: "user/other" }), row("Not Document", { private_audience: true, has_document: false })]))
  const view = mount()
  fireEvent.click(await screen.findByRole("button", { name: "Own private Doc" }))
- expect(view.select).toHaveBeenCalledWith("Own private")
+ expect(view.select).toHaveBeenCalledWith("@immutable-own")
  for (const name of ["Own legacy", "Own shared", "Foreign custody", "Not Document"]) expect(screen.queryByText(name)).toBeNull()
  expect(screen.getByRole("region", { name: "My space" })).toBeTruthy()
 })
