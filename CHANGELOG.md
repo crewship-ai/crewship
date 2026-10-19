@@ -98,7 +98,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
-- Prepare a strict native Board model and atomic in-memory operation validator; persistent Board editing and delivery remain unavailable.
 
 
 ### Fixed
