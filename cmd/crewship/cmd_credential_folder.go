@@ -311,7 +311,7 @@ var credFolderDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Folder %s deleted.\n", args[0])
+		cli.PrintSuccess(fmt.Sprintf("Folder %s deleted.", args[0]))
 		return nil
 	},
 }
