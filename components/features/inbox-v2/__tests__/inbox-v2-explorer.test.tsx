@@ -216,4 +216,48 @@ describe("history keeps archived noise out of the decision list", () => {
     expect(screen.queryByText("Decisions")).toBeNull()
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0)
   })
+
+  describe("Load more and server facet counts", () => {
+    it("ends the list with a quiet Load more that asks for the next page, and says so while it loads", () => {
+      const onLoadMore = vi.fn()
+      const { unmount } = render(
+        <InboxV2Explorer
+          view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+          entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+          selectedKey={null} onOpen={vi.fn()} canLoadMore onLoadMore={onLoadMore}
+        />,
+      )
+      const button = screen.getByRole("button", { name: "Load more" })
+      fireEvent.click(button)
+      expect(onLoadMore).toHaveBeenCalledOnce()
+      unmount()
+      render(
+        <InboxV2Explorer
+          view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+          entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+          selectedKey={null} onOpen={vi.fn()} canLoadMore loadingMore onLoadMore={onLoadMore}
+        />,
+      )
+      expect(screen.getByRole("button", { name: "Loading…" })).toBeDisabled()
+    })
+
+    it("has no Load more when there is nothing more to load", () => {
+      renderExplorer({ view: "history" })
+      expect(screen.queryByRole("button", { name: /Load more/ })).toBeNull()
+    })
+
+    it("shows the server's facet counts instead of counting the loaded rows", () => {
+      const server = {
+        type: { waitpoint: 41, escalation: 0 } as Record<string, number>,
+        attention: { decision: 41, input: 0, review: 0, repair: 0 },
+        deadline: { hour: 0, today: 0, none: 41, soon: 6 },
+        unread: 33, total: 41,
+      }
+      renderExplorer({ facetCounts: server as never })
+      fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+      unfold("Source type")
+      const waitpoint = screen.getByRole("button", { name: /Approval step/i })
+      expect(within(waitpoint).getByText("41")).toBeTruthy()
+    })
+  })
 })

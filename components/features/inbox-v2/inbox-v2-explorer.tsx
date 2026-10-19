@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils"
 import { agentByRef, EntryAvatar, entryFromAgent, entryIdentity } from "./inbox-entry-identity"
 import { ATTENTION_LABELS, type InboxAttention } from "./inbox-v2-attention"
 import {
-  ageLabel, entryKindPill, entryTitle, facetCounts, INBOX_ATTENTION, INBOX_SORTS, INBOX_V2_TYPES,
+  ageLabel, entryKindPill, entryTitle, facetCounts, type FacetCounts, INBOX_ATTENTION, INBOX_SORTS, INBOX_V2_TYPES,
   isArchivedNotDecided, needsHumanDecision,
   type InboxSort, type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
@@ -81,6 +81,14 @@ interface Props {
   historyNote?: string | null
   /** The whole feed for this view — facet counts are computed over it. */
   entries: InboxV2Entry[]
+  /** The server's facet counts for this space (plus the entries it cannot
+   *  count), exact however little of the history is loaded. Null or absent:
+   *  count `entries`, as before. */
+  facetCounts?: FacetCounts | null
+  /** More rows exist on the server than are listed: end the list with "Load more". */
+  canLoadMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   /** Filtered and sorted; what actually renders. */
   visible: InboxV2Entry[]
   attention?: InboxAttention | null
@@ -106,13 +114,14 @@ interface Props {
 }
 
 export function InboxV2Explorer({
-  view, onView, viewCounts, historyNote, entries, visible, filters, onFilters, attention, onClearAttention,
+  view, onView, viewCounts, historyNote, entries, facetCounts: serverFacets, canLoadMore = false, loadingMore = false, onLoadMore, visible, filters, onFilters, attention, onClearAttention,
   selectedKey, onOpen, overviewSelected = false, onOverview, sort = "urgency", onSort,
   lookup = EMPTY_INBOX_LOOKUP, loading = false, picking = false, picked, onTogglePicking, onPick,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
   // keystroke in search, and the counts do not depend on the filters at all.
-  const counts = useMemo(() => facetCounts(entries), [entries])
+  const loadedCounts = useMemo(() => facetCounts(entries), [entries])
+  const counts = serverFacets ?? loadedCounts
   const crews = useMemo(() => {
     const byId = new Map<string, number>()
     for (const entry of entries) {
@@ -382,6 +391,19 @@ export function InboxV2Explorer({
             ))}
             {view === "history" && historyNote && visible.length > 0 && (
               <p className="px-3 py-2 text-label text-muted-foreground" data-testid="inbox-history-note">{historyNote}</p>
+            )}
+            {canLoadMore && onLoadMore && (
+              <div className="px-3 py-2">
+                <button
+                  type="button"
+                  onClick={onLoadMore}
+                  disabled={loadingMore}
+                  data-testid="inbox-load-more"
+                  className="text-label text-muted-foreground hover:text-foreground hover:underline disabled:opacity-60 disabled:no-underline coarse:min-h-[44px] coarse:px-2"
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              </div>
             )}
             {visible.length === 0 && (
               <div className="p-2">
