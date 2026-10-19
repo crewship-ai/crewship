@@ -94,6 +94,10 @@ export const APPEARANCE_SYNC_STORAGE_KEY = "crewship-appearance-sync"
  *  defaults (migrateDeviceAppearance); bumped when a default changes. */
 export const APPEARANCE_VERSION_STORAGE_KEY = "crewship-appearance-version"
 export const APPEARANCE_VERSION = "2"
+/** Which values the user chose, and which came from a workspace default
+ *  (lib/theme/appearance-explicit). Per device, like the values. */
+export const APPEARANCE_EXPLICIT_STORAGE_KEY = "crewship-appearance-explicit"
+export const APPEARANCE_INHERITED_STORAGE_KEY = "crewship-appearance-inherited"
 
 /** The one key in the per-user preference store (GET /api/v1/me/preferences). */
 export const APPEARANCE_PREFERENCE_KEY = "appearance"
@@ -107,9 +111,9 @@ export interface Appearance {
   /** Optional on the wire: absent in values saved before it existed. */
   textSize: TextSize
   sidebar: SidebarChoice
-  /** Optional on the wire, and left out when it is the default (on): the
-   *  values every device stored before it existed stay complete, so they
-   *  are never echoed back. */
+  /** "Animated avatars" (#3789). Optional on the wire; like every field it is
+   *  synced only once the user chose it (lib/theme/appearance-explicit). Per
+   *  viewer: a workspace default never sets it. */
   avatarAnimation?: AvatarAnimationChoice
 }
 
@@ -265,7 +269,7 @@ function onStorage(e: StorageEvent): void {
   else if (e.key === STYLE_STORAGE_KEY) {
     // The style attribute is painted by AppearanceStyleSync from the new value.
   }
-  else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY) return
+  else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY && e.key !== APPEARANCE_EXPLICIT_STORAGE_KEY && e.key !== APPEARANCE_INHERITED_STORAGE_KEY) return
   emit()
 }
 

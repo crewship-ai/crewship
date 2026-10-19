@@ -50,10 +50,20 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 - **Text size** — Small (13 px text, what a new device starts at), Standard (14 px, the earlier default) or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account. A size you, or an earlier version of Crewship, saved keeps its size; a device that used Crewship before without saving one keeps Standard.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
 - **Touch** — on any touch screen (phone, tablet or touch laptop, at any window width) every button, field, tab and menu item is at least 44 px tall, and checkboxes and radios get a 44 px tap area.
-- **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
+- **Sidebar** — Expanded (default), Expand on hover, or Collapsed; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Animated avatars** — on by default. Voxel Bot and Voxel Art agent avatars blink and stretch now and then when drawn at 32 px or larger; turn this off to keep them still. Reduce motion On keeps them still too, and so does an operating system set to reduce motion while Reduce motion is System. See [Avatar styles](/api-reference/agents#avatar-styles).
+- **Animated avatars** — on by default. Voxel Bot and Voxel Art agent avatars blink and stretch now and then when drawn at 32 px or larger; turn this off to keep them still. Reduce motion On keeps them still too, and so does an operating system set to reduce motion while Reduce motion is System. It is yours alone: a workspace default never sets it, and **Use workspace default** leaves it as it is. See [Avatar styles](/api-reference/agents#avatar-styles).
 - **Sync across devices** — on by default. Theme, accent, text size, density, sidebar, motion and animated avatars are stored with your account under the `appearance` key of the per-user preference store, the visual style under `appearance.style` (`GET`/`PUT /api/v1/me/preferences/{key}`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser. Changes are written in order and retried when the connection drops; if the server refuses one, **Not synced · Retry** appears next to the switch and your look on this device stays as you set it.
+
+### Workspace default look
+
+An owner or admin can make a look the **workspace default** (**Settings → Appearance → Workspace default → Use my look as default**; CLI: `crewship workspace update --appearance-default`). It holds a style with its options, an accent and a theme, and **Reset** clears it.
+
+- A value is **yours** only when you change it, in Appearance or the top-bar menu. A card says **Set by you** or **Workspace default** for the style, theme and accent.
+- Everything you did not choose follows the default: when an admin changes it, it changes for you; when you switch workspace, you get that workspace's default (or the built-in look when it has none).
+- **Use workspace default** forgets your own style, theme and accent and returns to it. Text size, density, sidebar and motion are never part of the default.
+- Only what you chose is saved to your account under `appearance` and `appearance.style`. A device that only inherits writes nothing.
+- With **Sync across devices** off, your choices on this device still win and the rest is inherited; nothing is sent.
 
 ## Settings → General → Pages appearance
 
@@ -73,7 +83,7 @@ Everything on these pages is stored with **your user**, not with the browser, in
 
 | Key | What |
 |---|---|
-| `appearance` | theme, accent, text size, density, sidebar mode, reduce motion, animated avatars (`avatarAnimation`, written only when off) |
+| `appearance` | theme, accent, text size, density, sidebar mode, reduce motion, animated avatars (`avatarAnimation`; per user, never set by the workspace default) |
 | `appearance.style` | visual style and its options (`{"v":1,"style":"harbor","knobs":{}}`); kept apart so an older client that rewrites `appearance` cannot drop it |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 

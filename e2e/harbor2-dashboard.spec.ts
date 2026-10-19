@@ -241,7 +241,7 @@ test.describe("v67 parity", () => {
   test.describe("desktop 1440", () => {
     test.use({ viewport: { width: 1440, height: 900 } })
 
-    test("cards: Up next has the Calendar glyph, Your crews lists at most six, Run volume and Pages follow the KPIs", async ({ page }) => {
+    test("cards: Up next has the Calendar glyph, Your crews lists at most six, Run volume and Artifacts follow the KPIs", async ({ page }) => {
       await seed(page)
       await routeAttention(page)
       await page.goto("/")
@@ -255,7 +255,7 @@ test.describe("v67 parity", () => {
       const volume = page.getByRole("region", { name: /^Run volume/ })
       await expect(volume).toBeVisible()
       expect((await volume.boundingBox())!.y).toBeGreaterThan(kpisBottom)
-      await expect(page.getByRole("region", { name: "Pages" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Artifacts" })).toBeVisible()
     })
 
     test("card headers are 50 px with a 28 px tile and a 13 px semibold title", async ({ page }) => {

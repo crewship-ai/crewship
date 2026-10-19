@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useSyncExternalStore } from "react"
 
-// #3789 — "Animated avatars" syncs like the other appearance choices. The
-// default (on) is not written into the synced value, so the values every
-// existing device already stored stay complete and are never echoed back.
+// #3789 — "Animated avatars" syncs like the other appearance choices: only
+// once the user chose it (explicit, WSD-02), and never from a workspace
+// default — it is the viewer's own comfort setting, like Reduce motion.
 
 const themeStore = vi.hoisted(() => {
   let theme = "dark"
@@ -47,9 +47,9 @@ function ok(body: unknown) {
 function puts() {
   return apiFetch.mock.calls.filter((c) => c[0] === PUT)
 }
-function renderSync() {
+function renderSync(workspaceDefault?: unknown) {
   return renderHook(() => {
-    useAppearanceSync(true)
+    useAppearanceSync(true, workspaceDefault)
     return useAppearance()
   })
 }
@@ -87,7 +87,7 @@ describe("useAppearanceSync — Animated avatars", () => {
     expect(result.current.avatarAnimation).toBe("on")
   })
 
-  it("writes the switch back when it is turned off, and drops it again when turned on", async () => {
+  it("writes the switch once the user changes it, either way", async () => {
     apiFetch.mockResolvedValue(ok({ appearance: full }))
     const { result } = renderSync()
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
@@ -99,6 +99,24 @@ describe("useAppearanceSync — Animated avatars", () => {
 
     act(() => result.current.setAvatarAnimation("on"))
     await waitFor(() => expect(puts()).toHaveLength(2))
-    expect(JSON.parse(puts()[1][1].body)).toEqual(full)
+    expect(JSON.parse(puts()[1][1].body)).toEqual({ ...full, avatarAnimation: "on" })
+  })
+
+  it("is never set by a workspace default, and Use workspace default keeps it", async () => {
+    apiFetch.mockResolvedValue(ok({ appearance: { ...full, avatarAnimation: "off" } }))
+    const { result } = renderSync({ theme: "light", accent: "violet", avatarAnimation: "on" })
+    await waitFor(() => expect(result.current.avatarAnimation).toBe("off"))
+    act(() => result.current.resetToWorkspaceDefault())
+    await new Promise((r) => setTimeout(r, 0))
+    expect(result.current.avatarAnimation).toBe("off")
+    expect(result.current.explicit.has("avatarAnimation")).toBe(true)
+  })
+
+  it("an untouched device sends nothing for it", async () => {
+    apiFetch.mockResolvedValue(ok({}))
+    renderSync(null)
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 600))
+    for (const [, init] of puts()) expect(JSON.parse(init.body)).not.toHaveProperty("avatarAnimation")
   })
 })

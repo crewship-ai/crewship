@@ -2,6 +2,7 @@
 
 import type { AccentChoice } from "@/lib/theme/accents"
 import { setAccentChoice } from "@/lib/theme/appearance"
+import { markExplicit } from "@/lib/theme/appearance-explicit"
 import { useAccentChoice } from "@/hooks/use-appearance"
 
 /**
@@ -15,5 +16,5 @@ import { useAccentChoice } from "@/hooks/use-appearance"
  * store's storage listener. Kept as its own hook for existing callers.
  */
 export function useAccent(): [AccentChoice, (id: AccentChoice) => void] {
-  return [useAccentChoice(), setAccentChoice]
+  return [useAccentChoice(), (id) => { markExplicit("accent"); setAccentChoice(id) }]
 }
