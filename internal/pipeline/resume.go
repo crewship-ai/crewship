@@ -249,6 +249,14 @@ func (e *Executor) ResumeAfterSignal(runID string, logger *slog.Logger) {
 // reason lands in the row's error_message so operators can see WHY a
 // run fell back to interrupted.
 func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resumePlan, string) {
+	phase, phaseErr := e.runStore.startPhase(ctx, rec.ID)
+	if phaseErr != nil {
+		return nil, "start phase unreadable: " + phaseErr.Error()
+	}
+	if phase == startPhasePreHooks {
+		return nil, "setup interrupted before body; external hook effects may have occurred"
+	}
+
 	if rec.Mode != ModeRun {
 		// dry_run never persists a row in production — nobody is
 		// waiting on a preview after a restart; re-running would only
