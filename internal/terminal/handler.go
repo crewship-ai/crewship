@@ -60,7 +60,8 @@ type Handler struct {
 	// ticket TTL, and a live shell is torn down when the row is revoked
 	// mid-session. May be nil in dev / no-DB paths — the checks are then
 	// skipped (same tolerance the slug lookup uses for a nil db).
-	sessionStore sessions.Store
+	sessionStore       sessions.Store
+	authenticateStream func(context.Context, *auth.Claims) (context.Context, func(), error)
 	// revokePollInterval is the cadence of the mid-session revocation
 	// poll. Defaults to 30s (set in New, matching ws/client.go); tests
 	// override it to a few ms to exercise teardown without waiting.
@@ -80,6 +81,12 @@ type Handler struct {
 // with the orchestrator's RetainCrewContainer.
 func (h *Handler) SetContainerHolder(fn func(crewID string) func()) {
 	h.containerHolder = fn
+}
+
+// SetStreamAuthenticator joins the router's credential registry. Configure once
+// before serving, exactly as the chat WebSocket hub is wired.
+func (h *Handler) SetStreamAuthenticator(f func(context.Context, *auth.Claims) (context.Context, func(), error)) {
+	h.authenticateStream = f
 }
 
 // Session represents an active terminal connection.
@@ -170,8 +177,9 @@ type resizeMessage struct {
 // the handler's existing dev-mode tolerance for a nil db (the crew-slug
 // lookup falls back to the client-supplied slug when h.db == nil) and
 // keeps the many handler-in-isolation tests that pass nil deps working.
-// In production the server always passes a real store built from the
-// same *sql.DB that backs the hub's store, so the checks are live.
+// Production additionally wires SetStreamAuthenticator through the router's
+// revocation notifier registration, sharing source validation and stream leases
+// with HTTP and chat WebSockets. CLI sources cannot use the standalone fallback.
 func New(container provider.ContainerProvider, validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger, sessionStore sessions.Store) *Handler {
 	return &Handler{
 		container:          container,
@@ -228,6 +236,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	writeError := func(message string) {
+		if auth.StreamCredentialCurrent(r.Context()) {
+			h.writeError(ws, message)
+		}
+	}
+	writeInfo := func(message string) {
+		if auth.StreamCredentialCurrent(r.Context()) {
+			h.writeInfo(ws, message)
+		}
+	}
+	ws.SetPingHandler(func(message string) error {
+		if !auth.StreamCredentialCurrent(r.Context()) {
+			return context.Canceled
+		}
+		return ws.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second))
+	})
+
 	// Limit read size to 1 MB to prevent unbounded memory allocation.
 	ws.SetReadLimit(1 << 20)
 
@@ -236,7 +261,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, authMsg, err := ws.ReadMessage()
 	if err != nil {
 		h.logger.Warn("terminal auth read failed", "error", err)
-		h.writeError(ws, "failed to read auth message")
+		writeError("failed to read auth message")
 		return
 	}
 
@@ -245,7 +270,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authMsg, &authPayload); err != nil || authPayload.Type != "auth" || authPayload.Token == "" {
-		h.writeError(ws, "invalid auth message")
+		writeError("invalid auth message")
 		return
 	}
 
@@ -254,10 +279,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.validator.ValidateWS(authPayload.Token)
 	if err != nil {
 		h.logger.Warn("terminal auth failed", "error", err)
-		h.writeError(ws, "invalid token")
+		writeError("invalid token")
 		return
 	}
 	userID := claims.ID
+
+	if h.authenticateStream != nil {
+		tracked, release, authErr := h.authenticateStream(r.Context(), claims)
+		if release != nil {
+			defer release()
+		}
+		if tracked != nil {
+			r = r.WithContext(tracked)
+		}
+		if authErr != nil || tracked == nil || release == nil || !auth.StreamCredentialCurrent(tracked) {
+			h.logger.Warn("terminal credential unavailable", "error", authErr)
+			writeError("credential unavailable")
+			return
+		}
+		// Wake an idle auth/init read as well as an established PTY bridge.
+		stop := context.AfterFunc(tracked, func() { _ = ws.Close() })
+		defer stop()
+	} else if claims.Sid == "" {
+		// Standalone legacy browser fixtures retain their existing session-store
+		// contract, but no CLI ticket may skip source-token authentication.
+		writeError("credential unavailable")
+		return
+	}
 
 	// Mirror the chat hub (ws/hub.go HandleUpgrade): browser tickets carry
 	// a sid that joins to user_sessions; refuse the connection if the row
@@ -265,22 +313,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// revoke) even though the 15-min ws ticket is still cryptographically
 	// valid. This is a shell / code-exec surface, so a revoked user must
 	// not be able to open a NEW container shell within the ticket TTL.
-	// CLI-derived tickets have no sid — their CLI token is the auth
-	// artifact, with its own revocation table — so they skip this check.
+	// The shared authenticator above validates CLI source rows and browser
+	// sessions. This branch preserves standalone browser fixture behavior.
 	// A nil sessionStore (dev / no-DB) also skips, per the New() contract.
 	// Fail CLOSED at connect time (reject on any lookup error): unlike the
 	// ongoing poll below, we can't establish a trustworthy session here.
-	if claims.Sid != "" && h.sessionStore != nil {
+	if h.authenticateStream == nil && claims.Sid != "" && h.sessionStore != nil {
 		sess, sErr := h.sessionStore.Get(r.Context(), claims.Sid)
 		if sErr != nil {
 			if !errors.Is(sErr, sessions.ErrNotFound) {
 				h.logger.Error("terminal ws session lookup", "error", sErr, "sid", claims.Sid)
 			}
-			h.writeError(ws, "session_revoked")
+			writeError("session_revoked")
 			return
 		}
 		if !sess.Active(time.Now()) {
-			h.writeError(ws, "session_revoked")
+			writeError("session_revoked")
 			return
 		}
 	}
@@ -289,19 +337,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, msg, err := ws.ReadMessage()
 	if err != nil {
 		h.logger.Warn("terminal init read failed", "error", err)
-		h.writeError(ws, "failed to read init message")
+		writeError("failed to read init message")
 		return
 	}
 	ws.SetReadDeadline(time.Time{}) // clear deadline
 
 	var init InitMessage
 	if err := json.Unmarshal(msg, &init); err != nil {
-		h.writeError(ws, "invalid init message")
+		writeError("invalid init message")
 		return
 	}
 
 	if init.CrewSlug == "" || init.CrewID == "" {
-		h.writeError(ws, "crew_slug and crew_id are required")
+		writeError("crew_slug and crew_id are required")
 		return
 	}
 	if init.Mode == "" {
@@ -317,7 +365,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to this crew's workspace.
 	if err := h.verifyAccess(r.Context(), userID, init.CrewID); err != nil {
 		h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID, "error", err)
-		h.writeError(ws, "access denied")
+		writeError("access denied")
 		return
 	}
 
@@ -328,7 +376,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", init.CrewID).Scan(&actualSlug)
 		if err != nil {
 			h.logger.Error("terminal: crew slug lookup failed", "crew_id", init.CrewID, "error", err)
-			h.writeError(ws, "failed to resolve crew")
+			writeError("failed to resolve crew")
 			return
 		}
 	} else {
@@ -346,13 +394,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer h.containerHolder(init.CrewID)()
 	}
 
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return
+	}
+
 	// Ensure container is running (start if needed).
 	containerName := h.container.CrewContainerName(init.CrewID, actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
 	{
 		if err != nil || status == nil || status.State != "running" {
 			h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
-			h.writeInfo(ws, "Starting container...")
+			writeInfo("Starting container...")
 		}
 		// {id, slug} was the whole config this passed, which is why the
 		// terminal — the surface an operator opens specifically to look at a
@@ -381,10 +433,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// only the sidecar half failed.
 			h.logger.Warn("terminal: crew sidecars failed, opening the shell anyway",
 				"crew_slug", actualSlug, "error", err)
-			h.writeInfo(ws, "Sidecar services failed to start — opening the shell anyway: "+err.Error())
+			writeInfo("Sidecar services failed to start — opening the shell anyway: " + err.Error())
 		case err != nil:
 			h.logger.Error("terminal: failed to start container", "error", err)
-			h.writeError(ws, "failed to start container: "+err.Error())
+			writeError("failed to start container: " + err.Error())
 			return
 		}
 		// Managed admission covers preparation; add the legacy activity hold
@@ -409,20 +461,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if !ready {
-			h.writeError(ws, "container did not become ready in time")
+			writeError("container did not become ready in time")
 			return
 		}
 	}
 
 	interactive, ok := h.container.(provider.InteractiveExecProvider)
 	if !ok {
-		h.writeError(ws, "terminal not supported by container provider")
+		writeError("terminal not supported by container provider")
 		return
 	}
 
 	// Validate agent slug to prevent path traversal.
 	if init.AgentSlug != "" && !validSlugRe.MatchString(init.AgentSlug) {
-		h.writeError(ws, "invalid agent_slug")
+		writeError("invalid agent_slug")
 		return
 	}
 
@@ -435,7 +487,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "attach":
 		// Attach to a running agent's tmux session.
 		if init.AgentSlug == "" {
-			h.writeError(ws, "agent_slug is required for attach mode")
+			writeError("agent_slug is required for attach mode")
 			return
 		}
 		// E0: a tmux session names one RUN of the agent, not the agent
@@ -443,7 +495,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// enough to attach. Resolve it to a specific run, explicitly.
 		runID := init.RunID
 		if runID != "" && !orchestrator.ValidRunID(runID) {
-			h.writeError(ws, "invalid run_id")
+			writeError("invalid run_id")
 			return
 		}
 		if runID == "" {
@@ -451,12 +503,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if listErr != nil {
 				h.logger.Error("terminal: list tmux sessions failed",
 					"agent_slug", init.AgentSlug, "error", listErr)
-				h.writeError(ws, "failed to list the agent's running sessions")
+				writeError("failed to list the agent's running sessions")
 				return
 			}
 			switch len(live) {
 			case 0:
-				h.writeError(ws, "agent is not running (no active tmux session)")
+				writeError("agent is not running (no active tmux session)")
 				return
 			case 1:
 				runID = live[0]
@@ -465,7 +517,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// what E0 makes possible, and the wrong one is not visibly
 				// wrong once you are inside it. Name them so the client can
 				// re-init with run_id set.
-				h.writeError(ws, fmt.Sprintf(
+				writeError(fmt.Sprintf(
 					"agent %s has %d runs in progress (%s) — reconnect with run_id set to the one you want",
 					init.AgentSlug, len(live), strings.Join(live, ", ")))
 				return
@@ -479,7 +531,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			User:        "1001:1001",
 		})
 		if err != nil {
-			h.writeError(ws, "agent is not running")
+			writeError("agent is not running")
 			return
 		}
 		// Read and discard output, check exit code.
@@ -490,11 +542,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		running, exitCode, inspectErr := h.container.ExecInspect(r.Context(), checkResult.ExecID)
 		if inspectErr != nil {
 			h.logger.Error("terminal: exec inspect failed", "exec_id", checkResult.ExecID, "error", inspectErr)
-			h.writeError(ws, "failed to check agent session")
+			writeError("failed to check agent session")
 			return
 		}
 		if !running && exitCode != 0 {
-			h.writeError(ws, "agent is not running (no active tmux session)")
+			writeError("agent is not running (no active tmux session)")
 			return
 		}
 
@@ -528,6 +580,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return
+	}
 	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
 		ContainerID: containerName,
 		Cmd:         execCmd,
@@ -539,10 +594,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("terminal exec failed", "error", err, "container", containerName)
-		h.writeError(ws, "failed to start shell: "+err.Error())
+		writeError("failed to start shell: " + err.Error())
 		return
 	}
 	defer execResult.Conn.Close()
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return
+	}
 
 	sessionID := fmt.Sprintf("term-%d", h.sessionID.Add(1))
 	ctx, cancel := context.WithCancel(r.Context())
@@ -593,6 +651,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, err := execResult.Conn.Read(buf)
 			if n > 0 {
+				if !auth.StreamCredentialCurrent(ctx) {
+					return
+				}
 				if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
 					return
 				}
@@ -613,6 +674,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			if !auth.StreamCredentialCurrent(ctx) {
+				return
+			}
 			switch msgType {
 			case websocket.TextMessage:
 				// JSON control message (resize).
