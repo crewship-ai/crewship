@@ -31,6 +31,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add server validation and publication of an explicitly shared routine draft with exact revision checks, live View/Edit/Publish and agent authority, and atomic audit. Published history retains immutable nonsecret metadata through backup. Published execution, CLI/UI publication and the Edit + Publish preset remain separate; generic execution and automatic triggers refuse the new authority.
 
+- **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.

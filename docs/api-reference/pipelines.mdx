@@ -514,7 +514,7 @@ atomicity guarantee above — the routine is not saved either.
 | Method | Path | Body / query |
 |---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/errors` | `limit` query; failure groups |
-| POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay` | `{ "pinned_version": 3 }` optional |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay` | Optional `pinned_version`, object `inputs`, object `metadata`, string-array `tags` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay` | `{ "run_ids": [], "fingerprint": "...", "limit": 50 }`; `run_ids` or `fingerprint` required |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | Monthly spend report |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | `{ "monthly_budget_usd": 25 }`; `0` clears, negative is `400` |
@@ -784,10 +784,24 @@ already-cancelled item is `404`; cancellation failure is `500`.
 
 #### `POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay`
 
-**Auth:** `member` plus `create` (MANAGER+). Body is optional; when present it
-is `{ "pinned_version": 3 }`. The replay uses the source run's original
-inputs, metadata, and tags, marks the new run as a replay, and uses HEAD unless
-`pinned_version` is supplied. Invalid JSON or a missing `runId` is `400`.
+**Auth:** `member` plus `create` (MANAGER+). Body is optional. A replay inherits
+the source run's inputs, metadata and tags unless their replacements are supplied:
+
+```json
+{"pinned_version":3,"inputs":{"account_id":"corrected"},"metadata":{"reason":"corrected input"},"tags":["replayed"]}
+```
+
+Each supplied field replaces the whole inherited value. `{}` clears inputs or
+metadata; `[]` clears tags. `null` is rejected. Metadata is capped at 256 KiB
+and at most 10 tags may be supplied. Changed inputs must satisfy the selected
+routine definition's input-form contract before execution. Replay uses the
+current operator's authority and marks the new run as a replay. HEAD is used
+unless `pinned_version` is supplied. Invalid JSON, overrides or a missing
+`runId` return `400`.
+
+The CLI accepts `crewship routine replay <runId> --inputs '{"account_id":"corrected"}'
+--metadata '{"reason":"corrected input"}' --tags '["replayed"]' --version 3`.
+Inputs and metadata also accept `@file.json`. Omit a flag to inherit that field.
 
 **Response:** `200 OK` with the newly-created run result. A missing/foreign
 source run is `404`; a deleted source pipeline is `404`; an unavailable run
@@ -797,8 +811,10 @@ The response is the ordinary `RunResult` object: `run_id`, `pipeline_id`,
 `pipeline_slug`, `status`, `output`, `step_outputs`, `duration_ms`, and
 `cost_usd`, with `failed_at_step`/`error_message` for failures and
 `waitpoint_token`/`current_step` when the replay parks at a waitpoint. The new
-run is marked as a replay of `runId`; its inputs, metadata, and tags come from
-the source run. An omitted `pinned_version` uses the current head version.
+run is marked as a replay of `runId`; its inputs, metadata and tags use the
+replacements where supplied and otherwise come from the source run. An omitted
+`pinned_version` uses the current head version. Bulk replay retains its existing
+inheritance behavior and does not accept these overrides.
 
 **Statuses:** `200 OK`; `400` for invalid input; `401` without authentication;
 `403` without membership/create permission; `404` for a missing source;
