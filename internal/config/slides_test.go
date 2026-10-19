@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"gopkg.in/yaml.v3"
+	"testing"
+)
 
 func TestSlidesDisabledByDefault(t *testing.T) {
 	c := Default()
@@ -29,5 +32,20 @@ func TestSlidesEnablementEnvironmentOverrides(t *testing.T) {
 				t.Fatalf("Slides enabled=%v, want %v", c.Slides.Enabled, tc.want)
 			}
 		})
+	}
+}
+
+func TestSlidesYAMLConfigurationAndEnvironmentPrecedence(t *testing.T) {
+	c := Default()
+	if err := yaml.Unmarshal([]byte("slides:\n  enabled: true\n"), c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Slides.Enabled {
+		t.Fatal("YAML did not enable Slides")
+	}
+	t.Setenv("CREWSHIP_SLIDES_ENABLED", "0")
+	applyEnvOverrides(c)
+	if c.Slides.Enabled {
+		t.Fatal("environment failed to override YAML")
 	}
 }
