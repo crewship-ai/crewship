@@ -57,6 +57,27 @@ var issueCreateCmd = &cobra.Command{
 		if flags.Changed("assignee-type") && !flags.Changed("assignee") {
 			return fmt.Errorf("--assignee-type requires --assignee")
 		}
+		// --owner (a person) and --delegate (an agent) are set together in
+		// one create; they replace --assignee, which can hold only one.
+		ownerRef, _ := flags.GetString("owner")
+		delegateRef, _ := flags.GetString("delegate")
+		if (ownerRef != "" || delegateRef != "") && flags.Changed("assignee") {
+			return fmt.Errorf("--owner/--delegate cannot be combined with --assignee")
+		}
+		if ownerRef != "" {
+			id, err := resolveIssueOwnerUserID(client, ownerRef)
+			if err != nil {
+				return err
+			}
+			body["owner_user_id"] = id
+		}
+		if delegateRef != "" {
+			id, err := resolveAgentID(client, delegateRef)
+			if err != nil {
+				return fmt.Errorf("cannot resolve delegate %q: %w", delegateRef, err)
+			}
+			body["delegate_agent_id"] = id
+		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			atype, _ := flags.GetString("assignee-type")
 			assigneeID, atype, err := resolveIssueAssignee(client, atype, v)

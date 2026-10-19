@@ -121,7 +121,7 @@ crewship issue list --mine --counts
 | `--work-mode` | `string` | | Who holds the work: `agent` or `human`. |
 | `--mine` | `bool` | `false` | My work: open issues I own or hold as the worker. |
 | `--working` | `bool` | `false` | Agents working: an agent holds the issue and its session is active. |
-| `--needs` | `string` | | `reply` (an agent awaits my answer on an issue I own) or `review` (in `REVIEW` and I own it). |
+| `--needs` | `string` | | `reply` (open issue I own or hold where a session is `awaiting_input` or `error`, or the execution needs a person) or `review` (in `REVIEW`, client acceptance on, and I am the requester). |
 | `--blocked` | `bool` | `false` | Blocked: an open issue blocks it. |
 | `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
 | `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
@@ -180,6 +180,7 @@ Create a new issue.
 ```bash
 crewship issue create --crew backend-team --title "Fix login bug" --priority high
 crewship issue create --crew backend-team --title "Add caching" --assignee viktor --labels <label-id>
+crewship issue create --crew backend-team --title "Rotate keys" --owner jana@example.com --delegate viktor
 ```
 
 | Flag | Type | Default | Description |
@@ -191,6 +192,8 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--status` | `string` | `BACKLOG` | Starting status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED`, `DUPLICATE` — anything not one step from `BACKLOG` is refused with a 400. |
 | `--assignee` | `string` | | Who the issue goes to. With the default `--assignee-type agent`, an agent slug or ID (resolved client-side) — this sets the issue's **delegate**. With `--assignee-type user`, a workspace member's email or user ID — this sets the issue's human **owner**. |
 | `--assignee-type` | `string` | `agent` | `agent` (writes `delegate_agent_id`) or `user` (writes `owner_user_id`). Any other value is rejected before a request is sent. |
+| `--owner` | `string` | | The accountable person: a workspace member's email or user ID. Sets `owner_user_id`. Can be combined with `--delegate`; refused together with `--assignee`. |
+| `--delegate` | `string` | | The agent that does the work: a slug or ID. Sets `delegate_agent_id`. Can be combined with `--owner`; refused together with `--assignee`. |
 | `--labels` | `string` | | Comma-separated label IDs. |
 | `--due-date` | `string` | | Due date in ISO 8601 format. |
 | `--project-id` | `string` | | Attach to a project (ID). |

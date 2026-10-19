@@ -169,9 +169,11 @@ export type QuickView = "mine" | "reply" | "working" | "review" | "blocked" | "a
  * it would lie.
  *
  *  - My work: open issues I own, or hold as the worker
- *  - Needs my reply: an agent session on an issue I own is awaiting my input
- *  - Agents working: an agent holds the issue and its session is active
- *  - Waiting for my review: in review, and I own it
+ *  - Needs my reply: open, I own or hold it, and a person is wanted (session
+ *    awaiting_input or error, or the execution needs_human)
+ *  - Agents working: an agent holds the issue and its session is active or stale
+ *  - Waiting for my review: in review with client acceptance on, and I asked
+ *    for it (the requester, not the owner)
  *  - Blocked: an open issue blocks it
  */
 export const QUICK_VIEWS: { id: QuickView; label: string }[] = [
