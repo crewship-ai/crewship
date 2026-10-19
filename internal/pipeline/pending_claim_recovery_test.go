@@ -1,7 +1,7 @@
 package pipeline
 
 import (
-	"fmt"
+	"context"
 	"testing"
 	"time"
 )
@@ -149,8 +149,8 @@ func TestPendingStartRecoveryDoesNotReleaseAnotherOwner(t *testing.T) {
 // Rebuild stores at the two crash boundaries, then dispatch through the real
 // executor. This is a persisted-state crash simulation, not a kill -9 test.
 func TestPendingStartRecoveryDispatchesStableIdentityAfterCrash(t *testing.T) {
-	for _, claimed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("claimed_%t", claimed), func(t *testing.T) {
+	for _, state := range []string{"pending", "claimed", "interrupted_pending"} {
+		t.Run(state, func(t *testing.T) {
 			recorder := newEffectRecorder()
 			server := recorder.server(t)
 			rig := newEffectRig(t, "crash-recovery", effectDSL(server.URL, 0))
@@ -171,12 +171,24 @@ func TestPendingStartRecoveryDispatchesStableIdentityAfterCrash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if claimed {
-				if _, err := before.ClaimDue(t.Context(), "crash-intent", now); err != nil {
+			if state != "pending" {
+				claim, err := before.ClaimDue(t.Context(), "crash-intent", now)
+				if err != nil || claim == nil {
 					t.Fatal(err)
 				}
 				if _, _, err := idem.LookupOrReserve(t.Context(), "ws_test", "own-crash-key", "planned-crash-run", rig.pipeline.ID, time.Hour); err != nil {
 					t.Fatal(err)
+				}
+				if state == "interrupted_pending" {
+					// Shutdown can cancel persistence after reservation; dispatch
+					// bookkeeping survives cancellation and requeues the intent.
+					cancelled, cancel := context.WithCancel(t.Context())
+					cancel()
+					NewPendingRunDispatcher(before, rig.exec, nil).recordDispatchError(cancelled, *claim, context.Canceled)
+					row, err := before.Get(t.Context(), "ws_test", "crash-intent")
+					if err != nil || row.Status != "pending" {
+						t.Fatalf("interrupted dispatch did not requeue: %+v %v", row, err)
+					}
 				}
 			}
 			if err := RecoverPendingStartsAtBoot(t.Context(), rig.store.db); err != nil {
@@ -184,10 +196,12 @@ func TestPendingStartRecoveryDispatchesStableIdentityAfterCrash(t *testing.T) {
 			}
 			after := NewPendingRunStore(rig.store.db)
 			dispatcher := NewPendingRunDispatcher(after, rig.exec, nil)
+			dispatcher.now = func() time.Time { return now.Add(time.Minute) }
 			dispatcher.fireOne(t.Context(), PendingRun{ID: "crash-intent"})
 			actual, err := rig.runStore.Get(t.Context(), "planned-crash-run")
 			if err != nil || actual.Status != RunStatusCompleted {
-				t.Fatalf("accepted work did not execute: %+v %v", actual, err)
+				row, _ := after.Get(t.Context(), "ws_test", "crash-intent")
+				t.Fatalf("accepted work did not execute: run=%+v err=%v pending=%+v", actual, err, row)
 			}
 			row, err := after.Get(t.Context(), "ws_test", "crash-intent")
 			if err != nil || row.FiredRunID != "planned-crash-run" {

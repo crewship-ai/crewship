@@ -394,6 +394,9 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
 	defer cancel()
 	if err := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		if status == "pending" && pr.RunID != "" {
+			return d.store.requeueUnstartedClaim(ctx, pr, reason, next)
+		}
 		return d.store.FinishDispatchError(ctx, pr, status, reason, next)
 	}); err != nil {
 		d.logger.Error("pending dispatcher: persist dispatch failure", "pending_id", pr.ID, "error", err)
