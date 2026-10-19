@@ -417,6 +417,9 @@ function SubBarTabButton<T extends string>({
 
 type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 
+const PHONE_SQUARE =
+  "max-md:size-8 max-md:min-w-8 max-md:p-0 max-md:rounded-lg coarse:max-md:min-h-0 max-md:relative max-md:after:absolute max-md:after:-inset-1.5 max-md:after:content-['']"
+
 /** Primary CTA — soft/tinted. At most one per page. */
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   // On a phone (v67) the primary action is an icon button — the blue "+" — and
@@ -432,7 +435,14 @@ export function SubBarPrimary({ icon: Icon, className, children, asChild, ...pro
       size="sm"
       // Tablet (v67 index.html:275): an action with an icon is an icon square
       // below 1280 too, so the path, actions and bells fit one 48 px row.
-      className={cn("gap-1.5 px-3", Icon && "max-xl:min-w-8 max-xl:px-2 coarse:max-xl:min-w-[44px]", phoneIcon && "max-md:min-w-8 max-md:px-2 coarse:max-md:min-w-[44px]", className)}
+      className={cn(
+        "gap-1.5 px-3",
+        Icon && "max-xl:min-w-8 max-xl:px-2 md:coarse:max-xl:min-w-[44px]",
+        // Phone (v67 top bar): a 32 px blue square. Its 44 px touch target is
+        // an invisible ring around it, so the button does not fill the bar.
+        (Icon || phoneIcon) && PHONE_SQUARE,
+        className,
+      )}
       title={Icon && typeof children === "string" ? children : undefined}
       {...props}
     >
