@@ -55,7 +55,24 @@ function here(): string {
   return typeof window === "undefined" ? "" : window.location.pathname + window.location.search
 }
 
+// A reload restores the list once, on the first mount after the page loaded.
+let reloadUnused = true
+function reloadedOnce(): boolean {
+  if (!reloadUnused || typeof performance === "undefined") return false
+  reloadUnused = false
+  const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined
+  return nav?.type === "reload"
+}
+
 export interface PhoneListDetail<S> {
+  /**
+   * True when the list is being returned to — a detail opened from it is (or
+   * was just) on screen, or the page was reloaded — rather than entered anew,
+   * which opens the area's default (MOBIL-DOPORUCENI §2, "Běžný vstup").
+   */
+  returning: () => boolean
+  /** The list is on screen again: the detail under it is gone. */
+  settle: () => void
   open: (href: string, options?: { replace?: boolean }) => void
   back: () => void
   saveList: (state: S) => void
@@ -93,6 +110,9 @@ export function usePhoneListDetail<S>({
     else router.replace(listHref)
   }, [key, listHref, router])
 
+  const returning = useCallback(() => read<S>(key).detail != null || reloadedOnce(), [key])
+  const settle = useCallback(() => write<S>(key, { detail: null }), [key])
+
   const saveList = useCallback((state: S) => write<S>(key, { state }), [key])
   const readList = useCallback(() => read<S>(key).state ?? null, [key])
 
@@ -110,7 +130,7 @@ export function usePhoneListDetail<S>({
   }, [key])
 
   return useMemo(
-    () => ({ open, back, saveList, readList, rememberScroll, restoreScroll }),
-    [open, back, saveList, readList, rememberScroll, restoreScroll],
+    () => ({ open, back, returning, settle, saveList, readList, rememberScroll, restoreScroll }),
+    [open, back, returning, settle, saveList, readList, rememberScroll, restoreScroll],
   )
 }

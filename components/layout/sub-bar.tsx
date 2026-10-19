@@ -267,7 +267,7 @@ export function SubBar<T extends string = string>({
               <span
                 data-slot="sub-bar-detail-title"
                 title={typeof (section ?? title) === "string" ? String(section ?? title) : undefined}
-                className="line-clamp-2 min-w-0 flex-1 whitespace-normal break-words text-[13px] font-semibold leading-tight text-foreground [overflow-wrap:anywhere]"
+                className="line-clamp-2 min-w-0 flex-1 whitespace-normal break-words text-control font-semibold leading-tight text-foreground [overflow-wrap:anywhere]"
               >
                 {section ?? title}
               </span>

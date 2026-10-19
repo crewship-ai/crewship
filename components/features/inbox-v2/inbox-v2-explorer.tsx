@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, type Ref } from "react"
 import Link from "next/link"
 
 import {
@@ -20,6 +20,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Badge } from "@/components/ui/badge"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { InlineEmpty } from "@/components/ui/inline-empty"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import { agentByRef, EntryAvatar, entryFromAgent, entryIdentity } from "./inbox-entry-identity"
@@ -111,12 +112,18 @@ interface Props {
   picked?: ReadonlySet<string>
   onTogglePicking?: () => void
   onPick?: (entry: InboxV2Entry) => void
+  /** The feed could not load: an error with Retry in the list, not "empty". */
+  error?: string | null
+  onRetry?: () => void
+  /** The list's scroller, so the page can keep its position (phone pilot). */
+  scrollRef?: Ref<HTMLDivElement>
 }
 
 export function InboxV2Explorer({
   view, onView, viewCounts, historyNote, entries, facetCounts: serverFacets, canLoadMore = false, loadingMore = false, onLoadMore, visible, filters, onFilters, attention, onClearAttention,
   selectedKey, onOpen, overviewSelected = false, onOverview, sort = "urgency", onSort,
   lookup = EMPTY_INBOX_LOOKUP, loading = false, picking = false, picked, onTogglePicking, onPick,
+  error = null, onRetry, scrollRef,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
   // keystroke in search, and the counts do not depend on the filters at all.
@@ -268,6 +275,13 @@ export function InboxV2Explorer({
           {filters.type && <Chip onRemove={() => set({ type: null })} text={`Source type: ${TYPE_LABEL[filters.type]}`} />}
           {crewChip && <Chip onRemove={() => set({ crew: null })} text={`Crew: ${crewChip}`} />}
           {agentChip && <Chip onRemove={() => set({ agent: null })} text={`Agent: ${agentChip}`} />}
+          {/* Phone pilot: every active filter is a readable chip on the page,
+              each removable, and one control removes them all. */}
+          {activeCount > 0 && (
+            <button type="button" onClick={clearFacets} className="kit-tap rounded-md px-1.5 py-0.5 text-micro font-medium text-primary-hover hover:underline">
+              Clear filters
+            </button>
+          )}
         </SidebarActiveChips>
       )}
 
@@ -353,7 +367,7 @@ export function InboxV2Explorer({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-1 pt-1">
+      <div ref={scrollRef} data-inbox-list-scroller className="min-h-0 flex-1 overflow-y-auto pb-1 pt-1">
         {onOverview && (
           <SidebarRow as="div" selected={overviewSelected} onSelect={onOverview} className="mt-1">
             <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
@@ -405,11 +419,23 @@ export function InboxV2Explorer({
                 </button>
               </div>
             )}
-            {visible.length === 0 && (
+            {visible.length === 0 && error && (
+              <div className="p-2" data-testid="inbox-list-error" role="alert">
+                <InlineEmpty
+                  icon={AlertTriangle}
+                  text="The inbox could not load. Nothing was changed."
+                  action={onRetry ? <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button> : undefined}
+                />
+              </div>
+            )}
+            {visible.length === 0 && !error && (
               <div className="p-2">
                 <ExplorerEmpty
                   view={view}
                   narrowed={narrowed}
+                  search={filters.search.trim()}
+                  scope={attention ? ATTENTION_LABELS[attention] : SPACES.find((s) => s.key === view)?.label ?? ""}
+                  filterCount={activeCount}
                   onClear={() => {
                     onFilters({ search: "", type: null, attention: null, deadline: null, unreadOnly: false, crew: null, agent: null })
                     onClearAttention?.()
@@ -434,7 +460,24 @@ function isTyping(target: EventTarget | null): boolean {
  * The column's empty state says what lands here and one way to make it
  * appear (README §6) — "Nothing here" said neither.
  */
-function ExplorerEmpty({ view, narrowed, onClear }: { view: InboxV2View; narrowed: boolean; onClear: () => void }) {
+function ExplorerEmpty({ view, narrowed, search = "", scope = "", filterCount = 0, onClear }: {
+  view: InboxV2View
+  narrowed: boolean
+  /** What was searched for: a search that found nothing says so, and where. */
+  search?: string
+  scope?: string
+  filterCount?: number
+  onClear: () => void
+}) {
+  if (narrowed && search) {
+    return (
+      <div className="grid justify-items-center gap-1.5 px-3 py-8 text-center text-label text-muted-foreground" data-testid="inbox-no-results">
+        <b className="text-body font-semibold text-foreground [overflow-wrap:anywhere]">Nothing matches “{search}”</b>
+        <span>in {scope || "this inbox"}{filterCount > 0 ? ` · ${filterCount} filter${filterCount === 1 ? "" : "s"}` : ""}</span>
+        <Button size="sm" variant="outline" className="mt-1" onClick={onClear}>Clear search and filters</Button>
+      </div>
+    )
+  }
   if (narrowed) {
     return (
       <InlineEmpty
