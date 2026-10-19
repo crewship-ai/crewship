@@ -90,6 +90,25 @@ func TestAcceptance_PagePersonalSpaceClassification(t *testing.T) {
 			if !found["legacy-unfiled"] || found["explicit-private"] != (role != "ADMIN") {
 				t.Fatalf("unexpected authorized list: %#v", found)
 			}
+			personal := exec.CommandContext(t.Context(), binary, "api", "request", "GET", "/api/v1/pages", "--query", "audience=personal", "--query", "limit=1")
+			personal.Env = command.Env
+			personalOut, err := personal.CombinedOutput()
+			if err != nil {
+				t.Fatalf("personal catalog: %v %s", err, personalOut)
+			}
+			var personalRows []struct {
+				Slug string `json:"slug"`
+			}
+			if err := json.Unmarshal(personalOut, &personalRows); err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if role == "MEMBER" {
+				want = 1
+			}
+			if len(personalRows) != want || want == 1 && personalRows[0].Slug != "explicit-private" {
+				t.Fatalf("personal catalog leaked custody or legacy ownership: %s", personalOut)
+			}
 		})
 	}
 }
