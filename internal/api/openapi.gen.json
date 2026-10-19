@@ -2688,9 +2688,6 @@
                 "scope",
                 "window",
                 "mode",
-                "limit_usd",
-                "spent_usd",
-                "remaining_usd",
                 "state"
               ],
               "type": "object"
@@ -2779,7 +2776,6 @@
           "payer",
           "budgets",
           "gate",
-          "estimate_usd",
           "estimate_state",
           "constraints"
         ],
@@ -15670,8 +15666,7 @@
           "last_outcomes",
           "finished",
           "succeeded",
-          "runs",
-          "spend_usd"
+          "runs"
         ],
         "type": "object"
       },
@@ -16568,8 +16563,7 @@
           "status",
           "output",
           "step_outputs",
-          "duration_ms",
-          "cost_usd"
+          "duration_ms"
         ],
         "type": "object"
       },
@@ -17554,8 +17548,7 @@
           "start_reason",
           "ended_at",
           "end_reason",
-          "exit_evidence",
-          "cost_usd"
+          "exit_evidence"
         ],
         "type": "object"
       },
@@ -17813,8 +17806,7 @@
           "agent",
           "crew",
           "event_type",
-          "duration_ms",
-          "cost_usd"
+          "duration_ms"
         ],
         "type": "object"
       },
@@ -17989,7 +17981,6 @@
           "crew",
           "event_type",
           "duration_ms",
-          "cost_usd",
           "attempts",
           "events"
         ],

@@ -18,9 +18,10 @@ type routineHealthRow struct {
 	Succeeded    int      `json:"succeeded"`
 	// SuccessPct is over the finished runs among LastOutcomes; absent when
 	// none finished (no figure rather than 0 %).
-	SuccessPct *int    `json:"success_pct,omitempty"`
-	Runs       int     `json:"runs"`
-	SpendUSD   float64 `json:"spend_usd"`
+	SuccessPct *int `json:"success_pct,omitempty"`
+	Runs       int  `json:"runs"`
+	// SpendUSD is left out below ADMIN (#3590), like every cost figure.
+	SpendUSD *float64 `json:"spend_usd,omitempty"`
 }
 
 type routineHealthResponse struct {
@@ -56,6 +57,7 @@ func (h *PipelineHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		days = n
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	showCost := canReadCosts(r.Context())
 	byID, err := h.runStore.HealthByPipeline(r.Context(), workspaceID, time.Now().AddDate(0, 0, -days), healthLastRuns)
 	if err != nil {
 		replyInternalError(w, h.logger, "routine health", err)
@@ -72,7 +74,11 @@ func (h *PipelineHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		if agg == nil {
 			continue
 		}
-		row := routineHealthRow{Slug: p.Slug, LastOutcomes: agg.Outcomes, Runs: agg.Runs, SpendUSD: agg.SpendUSD}
+		row := routineHealthRow{Slug: p.Slug, LastOutcomes: agg.Outcomes, Runs: agg.Runs}
+		if showCost {
+			spend := agg.SpendUSD
+			row.SpendUSD = &spend
+		}
 		for _, o := range agg.Outcomes {
 			switch o {
 			case "completed":

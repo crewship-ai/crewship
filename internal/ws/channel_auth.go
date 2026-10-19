@@ -213,3 +213,46 @@ func (a *DBChannelAuthorizer) trustedAccountActive(ctx context.Context, userID s
  AND NOT EXISTS(SELECT 1 FROM workspace_members m WHERE m.user_id=u.id AND m.access_mode='restricted'))`, userID).Scan(&active)
 	return active, err
 }
+
+// CanReadCosts reports whether userID may read money amounts on channel
+// (#3590): OWNER or ADMIN of the workspace the channel belongs to. Frames the
+// writer cannot clear this way are sent with the costvis fields removed, so
+// every failure here means "redact", never "drop the user" or "send as is".
+func (a *DBChannelAuthorizer) CanReadCosts(ctx context.Context, userID, channel string) (bool, error) {
+	if a == nil || a.db == nil || userID == "" {
+		return false, nil
+	}
+	idx := strings.IndexByte(channel, ':')
+	if idx <= 0 || idx == len(channel)-1 {
+		return false, nil
+	}
+	chType, chID := channel[:idx], channel[idx+1:]
+	var lookup string
+	switch chType {
+	case "workspace", "journal", "keeper":
+		lookup = `SELECT ?`
+	case "crew", "files":
+		lookup = `SELECT workspace_id FROM crews WHERE id = ?`
+	case "agent":
+		lookup = `SELECT workspace_id FROM agents WHERE id = ?`
+	case "mission":
+		lookup = `SELECT c.workspace_id FROM missions m JOIN crews c ON c.id = m.crew_id WHERE m.id = ?`
+	case "session", "chat-hints":
+		lookup = `SELECT workspace_id FROM chats WHERE id = ?`
+	case "page":
+		lookup = `SELECT workspace_id FROM pages WHERE id = ?`
+	default:
+		return false, nil
+	}
+	var role string
+	err := a.db.QueryRowContext(ctx,
+		`SELECT m.role FROM workspace_members m WHERE m.user_id = ? AND m.workspace_id = (`+lookup+`)`,
+		userID, chID).Scan(&role)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return role == "OWNER" || role == "ADMIN", nil
+}

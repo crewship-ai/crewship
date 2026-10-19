@@ -222,6 +222,11 @@ func (h *MetricsHandler) Timeseries(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, code, msg)
 		return
 	}
+	// cost_usd is a cost-only series (#3590): OWNER/ADMIN, 403 otherwise.
+	if p.Metric == "cost_usd" && !canReadCosts(r.Context()) {
+		writeProblem(w, r, http.StatusForbidden, "Spend requires OWNER or ADMIN")
+		return
+	}
 
 	starts := bucketStartsFor(p)
 	// Precompute lookup by key with a stable zero-filled initial row per bucket.

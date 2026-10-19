@@ -18,6 +18,7 @@ import { runBarTone, type RunBarTone } from "@/lib/routine-page"
 import { runProvenance } from "@/lib/run-provenance"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { formatReportedUsage } from "./routine-cost-format"
+import { isCostShown } from "@/lib/cost-visibility"
 
 const DOT: Record<RunBarTone, string> = {
   ok: "bg-success",
@@ -82,7 +83,8 @@ export interface PeekRun {
   id: string
   status: string
   started_at: string
-  cost_usd: number
+  /** Absent below ADMIN (#3590): the Cost row is left out. */
+  cost_usd?: number
   duration_ms: number
   outcome?: string
   pipeline_version?: number
@@ -170,8 +172,12 @@ export function RoutineRunPeek({
           <dd className="font-mono">{run.pipeline_version != null ? `v${run.pipeline_version}` : "—"}</dd>
           <dt className="text-muted-foreground">Took</dt>
           <dd className="font-mono">{run.duration_ms > 0 ? formatDurationMs(run.duration_ms) : "—"}</dd>
-          <dt className="text-muted-foreground">Cost</dt>
-          <dd className="font-mono">{formatReportedUsage(run.cost_usd)}</dd>
+          {isCostShown(run.cost_usd) && (
+            <>
+              <dt className="text-muted-foreground">Cost</dt>
+              <dd className="font-mono">{formatReportedUsage(run.cost_usd)}</dd>
+            </>
+          )}
           {run.error_message && (
             <>
               <dt className="text-muted-foreground">Error</dt>

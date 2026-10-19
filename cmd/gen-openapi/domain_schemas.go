@@ -41,7 +41,7 @@ func executionSchemaComponents() map[string]any {
 		"output": str(), "step_outputs": stringMap, "would_execute": arr(refOrString("DryRunStep")),
 		"duration_ms": integer(), "cost_usd": number(), "failed_at_step": str(),
 		"error_message": str(), "deduped": boolean(), "waitpoint_token": str(), "current_step": str(),
-	}, "run_id", "pipeline_id", "pipeline_slug", "status", "output", "step_outputs", "duration_ms", "cost_usd")
+	}, "run_id", "pipeline_id", "pipeline_slug", "status", "output", "step_outputs", "duration_ms") // cost_usd: OWNER/ADMIN only (#3590)
 	// pipeline.DryRunStep: one planned step of a dry run.
 	dryRunStep := obj(map[string]any{
 		"step_id": str(), "step_type": str(), "would_call_agent": str(), "would_call_pipeline": str(),

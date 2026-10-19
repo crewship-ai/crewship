@@ -66,7 +66,7 @@ func routineOrganisationSchemaCatalog() (map[string]DomainSchema, map[string]any
 			"finished":      integer(), "succeeded": integer(),
 			"success_pct": map[string]any{"type": "integer", "description": "Over the finished runs among last_outcomes; absent when none finished."},
 			"runs":        integer(), "spend_usd": number(),
-		}, "slug", "last_outcomes", "finished", "succeeded", "runs", "spend_usd"),
+		}, "slug", "last_outcomes", "finished", "succeeded", "runs"),
 		"RoutineHealth": object(map[string]any{"window_days": integer(), "routines": array(ref("RoutineHealthRow"))}, "window_days", "routines"),
 
 		"RoutineCheckupCheck": object(map[string]any{

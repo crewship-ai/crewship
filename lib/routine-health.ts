@@ -6,6 +6,7 @@
 
 import { runBarTone, type RunBarTone } from "@/lib/routine-page"
 import type { BudgetSummary } from "@/hooks/use-routine-budget"
+import { isCostShown } from "@/lib/cost-visibility"
 
 export interface HealthRun {
   id: string
@@ -92,7 +93,7 @@ export interface ServerRoutineHealth {
   succeeded: number
   success_pct?: number | null
   runs: number
-  spend_usd: number
+  spend_usd?: number
 }
 
 const OUTCOME_BAR: Record<string, { tone: RunBarTone; label: string }> = {
@@ -138,7 +139,10 @@ export function routineHealthRows(
     if (l.length < n) l.push(r)
     bySlug.set(r.pipeline_slug, l)
   }
-  const spent = new Map((spend?.routines ?? []).map((s) => [s.slug, s.spent_usd]))
+  // Below ADMIN the summary carries no amounts (#3590): spent stays
+  // null ("not shown") instead of reading the missing field as $0.
+  const amountsShown = (spend?.routines ?? []).every((s) => isCostShown(s.spent_usd))
+  const spent = new Map((spend?.routines ?? []).map((s) => [s.slug, s.spent_usd ?? 0]))
   const rows = routines.map((routine): HealthRow => {
     const mine = bySlug.get(routine.slug) ?? []
     if (server) {
@@ -152,7 +156,7 @@ export function routineHealthRows(
         finished: agg?.finished ?? 0,
         ok: agg?.succeeded ?? 0,
         successPct: agg?.success_pct ?? null,
-        spent: agg ? agg.spend_usd : null,
+        spent: agg && isCostShown(agg.spend_usd) ? agg.spend_usd : null,
         spentWindow: "30 days",
         checkup: checkupCounts(routineChecks({ routine, runs: mine })),
       }
@@ -167,7 +171,7 @@ export function routineHealthRows(
       finished: done.length,
       ok,
       successPct: done.length ? Math.round((ok / done.length) * 100) : null,
-      spent: spend ? (spent.get(routine.slug) ?? 0) : null,
+      spent: spend && amountsShown ? (spent.get(routine.slug) ?? 0) : null,
       spentWindow: "this month",
       checkup: checkupCounts(routineChecks({ routine, runs: mine })),
     }

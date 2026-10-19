@@ -8,12 +8,16 @@ import { toApiError } from "@/lib/api-error"
 // (GET/PATCH /pipelines/{slug}/budget, #1422 item 3). Distinct from a
 // routine's DSL max_cost_usd (a per-run hard gate) — this is an
 // out-of-band monthly spend cap + budget-vs-actual view.
+//
+// Below ADMIN the server keeps has_budget / over_budget and leaves every
+// amount out (#3590), hence the optional money fields: absent is "not
+// yours to see", never "$0".
 export interface RoutineBudget {
   slug: string
   has_budget: boolean
-  monthly_budget_usd: number
+  monthly_budget_usd?: number
   month: string // "2026-07"
-  spent_usd: number
+  spent_usd?: number
   pct_used?: number
   over_budget?: boolean
 }
@@ -118,8 +122,9 @@ export function useRoutineBudget(
 // (GET /pipelines/budget-summary) — the workspace roll-up.
 export interface BudgetSummaryRow {
   slug: string
-  monthly_budget_usd: number
-  spent_usd: number
+  has_budget?: boolean
+  monthly_budget_usd?: number // absent below ADMIN (#3590)
+  spent_usd?: number // absent below ADMIN (#3590)
   pct_used?: number
   over_budget?: boolean
 }
@@ -127,8 +132,8 @@ export interface BudgetSummaryRow {
 export interface BudgetSummary {
   month: string
   routines: BudgetSummaryRow[]
-  total_budget_usd: number
-  total_spent_usd: number
+  total_budget_usd?: number // absent below ADMIN (#3590)
+  total_spent_usd?: number // absent below ADMIN (#3590)
 }
 
 // useBudgetSummary fetches the workspace-wide budget roll-up: every

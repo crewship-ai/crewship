@@ -72,7 +72,7 @@ func TestGetHealth(t *testing.T) {
 		t.Fatalf("busy success = %+v", busy)
 	}
 	// The window drops the 40-day-old run and the dry run.
-	if busy.Runs != 6 || busy.SpendUSD != 1.6 {
+	if busy.Runs != 6 || busy.SpendUSD == nil || *busy.SpendUSD != 1.6 {
 		t.Fatalf("busy window = %d runs, $%v; want 6 runs, $1.6", busy.Runs, busy.SpendUSD)
 	}
 	if by["quiet"].Runs != 1 || by["quiet"].SuccessPct == nil || *by["quiet"].SuccessPct != 100 {

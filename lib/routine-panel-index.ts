@@ -8,6 +8,8 @@
 // the slash-command catalog (`routine.run:<slug>` = a chat command) and the
 // row's own `linked_issue_count` (issues bound to the routine start it).
 
+import { isCostShown } from "@/lib/cost-visibility"
+
 export type RoutineTriggerKind = "schedule" | "webhook" | "issue" | "chat"
 
 /** The Trigger facet's values, in the order the panel lists them. */
@@ -54,7 +56,8 @@ export function buildRoutinePanelIndex(input: {
   webhooks?: readonly IndexTarget[]
   /** Ids of the slash-command catalog; routine commands are `routine.run:<slug>`. */
   chatCommandIds?: readonly string[]
-  spend?: { routines: readonly { slug: string; spent_usd: number }[] } | null
+  /** spent_usd is absent below ADMIN (#3590); such rows add no spend. */
+  spend?: { routines: readonly { slug: string; spent_usd?: number }[] } | null
 }): RoutinePanelIndex {
   const slugById = new Map(input.routines.map((r) => [r.id, r.slug]))
   const known = new Set(input.routines.map((r) => r.slug))
@@ -90,7 +93,7 @@ export function buildRoutinePanelIndex(input: {
     triggers.set(r.slug, set ? ROUTINE_TRIGGER_KINDS.map((k) => k.id).filter((k) => set.has(k)) : [])
   }
   const spend = new Map<string, number>()
-  for (const row of input.spend?.routines ?? []) if (known.has(row.slug) && row.spent_usd > 0) spend.set(row.slug, row.spent_usd)
+  for (const row of input.spend?.routines ?? []) if (known.has(row.slug) && isCostShown(row.spent_usd) && row.spent_usd > 0) spend.set(row.slug, row.spent_usd)
   return { triggers, nextRun, spend }
 }
 

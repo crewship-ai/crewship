@@ -159,17 +159,17 @@ func workAgentCell(agent *workLedgerAgent, id string) string {
 }
 
 type workAttemptRow struct {
-	RunID          string  `json:"run_id" yaml:"run_id"`
-	Attempt        int     `json:"attempt" yaml:"attempt"`
-	Generation     int64   `json:"generation" yaml:"generation"`
-	LeaseOwner     string  `json:"lease_owner" yaml:"lease_owner"`
-	LeaseExpiresAt string  `json:"lease_expires_at" yaml:"lease_expires_at"`
-	RuntimeLocator string  `json:"runtime_locator" yaml:"runtime_locator"`
-	StartedAt      string  `json:"started_at" yaml:"started_at"`
-	EndedAt        *string `json:"ended_at" yaml:"ended_at"`
-	EndReason      string  `json:"end_reason" yaml:"end_reason"`
-	ExitEvidence   string  `json:"exit_evidence" yaml:"exit_evidence"`
-	CostUSD        float64 `json:"cost_usd" yaml:"cost_usd"`
+	RunID          string   `json:"run_id" yaml:"run_id"`
+	Attempt        int      `json:"attempt" yaml:"attempt"`
+	Generation     int64    `json:"generation" yaml:"generation"`
+	LeaseOwner     string   `json:"lease_owner" yaml:"lease_owner"`
+	LeaseExpiresAt string   `json:"lease_expires_at" yaml:"lease_expires_at"`
+	RuntimeLocator string   `json:"runtime_locator" yaml:"runtime_locator"`
+	StartedAt      string   `json:"started_at" yaml:"started_at"`
+	EndedAt        *string  `json:"ended_at" yaml:"ended_at"`
+	EndReason      string   `json:"end_reason" yaml:"end_reason"`
+	ExitEvidence   string   `json:"exit_evidence" yaml:"exit_evidence"`
+	CostUSD        *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 }
 
 type workEventRow struct {
@@ -435,9 +435,9 @@ conversation. Its fingerprint is.`,
 			// and that is exactly when somebody is reading this by eye.
 			fmt.Fprintln(w, "#\tRUN\tGEN\tOWNER\tLOCATOR\tSTARTED\tENDED\tCOST\tEND REASON")
 			for _, a := range detail.Attempts {
-				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%.4f\t%s\n",
+				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					a.Attempt, workShortID(f, a.RunID), a.Generation, a.LeaseOwner, a.RuntimeLocator,
-					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), a.CostUSD, a.EndReason)
+					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), usdOrDash("%.4f", a.CostUSD), a.EndReason)
 			}
 			_ = w.Flush()
 			if len(detail.Attempts) == 0 {

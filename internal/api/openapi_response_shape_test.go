@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -409,6 +410,12 @@ func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {
 
 			var missing, spurious []string
 			for _, f := range always {
+				// A cost field is emitted for OWNER/ADMIN only: writeCostAwareJSON
+				// removes every costvis key for other roles whatever the tag says
+				// (#3590), so it must not be required.
+				if _, money := costvis.Keys[f]; money {
+					continue
+				}
 				// Only grade fields the schema actually describes; a schema may
 				// legitimately document a subset while it is being tightened.
 				if declared[f] && !required[f] {

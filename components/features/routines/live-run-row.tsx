@@ -12,6 +12,7 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { formatElapsedSince, formatStepCost } from "./routine-cost-format"
+import { isCostShown } from "@/lib/cost-visibility"
 
 // LiveRunRow — one active routine run inside the header Activity
 // dropdown's LIVE section: pulse dot (amber while parked on a human),
@@ -129,7 +130,7 @@ export function LiveRunRow({
       trailing={
         <span className="type-meta font-mono tabular-nums text-muted-foreground-soft">
           {elapsed}
-          {run.cost_usd > 0 ? `${elapsed ? " · " : ""}${formatStepCost(run.cost_usd)}` : ""}
+          {isCostShown(run.cost_usd) && run.cost_usd > 0 ? `${elapsed ? " · " : ""}${formatStepCost(run.cost_usd)}` : ""}
         </span>
       }
       actions={

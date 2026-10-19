@@ -114,7 +114,7 @@ var routineTreeCmd = &cobra.Command{
 				if parent == "" {
 					parent = "(root)"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t$%.4f\n", n.ID, parent, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", n.ID, parent, n.PipelineSlug, n.Status, n.TriggeredVia, usdOrDash("$%.4f", n.CostUSD))
 			}
 			flush.of(w)
 		}); err != nil {
@@ -126,12 +126,12 @@ var routineTreeCmd = &cobra.Command{
 
 // runTreeNode is one run in a `routine tree` result.
 type runTreeNode struct {
-	ID           string  `json:"id" yaml:"id"`
-	ParentID     string  `json:"parent_id" yaml:"parent_id"`
-	PipelineSlug string  `json:"pipeline_slug" yaml:"pipeline_slug"`
-	Status       string  `json:"status" yaml:"status"`
-	TriggeredVia string  `json:"triggered_via" yaml:"triggered_via"`
-	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	ID           string   `json:"id" yaml:"id"`
+	ParentID     string   `json:"parent_id" yaml:"parent_id"`
+	PipelineSlug string   `json:"pipeline_slug" yaml:"pipeline_slug"`
+	Status       string   `json:"status" yaml:"status"`
+	TriggeredVia string   `json:"triggered_via" yaml:"triggered_via"`
+	CostUSD      *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 }
 
 var routineSignalCmd = &cobra.Command{

@@ -19,7 +19,7 @@ type routineHealthRowJSON struct {
 	Succeeded    int      `json:"succeeded" yaml:"succeeded"`
 	SuccessPct   *int     `json:"success_pct,omitempty" yaml:"success_pct,omitempty"`
 	Runs         int      `json:"runs" yaml:"runs"`
-	SpendUSD     float64  `json:"spend_usd" yaml:"spend_usd"`
+	SpendUSD     *float64 `json:"spend_usd,omitempty" yaml:"spend_usd,omitempty"` // absent below ADMIN
 }
 
 type routineHealthJSON struct {
@@ -69,7 +69,11 @@ Outcome key: + completed, x failed, - stopped, ? waiting for a person, ~ running
 				if r.SuccessPct != nil {
 					success = fmt.Sprintf("%d%% (%d of %d)", *r.SuccessPct, r.Succeeded, r.Finished)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t$%.2f\n", r.Slug, bars.String(), success, r.Runs, r.SpendUSD)
+				spend := "—" // amounts are for workspace OWNER and ADMIN
+				if r.SpendUSD != nil {
+					spend = fmt.Sprintf("$%.2f", *r.SpendUSD)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", r.Slug, bars.String(), success, r.Runs, spend)
 			}
 			_ = w.Flush()
 		})

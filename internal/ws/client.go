@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/costvis"
 
 	"golang.org/x/net/websocket"
 )
@@ -186,6 +187,10 @@ func (c *Client) writeFrame(msg []byte) bool {
 			return false
 		}
 	}
+	msg, ok := c.costVisibleFrame(authorizer, msg)
+	if !ok {
+		return true // frame dropped, connection kept
+	}
 	wait := c.writeWait
 	if wait <= 0 {
 		wait = defaultWriteWait
@@ -200,6 +205,40 @@ func (c *Client) writeFrame(msg []byte) bool {
 		return false
 	}
 	return true
+}
+
+// costReader is the optional authorizer half of the #3590 money rule.
+type costReader interface {
+	CanReadCosts(ctx context.Context, userID, channel string) (bool, error)
+}
+
+// costVisibleFrame removes money amounts (internal/costvis) from a frame bound
+// for a user who is not OWNER/ADMIN of the channel's workspace. Journal
+// entries, routine step/run events and chat run metadata all carry them.
+// It reports false when the frame could not be redacted; the caller drops it
+// rather than send amounts. Without any authorizer (unit-test hubs) frames
+// pass unchanged, matching CanDeliver above.
+func (c *Client) costVisibleFrame(authorizer ChannelAuthorizer, msg []byte) ([]byte, bool) {
+	if authorizer == nil || !costvis.MayCarry(msg) {
+		return msg, true
+	}
+	if cr, ok := authorizer.(costReader); ok {
+		var envelope struct {
+			Channel string `json:"channel"`
+		}
+		_ = json.Unmarshal(msg, &envelope)
+		ctx, cancel := context.WithTimeout(c.ctx, 2*time.Second)
+		allowed, err := cr.CanReadCosts(ctx, c.userID, envelope.Channel)
+		cancel()
+		if err == nil && allowed {
+			return msg, true
+		}
+	}
+	out, err := costvis.RedactJSON(msg)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // Session revocation is enforced by the hub's shared sweep

@@ -154,7 +154,7 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
 		map[string]string{"id": id, "mission_id": missionID, "status": status})
 
-	writeJSON(w, http.StatusCreated, resp)
+	writeCostAwareJSON(w, r, http.StatusCreated, resp)
 }
 
 // updateTaskRequest holds the parsed JSON body for UpdateTask.
@@ -451,5 +451,5 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			map[string]string{"id": taskID, "mission_id": missionID, "status": *req.Status})
 	}
 
-	writeJSON(w, http.StatusOK, t)
+	writeCostAwareJSON(w, r, http.StatusOK, t)
 }
