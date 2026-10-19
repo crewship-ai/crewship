@@ -54,3 +54,18 @@ service's operating contract.
 Node and image smoke tests use a controlled authority fixture. They qualify the
 service protocol and packaging; real Go persistence, managed deployment and
 provider-backed document creation require their separate acceptance scenarios.
+
+## Structural candidates
+
+`structural-candidate.mjs` computes an unregistered schema-3 candidate from a
+trusted original revision, snapshot and explicitly selected contiguous root
+paragraphs or headings. It supports bounded insertion and deletion, checks the
+original block hashes and neighbours, and keeps the caller's CRDT unchanged on
+failure. Unchanged character identities survive because it clones the complete
+CRDT snapshot. Move is unsupported.
+
+The returned proof contains complete before/after content and must stay inside
+the private document boundary. It is neither consent nor editing authority.
+Fresh human admission, durable writer verification, and historical identifier
+reservation across requests remain separate requirements; no service operation
+or agent tool invokes this module.
