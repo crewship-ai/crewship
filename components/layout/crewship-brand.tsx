@@ -12,8 +12,9 @@ import { apiFetch } from "@/lib/api-fetch"
 import { buildLabel, editionName, type Build } from "@/lib/build-info"
 
 /**
- * The Crewship sail at the foot of the rail, above the sidebar-mode row
- * (owner, 19 Oct; wireframe round 61). It stays when the rail folds to icons,
+ * The Crewship sail at the bottom of the rail, just above the footer's rule
+ * (owner, 19 Oct; wireframe round 61): the end of the navigation, set apart
+ * from the footer's controls. It stays when the rail folds to icons,
  * so the product is named on every screen, and it opens a short About: what
  * Crewship is, which build this is, where to read more. The top of the rail
  * is the workspace switcher and Search only: folded, the sail, the workspace
