@@ -4345,6 +4345,38 @@
             "nullable": true,
             "type": "boolean"
           },
+          "appearance_default": {
+            "additionalProperties": false,
+            "description": "Workspace default look (OWNER/ADMIN), at most 2 KiB. Members inherit each value they have not chosen themselves. An empty object resets it.",
+            "maxProperties": 4,
+            "properties": {
+              "accent": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "knobs": {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 16,
+                "type": "object"
+              },
+              "style": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "theme": {
+                "enum": [
+                  "dark",
+                  "light",
+                  "system"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "approvals_retention_days": {
             "nullable": true,
             "type": "integer"
@@ -19001,6 +19033,38 @@
           "allow_privileged_credentials": {
             "type": "boolean"
           },
+          "appearance_default": {
+            "additionalProperties": false,
+            "description": "Workspace default look (OWNER/ADMIN), at most 2 KiB. Members inherit each value they have not chosen themselves. An empty object resets it.",
+            "maxProperties": 4,
+            "properties": {
+              "accent": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "knobs": {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 16,
+                "type": "object"
+              },
+              "style": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "theme": {
+                "enum": [
+                  "dark",
+                  "light",
+                  "system"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "approvals_retention_days": {
             "format": "int32",
             "nullable": true,
@@ -19107,6 +19171,7 @@
           "logo_url",
           "preferred_language",
           "pages_theme",
+          "appearance_default",
           "run_retention_days",
           "credential_audit_retention_days",
           "audit_log_retention_days",
