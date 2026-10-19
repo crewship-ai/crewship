@@ -190,7 +190,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const session = useSessionSafe()
   const currentUserId = session.data?.user.id ?? null
 
-  const summary = React.useMemo(() => summarisePages(pages, now), [pages, now])
+  const summaryPages = React.useMemo(() => personalSpace
+    ? pages.filter(page => page.hasDocument === true && page.privateAudience === true && page.ownerRef === `user/${currentUserId}`)
+    : pages, [pages, personalSpace, currentUserId])
+  const summary = React.useMemo(() => summarisePages(summaryPages, now), [summaryPages, now])
   const filtered = React.useMemo(
     () => pages.filter((p) => matchesPageFilters(p, filters, search)),
     [pages, filters, search],
@@ -213,7 +216,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const description = (
     <>
-      {pages.length} {pages.length === 1 ? "page" : "pages"}
+      {summaryPages.length} {summaryPages.length === 1 ? "page" : "pages"}
       {summary.hasFreshnessBasis
         ? summary.stalePages > 0
           ? ` · ${summary.stalePages} stale`

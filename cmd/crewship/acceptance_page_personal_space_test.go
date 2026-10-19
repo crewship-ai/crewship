@@ -90,7 +90,7 @@ func TestAcceptance_PagePersonalSpaceClassification(t *testing.T) {
 			if !found["legacy-unfiled"] || found["explicit-private"] != (role != "ADMIN") {
 				t.Fatalf("unexpected authorized list: %#v", found)
 			}
-			personal := exec.CommandContext(t.Context(), binary, "api", "request", "GET", "/api/v1/pages", "--query", "audience=personal", "--query", "limit=1")
+			personal := exec.CommandContext(t.Context(), binary, "page", "list", "--audience", "personal", "--limit", "1")
 			personal.Env = command.Env
 			personalOut, err := personal.CombinedOutput()
 			if err != nil {
