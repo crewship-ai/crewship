@@ -8,6 +8,16 @@ import "maps"
 func PublicAuthorizationAudit(e Entry) Entry {
 	e.Payload = maps.Clone(e.Payload)
 	switch e.Type {
+	case EntryMemberAdded:
+		// Keep the producer's exact public whitelist across feeds, preview,
+		// matching and rendering; the canonical initial policy stays intact.
+		public := map[string]any{}
+		for _, key := range []string{"member_id", "subject_user_id", "action"} {
+			if value, ok := e.Payload[key]; ok {
+				public[key] = value
+			}
+		}
+		e.Payload = public
 	case EntryMemberAccessChanged:
 		if e.Payload["action"] == "owner_created" {
 			payload := map[string]any{}
