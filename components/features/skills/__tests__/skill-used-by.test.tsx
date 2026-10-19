@@ -1,3 +1,5 @@
+import { parseActivityUrl } from "@/lib/activity-url"
+import { currentStop } from "@/lib/activity-selection"
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { SkillPage, type SkillPageProps } from "@/components/features/skills/skill-page"
@@ -42,7 +44,7 @@ function renderUsedBy(mutate: typeof h.mutate) {
 }
 
 describe("Activity button", () => {
-  it("has its own name next to the shell's Activity button and opens Used by", () => {
+  it("has its own name next to the shell's Activity button and opens Activity filtered to the skill", () => {
     h.mutate = () => Promise.resolve()
     h.detail = {
       id: "sk", name: "web", slug: "web", display_name: "Web", description: null, version: null, author: null, category: "RESEARCH",
@@ -55,8 +57,14 @@ describe("Activity button", () => {
     )
     // The top bar already has the shell's "Activity" (live runs) button.
     expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Skill activity" }))
-    expect(onTab).toHaveBeenCalledWith("used")
+    const link = screen.getByRole("link", { name: "Skill activity" })
+    const href = link.getAttribute("href") ?? ""
+    expect(href).toMatch(/^\/activity\?/)
+    // The link carries the skill as a walk stop, which the Activity page turns
+    // into its Skill facet (applyStop).
+    const last = currentStop(parseActivityUrl(new URLSearchParams(href.split("?")[1])).path)
+    expect(last).toMatchObject({ kind: "skill", id: "sk" })
+    expect(onTab).not.toHaveBeenCalled()
   })
 })
 

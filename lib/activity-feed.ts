@@ -133,6 +133,8 @@ export const CHANGE_TYPES: Record<ChangeKind, readonly string[]> = {
     "skill.unassigned",
     "skill.imported",
     "skill.deleted",
+    "skill.archived",
+    "skill.restored",
     "memory.skill_approved",
     "audit.entity_created",
     "audit.entity_updated",
@@ -185,6 +187,8 @@ const ACTION_LABEL: Record<string, string> = {
   "skill.unassigned": "Skill removed",
   "skill.imported": "Skill imported",
   "skill.deleted": "Skill deleted",
+  "skill.archived": "Skill archived",
+  "skill.restored": "Skill restored",
   "memory.skill_approved": "Skill approved",
   "audit.entity_created": "Created",
   "audit.entity_updated": "Updated",
@@ -228,6 +232,8 @@ export interface WorkItem {
   routineSlug?: string
   agents: { id: string; name: string }[]
   issues: { id: string; label: string }[]
+  /** Skills the work's agents called while on it (the Skill facet). */
+  skills: { id: string; name: string }[]
   durationMs: number | null
   chain: ChainSummary
   /** A bundle of repeated runs: the runs it holds, newest first. */
@@ -300,6 +306,7 @@ export function workFromChain(c: ChainSummary, ctx: WorkContext = {}): WorkItem 
     routineSlug: c.routine_slug || undefined,
     agents: (c.agents ?? []).map((a) => ({ id: a.id, name: a.name || a.slug || a.id })),
     issues: (c.issues ?? []).map((i) => ({ id: i.id, label: i.identifier || i.title || i.id })),
+    skills: (c.skills ?? []).map((s) => ({ id: s.id, name: s.name || s.slug || s.id })),
     durationMs: c.duration_ms,
     chain: c,
   }
@@ -663,6 +670,8 @@ export interface FeedFilters {
   source: WorkSource | null
   /** One issue: its work and the changes to it. */
   issue: string | null
+  /** One skill: the work whose agents called it (ODCH-SK-14). */
+  skill: string | null
 }
 
 export const EMPTY_FILTERS: FeedFilters = {
@@ -674,11 +683,12 @@ export const EMPTY_FILTERS: FeedFilters = {
   crew: null,
   source: null,
   issue: null,
+  skill: null,
 }
 
 /** How many facets narrow the list (search and the view are not counted). */
 export function activeFacetCount(f: FeedFilters): number {
-  return [f.what, f.routine, f.agent, f.crew, f.source, f.issue].filter(Boolean).length +
+  return [f.what, f.routine, f.agent, f.crew, f.source, f.issue, f.skill].filter(Boolean).length +
     (f.status && !viewOfStatus(f.status) ? 1 : 0)
 }
 
@@ -697,6 +707,7 @@ export function workPasses(w: WorkItem, f: FeedFilters, ctx: FilterContext = {},
   if (on("crew") && f.crew && !w.agents.some((a) => ctx.crewOfAgent?.(a.id) === f.crew)) return false
   if (on("source") && f.source && w.source !== f.source) return false
   if (on("issue") && f.issue && !w.issues.some((i) => i.id === f.issue)) return false
+  if (on("skill") && f.skill && !w.skills.some((s) => s.id === f.skill)) return false
   if (on("q") && f.q && !matchesQuery(w.chain, f.q, w.routineSlug ? ctx.routineName?.(w.routineSlug) : undefined)) return false
   return true
 }
@@ -707,6 +718,8 @@ export function workPasses(w: WorkItem, f: FeedFilters, ctx: FilterContext = {},
  */
 export function changePasses(c: ChangeItem, f: FeedFilters, ctx: FilterContext = {}): boolean {
   if (f.status || f.source) return false
+  // A skill is something work calls; a change to an issue or a page is not work.
+  if (f.skill) return false
   if (f.what === "work") return false
   if (f.what && f.what !== "changes" && f.what !== c.kind) return false
   if (f.routine && c.routineSlug !== f.routine) return false
@@ -916,6 +929,7 @@ export function parseFeedUrl(p: URLSearchParams): FeedUrlState {
       crew: param(p, "crew"),
       source: source && SOURCES.has(source) ? (source as WorkSource) : null,
       issue: param(p, "mission") ?? param(p, "issue"),
+      skill: param(p, "skill"),
     },
     group,
     bundle: param(p, "bundle") !== "off",
@@ -935,6 +949,7 @@ export function feedUrlParams(s: FeedUrlState): URLSearchParams {
   if (f.routine) p.set("pipeline", f.routine)
   if (f.issue) p.set("mission", f.issue)
   if (f.agent) p.set("agent", f.agent)
+  if (f.skill) p.set("skill", f.skill)
   if (f.crew) p.set("crew", f.crew)
   if (f.source) p.set("source", f.source)
   if (f.q) p.set("q", f.q)

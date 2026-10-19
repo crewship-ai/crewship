@@ -98,6 +98,9 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	chainAgentRef := object(map[string]any{
 		"id": str(), "slug": str(), "name": str(), "assignments": integer(),
 	})
+	chainSkillRef := object(map[string]any{
+		"id": str(), "slug": str(), "name": str(), "uses": integer(),
+	})
 	chainSummary := object(map[string]any{
 		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
 		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
@@ -116,6 +119,9 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"duration_ms": map[string]any{"type": "integer", "nullable": true},
 		"issues":      array(chainIssueRef), "issue_count": integer(),
 		"agents": array(chainAgentRef), "agent_count": integer(),
+		// Skills the chain's agents called inside their assignment windows
+		// (ODCH-SK-14); capped per row (24), skill_count is the full total.
+		"skills": array(chainSkillRef), "skill_count": integer(),
 	})
 	// has_unrecorded_runs is load-bearing the way truncated is on the walk:
 	// runs from before the chain_origin column are absent from the index and

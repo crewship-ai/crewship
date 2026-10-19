@@ -52,6 +52,7 @@ export function ActivityPanel({
   routines,
   agents,
   crews,
+  skills = [],
   sources,
   onOpenLedger,
   ledgerCounts,
@@ -63,6 +64,8 @@ export function ActivityPanel({
   routines: PanelOption[]
   agents: PanelOption[]
   crews: PanelOption[]
+  /** Skills the listed work used; absent on a server without them. */
+  skills?: PanelOption[]
   sources: { id: WorkSource; count: number }[]
   /** The work queue and webhook deliveries keep their place under Views. */
   onOpenLedger?: (section: LedgerSection) => void
@@ -81,7 +84,7 @@ export function ActivityPanel({
   const facetBlock = useSidebarFacets()
   // The views (Needs a person, Running, Could not finish) are places, not facets: Clear keeps them.
   const clearAll = () =>
-    onFilters({ ...filters, what: null, routine: null, agent: null, crew: null, source: null, issue: null, status: viewOfStatus(filters.status) ? filters.status : null })
+    onFilters({ ...filters, what: null, routine: null, agent: null, crew: null, source: null, issue: null, skill: null, status: viewOfStatus(filters.status) ? filters.status : null })
   const nameOf = (xs: PanelOption[], id: string) => xs.find((x) => x.id === id)?.label ?? id
   type Chip = { key: keyof FeedFilters; label: string }
   const chips = ([
@@ -90,6 +93,7 @@ export function ActivityPanel({
     filters.routine ? { key: "routine" as const, label: `Routine: ${nameOf(routines, filters.routine)}` } : null,
     filters.agent ? { key: "agent" as const, label: `Who: ${nameOf(agents, filters.agent)}` } : null,
     filters.crew ? { key: "crew" as const, label: `Crew: ${nameOf(crews, filters.crew)}` } : null,
+    filters.skill ? { key: "skill" as const, label: `Skill: ${nameOf(skills, filters.skill)}` } : null,
     filters.source ? { key: "source" as const, label: `Work started by: ${WORK_SOURCE_LABEL[filters.source]}` } : null,
   ] as (Chip | null)[]).filter((c): c is Chip => c != null)
 
@@ -162,6 +166,15 @@ export function ActivityPanel({
             selected={filters.crew}
             onToggle={(v) => toggle("crew", v)}
             onClear={() => set({ crew: null })}
+          />
+        )}
+        {skills.length > 0 && (
+          <SidebarInlineFacet
+            label="Skill"
+            values={skills.map((s) => ({ value: s.id, label: s.label, count: s.count }))}
+            selected={filters.skill}
+            onToggle={(v) => toggle("skill", v)}
+            onClear={() => set({ skill: null })}
           />
         )}
         {sources.length > 0 && (

@@ -43,6 +43,7 @@ import { Switch } from "@/components/ui/switch"
 import { PageError, PageLoading, PageNotFound } from "@/components/layout/page-state"
 import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { useJournalList } from "@/hooks/use-journal-list"
+import { activityUrl } from "@/lib/activity-url"
 import { useDeleteSkill, useSetSkillAssignment, useSetSkillLifecycle, useSkillDetail } from "@/hooks/use-skills"
 import { entityHref } from "@/lib/entity-links"
 import { formatRelativeShort } from "@/lib/time"
@@ -173,6 +174,11 @@ function downloadSkill(s: SkillDetail) {
 }
 
 const ACTIVITY_TYPES = "skill.invoked,skill.assigned,skill.unassigned,skill.imported"
+
+/** Activity narrowed to the work that called this skill (?walk=skill:<id>). */
+export function skillActivityHref(id: string, label: string): string {
+  return activityUrl("/activity", { path: { stops: [{ kind: "skill", id, label }], dropped: 0 }, lens: "workflows" })
+}
 
 function useSkillJournal(skill: SkillRow, workspaceId: string) {
   const { entries, loading, error } = useJournalList({ workspaceId, params: { entry_type: ACTIVITY_TYPES }, limit: 200 })
@@ -705,11 +711,6 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
     }
   }
 
-  const openActivity = () => {
-    onTab("used")
-    setTimeout(() => recentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)
-  }
-
   const takeFromAll = async () => {
     const results = await Promise.allSettled(holders.map((a) => assign.mutateAsync({ agentId: a.agent_id, skillId: skill.id, on: false })))
     const bad = results.filter((r) => r.status === "rejected").length
@@ -726,8 +727,10 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
         actions={
           <>
             {/* Named apart from the shell's own Activity button in the same bar. */}
-            <SubBarSecondary icon={Activity} onClick={openActivity} aria-label="Skill activity" className="max-sm:hidden">
-              Activity
+            <SubBarSecondary asChild icon={Activity} className="max-sm:hidden">
+              <Link href={skillActivityHref(skill.id, skillName(skill))} aria-label="Skill activity">
+                Activity
+              </Link>
             </SubBarSecondary>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

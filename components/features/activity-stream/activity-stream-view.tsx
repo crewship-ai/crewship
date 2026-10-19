@@ -141,6 +141,7 @@ function applyStop(f: FeedFilters, s: ActivityStop): boolean {
   else if (s.kind === "routine") f.routine = s.id
   else if (s.kind === "agent") f.agent = s.id
   else if (s.kind === "crew") f.crew = s.id
+  else if (s.kind === "skill") f.skill = s.id
   else return false
   return true
 }
@@ -405,7 +406,9 @@ export function ActivityStreamView({
     const agents = new Map<string, { name: string; n: number }>()
     const crews = new Map<string, number>()
     const sources = new Map<WorkSource, number>()
+    const skills = new Map<string, { name: string; n: number }>()
     for (const w of allWork) {
+      for (const s of w.skills) skills.set(s.id, { name: s.name, n: (skills.get(s.id)?.n ?? 0) + 1 })
       if (w.routineSlug) routines.set(w.routineSlug, (routines.get(w.routineSlug) ?? 0) + 1)
       sources.set(w.source, (sources.get(w.source) ?? 0) + 1)
       const seen = new Set<string>()
@@ -423,14 +426,16 @@ export function ActivityStreamView({
     if (filters.routine && !routines.has(filters.routine)) routines.set(filters.routine, 0)
     if (filters.agent && !agents.has(filters.agent)) agents.set(filters.agent, { name: agentName(filters.agent) ?? shortId(filters.agent), n: 0 })
     if (filters.crew && !crews.has(filters.crew)) crews.set(filters.crew, 0)
+    if (filters.skill && !skills.has(filters.skill)) skills.set(filters.skill, { name: filters.skill, n: 0 })
     const byCount = <T extends { count: number; label: string }>(a: T, b: T) => b.count - a.count || a.label.localeCompare(b.label)
     return {
       routines: [...routines].map(([id, count]) => ({ id, label: routineName(id) ?? id, count })).sort(byCount),
       agents: [...agents].map(([id, a]) => ({ id, label: a.name, count: a.n })).sort(byCount),
       crews: [...crews].map(([id, count]) => ({ id, label: lookup.crews.get(id)?.name ?? shortId(id), count })).sort(byCount),
+      skills: [...skills].map(([id, s]) => ({ id, label: s.name, count: s.n })).sort(byCount),
       sources: [...sources].map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count),
     }
-  }, [allWork, crewOfAgent, routineName, lookup.crews, agentName, filters.routine, filters.agent, filters.crew])
+  }, [allWork, crewOfAgent, routineName, lookup.crews, agentName, filters.routine, filters.agent, filters.crew, filters.skill])
 
   const resolveAgent = React.useCallback<AgentResolver>(
     (id) => {
@@ -818,6 +823,7 @@ export function ActivityStreamView({
             routines={panelOptions.routines}
             agents={panelOptions.agents}
             crews={panelOptions.crews}
+            skills={panelOptions.skills}
             sources={panelOptions.sources}
             onOpenLedger={onOpenSection}
             journalLedgers={journalLedgers}
