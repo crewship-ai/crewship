@@ -30,6 +30,14 @@ func seedPreflightMode(cmd *cobra.Command, accountsOnly bool) error {
 	flagServer = strings.TrimRight(server, "/")
 	if !accountsOnly {
 		offline, _ := cmd.Flags().GetBool("offline-demo")
+		// The UI tour only saves agentless routines and plain records: it never
+		// needs a provider credential.
+		uiTour, _ := cmd.Flags().GetBool("ui-tour")
+		if uiTour {
+			if err := checkUITourFlags(cmd); err != nil {
+				return err
+			}
+		}
 		if offline {
 			for _, name := range []string{"smoke-test", "test-backup"} {
 				if value, _ := cmd.Flags().GetBool(name); value {
@@ -45,7 +53,7 @@ func seedPreflightMode(cmd *cobra.Command, accountsOnly bool) error {
 		if err != nil {
 			return err
 		}
-		if !offline && login == nil && strings.TrimSpace(os.Getenv("SEED_ANTHROPIC_API_KEY")) == "" {
+		if !offline && !uiTour && login == nil && strings.TrimSpace(os.Getenv("SEED_ANTHROPIC_API_KEY")) == "" {
 			return fmt.Errorf("seed requires SEED_ANTHROPIC_API_KEY (API key or Claude OAuth token), or a renewable Codex login via --codex-auth-file / SEED_CODEX_AUTH_FILE; no data was created")
 		}
 	}
