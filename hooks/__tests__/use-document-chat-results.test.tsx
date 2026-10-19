@@ -105,3 +105,20 @@ it("drops deleted result titles immediately even when refresh is unavailable", a
   expect(view.result.current.data?.results).toEqual([])
   expect(view.client.getQueryData(["document-chat-results", "ws /&", "chat /&", "human"])).toEqual({ results: [] })
 })
+
+it("does not restore pre-deletion results from an already pending response", async () => {
+  const view = mount()
+  await waitFor(() => expect(view.result.current.data?.results).toEqual([row]))
+  let oldResponse!: (value: Response) => void
+  const pending = new Promise<Response>(resolve => { oldResponse = resolve })
+  vi.mocked(apiFetch).mockReturnValueOnce(pending).mockResolvedValue(response({ error: "Unavailable" }, 503))
+  let oldFetch!: Promise<unknown>
+  act(() => { oldFetch = view.result.current.refetch() })
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
+  await act(async () => { events.get("page.deleted")?.() })
+  await waitFor(() => expect(view.result.current.isError).toBe(true))
+  expect(view.result.current.data?.results).toEqual([])
+  await act(async () => { oldResponse(response({ results: [row] })); await oldFetch })
+  expect(view.result.current.data?.results).toEqual([])
+  expect(view.client.getQueryData(["document-chat-results", "ws /&", "chat /&", "human"])).toEqual({ results: [] })
+})

@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+
 - Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
 - Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
 
