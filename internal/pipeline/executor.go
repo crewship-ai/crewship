@@ -1028,13 +1028,17 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		bodyEntered = true
 		return e.runDSL(ctx, in, 0)
 	})
+	if in.startPrepared && res == nil && err != nil {
+		res = &RunResult{RunID: preallocRunID, PipelineID: in.PipelineID, Status: "FAILED", ErrorMessage: err.Error()}
+		bodyEntered = false // runDSL returned before its terminal defer was installed.
+	}
 	// Translate context-cancellation into a CANCELLED status when
 	// the registry confirms the cancel was user-driven (vs. a parent
 	// ctx going away unexpectedly). The runDSL loop returns the
 	// partial result with FAILED in either case; we re-label here so
 	// the caller can distinguish "user pressed Cancel" from
 	// "unexpected shutdown."
-	if err == nil && res != nil && e.runs != nil && e.runs.IsCancelRequested(preallocRunID) {
+	if res != nil && runWasCancelled(ctx, e.runs, preallocRunID) {
 		res.Status = "CANCELLED"
 		if res.ErrorMessage == "" {
 			res.ErrorMessage = "run cancelled"
@@ -1372,10 +1376,9 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		in.AuthorAgentID = in.pipeline.AuthorAgentID
 	}
 	if err := e.checkInvokingUser(ctx, in); err != nil {
-		// Run may already have reserved an idempotency key. No run row exists
-		// yet at this boundary, so a revoked caller must not leave a ghost
-		// reservation that makes a later authorized retry look DEDUPED.
-		if depth == 0 && in.pipeline != nil && in.IdempotencyKey != "" && e.idempotency != nil {
+		// Only unstarted execution may release its reservation. Once setup
+		// could have run, a retry must resolve to the durable identity.
+		if !in.startPrepared && depth == 0 && in.pipeline != nil && in.IdempotencyKey != "" && e.idempotency != nil {
 			_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.pipeline.ID, in.IdempotencyKey)
 		}
 		return nil, err

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -143,5 +144,55 @@ func TestRunStartBoundaryHookFailureIsDurable(t *testing.T) {
 	phase, err := rig.runStore.startPhase(t.Context(), result.RunID)
 	if err != nil || phase != startPhasePreHooks {
 		t.Fatalf("failed setup phase=%q err=%v", phase, err)
+	}
+}
+
+func TestRunStartBoundaryRevocationAfterSetupKeepsIdentity(t *testing.T) {
+	var revoked atomic.Bool
+	var effects atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		effects.Add(1)
+		revoked.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	definition := fmt.Sprintf(`{"dsl_version":"1.0","name":"setup-revocation","hooks":{"before_all":{"id":"before","type":"http","http":{"method":"POST","url":%q}}},"steps":[{"id":"done","type":"transform","transform":{"input":"ok","expression":"."}}]}`, srv.URL)
+	rig := newEffectRig(t, "setup-revocation", definition)
+	if _, err := rig.store.db.Exec(idempotencySchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	rig.exec.WithIdempotencyStore(NewIdempotencyStore(rig.store.db))
+	rig.exec.memberCheck = func(context.Context, string, string) (bool, error) { return !revoked.Load(), nil }
+	input := RunInput{PipelineID: rig.pipeline.ID, WorkspaceID: "ws_test", Mode: ModeRun, InvokingUserID: "human", IdempotencyKey: "setup-once"}
+	result, err := rig.exec.Run(t.Context(), input)
+	if err == nil || result == nil {
+		t.Fatalf("revoked body admission: %+v %v", result, err)
+	}
+	actual, getErr := rig.runStore.Get(t.Context(), result.RunID)
+	if getErr != nil || actual.Status != RunStatusFailed {
+		t.Fatalf("revocation must close durable start: %+v %v", actual, getErr)
+	}
+	revoked.Store(false)
+	duplicate, err := rig.exec.Run(t.Context(), input)
+	if err != nil || duplicate == nil || duplicate.Status != "DEDUPED" || duplicate.RunID != result.RunID {
+		t.Fatalf("retry lost identity: %+v %v", duplicate, err)
+	}
+	if effects.Load() != 1 {
+		t.Fatal("retry repeated setup")
+	}
+}
+
+func TestRunStartBoundaryCancelBeforeBody(t *testing.T) {
+	rig := newEffectRig(t, "cancel-setup", `{"dsl_version":"1.0","name":"cancel-setup","steps":[{"id":"done","type":"transform","transform":{"input":"ok","expression":"."}}]}`)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result, _ := rig.exec.Run(ctx, RunInput{PipelineID: rig.pipeline.ID, WorkspaceID: "ws_test", Mode: ModeRun, OnStarted: func(string) { cancel() }})
+	if result == nil || result.Status != "CANCELLED" {
+		t.Fatalf("cancelled admission: %+v", result)
+	}
+	actual, err := rig.runStore.Get(t.Context(), result.RunID)
+	if err != nil || actual.Status != RunStatusCancelled {
+		t.Fatalf("durable cancellation: %+v %v", actual, err)
 	}
 }
