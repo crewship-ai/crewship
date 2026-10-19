@@ -426,6 +426,14 @@ describe("<RoutinesExplorer> folders (ODCH-RT-01)", () => {
     await waitFor(() => expect(onMove).toHaveBeenCalledWith(["invoice"], "f_intel"))
   })
 
+  it("the selection bar wraps instead of pushing Done selecting out of the 272 px panel (nightly RT-03)", () => {
+    renderPanel({ routines: folderRoutines, folders: { list, onMove: vi.fn(async () => null) }, bulk: bulk() })
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }))
+    const bar = screen.getByRole("toolbar", { name: "Selected routines" })
+    expect(bar.className).toContain("flex-wrap")
+    expect(within(bar).getByRole("button", { name: "Done selecting" })).toBeInTheDocument()
+  })
+
   it("does not offer Move before the person may create", () => {
     renderPanel({ routines: folderRoutines, folders: { list }, bulk: bulk() })
     fireEvent.click(screen.getByRole("button", { name: "Select several" }))

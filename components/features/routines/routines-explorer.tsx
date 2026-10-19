@@ -614,8 +614,8 @@ function RoutinesList({
 
       {/* PNL-03: the bulk bar sits at the bottom of the panel while selecting. */}
       {selecting && bulk && (
-        <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
-          <span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
+        <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 flex-wrap items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
+          <span className="min-w-0 flex-1 basis-full truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
           {folders?.onMove && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
