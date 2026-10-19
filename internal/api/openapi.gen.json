@@ -2941,6 +2941,184 @@
         ],
         "type": "object"
       },
+      "ChatSourceAuthor": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChatSourceConversationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "agent_session",
+              "workspace_room"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "source_kind",
+          "source_id"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "alternative_parent": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "author": {
+            "$ref": "#/components/schemas/ChatSourceAuthor"
+          },
+          "content": {
+            "type": "string"
+          },
+          "message_ref": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/ChatSourceOrder"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSourcePart"
+            },
+            "type": "array"
+          },
+          "reply_to": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "thread_root": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          }
+        },
+        "required": [
+          "message_ref",
+          "role",
+          "author",
+          "occurred_at",
+          "order",
+          "reply_to",
+          "thread_root",
+          "alternative_parent",
+          "content",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessageRef": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "conversation_ref": {
+            "$ref": "#/components/schemas/ChatSourceConversationRef"
+          },
+          "source_message_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_ref",
+          "source_message_id"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessages": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "conversation_ref": {
+            "$ref": "#/components/schemas/ChatSourceConversationRef"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSourceMessage"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "snapshot_complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "conversation_ref",
+          "messages"
+        ],
+        "type": "object"
+      },
+      "ChatSourceOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "source_position": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_sequence": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ChatSourcePart": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "tool_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
       "Connector": {
         "properties": {
           "auth_mode": {
@@ -19159,22 +19337,40 @@
         "type": "object"
       },
       "WorkspaceConversationMessages": {
-        "properties": {
-          "has_more": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "properties": {
+                  "has_more": {
+                    "type": "boolean"
+                  },
+                  "messages": {
+                    "items": {
+                      "$ref": "#/components/schemas/WorkspaceConversationMessage"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "messages",
+                  "has_more"
+                ],
+                "type": "object"
+              },
+              {
+                "not": {
+                  "required": [
+                    "contract_version"
+                  ]
+                }
+              }
+            ]
           },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceConversationMessage"
-            },
-            "type": "array"
+          {
+            "$ref": "#/components/schemas/ChatSourceMessages"
           }
-        },
-        "required": [
-          "messages",
-          "has_more"
-        ],
-        "type": "object"
+        ]
       },
       "WorkspaceConversationMuteRequest": {
         "additionalProperties": false,
@@ -60080,6 +60276,17 @@
             }
           },
           {
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "enum": [
+                "source_v1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -60094,40 +60301,58 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "messages": {
-                      "items": {
-                        "properties": {
-                          "author_user_id": {
-                            "nullable": true,
-                            "type": "string"
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "properties": {
+                            "messages": {
+                              "items": {
+                                "properties": {
+                                  "author_user_id": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "content": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "session_id": {
+                                    "type": "string"
+                                  },
+                                  "tool_summary": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "ts": {
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
                           },
-                          "content": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "role": {
-                            "type": "string"
-                          },
-                          "session_id": {
-                            "type": "string"
-                          },
-                          "tool_summary": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "ts": {
-                            "type": "string"
-                          }
+                          "type": "object"
                         },
-                        "type": "object"
-                      },
-                      "type": "array"
+                        {
+                          "not": {
+                            "required": [
+                              "contract_version"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatSourceMessages"
                     }
-                  },
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -66865,6 +67090,17 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "enum": [
+                "source_v1"
+              ],
+              "type": "string"
             }
           },
           {
