@@ -244,7 +244,7 @@ var TableCategory = map[string]string{
 	"cost_ledger": CategoryJournal, "gdpr_actions": CategoryJournal,
 
 	// Credentials and integrations.
-	"credentials": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
+	"credentials": CategoryCreds, "credential_folders": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
 	"credential_fields": CategoryCreds, "provider_login_pools": CategoryCreds,
 	"provider_login_pool_members": CategoryCreds, "agent_credentials": CategoryCreds,
 	"credential_audit": CategoryCreds, "credential_rotations": CategoryCreds, "composio_settings": CategoryCreds,
