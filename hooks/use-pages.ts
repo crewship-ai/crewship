@@ -473,6 +473,8 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  /** Actual validated wire ID only; never the legacy slug-derived row key. */
+  immutablePageId?: string
   /** Unknown on legacy servers; never infer from ownership or folder. */
   privateAudience?: boolean
   /** Confirmed native Document descriptor; missing means a legacy Page. */
@@ -622,6 +624,7 @@ export function toPageView(raw: WirePage): PageView {
   const slug = trimmed(raw.slug) ?? ""
   return {
     id: trimmed(raw.id) ?? slug,
+    immutablePageId: typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(raw.id) ? raw.id : undefined,
     hasDocument: raw.has_document === true,
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     slug,

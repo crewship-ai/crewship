@@ -27,5 +27,5 @@ it("refuses a missing wire identity instead of promoting its synthetic key into 
  expect(button).toBeDisabled()
  fireEvent.click(button)
  expect(select).not.toHaveBeenCalled()
- expect(screen.getByText("A Document cannot be opened because its original identity is unavailable.")).toBeTruthy()
+ expect(screen.getByText("A Document is unavailable. Refresh the list and try again.")).toBeTruthy()
 })
