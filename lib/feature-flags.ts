@@ -35,3 +35,12 @@ export function legacyMcpIntegrations(): boolean {
 export function chatSearchFilesFixtures(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES === "true"
 }
+
+/**
+ * Chat sidebar smart sections without a data source yet (CH-26: Mentions,
+ * Threads, Saved, Drafts, Waiting for you, Review). Default OFF; with the flag
+ * on they render from fixtures.
+ */
+export function chatSidebarSmartSections(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS === "true"
+}

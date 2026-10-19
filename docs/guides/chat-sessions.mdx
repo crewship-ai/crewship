@@ -779,3 +779,14 @@ Legacy proxy traffic under a hard budget requires the restricted broker even
 when a balance remains; preflight reports that existing constraint.
 
 Changing conversations clears the previous transcript before the new history is loaded, including when the current account and workspace stay the same. Responses from the previous conversation cannot repopulate the new view.
+
+## Sidebar views
+
+The chat sidebar has view chips: **All**, **Unreads** and **Agents running**.
+"Agents running" lists agents whose status is running; it does not mean the
+chat you have open is running. Other views (Mentions, Threads, Saved, Drafts,
+Waiting for you, Review) are preview-only on sample data and are hidden unless
+enabled for development. Rows do not move while your pointer or keyboard focus
+is on a list; when the order changed, a **Refresh** button appears. Your open
+chat stays in the list even when the view would otherwise filter it out, and
+Favorites are never removed by a view.
