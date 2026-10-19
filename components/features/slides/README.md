@@ -6,6 +6,14 @@ gate rejects the entire schema-2 or unknown deck before rendering any source tex
 image authorization/rendering is not integrated. Stored schema-2 data is unchanged.
 This is the native candidate renderer, not a format-selection result.
 
+`PageSlides` supplies a separate read-only saved-content wrapper. Its
+`usePageSlides` hook reads an immutable Page ID for the current human/workspace
+and open epoch, validates the closed schema-1 response and canonical content hash,
+and conceals old content on scope changes, deletion and reconnect. It passes only
+verified saved content and its revision to the editor. This wrapper adds no save,
+history, restore or agent operation; Page metadata and layout dispatch still need
+separate integration. HTTP/realtime-callback tests do not prove a live browser flow.
+
 `deck` is the caller-owned displayed candidate. `onChange(candidate)` emits a
 validated unsaved draft. Optional `onSave(candidate)` only requests persistence;
 it performs no request and cannot establish a successful save. `readOnly` or
