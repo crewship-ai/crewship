@@ -10,7 +10,7 @@ const account = vi.hoisted(() => ({ user: "human-A" as string | null, status: "a
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: account.status, data: account.user ? { user: { id: account.user } } : null }) }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: true, isPending: false }) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 afterEach(() => { cleanup(); request.mockReset(); account.user = "human-A"; account.status = "authenticated" })
 
 it.each([200, 403])("unmounts the former human's editor and draft download before the next human's %s response", async (status) => {

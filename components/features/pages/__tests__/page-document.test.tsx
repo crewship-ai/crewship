@@ -10,7 +10,7 @@ const availability=vi.hoisted(()=>({enabled:true}))
 const account=vi.hoisted(()=>({id:"document-test-human"}))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({data:availability.enabled,isPending:false}) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: account.id } } }) }))
 afterEach(() => { cleanup(); request.mockReset();availability.enabled=true;account.id="document-test-human" })
 it("hydrates saved CRDT content before binding the editor without manufacturing a local write", async () => {

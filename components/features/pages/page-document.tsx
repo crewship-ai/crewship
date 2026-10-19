@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Extension } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
@@ -16,6 +16,8 @@ import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { usePageDocument } from "@/hooks/use-page-document"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { useDocumentHistory } from "@/hooks/use-document-history"
+import { DocumentHistory } from "./document-history/document-history"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -51,16 +53,22 @@ export function PageDocument(props: DocumentProps) {
   if (!props.workspaceId || !props.pageId) return <p role="alert" className="p-6">The original Page identity is unavailable.</p>
   if (availability.isPending && admitted !== identity) return <p role="status" className="p-6">Checking document availability…</p>
   if (!available && admitted !== identity) return <p role="status" className="p-6">Documents are unavailable. Your Page remains in the list.</p>
-  return <DocumentSession key={identity} {...props} available={available} />
+  return <DocumentSession key={identity} {...props} humanId={human} available={available} />
 }
-function DocumentSession(props: DocumentProps & {available:boolean}) {
+function DocumentSession(props: DocumentProps & {available:boolean; humanId:string}) {
+  const [historyExpired, setHistoryExpired] = useState(false)
+  useEffect(() => {
+    const expire = () => setHistoryExpired(true)
+    window.addEventListener("auth:session-expired", expire)
+    return () => window.removeEventListener("auth:session-expired", expire)
+  }, [])
   const sync = usePageDocument(props.workspaceId, props.slug, props.pageId, props.available)
   // Bind ProseMirror only after hydration, so its empty default paragraph is
   // never merged into a document which already contains saved content.
   if (!sync.state) return <p role={sync.denied ? "alert" : "status"} className="p-6">{sync.status}{sync.error ? ` · ${sync.error}` : ""}</p>
-  return <DocumentWorkspace {...props} sync={sync} />
+  return <DocumentWorkspace {...props} sync={sync} historyExpired={historyExpired} />
 }
-function DocumentWorkspace({ slug, name, available, onDirtyChange, sync }: DocumentProps & { available:boolean; sync: ReturnType<typeof usePageDocument> }) {
+function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available, historyExpired, onDirtyChange, sync }: DocumentProps & { available:boolean; humanId:string; historyExpired:boolean; sync: ReturnType<typeof usePageDocument> }) {
   const [linkAddress, setLinkAddress] = useState("")
   const [actionError, setActionError] = useState<string>()
   const editor = useEditor({
@@ -74,6 +82,7 @@ function DocumentWorkspace({ slug, name, available, onDirtyChange, sync }: Docum
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><span role="status" aria-live="polite" className="text-sm">{!available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}</span></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
     {(sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your local draft is retained in this tab. Download it before reopening the current document.</p><Button onClick={() => download(`${slug}-recovery.json`, JSON.stringify(editor?.getJSON(), null, 2))}>Download unsaved draft</Button><Button variant="outline" onClick={() => window.location.reload()}>Reopen saved document</Button></div>}
+    <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired} />
     {!sync.denied && <>
     {sync.editable && editor && <div aria-label="Document formatting" className="flex flex-wrap gap-1 px-6">
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().setParagraph().run()}>Paragraph</Button>
@@ -87,4 +96,23 @@ function DocumentWorkspace({ slug, name, available, onDirtyChange, sync }: Docum
     {sync.state ? <EditorContent editor={editor} /> : <p className="p-6">{sync.status}</p>}
     </>}
   </section>
+}
+
+function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied }: { workspaceId: string; pageId: string; humanId: string; available: boolean; denied: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [openEpoch, setOpenEpoch] = useState(0)
+  const opener = useRef<HTMLButtonElement>(null)
+  const eligible = available && !denied
+  const visible = open && eligible
+  const history = useDocumentHistory({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}` })
+  useEffect(() => { if (!eligible) setOpen(false) }, [eligible])
+  const close = () => { setOpen(false); opener.current?.focus() }
+  return <div className="space-y-3 px-3">
+    <Button ref={opener} type="button" variant="outline" disabled={!eligible} aria-expanded={visible} onClick={() => {
+      if (!eligible) return
+      if (open) close()
+      else { setOpenEpoch(value => value + 1); setOpen(true) }
+    }}>History</Button>
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} />}
+  </div>
 }
