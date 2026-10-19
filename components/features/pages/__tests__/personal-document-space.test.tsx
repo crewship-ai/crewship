@@ -52,3 +52,12 @@ it("does not fetch without a current human and shows an honest empty state", asy
  identity.userId = "human-a"; request.mockResolvedValue(Response.json([])); view.rerender(view.content("workspace-a"))
  await screen.findByText("No private Documents in your space.")
 })
+
+it.each([false, true])("reports unknown own Document classification without claiming empty (known private present=%s)", async mixed => {
+ request.mockResolvedValue(Response.json([row("Unknown audience title"), ...(mixed ? [row("Known private", { private_audience: true })] : [])]))
+ mount()
+ await screen.findByText("Document audience information is unavailable for some of your Documents.")
+ expect(screen.queryByText("No private Documents in your space.")).toBeNull()
+ expect(screen.queryByText("Unknown audience title")).toBeNull()
+ if (mixed) expect(screen.getByRole("button", { name: "Known private Doc" })).toBeTruthy()
+})
