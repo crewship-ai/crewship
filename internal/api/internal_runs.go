@@ -266,6 +266,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	var body struct {
+		CompletedAt  string          `json:"completed_at,omitempty"`
 		Status       string          `json:"status"`
 		ExitCode     *int            `json:"exit_code"`
 		ErrorMessage *string         `json:"error_message"`
@@ -349,6 +350,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if projection.Ready {
+			body.CompletedAt = projection.Result.CompletedAt
 			body.Status = projection.Status
 			body.ExitCode = projection.Result.ExitCode
 			body.ErrorMessage = projection.Result.ErrorMessage
@@ -435,7 +437,12 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 			decoder.UseNumber()
 			_ = decoder.Decode(&metadata)
 		}
-		entry := journal.RunTerminalReplay(runID, workspaceID, agentID, started, entryType, workOwned, body.ExitCode, body.ErrorMessage, metadata)
+		eventTime, err := journal.RunTerminalEventTime(started, body.CompletedAt)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, "Invalid captured completion timestamp")
+			return
+		}
+		entry := journal.RunTerminalReplay(runID, workspaceID, agentID, eventTime, entryType, workOwned, body.ExitCode, body.ErrorMessage, metadata)
 		emit = func(ctx context.Context, _ journal.Entry) (string, error) {
 			id, _, err := replay.EmitReplaySync(ctx, entry)
 			return id, err
