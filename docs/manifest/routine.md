@@ -660,7 +660,7 @@ crewship routine replay <run_id> --tags '["prod","retry"]' --version 9
 - The replay executes real work with the current operator's authority.
 
 Editing inputs on replay is available in the API and CLI; the UI does not
-offer it yet. See [`crewship routine replay`](/cli/routine#crewship-routine-replay-run_id).
+offer it yet. See [`crewship routine replay`](/cli/routine#crewship-routine-replay-<run_id>).
 
 ### Errors view + bulk replay
 

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **The Schedules tab names capacity outcomes in plain words.** A schedule's last fire reads "Waiting for capacity" when it is queued, "Skipped – a run is already waiting" when a full routine already holds its waiting occurrence, and "Routine inactive" when the routine is not active. The scheduling, routines and manifest guides now describe capacity queueing and replay with edited inputs and metadata.
+
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
