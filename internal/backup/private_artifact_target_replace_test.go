@@ -22,7 +22,7 @@ import (
 // old schemas. Replacement must not discard newer audience proof while leaving
 // the newer per-agent log outside the archived stores. No HTTP/model claim.
 func TestPrivateArtifactTargetWorkspaceReplace(t *testing.T) {
-	for _, kind := range []string{"consent", "created", "ordinary"} {
+	for _, kind := range []string{"consent", "created", "marker", "ordinary"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newInstanceFixture(t)
 			seedReplacementChat(t, f.db, f.paths.Output)
@@ -38,12 +38,25 @@ func TestPrivateArtifactTargetWorkspaceReplace(t *testing.T) {
 				t.Fatal("snapshot must be encrypted")
 			}
 			logPath, before := advanceReplacementTarget(t, f.db, f.paths.Output, filepath.Join(t.TempDir(), "logs"), kind)
+			if kind == "ordinary" {
+				// Another workspace's retained privacy must not block this target.
+				replacementExec(t, f.db, `INSERT INTO workspaces(id,name,slug) VALUES('unrelated-private-workspace','Other private workspace','unrelated-private-workspace')`)
+				replacementExec(t, f.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('unrelated-private-crew','unrelated-private-workspace','Other crew','other-private')`)
+				replacementExec(t, f.db, `INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('unrelated-private-agent','unrelated-private-workspace','unrelated-private-crew','Other agent','other-private')`)
+				replacementExec(t, f.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,private_artifact_author_user_id) VALUES('unrelated-private-chat','unrelated-private-workspace','unrelated-private-agent','u_admin','private','u_admin')`)
+			}
 			_, err = backup.RestoreBackup(t.Context(), f.db, backup.RestoreOptions{
 				Path: bundle.Path, Identities: []age.Identity{f.identity}, Replace: true,
 				Actor: backup.Actor{UserID: "u_admin", Role: "OWNER"}, ConversationRoot: f.paths.Output,
 			})
 			// Workspace restore reconciles the retained newer transcript into SQL.
 			assertReplacementOutcome(t, f.db, logPath, before, kind, 2, err)
+			if kind == "ordinary" {
+				var author string
+				if err := f.db.QueryRow(`SELECT private_artifact_author_user_id FROM chats WHERE id='unrelated-private-chat'`).Scan(&author); err != nil || author != "u_admin" {
+					t.Fatalf("unrelated private workspace changed: %v", err)
+				}
+			}
 		})
 	}
 }
@@ -82,6 +95,10 @@ func advanceReplacementTarget(t *testing.T, db *sql.DB, output, logs, kind strin
 	replacementExec(t, db, `UPDATE workspaces SET name='newer target state' WHERE id='ws_e2e_1'`)
 	if kind != "ordinary" {
 		replacementExec(t, db, `INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at) VALUES('replace-original','ws_e2e_1','u_admin','replace-chat','replace-submission','2026-10-19T00:00:00Z')`)
+		if kind == "marker" {
+			// Runtime consent can be purged; the retained marker must suffice.
+			replacementExec(t, db, `DELETE FROM document_creation_consents WHERE chat_id='replace-chat'`)
+		}
 		if kind == "created" {
 			seedBackupDocument(t, db, "ws_e2e_1", "replace-document", "u_admin")
 			replacementExec(t, db, `UPDATE pages SET private_audience=1 WHERE id='replace-document'`)

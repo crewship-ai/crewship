@@ -21,7 +21,7 @@ import (
 // snapshot. Only then do we add newer output. The second, forced recovery must
 // refuse before replacing that installation's database or retained log files.
 func TestPrivateArtifactTargetForceRecover(t *testing.T) {
-	for _, kind := range []string{"consent", "created", "ordinary"} {
+	for _, kind := range []string{"consent", "created", "marker", "ordinary"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newInstanceFixture(t)
 			seedReplacementChat(t, f.db, f.paths.Output)
@@ -68,7 +68,7 @@ func TestPrivateArtifactTargetForceRecoverThroughBinary(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build actual binary: %v %s", err, output)
 	}
-	for _, kind := range []string{"consent", "ordinary"} {
+	for _, kind := range []string{"consent", "marker", "ordinary"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newInstanceFixture(t)
 			seedReplacementChat(t, f.db, f.paths.Output)
