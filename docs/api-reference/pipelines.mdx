@@ -747,11 +747,20 @@ filters use newest accepted starts first.
 
 Each item contains `id`, `pipeline_slug`, optional `debounce_key`, `priority`,
 RFC3339Nano `fire_at`, nullable `pinned_version`, `status`, `run_id`,
-`dispatch_attempts`, safe `last_error`, nullable `expires_at` and `next_attempt_at`,
+`dispatch_attempts`, stable `reason_code`, safe `last_error`, nullable `expires_at` and `next_attempt_at`,
 `can_cancel`, and the read-only `inputs` preview (`{}` when empty). The preview
 retains safe primitives; credentials, files and known secrets become type-only
 markers, and other containers are empty. It must not be replayed as run inputs.
 An unavailable database is `503`; listing failure is `500`.
+
+`reason_code` is always present. Codes include `unknown`, `scheduled`,
+`routine_capacity`, `retry_backoff`, `paused`, `capacity_expired`, `expired`,
+`version_missing`, `routine_inactive`, `dispatch_failed`, `recovered` and
+`recovery_unknown`. Legacy rows without evidence return `unknown`; clients must
+also tolerate future codes. `paused` is a read-time overlay for pending starts
+only. For `recovery_unknown`, inspect run history and server logs using the
+pending ID before considering another start; it is not evidence that execution
+started or that replay is safe.
 
 Capacity rejection retries without occupying a worker during backoff: 2, 4, 8,
 16, 32, then at most 60 seconds. The original TTL ends waiting as `expired` with

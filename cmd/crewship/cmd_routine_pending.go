@@ -46,6 +46,9 @@ var routinePendingListCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+		for i := range rows {
+			rows[i].ReasonCode = pendingCLIReason(rows[i])
+		}
 		// "Nothing pending" is the normal state, so it is also the state a
 		// polling script hits on nearly every run — it must be an empty list,
 		// not the sentence this used to print under `-f json`.
@@ -62,7 +65,7 @@ var routinePendingListCmd = &cobra.Command{
 				if r.PinnedVersion != nil {
 					version = fmt.Sprintf("v%d", *r.PinnedVersion)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.PipelineSlug, r.Status, r.DispatchAttempts, r.Priority, r.DebounceKey, r.FireAt, version, r.RunID, r.LastError)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", r.ID, r.PipelineSlug, r.Status, r.DispatchAttempts, r.Priority, r.DebounceKey, r.FireAt, version, r.RunID, pendingCLIReason(r))
 			}
 			flush.of(w)
 		}); err != nil {
@@ -89,6 +92,7 @@ type pendingTriggerRow struct {
 	Status           string         `json:"status" yaml:"status"`
 	RunID            string         `json:"run_id" yaml:"run_id"`
 	DispatchAttempts int            `json:"dispatch_attempts" yaml:"dispatch_attempts"`
+	ReasonCode       string         `json:"reason_code" yaml:"reason_code"`
 	LastError        string         `json:"last_error" yaml:"last_error"`
 	CanCancel        bool           `json:"can_cancel" yaml:"can_cancel"`
 }
@@ -145,6 +149,7 @@ var routinePendingGetCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&row); err != nil {
 			return err
 		}
+		row.ReasonCode = pendingCLIReason(row)
 		return resolvedFormatter(cmd).AutoHuman(row, func() {
 			fmt.Printf("Deferred start: %s\nRoutine: %s\nStatus: %s\nDispatch attempts: %d\nScheduled for: %s\n", row.ID, row.PipelineSlug, row.Status, row.DispatchAttempts, row.FireAt)
 			if row.ExpiresAt != nil {
@@ -156,6 +161,7 @@ var routinePendingGetCmd = &cobra.Command{
 			if row.RunID != "" {
 				fmt.Printf("Run: %s\n", row.RunID)
 			}
+			fmt.Printf("Reason code: %s\n", pendingCLIReason(row))
 			if row.LastError != "" {
 				fmt.Printf("Reason: %s\n", row.LastError)
 			}
@@ -169,4 +175,11 @@ func init() {
 	routinePendingCmd.AddCommand(routinePendingListCmd)
 	routinePendingCmd.AddCommand(routinePendingCancelCmd)
 	pipelineCmd.AddCommand(routinePendingCmd)
+}
+
+func pendingCLIReason(row pendingTriggerRow) string {
+	if row.ReasonCode == "" {
+		return "unknown"
+	}
+	return row.ReasonCode
 }

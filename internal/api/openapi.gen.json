@@ -1,6 +1,48 @@
 {
   "components": {
     "schemas": {
+      "AcceptedPipelineRun": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pending_id": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "QUEUED",
+              "FAILED",
+              "EXPIRED",
+              "CANCELLED"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "pipeline_id",
+          "pipeline_slug",
+          "status",
+          "pending_id",
+          "reason_code"
+        ],
+        "type": "object"
+      },
       "AccessMeDecision": {
         "properties": {
           "reason": {
@@ -11447,6 +11489,31 @@
         ],
         "type": "object"
       },
+      "PipelineRunDetail": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PipelineRun"
+              },
+              {
+                "required": [
+                  "id",
+                  "workspace_id",
+                  "pipeline_id",
+                  "pipeline_slug",
+                  "status",
+                  "mode",
+                  "started_at"
+                ]
+              }
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/AcceptedPipelineRun"
+          }
+        ]
+      },
       "PipelineRunList": {
         "properties": {
           "count": {
@@ -19508,6 +19575,9 @@
           "priority": {
             "type": "integer"
           },
+          "reason_code": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -19535,7 +19605,8 @@
           "run_id",
           "dispatch_attempts",
           "last_error",
-          "can_cancel"
+          "can_cancel",
+          "reason_code"
         ],
         "type": "object"
       },
@@ -19583,6 +19654,9 @@
             "priority": {
               "type": "integer"
             },
+            "reason_code": {
+              "type": "string"
+            },
             "run_id": {
               "type": "string"
             },
@@ -19610,7 +19684,8 @@
             "run_id",
             "dispatch_attempts",
             "last_error",
-            "can_cancel"
+            "can_cancel",
+            "reason_code"
           ],
           "type": "object"
         },
@@ -143483,6 +143558,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -143501,6 +143588,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -143737,6 +143836,9 @@
                     "duplicate": {
                       "type": "boolean"
                     },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "reason": {
                       "type": "string"
                     },
@@ -143769,6 +143871,9 @@
                     },
                     "duplicate": {
                       "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
                     },
                     "reason": {
                       "type": "string"
@@ -150429,7 +150534,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineRun"
+                  "$ref": "#/components/schemas/PipelineRunDetail"
                 }
               }
             },
@@ -150488,24 +150593,6 @@
               }
             },
             "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Not Found"
           },
           "500": {
             "content": {

@@ -36,10 +36,14 @@ func TestSerializeEntryOwnerCreationWhitelist(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			projected := PublicAuthorizationAudit(entry)
 			actual := SerializeEntry(entry)["payload"]
 			want := copy
 			if tc.redact {
 				want = map[string]any{"member_id": "member", "subject_user_id": "user", "action": tc.action, "creation_path": "signup_personal"}
+			}
+			if !reflect.DeepEqual(projected.Payload, want) {
+				t.Fatal("public owner creation projection missing or unrelated event changed")
 			}
 			if !reflect.DeepEqual(actual, want) {
 				t.Fatal("owner creation privacy whitelist missing or unrelated event changed")

@@ -86,6 +86,7 @@ var AllEntryTypes = []EntryType{
 	EntryMemberAccessChanged,
 	EntryMemberCapabilitiesChanged,
 	EntryMemberRemoved,
+	EntryMemberRoleChanged,
 	EntryMemoryConfigUpdated,
 	EntryMemoryConsolidated,
 	EntryMemoryConsolidationProposed,
@@ -116,14 +117,14 @@ var AllEntryTypes = []EntryType{
 	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:79:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
-	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:793:2
+	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
 	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:57:7
 	EntryPagePanelRecovered,
 	EntryPagePanelStale,
 	EntryPagePanelUpdated,
 	EntryPageProduceDenied,
-	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:796:2
-	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:792:2
+	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:800:2
+	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:796:2
 	EntryPageSpecChanged,
 	EntryPageWakeFired,
 	EntryType("page.webhook_issued"),  // journalPageWebhookIssued, internal/api/pages_webhooks.go:451:2

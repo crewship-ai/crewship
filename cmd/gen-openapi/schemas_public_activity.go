@@ -184,14 +184,14 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 			},
 			SuccessStatuses: []string{"200", "202"},
 			Response: object(map[string]any{
-				"run_id": str(), "status": str(), "deduped": boolean(), "delivery_id": str(),
+				"run_id": str(), "status": str(), "deduped": boolean(), "delivery_id": str(), "pending_id": str(),
 				"duplicate": boolean(), "reason": str(),
 			}, "status"),
 		},
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks":               {Response: array(webhook)},
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":              {Request: webhookRequest, Response: webhook},
 		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}": {Request: webhookUpdateRequest, Response: webhook},
-		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str()})},
+		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str(), "pending_id": str(), "delivery_id": str(), "deduped": boolean(), "duplicate": boolean()})},
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,
