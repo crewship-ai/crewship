@@ -257,6 +257,7 @@ env:
     e2e/tap-target-pointer.spec.ts
     e2e/harbor2-parity-global.spec.ts
     e2e/harbor2-workspace-default.spec.ts
+    e2e/avatars-voxel.spec.ts
 
 jobs:
   build-tools:
