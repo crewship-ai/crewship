@@ -111,9 +111,20 @@ Paginated, newest-first list. The UI calls this on first load and after every WS
 | `state` | `unread` \| `read` \| `resolved` \| `active` \| `all` | `all` | Linear-Triage default — resolved items stay visible-but-dimmed. `active` returns everything not resolved (unread + read). `""` behaves like `all`. Invalid value → `400 invalid state`. |
 | `kind` | string | (unset) | Narrows by item type. |
 | `limit` | int | `100` | Capped at `500`. |
-| `offset` | int | `0` | Rows to skip. Pair with `has_more` to walk the feed; `crewship inbox list --all` does exactly that. Offset paging is not stable across a mutating feed — a row that leaves the filter between two requests shifts the window and is never returned, so a full walk is exact only on a quiet workspace. |
+| `offset` | int | `0` | Rows to skip. Offset paging is not stable across a mutating feed — a row that leaves the filter between two requests shifts the window and is never returned. Prefer `cursor`. |
+| `cursor` | string | (unset) | Keyset position: the `next_cursor` of the previous page. Rows are ordered `created_at DESC, id DESC` and the cursor resumes strictly after the last row returned, so a row added, read or resolved mid-walk neither shifts the window nor repeats a row. Opaque; do not build one. Cannot be combined with `offset` (`400`); a malformed one is `400 invalid cursor`. |
+| `q` | string | (unset) | Search, case-insensitive (ASCII folding) and literal — `%` and `_` mean themselves. Matches the title, body, sender name, kind, `payload.agent_name` / `agent_slug`, and the name or slug of the crew and agent the item is about. |
+| `space` | `action` \| `updates` \| `history` | (unset) | One Inbox space, defined as under [`/inbox/counts`](#get-apiv1inboxcounts). |
+| `unread` | bool | `false` | `true`: only items unread for the caller. |
+| `attention` | `decision` \| `input` \| `review` \| `repair` | (unset) | Active items of one attention class: the row's `attention_class` if set, otherwise derived from its kind (waitpoint → decision, `run_needs_human` → input, `memory_consolidation` → review, failures and schedule alerts → repair, an actionable escalation by its type). |
+| `deadline` | `hour` \| `today` \| `soon` \| `none` | (unset) | By `payload.timeout_at`: `hour` due within the hour or already past, `today` later than that but before `day_end`, `soon` not yet due and due within 24 h (overlaps the others), `none` no parseable deadline. |
+| `now`, `day_end` | RFC3339 | server clock, end of the UTC day | The instants the `deadline` buckets are measured from. The server does not know the caller's time zone: send the end of the caller's local day as `day_end`. |
+| `crew` | string | (unset) | Items about one crew id (`payload.invoking_crew_id`, else `payload.crew_id`). |
+| `agent` | string | (unset) | Items about one agent, by id, slug or name (`payload.agent_id` / `agent_slug` / `agent_name`, or the sender when it is an agent). |
 
-The response inlines both row count and unread count so the bell badge renders from the same fetch (no second round-trip on every poll), plus `has_more` so a client can tell a full page from the final page:
+An invalid `space`, `attention`, `deadline`, `unread`, `now` or `day_end` is `400`. Only inbox items are searched and filtered: approvals-queue rows and issue tasks that the web page merges into its feed are not part of this endpoint.
+
+The response inlines both row count and unread count so the bell badge renders from the same fetch (no second round-trip on every poll), plus `has_more` so a client can tell a full page from the final page, and `next_cursor` (present exactly when `has_more` is) to resume with `?cursor=`:
 
 ```json
 {
@@ -175,9 +186,13 @@ How many items the caller can see in each Inbox space and kind, in one request, 
   "by_kind": {
     "waitpoint":  { "action": 2, "updates": 0, "history": 0 },
     "failed_run": { "action": 0, "updates": 3, "history": 1 }
-  }
+  },
+  "by_attention": { "decision": 2, "input": 0, "review": 0, "repair": 3 },
+  "by_deadline": { "hour": 1, "today": 0, "soon": 1, "none": 5 }
 }
 ```
+
+It takes the same filters as the list (`q`, `space`, `unread`, `attention`, `deadline` with `now` / `day_end`, `crew`, `agent`, `kind`), so a count is the number of rows the list returns for the same parameters; counts are not paged, so a `cursor` is ignored. `by_attention` counts active items per attention class and `by_deadline` items per deadline bucket (`soon` overlaps the others), as defined under [the list](#get-apiv1inbox).
 
 | Space | Items counted |
 |---|---|

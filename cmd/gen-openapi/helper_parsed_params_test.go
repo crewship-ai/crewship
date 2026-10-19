@@ -102,6 +102,16 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/credentials", "parsePagination", []string{"kind", "limit", "offset", "paginate", "q", "search", "tag"}},
 	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"chat_id", "counts", "kind", "limit", "offset", "q", "routine_id", "source"}},
 
+	// parseInboxFilters (inbox_query.go), shared by the Inbox list and counts.
+	// The list also reads state/kind/limit/offset/cursor inline.
+	{"GET", "/api/v1/inbox", "parseInboxFilters", []string{
+		"agent", "attention", "crew", "cursor", "day_end", "deadline", "kind", "limit", "now",
+		"offset", "q", "space", "state", "unread",
+	}},
+	{"GET", "/api/v1/inbox/counts", "parseInboxFilters", []string{
+		"agent", "attention", "crew", "day_end", "deadline", "kind", "now", "q", "space", "unread",
+	}},
+
 	// resolveIOStep (pipeline_runs.go) — the #863 sub-span I/O gate.
 	{"GET", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", "resolveIOStep", []string{"include_io", "io_step"}},
 }

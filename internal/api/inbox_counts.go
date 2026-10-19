@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strings"
+	"time"
 )
 
 // inboxSpace names the three Inbox spaces the Harbor 2 UI sorts items into.
@@ -61,7 +63,17 @@ type inboxCountsResponse struct {
 	Unread int                         `json:"unread"`
 	Spaces inboxSpaceCounts            `json:"spaces"`
 	ByKind map[string]inboxSpaceCounts `json:"by_kind"`
+	// ByAttention and ByDeadline are the explorer's facet counts, over the same
+	// rows: active items per attention class, and items per deadline bucket
+	// (hour / today / soon / none; soon overlaps the other buckets).
+	ByAttention map[string]int `json:"by_attention"`
+	ByDeadline  map[string]int `json:"by_deadline"`
 }
+
+var (
+	inboxAttentionKeys = []string{inboxAttentionDecision, inboxAttentionInput, inboxAttentionReview, inboxAttentionRepair}
+	inboxDeadlineKeys  = []string{"hour", "today", "soon", "none"}
+)
 
 // Counts serves GET /api/v1/inbox/counts: totals per space and per kind for
 // the caller's visible items, so a client need not walk every page of the list
@@ -76,14 +88,26 @@ func (h *InboxHandler) Counts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	// The same optional filters as the list (q, space, unread, attention,
+	// deadline, crew, agent, kind), so a count and the rows it labels agree.
+	filters, badFilter := parseInboxFilters(r.URL.Query(), time.Now)
+	if badFilter != "" {
+		replyError(w, http.StatusBadRequest, badFilter)
+		return
+	}
+	if kind := r.URL.Query().Get("kind"); kind != "" {
+		filters.clause += " AND kind = ?"
+		filters.args = append(filters.args, kind)
+	}
 	query := `SELECT kind,
 		CASE WHEN state = 'resolved' THEN '` + inboxSpaceHistory + `'
 		     WHEN ` + inboxActionableSQL + ` THEN '` + inboxSpaceAction + `'
 		     ELSE '` + inboxSpaceUpdates + `' END AS space,
 		COUNT(*),
 		SUM(CASE WHEN ` + inboxEffectiveStateExpr + ` = 'unread' THEN 1 ELSE 0 END)
-	FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause + ` GROUP BY kind, space`
+	FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause + filters.clause + ` GROUP BY kind, space`
 	args := append([]interface{}{user.ID, workspaceID}, visArgs...)
+	args = append(args, filters.args...)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -93,7 +117,11 @@ func (h *InboxHandler) Counts(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := inboxCountsResponse{ByKind: map[string]inboxSpaceCounts{}}
+	out := inboxCountsResponse{
+		ByKind:      map[string]inboxSpaceCounts{},
+		ByAttention: map[string]int{},
+		ByDeadline:  map[string]int{},
+	}
 	for rows.Next() {
 		var kind, space string
 		var n, unread int
@@ -115,5 +143,45 @@ func (h *InboxHandler) Counts(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "counts failed")
 		return
 	}
+	if err := h.facetCounts(r, &out, user.ID, workspaceID, visClause, visArgs, filters); err != nil {
+		h.logger.Error("inbox facet counts", "error", err)
+		replyError(w, http.StatusInternalServerError, "counts failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// facetCounts fills ByAttention and ByDeadline in one pass over the filtered
+// rows. The deadline buckets carry bound instants, and those placeholders come
+// first in the statement, ahead of the reads join.
+func (h *InboxHandler) facetCounts(r *http.Request, out *inboxCountsResponse, userID, workspaceID, visClause string, visArgs []interface{}, f inboxFilters) error {
+	var cols []string
+	var args []interface{}
+	for _, k := range inboxAttentionKeys {
+		cols = append(cols, `COALESCE(SUM(CASE WHEN `+inboxAttentionSQL+` = '`+k+`' THEN 1 ELSE 0 END), 0)`)
+	}
+	for _, k := range inboxDeadlineKeys {
+		sql, a := f.clock.deadlineSQL(k)
+		cols = append(cols, `COALESCE(SUM(CASE WHEN `+sql+` THEN 1 ELSE 0 END), 0)`)
+		args = append(args, a...)
+	}
+	query := `SELECT ` + strings.Join(cols, ", ") + ` FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause + f.clause
+	args = append(args, userID, workspaceID)
+	args = append(args, visArgs...)
+	args = append(args, f.args...)
+	vals := make([]int, len(cols))
+	ptrs := make([]interface{}, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	if err := h.db.QueryRowContext(r.Context(), query, args...).Scan(ptrs...); err != nil {
+		return err
+	}
+	for i, k := range inboxAttentionKeys {
+		out.ByAttention[k] = vals[i]
+	}
+	for i, k := range inboxDeadlineKeys {
+		out.ByDeadline[k] = vals[len(inboxAttentionKeys)+i]
+	}
+	return nil
 }
