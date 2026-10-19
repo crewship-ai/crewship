@@ -1093,6 +1093,11 @@ refused, because replacing would delete everything the bundle does not hold.
 
 ### When plans run
 
+Queued manual runs and busy retries become eligible at their exact stored UTC
+deadline, including equality. Dispatch compares parsed instants after selecting
+candidates, so older variable-precision timestamps neither delay due work nor
+start a future retry early. Stored timestamp formats remain unchanged.
+
 - **Timezone.** `time_of_day` is a wall-clock time in the plan's IANA
   `timezone`, so 03:00 stays 03:00 across daylight-saving changes. Cadence is
   `daily`, `weekly` (`weekday`, 0 = Sunday), `monthly` (`monthday`, or the
