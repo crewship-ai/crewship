@@ -1,5 +1,6 @@
 "use client"
 
+import type React from "react"
 import { Trash2 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import { EditableField } from "@/components/shared/editable-field"
@@ -25,6 +26,9 @@ export interface SettingsTabProps {
   applyAvatarStyle: (resetOverrides: boolean) => void
   /** Absent for anyone who may not delete the crew (ADMIN+): no Danger zone. */
   onDelete?: () => void
+  /** Cards that belong above the Danger zone (People, Budget, command line):
+   *  the delete button is the last thing on the tab, as in v67. */
+  trailing?: React.ReactNode
 }
 
 export function SettingsTab({
@@ -34,6 +38,7 @@ export function SettingsTab({
   patch,
   applyAvatarStyle,
   onDelete,
+  trailing,
 }: SettingsTabProps) {
   // Private-endpoint egress is an ADMIN ("manage") capability server-side —
   // mirror that gate in the UI so a MANAGER sees the posture but can't flip it
@@ -136,6 +141,8 @@ export function SettingsTab({
       <section aria-label="Escalations">
         <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
       </section>
+
+      {trailing && <div className="space-y-4">{trailing}</div>}
 
       {/* Danger */}
       {onDelete && <section className="space-y-3">

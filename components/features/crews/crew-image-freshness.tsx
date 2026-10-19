@@ -169,6 +169,12 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
           </p>
         ) : null}
 
+        {verdict === "current" ? (
+          <p className="type-meta text-muted-foreground" data-testid="crew-image-freshness-current">
+            The container runs the same build the tag points at now.
+          </p>
+        ) : null}
+
         {/* The reason a check could not be made is part of the answer, not a
             debug detail. Without it "not behind" is indistinguishable from
             "current", which is the false assurance the whole feature avoids. */}
@@ -188,14 +194,14 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
           <div className="border-t border-hairline pt-2">
             {status.running_digest ? (
               <TickRow
-                label="Running"
+                label="Container runs"
                 meta={shortDigest(status.running_digest)}
                 status={status.behind ? "pending" : "ok"}
               />
             ) : null}
             {status.resolved_digest ? (
               <TickRow
-                label="Tag resolves to"
+                label="Tag points at"
                 meta={shortDigest(status.resolved_digest)}
                 status="ok"
               />

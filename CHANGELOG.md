@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Crews: the icon you pick is the icon you get** (#3767). The icon dialogs and the New/Edit crew identity tile preview the crew as the header draws it (solid colour tile, white glyph). Settings ends with the Danger zone; the image card says what "current" is compared against.
 - **Crews: New crew opens the crew it created** (#3762). After Create crew, /crews kept the crew it had auto-opened on load on the canvas; it now opens the new one.
 - **Dashboard sparklines for Success and P95.** `GET /api/v1/metrics/timeseries` accepts `metric=success_rate` and `metric=p95_duration_ms` (per bucket, from the same rules as the run insights); a bucket in which no run finished has no value. `crewship metrics --series` now sends `--window` and `--bucket` (the old `--range` was never read by the server and still works as the window).
 - **Calendar: agents and .ics.** Every event of `GET /api/v1/workspaces/{id}/pipelines/calendar` now lists the `agents` its routine's steps run (for the Agents view and the agent filter), and `GET .../pipelines/calendar.ics` (`crewship routine calendar --ics`) returns the same window as an iCalendar file. A signed subscription URL that calendar apps can poll is not part of this.

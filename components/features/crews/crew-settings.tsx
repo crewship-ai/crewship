@@ -57,24 +57,25 @@ export function CrewSettings({
         patch={patch}
         applyAvatarStyle={onApplyAvatarStyle}
         onDelete={onDelete}
+        trailing={<>
+        <CrCard title="People" concept="settings" count={members?.length}>
+          {membersFailed ? (
+            <CrNote tone="error">People could not be loaded.</CrNote>
+          ) : members === null ? (
+            <CrNote>Loading…</CrNote>
+          ) : (
+            <div className="border-t border-border p-3">
+              <p className="mb-2 text-label text-muted-foreground">Everyone with a workspace role can see this crew. A crew role can only raise someone’s workspace role here.</p>
+              <CrewMembers members={members} crewId={crew.id} workspaceId={workspaceId} canEdit={isAdmin} onMembersChange={setMembers} />
+            </div>
+          )}
+        </CrCard>
+
+        {isAdmin && <CrewBudgetCard workspaceId={workspaceId} crewId={crew.id} />}
+
+        <CrewCommandLine workspaceId={workspaceId} crew={crew} />
+        </>}
       />
-
-      <CrCard title="People" concept="settings" count={members?.length}>
-        {membersFailed ? (
-          <CrNote tone="error">People could not be loaded.</CrNote>
-        ) : members === null ? (
-          <CrNote>Loading…</CrNote>
-        ) : (
-          <div className="border-t border-border p-3">
-            <p className="mb-2 text-label text-muted-foreground">Everyone with a workspace role can see this crew. A crew role can only raise someone’s workspace role here.</p>
-            <CrewMembers members={members} crewId={crew.id} workspaceId={workspaceId} canEdit={isAdmin} onMembersChange={setMembers} />
-          </div>
-        )}
-      </CrCard>
-
-      {isAdmin && <CrewBudgetCard workspaceId={workspaceId} crewId={crew.id} />}
-
-      <CrewCommandLine workspaceId={workspaceId} crew={crew} />
     </div>
   )
 }
