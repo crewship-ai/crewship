@@ -126,7 +126,8 @@ func TestAuthorizationAuditCapabilities(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantPayload := map[string]any{"subject_user_id": f.target, "action": "capabilities_changed"}
-			if actor != f.owner || !reflect.DeepEqual(payload, wantPayload) {
+			public := journal.SerializeEntry(journal.Entry{Type: journal.EntryMemberCapabilitiesChanged, Payload: payload})["payload"]
+			if actor != f.owner || !reflect.DeepEqual(public, wantPayload) {
 				t.Fatalf("audit identity or capability privacy changed: actor=%s payload=%s", actor, raw)
 			}
 
