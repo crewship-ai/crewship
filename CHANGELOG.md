@@ -8,6 +8,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
+- **The Crewship ship is always at the top left.** The rail opens with the Crewship mark above the workspace switcher, and it stays when the rail folds to icons. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
 
 - **One name: Artifacts.** The command palette, the Dashboard strip, the Artifacts overview card and the Activity filter now say Artifacts where they said Pages (addresses and commands are unchanged).
 - **Command palette: the empty state follows the design.** Opening ⌘K shows Recent, Quick actions, Go to and Switch workspace; the list of settings pages appears once you type, like the other results.

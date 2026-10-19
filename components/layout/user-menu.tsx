@@ -23,18 +23,13 @@ import { buildLabel, editionName } from "@/lib/build-info"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
 
-// External destinations for the user menu. Kept here (not env-driven) because
-// they are stable public properties; the docs site is the Mintlify source of
-// truth and Report an issue routes to the GitHub issue tracker.
-export const DOCS_URL = "https://docs.crewship.ai"
+import { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL } from "@/lib/crewship-links"
+export { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL }
 
 /** OWNER → Owner, the way the role reads under a name. */
 function roleLabel(role: string): string {
   return role.charAt(0) + role.slice(1).toLowerCase()
 }
-export const GITHUB_URL = "https://github.com/crewship-ai/crewship"
-export const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
-export const RELEASES_URL = "https://github.com/crewship-ai/crewship/releases"
 
 const ITEM = "gap-3 text-xs"
 const ICON = "h-4 w-4 text-muted-foreground"

@@ -10,6 +10,7 @@ import { useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access
 import { useAbilities } from "@/hooks/use-abilities"
 import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
+import { CrewshipBrand } from "@/components/layout/crewship-brand"
 import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf } from "@/components/layout/rail"
 import { UserMenu } from "@/components/layout/user-menu"
 import { useAppStore } from "@/lib/store"
@@ -80,6 +81,7 @@ export function AppSidebar() {
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader className="rail-inset gap-1.5 pb-1 pt-3">
+        <CrewshipBrand />
         <WorkspaceSwitcher />
         <SidebarSearch />
       </SidebarHeader>
