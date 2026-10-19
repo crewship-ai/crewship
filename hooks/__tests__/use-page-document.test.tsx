@@ -1,12 +1,23 @@
 import { createElement, type ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook as baseRenderHook, waitFor } from "@testing-library/react"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { decodeUpdate, usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
+const journal = vi.hoisted(() => ({ rows: new Map<string, unknown>(), open: vi.fn(), put: vi.fn(), remove: vi.fn() }))
+vi.mock("@/lib/document-queue", async importOriginal => ({
+ ...await importOriginal<typeof import("@/lib/document-queue")>(),
+ openDocumentDrafts: journal.open,
+}))
+beforeEach(() => {
+ journal.rows.clear()
+ journal.put.mockReset().mockImplementation(async (draft) => { journal.rows.set(draft.id,structuredClone(draft)) })
+ journal.remove.mockReset().mockImplementation(async id => { journal.rows.delete(id) })
+ journal.open.mockReset().mockImplementation(async()=>({load:async()=>[...journal.rows.values()],put:journal.put,remove:journal.remove,close:()=>{}}))
+})
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
 afterEach(() => { vi.restoreAllMocks(); fetchMock.mockReset() })
@@ -128,4 +139,98 @@ it("stops on malformed saved binary and preserves a recovery state",async()=>{
  const server=model();fetchMock.mockImplementation(()=>response({...state(server),snapshot:"%%%invalid%%%"}))
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
  try{await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.error).toContain("Confirmed document content rejected");expect(result.current.editable).toBe(false);await act(async()=>{await new Promise(resolve=>setTimeout(resolve,600))});expect(fetchMock).toHaveBeenCalledTimes(1)}finally{unmount();server.destroy()}
+})
+
+it("fails closed when private durable storage is unavailable",async()=>{
+ journal.open.mockRejectedValue(new (await import("@/lib/document-queue")).DocumentStorageError("Private document storage is unavailable."))
+ const server=model();fetchMock.mockImplementation(()=>response(state(server)))
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{
+  await waitFor(()=>expect(result.current.status).not.toBe("Loading document…"))
+  expect(result.current.editable).toBe(false)
+  expect(result.current.status).toContain("storage")
+  expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+ }finally{unmount();server.destroy()}
+})
+
+
+it("retains exact lost-ACK bytes after unmount and offers recovery without replay",async()=>{
+ const server=model();let original=""
+ fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){original=init.body as string;return response({error:"lost ACK"},503)}
+  return response(state(server))
+ })
+ const first=renderHook(()=>usePageDocument("w","slug","page"))
+ await waitFor(()=>expect(first.result.current.editable).toBe(true))
+ act(()=>content(first.result.current.doc).insert(0,"pending "))
+ await waitFor(()=>expect(original).not.toBe(""))
+ expect(journal.rows.size).toBe(1)
+ first.unmount();fetchMock.mockClear()
+ const second=renderHook(()=>usePageDocument("w","renamed","page"))
+ try{
+  await waitFor(()=>expect(second.result.current.recovery).toBe(true))
+  expect(second.result.current.editable).toBe(false)
+  expect(second.result.current.pending).toBe(1)
+  expect(JSON.stringify(second.result.current.recoveredDrafts[0].request)).toBe(original)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+ }finally{second.unmount();server.destroy()}
+})
+
+it("waits for durable transaction completion before attempting a patch",async()=>{
+ const server=model();let release:()=>void=()=>{}
+ const persisted=new Promise<void>(resolve=>{release=resolve})
+ journal.put.mockImplementation(()=>persisted)
+ fetchMock.mockImplementation((_url:string,init?:RequestInit)=>init?.method==="POST"?response({error:"offline"},503):response(state(server)))
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{
+  await waitFor(()=>expect(result.current.editable).toBe(true))
+  act(()=>content(result.current.doc).insert(0,"pending "))
+  await waitFor(()=>expect(journal.put).toHaveBeenCalled())
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,650))})
+  expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+  release()
+  await waitFor(()=>expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(true))
+ }finally{release();unmount();server.destroy()}
+})
+
+
+it("hides a persisted private baseline when current Page read authorization is revoked",async()=>{
+ const server=model("private baseline")
+ journal.rows.set("old",{id:"old",schema:3,epoch:"old",snapshot:documentSchema.snapshot(server),update:"private",attempted:true})
+ fetchMock.mockImplementation(()=>response({error:"not found"},404))
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{
+  await waitFor(()=>expect(result.current.denied).toBe(true))
+  expect(result.current.recoveredDrafts).toEqual([])
+  expect(result.current.state).toBeUndefined()
+  expect(contentSafe(result.current.doc)).not.toContain("private baseline")
+  expect(journal.rows.size).toBe(1)
+ }finally{unmount();server.destroy()}
+})
+function contentSafe(doc:Y.Doc){return doc.getXmlFragment("default").toString()}
+
+it("keeps confirmed edits out of replay when journal cleanup fails",async()=>{
+ const {DocumentStorageError}=await import("@/lib/document-queue")
+ const server=model();let posts=0
+ journal.remove.mockRejectedValue(new DocumentStorageError("storage cleanup failed"))
+ fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){
+   posts++;const body=JSON.parse(init.body as string)
+   Y.applyUpdate(server,decodeUpdate(body.update))
+   return response({id:body.id,epoch:body.epoch,rev:5})
+  }
+  return response(state(server,posts?5:4))
+ })
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{
+  await waitFor(()=>expect(result.current.editable).toBe(true))
+  act(()=>content(result.current.doc).insert(0,"confirmed "))
+  await waitFor(()=>expect(result.current.status).toContain("storage"))
+  expect(result.current.pending).toBe(0)
+  expect(result.current.editable).toBe(false)
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,650))})
+  expect(posts).toBe(1)
+  expect(journal.rows.size).toBe(1)
+ }finally{unmount();server.destroy()}
 })
