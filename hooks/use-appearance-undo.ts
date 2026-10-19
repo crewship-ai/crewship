@@ -8,11 +8,13 @@ import { useAppearance } from "@/hooks/use-appearance"
 import {
   emitAppearanceChange,
   readAccent,
+  readAvatarAnimation,
   readDensity,
   readMotion,
   readSidebar,
   readTextSize,
   setAccentChoice,
+  setAvatarAnimation,
   setDensity,
   setMotion,
   setSidebarChoice,
@@ -49,6 +51,7 @@ export function useUndoableAppearance() {
       setMotion(snap.motion)
       setTextSize(snap.textSize)
       setSidebarChoice(snap.sidebar)
+      setAvatarAnimation(snap.avatarAnimation)
       restoreMarks(snap.explicit, snap.inherited)
       emitAppearanceChange()
       toast.dismiss(UNDO_TOAST_ID)
@@ -68,6 +71,7 @@ export function useUndoableAppearance() {
           motion: readMotion(),
           textSize: readTextSize(),
           sidebar: readSidebar(),
+          avatarAnimation: readAvatarAnimation(),
           explicit: readExplicit(),
           inherited: readInherited(),
         }
@@ -86,6 +90,7 @@ type Snapshot = {
   motion: ReturnType<typeof readMotion>
   textSize: ReturnType<typeof readTextSize>
   sidebar: ReturnType<typeof readSidebar>
+  avatarAnimation: ReturnType<typeof readAvatarAnimation>
   explicit: ReturnType<typeof readExplicit>
   inherited: ReturnType<typeof readInherited>
 }

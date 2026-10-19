@@ -249,7 +249,7 @@ function SchemeHint({ styleId, onSwitch }: { styleId: string; onSwitch: () => vo
 }
 
 export function AppearanceSection() {
-  const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled, style, pickStyle, resetStyle, setKnob } = useAppearance()
+  const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, avatarAnimation, setAvatarAnimation, syncEnabled, setSyncEnabled, style, pickStyle, resetStyle, setKnob } = useAppearance()
   const { resolvedTheme } = useTheme()
   // Every personal change below applies and saves at once, and offers Undo.
   const undoable = useUndoableAppearance()
@@ -313,6 +313,16 @@ export function AppearanceSection() {
         </SettingsRow>
         <SettingsRow label="Reduce motion" description="System follows your operating system's setting.">
           <SettingsSegmented label="Reduce motion" options={MOTION_OPTIONS} value={motion} onChange={undoable("Motion changed", setMotion)} />
+        </SettingsRow>
+        <SettingsRow
+          label="Animated avatars"
+          description="Voxel avatars blink and stretch now and then, at 32 px and up. Reduce motion On also keeps them still."
+        >
+          <Switch
+            checked={avatarAnimation === "on"}
+            onCheckedChange={undoable("Animated avatars changed", (on: boolean) => setAvatarAnimation(on ? "on" : "off"))}
+            aria-label="Animated avatars"
+          />
         </SettingsRow>
         <SettingsRow
           label="Sync across devices"

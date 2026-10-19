@@ -105,6 +105,9 @@ importers:
       '@dicebear/core':
         specifier: 9.4.3
         version: 9.4.3
+      '@dicebear/core-v10':
+        specifier: npm:@dicebear/core@10.7.0
+        version: '@dicebear/core@10.7.0'
       '@dicebear/croodles':
         specifier: 9.4.2
         version: 9.4.2(@dicebear/core@9.4.3)
@@ -147,6 +150,9 @@ importers:
       '@dicebear/pixel-art-neutral':
         specifier: 9.4.2
         version: 9.4.2(@dicebear/core@9.4.3)
+      '@dicebear/styles-v10':
+        specifier: npm:@dicebear/styles@10.6.0
+        version: '@dicebear/styles@10.6.0'
       '@dicebear/thumbs':
         specifier: 9.4.2
         version: 9.4.2(@dicebear/core@9.4.3)
@@ -776,6 +782,10 @@ packages:
     peerDependencies:
       '@dicebear/core': ^9.0.0
 
+  '@dicebear/core@10.7.0':
+    resolution: {integrity: sha512-JUOzKOd8RUByJJo8ZL+C7YE/pvEsWewfpbWUmR8OIQZWv/PvUQHnohdevySC3icyyxe6EIU/8B/rQgA42us1QA==}
+    engines: {node: '>=22.0.0'}
+
   '@dicebear/core@9.4.3':
     resolution: {integrity: sha512-9ITrQI57k3p5hKuU8HZJ1d0kPdrmTKEJDOdlKQ8CpaChbtmnD1R+dtWmNz5IesYThXM8F64pJ0ZvJ2rsY8Hciw==}
     engines: {node: '>=18.0.0'}
@@ -863,6 +873,9 @@ packages:
     engines: {node: '>=18.0.0'}
     peerDependencies:
       '@dicebear/core': ^9.0.0
+
+  '@dicebear/styles@10.6.0':
+    resolution: {integrity: sha512-KhxbEVI+z8TaenX58+ZhIRFBt7adggu/F+8g6ZYLu43H2/lgLuWA3Kg8vHBrCVWdfTTTt1p2wUhQomIkkypTuQ==}
 
   '@dicebear/thumbs@9.4.2':
     resolution: {integrity: sha512-ccWvDBqbkWS5uzHbsg5L6uML6vBfX7jT3J3jHCQksvz8haHItxTK02w+6e1UavZUsvza4lG5X/XY3eji3siJ4Q==}
@@ -7170,6 +7183,8 @@ snapshots:
     dependencies:
       '@dicebear/core': 9.4.3
 
+  '@dicebear/core@10.7.0': {}
+
   '@dicebear/core@9.4.3':
     dependencies:
       '@types/json-schema': 7.0.15
@@ -7229,6 +7244,8 @@ snapshots:
   '@dicebear/pixel-art@9.4.2(@dicebear/core@9.4.3)':
     dependencies:
       '@dicebear/core': 9.4.3
+
+  '@dicebear/styles@10.6.0': {}
 
   '@dicebear/thumbs@9.4.2(@dicebear/core@9.4.3)':
     dependencies:

@@ -135,7 +135,8 @@ describe("<CreateAgentDialog> — the avatar tile", () => {
     // avatar currently IS, which the badge never did.
     renderDialog()
     const caption = screen.getByRole("button", { name: /tap to change/i })
-    expect(caption).toHaveTextContent(/Bottts Neutral/i)
+    // A new agent starts on the default, Voxel Bot (#3789).
+    expect(caption).toHaveTextContent(/Voxel Bot/i)
 
     fireEvent.click(caption)
     expect(screen.getByText(/Avatar — new agent/i)).toBeInTheDocument()

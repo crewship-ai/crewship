@@ -312,7 +312,7 @@ headers to say "showing 1–100 of 103" instead of calling a page the whole.
 | `llm_model` | string? | LLM model identifier |
 | `system_prompt` | string? | System prompt for the agent |
 | `avatar_seed` | string? | Seed for avatar generation |
-| `avatar_style` | string? | Avatar style (e.g., `"bottts"`, `"pixel-art"`) |
+| `avatar_style` | string? | Avatar style slug (e.g., `"voxel-bot"`, `"pixel-art"`); `null` follows the crew's style, else the default. See [Avatar styles](#avatar-styles). |
 | `avatar_url` | string? | Serve URL for the agent's **stored** avatar, or `null` when it has none and is still generated from the seed. See [Agent avatars](#agent-avatars). |
 | `timeout_seconds` | integer | Maximum execution time |
 | `tool_profile` | string | Tool access profile |
@@ -361,7 +361,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 | `llm_model` | string | No | `null` | LLM model |
 | `system_prompt` | string | No | `null` | System prompt |
 | `avatar_seed` | string | No | `null` | Avatar seed |
-| `avatar_style` | string | No | `null` | Avatar style |
+| `avatar_style` | string | No | `null` | Avatar style slug ([Avatar styles](#avatar-styles)); `null` follows the crew, else Voxel Bot. An unknown slug is a `400`. |
 | `timeout_seconds` | integer | No | `1800` | Max execution time in seconds |
 | `tool_profile` | string | No | `"CODING"` | Tool profile |
 | `memory_enabled` | boolean | No | `false` | Enable agent memory |
@@ -1315,6 +1315,45 @@ header. Rebuilding the URL by hand and dropping that parameter yields a
   it skipped because you cannot edit them. To store an SVG of your own instead,
   use [`crewship agent avatar set`](/cli/agent#crewship-agent-avatar-set).
 </Note>
+
+### Avatar styles
+
+`avatar_style` (on agents and crews) is one of these slugs; anything else is
+refused with `400 unknown avatar style "…" (one of: …)` by `POST /agents`,
+`PATCH /agents/{id}`, `PATCH /crews/{id}` and `POST /crews/{id}/apply-avatar-style`,
+and by the CLI before it sends anything:
+
+`voxel-bot`, `voxel-art`, `bottts-neutral`, `bottts`, `adventurer`, `adventurer-neutral`, `avataaars`, `avataaars-neutral`, `big-ears`, `big-ears-neutral`, `big-smile`, `croodles`, `croodles-neutral`, `dylan`, `fun-emoji`, `lorelei`, `lorelei-neutral`, `micah`, `miniavs`, `notionists`, `notionists-neutral`, `open-peeps`, `personas`, `pixel-art`, `pixel-art-neutral`, `thumbs`, `toon-head`.
+
+- **Default: Voxel Bot.** An agent with no style of its own, in a crew with no
+  style (or in no crew), is drawn as `voxel-bot`. That includes every agent
+  created after #3789 without a style, from the dashboard, the CLI, the API or
+  a template.
+- **Existing agents keep their face.** The default used to be `bottts-neutral`.
+  Upgrading runs a migration that writes `bottts-neutral` into every agent that
+  was drawn with the old default (no style of its own, and no crew style).
+  Agents with their own style, agents that follow a crew with a style, and all
+  crews are left as they were. Restoring a backup taken before the upgrade
+  applies the same pin to the restored agents. Those agents now show
+  **Bottts Neutral** in the picker instead of "Follow the crew".
+- **Voxel Bot and Voxel Art move.** They come from DiceBear 10 (pinned exactly,
+  loaded beside the 9.4 library the other 25 styles keep using, because 10.x
+  draws a different face for the same seed). Drawn at 32 px or larger, they
+  blink and stretch now and then; smaller, they are still. They are still too
+  when the viewer's Reduce motion is On, when their **Animated avatars** switch
+  is off ([Settings → Appearance](/guides/account-and-top-bar)),
+  or when the operating system asks for reduced motion and Reduce motion is
+  System — the app checks the OS setting and draws the still render, and the
+  SVG's own animation also sits inside
+  `@media (prefers-reduced-motion: no-preference)`.
+  Motion never stands for anything: an agent's state always has its own
+  label or badge.
+- **Voxel avatars are never stored.** DiceBear 10's markup uses `<use href>`
+  and an XML comment, which the stored-avatar allowlist refuses, and a stored
+  render would freeze the motion. They are always drawn live (`avatar_url`
+  stays `null`), and the backfill counts them as drawn live rather than
+  missing. Their faces are pinned by the exact package versions and by golden
+  hashes in the test suite.
 
 ### Get stored avatar
 

@@ -15,10 +15,12 @@ import { APPEARANCE_EXPLICIT_STORAGE_KEY, APPEARANCE_INHERITED_STORAGE_KEY, emit
 
 export { APPEARANCE_EXPLICIT_STORAGE_KEY, APPEARANCE_INHERITED_STORAGE_KEY }
 
-export const EXPLICIT_FIELDS = ["theme", "accent", "style", "density", "motion", "textSize", "sidebar"] as const
+export const EXPLICIT_FIELDS = ["theme", "accent", "style", "density", "motion", "textSize", "sidebar", "avatarAnimation"] as const
 export type ExplicitField = (typeof EXPLICIT_FIELDS)[number]
 
-/** The fields a workspace default can supply. */
+/** The fields a workspace default can supply. Not "Animated avatars"
+ *  (#3789): whether avatars move is the viewer's own comfort setting, like
+ *  Reduce motion, so it is never inherited and "Use workspace default" keeps it. */
 export const INHERITABLE_FIELDS = ["theme", "accent", "style"] as const satisfies readonly ExplicitField[]
 
 const memory = new Map<string, string>()

@@ -12,6 +12,7 @@ import {
   emitAppearanceChange,
   parseAppearance,
   setAccentChoice,
+  setAvatarAnimation,
   setDensity,
   setMotion,
   setSidebarChoice,
@@ -70,12 +71,12 @@ function storageForOutbox() {
 /** Nothing chosen: what both preference keys hold for a user with no explicit value. */
 const EMPTY = "{}"
 
-const APPEARANCE_FIELDS = ["theme", "accent", "density", "motion", "textSize", "sidebar"] as const satisfies readonly (keyof Appearance & ExplicitField)[]
+const APPEARANCE_FIELDS = ["theme", "accent", "density", "motion", "textSize", "sidebar", "avatarAnimation"] as const satisfies readonly (keyof Appearance & ExplicitField)[]
 
 /** The fields of the look the user chose; the rest is inherited and not sent. */
 function explicitOnly(a: Appearance, explicit: ReadonlySet<ExplicitField>): Partial<Appearance> {
   const out: Record<string, string> = {}
-  for (const f of APPEARANCE_FIELDS) if (explicit.has(f)) out[f] = a[f]
+  for (const f of APPEARANCE_FIELDS) if (explicit.has(f) && a[f] !== undefined) out[f] = a[f] as string
   return out as Partial<Appearance>
 }
 
@@ -93,7 +94,7 @@ function readStyleRaw(): string | null {
 
 /**
  * Keeps this browser's appearance (theme, accent, density, motion,
- * text size, sidebar mode) and its visual style in step with the signed-in
+ * text size, sidebar mode, animated avatars) and its visual style in step with the signed-in
  * user's `appearance` and `appearance.style` preferences on the server, and
  * applies the workspace's default look to whatever the user has not chosen.
  *
@@ -144,13 +145,13 @@ function readStyleRaw(): string | null {
  * send them.
  */
 export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown): void {
-  const { theme, accent, density, motion, textSize, sidebar, syncEnabled, explicit } = useAppearance()
+  const { theme, accent, density, motion, textSize, sidebar, avatarAnimation, syncEnabled, explicit } = useAppearance()
   const { resolvedTheme, setTheme: setNextTheme } = useTheme()
   const active = enabled && syncEnabled
 
   // The explicit part of the look as it would be stored; null until
   // next-themes knows the theme.
-  const full: Appearance | null = theme ? { theme, accent, density, motion, textSize, sidebar } : null
+  const full: Appearance | null = theme ? { theme, accent, density, motion, textSize, sidebar, avatarAnimation } : null
   const current = full ? explicitOnly(full, explicit) : null
   const serialized = current ? canonicalAppearance(current) : null
   const fullRef = useRef(full)
@@ -234,6 +235,9 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
           if (remote.motion) { markExplicit("motion"); if (remote.motion !== local?.motion) setMotion(remote.motion) }
           if (remote.textSize) { markExplicit("textSize"); if (remote.textSize !== local?.textSize) setTextSize(remote.textSize) }
           if (remote.sidebar) { markExplicit("sidebar"); if (remote.sidebar !== local?.sidebar) setSidebarChoice(remote.sidebar) }
+          // Animated avatars (#3789) syncs like the rest; it has no workspace
+          // default, so the inherit step below never touches it.
+          if (remote.avatarAnimation) { markExplicit("avatarAnimation"); if (remote.avatarAnimation !== local?.avatarAnimation) setAvatarAnimation(remote.avatarAnimation) }
           // The server's value is what the server holds, so it is not sent
           // back; a local explicit field it lacks is, by the push effect.
           lastSentRef.current = canonicalAppearance(remote)

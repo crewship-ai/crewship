@@ -58,6 +58,11 @@ export type TextSize = (typeof TEXT_SIZES)[number]
 export const SIDEBAR_CHOICES = ["hover", "collapsed", "pinned"] as const
 export type SidebarChoice = (typeof SIDEBAR_CHOICES)[number]
 
+/** "Animated avatars" (#3789): whether animatable agent avatars move for
+ *  this viewer. Reduce motion: On keeps them still regardless. */
+export const AVATAR_ANIMATION_CHOICES = ["on", "off"] as const
+export type AvatarAnimationChoice = (typeof AVATAR_ANIMATION_CHOICES)[number]
+
 export const DEFAULT_DENSITY: Density = "comfortable"
 /** What a device with no stored size shows: Compact (Harbor 2). */
 export const DEFAULT_TEXT_SIZE: TextSize = "small"
@@ -73,10 +78,12 @@ export const LEGACY_THEME: ThemeChoice = "dark"
 // 2026-10-18, v67). A tablet still shows the rail (components/ui/sidebar.tsx).
 export const DEFAULT_SIDEBAR: SidebarChoice = "pinned"
 export const DEFAULT_MOTION: MotionChoice = "system"
+export const DEFAULT_AVATAR_ANIMATION: AvatarAnimationChoice = "on"
 
 /** localStorage keys; per browser, like the theme and the accent. */
 export const DENSITY_STORAGE_KEY = "crewship-density"
 export const MOTION_STORAGE_KEY = "crewship-motion"
+export const AVATAR_ANIMATION_STORAGE_KEY = "crewship-avatar-animation"
 export const TEXT_SIZE_STORAGE_KEY = "crewship-text-size"
 /** components/ui/sidebar.tsx's own key; read here, written through it. */
 export const SIDEBAR_STORAGE_KEY = "crewship_sidebar_mode"
@@ -104,6 +111,10 @@ export interface Appearance {
   /** Optional on the wire: absent in values saved before it existed. */
   textSize: TextSize
   sidebar: SidebarChoice
+  /** "Animated avatars" (#3789). Optional on the wire; like every field it is
+   *  synced only once the user chose it (lib/theme/appearance-explicit). Per
+   *  viewer: a workspace default never sets it. */
+  avatarAnimation?: AvatarAnimationChoice
 }
 
 export function isThemeChoice(v: unknown): v is ThemeChoice {
@@ -120,6 +131,9 @@ export function isTextSize(v: unknown): v is TextSize {
 }
 export function isSidebarChoice(v: unknown): v is SidebarChoice {
   return typeof v === "string" && (SIDEBAR_CHOICES as readonly string[]).includes(v)
+}
+export function isAvatarAnimationChoice(v: unknown): v is AvatarAnimationChoice {
+  return typeof v === "string" && (AVATAR_ANIMATION_CHOICES as readonly string[]).includes(v)
 }
 
 /**
@@ -138,6 +152,7 @@ export function parseAppearance(value: unknown): Partial<Appearance> {
   if (isMotionChoice(v.motion)) out.motion = v.motion
   if (isTextSize(v.textSize)) out.textSize = v.textSize
   if (isSidebarChoice(v.sidebar)) out.sidebar = v.sidebar
+  if (isAvatarAnimationChoice(v.avatarAnimation)) out.avatarAnimation = v.avatarAnimation
   return out
 }
 
@@ -248,6 +263,9 @@ function onStorage(e: StorageEvent): void {
   }
   else if (e.key === DENSITY_STORAGE_KEY) applyDensityAttr(readDensity())
   else if (e.key === MOTION_STORAGE_KEY) applyMotionAttr(readMotion())
+  else if (e.key === AVATAR_ANIMATION_STORAGE_KEY) {
+    // Nothing to paint: avatars read the choice through the store.
+  }
   else if (e.key === STYLE_STORAGE_KEY) {
     // The style attribute is painted by AppearanceStyleSync from the new value.
   }
@@ -270,6 +288,13 @@ export function readDensity(): Density {
 }
 export function readMotion(): MotionChoice {
   return read(MOTION_STORAGE_KEY, isMotionChoice, DEFAULT_MOTION)
+}
+export function readAvatarAnimation(): AvatarAnimationChoice {
+  return read(AVATAR_ANIMATION_STORAGE_KEY, isAvatarAnimationChoice, DEFAULT_AVATAR_ANIMATION)
+}
+export function setAvatarAnimation(a: AvatarAnimationChoice): void {
+  write(AVATAR_ANIMATION_STORAGE_KEY, a)
+  emit()
 }
 /** Default ON: a user who never opens Settings still gets the same look on
  *  every device, which is what "my preferences" means to most people. */

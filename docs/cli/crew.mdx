@@ -1233,13 +1233,13 @@ On servers built via `make build` / `make build:go`, the expected sidecar hash i
 Set the `avatar_style` override for every agent in a crew in one call, or clear existing per-agent overrides so they fall back to the template default. Mirrors the crew toolbar's "Apply to all agents" avatar action.
 
 ```bash
-crewship crew apply-avatar-style <slug-or-id> --style bottts-neutral
+crewship crew apply-avatar-style <slug-or-id> --style voxel-bot
 crewship crew apply-avatar-style <slug-or-id> --reset
 ```
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--style <name>` | (unset) | Avatar style: `bottts-neutral`\|`adventurer`\|`fun-emoji`\|`pixel-art`\|`micah`\|`notionists`\|`thumbs`\|`lorelei`\|`big-smile`\|`avataaars`. |
+| `--style <name>` | (unset) | Avatar style, one of the [avatar styles](/api-reference/agents#avatar-styles) (for example `voxel-bot`, `voxel-art`, `bottts-neutral`). An unknown slug fails before anything is sent. |
 | `--reset` | `false` | Clear `avatar_style` overrides for every agent in the crew. Mutually exclusive with `--style`. |
 
 Exactly one of `--style` or `--reset` is required. Backed by `POST /api/v1/crews/{crewId}/apply-avatar-style`. The response reports `updated` (agent row count affected) plus either `style` or `reset: true`.
