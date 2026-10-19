@@ -31,12 +31,11 @@ type slidesReadFixture struct {
 func newSlidesReadFixture(t *testing.T, enabled bool) *slidesReadFixture {
 	t.Helper()
 	db := setupTestDB(t)
-	router, err := NewRouter(db, slidesReadSecret, newTestLogger())
+	router, err := NewRouter(db, slidesReadSecret, newTestLogger(), WithSlidesRead(enabled))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
-	router.registerSlidesReadRoutes(enabled)
 	f := &slidesReadFixture{db: db, router: router, workspace: generateCUID(), page: generateCUID(), user: generateCUID()}
 	execOrFatal(t, db, "INSERT INTO workspaces(id,name,slug) VALUES(?, 'Slides','slides-read')", f.workspace)
 	pagesSeedUser(t, router.Pages(), f.workspace, f.user, "slides-reader@example.test", "MEMBER")
