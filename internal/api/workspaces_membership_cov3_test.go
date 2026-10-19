@@ -72,7 +72,7 @@ func TestCov3WMListMembers_ScanError500(t *testing.T) {
 // --- AddMember: insert blocked → 500 ---
 
 func TestCov3WMAddMember_InsertBlocked500(t *testing.T) {
-	h, db, _, wsID := cov3WMRig(t)
+	h, db, userID, wsID := cov3WMRig(t)
 	// Second user who is not yet a member.
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password)
 		VALUES ('u-new3', 'u-new3@example.com', 'New', 'x')`); err != nil {
@@ -82,7 +82,9 @@ func TestCov3WMAddMember_InsertBlocked500(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
 
 	rec := httptest.NewRecorder()
-	h.AddMember(rec, cov3WMReq("POST", "/x", `{"user_id":"u-new3","role":"MEMBER"}`, wsID, "OWNER"))
+	req := cov3WMReq("POST", "/x", `{"user_id":"u-new3","role":"MEMBER"}`, wsID, "OWNER")
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	h.AddMember(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 (insert blocked), body=%s", rec.Code, rec.Body.String())
 	}
@@ -159,7 +161,7 @@ func TestCov3WMCreateInvitation_InsertBlocked500(t *testing.T) {
 // --- AddMember: member-exists check error → 500 ---
 
 func TestCov3WMAddMember_ExistsCheckError500(t *testing.T) {
-	h, db, _, wsID := cov3WMRig(t)
+	h, db, userID, wsID := cov3WMRig(t)
 	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatalf("fk off: %v", err)
 	}
@@ -167,7 +169,9 @@ func TestCov3WMAddMember_ExistsCheckError500(t *testing.T) {
 		t.Fatalf("drop: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	h.AddMember(rec, cov3WMReq("POST", "/x", `{"user_id":"whoever"}`, wsID, "OWNER"))
+	req := cov3WMReq("POST", "/x", `{"user_id":"whoever"}`, wsID, "OWNER")
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	h.AddMember(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 (exists check), body=%s", rec.Code, rec.Body.String())
 	}
