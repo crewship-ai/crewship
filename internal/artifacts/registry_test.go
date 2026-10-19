@@ -63,7 +63,7 @@ func TestRegistryUnknownAndUnsupportedRemainClosed(t *testing.T) {
 		schema    int
 		operation Operation
 	}{
-		{"unknown", 1, Read}, {"doc", 99, Read}, {"doc", 3, Operation("execute")}, {"doc", 3, Export}, {"slides", 1, Apply},
+		{"unknown", 1, Read}, {"doc", 99, Read}, {"doc", 3, Operation("execute")}, {"doc", 3, Export},
 	} {
 		if err := registry.Check(test.id, test.schema, test.operation); !errors.Is(err, ErrUnsupported) {
 			t.Fatalf("%#v accepted: %v", test, err)

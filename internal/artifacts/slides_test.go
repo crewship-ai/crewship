@@ -118,6 +118,12 @@ func TestSlidesAdapterNativeLifecycleAndRevocation(t *testing.T) {
 	db, store, key, create, live := slidesAdapterFixture(t)
 	adapter := NewSlidesAdapter(store, true)
 	operations, _ := NewRegistry(EnabledTypes{"slides": true}, nil, WithSlidesAdapter(adapter)).Slides()
+	if value, err := operations.Read(t.Context(), key, live); !errors.Is(err, slides.ErrNotFound) || !reflect.DeepEqual(value, slides.State{}) {
+		t.Fatalf("absent read %#v %v", value, err)
+	}
+	if value, err := operations.Versions(t.Context(), key, live); !errors.Is(err, slides.ErrNotFound) || value != nil {
+		t.Fatalf("absent versions %#v %v", value, err)
+	}
 	calls := 0
 	auth := func(ctx context.Context, tx *sql.Tx) (string, error) { calls++; return live(ctx, tx) }
 	var first slides.Receipt
@@ -200,8 +206,33 @@ func TestSlidesAdapterFinalAuthorityFailureReturnsZero(t *testing.T) {
 	if value, err := adapter.Versions(t.Context(), key, denyFinal()); !errors.Is(err, errSlidesAdapterDenied) || value != nil {
 		t.Fatalf("populated metadata leaked %#v %v", value, err)
 	}
+	hash, _ := slides.SlideHash(create.Deck.Slides[0])
+	notes := "Rejected candidate"
+	patch := slides.PatchRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 1, MutationID: "final-patch", Operations: []slides.Operation{{Op: "set_notes", SlideID: create.Deck.Slides[0].ID, IfHash: hash, Notes: &notes}}}
+	if value, err := adapter.Apply(t.Context(), key, patch, denyFinal()); !errors.Is(err, errSlidesAdapterDenied) || value != (slides.Receipt{}) {
+		t.Fatalf("partial patch receipt %#v %v", value, err)
+	}
+	restore := slides.RestoreRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 1, IfOrderVersion: 1, Revision: 1, MutationID: "final-restore"}
+	if value, err := adapter.Restore(t.Context(), key, restore, denyFinal()); !errors.Is(err, errSlidesAdapterDenied) || value != (slides.Receipt{}) {
+		t.Fatalf("partial restore receipt %#v %v", value, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM slides_receipts`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failed mutations did not rollback %d %v", count, err)
+	}
 	if value, err := adapter.Read(t.Context(), key, nil); err == nil || !reflect.DeepEqual(value, slides.State{}) {
 		t.Fatal("nil authority accepted")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := adapter.Read(t.Context(), key, live); err == nil || !reflect.DeepEqual(value, slides.State{}) {
+		t.Fatal("failed Store returned state")
+	}
+	if value, err := adapter.Create(t.Context(), key, create, live); err == nil || value != (slides.Receipt{}) {
+		t.Fatal("failed Store returned receipt")
+	}
+	if value, err := adapter.Versions(t.Context(), key, live); err == nil || value != nil {
+		t.Fatal("failed Store returned metadata")
 	}
 }
 
@@ -213,6 +244,11 @@ func TestSlidesAdapterSchemaFencesAndUnsupportedOperations(t *testing.T) {
 	}
 	for _, schema := range []int{2, 99} {
 		slidesAdapterExec(t, db, `UPDATE slides_heads SET schema_version=? WHERE page_id=?`, schema, key.PageID)
+		slidesAdapterExec(t, db, `UPDATE pages SET owner_user_id='successor' WHERE id=?`, key.PageID)
+		if value, err := adapter.Versions(t.Context(), key, live); !errors.Is(err, errSlidesAdapterDenied) || value != nil {
+			t.Fatalf("schema fence preceded actor authority %#v %v", value, err)
+		}
+		slidesAdapterExec(t, db, `UPDATE pages SET owner_user_id='owner' WHERE id=?`, key.PageID)
 		if value, err := adapter.Create(t.Context(), key, create, live); !errors.Is(err, ErrUnsupported) || value != (slides.Receipt{}) {
 			t.Fatalf("head%d replay %#v %v", schema, value, err)
 		}

@@ -45,9 +45,9 @@ func Capabilities(typeID string, schema int, enabled EnabledTypes) []Capability 
 	for _, operation := range []Operation{Create, Read, Apply, Versions, Restore, Snapshot, Export} {
 		c := Capability{Operation: operation}
 		switch {
-		case !known:
+		case !known || (typeID == "slides" && schema != 1):
 			c.Reason = "unsupported-type-or-schema"
-		case typeID != "doc" || operation == Export:
+		case (typeID != "doc" && typeID != "slides") || operation == Export || (typeID == "slides" && operation == Snapshot):
 			c.Reason = "adapter-unavailable"
 		default:
 			c.Supported = true

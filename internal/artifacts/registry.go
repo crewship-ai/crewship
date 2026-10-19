@@ -13,13 +13,22 @@ var ErrUnavailable = errors.New("artifact adapter unavailable")
 type Registry struct {
 	enabled  EnabledTypes
 	document DocumentOperations
+	slides   *SlidesAdapter
 }
 
-// NewRegistry captures server flags and the concrete installed Document adapter.
+// RegistryOption installs a trusted compiled adapter, never content-supplied code.
+type RegistryOption func(*Registry)
+
+func WithSlidesAdapter(adapter *SlidesAdapter) RegistryOption {
+	return func(r *Registry) { r.slides = adapter }
+}
+
+// NewRegistry captures flags and concrete adapters. Existing Document callers
+// need no option; an absent optional Slides adapter remains unavailable.
 // The concrete constructor input makes nil adapters/stores unambiguous without
 // reflection or a new health/authorization protocol on every operation type.
-// Returned operations retain DocumentAdapter's own enablement checks as well.
-func NewRegistry(enabled EnabledTypes, document *DocumentAdapter) *Registry {
+// Returned operations retain each adapter's own enablement checks as well.
+func NewRegistry(enabled EnabledTypes, document *DocumentAdapter, options ...RegistryOption) *Registry {
 	r := &Registry{enabled: make(EnabledTypes, len(enabled))}
 	for id, value := range enabled {
 		r.enabled[id] = value
@@ -27,6 +36,16 @@ func NewRegistry(enabled EnabledTypes, document *DocumentAdapter) *Registry {
 	if document != nil && document.store != nil {
 		r.document = document
 		r.enabled["doc"] = r.enabled["doc"] && document.enabled
+	}
+	for _, option := range options {
+		if option != nil {
+			option(r)
+		}
+	}
+	if r.slides == nil || r.slides.store == nil {
+		r.slides = nil
+	} else {
+		r.enabled["slides"] = r.enabled["slides"] && r.slides.enabled
 	}
 	return r
 }
@@ -40,6 +59,14 @@ func (r *Registry) Documents() (DocumentOperations, bool) {
 	return r.document, true
 }
 
+// Slides requires both enablement flags and an installed concrete Store adapter.
+func (r *Registry) Slides() (SlideOperations, bool) {
+	if r == nil || r.slides == nil || !r.enabled["slides"] {
+		return nil, false
+	}
+	return r.slides, true
+}
+
 func (r *Registry) Capabilities(typeID string, schema int) []Capability {
 	var enabled EnabledTypes
 	if r != nil {
@@ -48,7 +75,7 @@ func (r *Registry) Capabilities(typeID string, schema int) []Capability {
 	result := Capabilities(typeID, schema, enabled)
 	// A compiled implementation is supported even when no instance is installed;
 	// it must not be advertised as available just because its flag is true.
-	if typeID == "doc" && (r == nil || r.document == nil) {
+	if (typeID == "doc" && (r == nil || r.document == nil)) || (typeID == "slides" && (r == nil || r.slides == nil)) {
 		for i := range result {
 			if result[i].Supported {
 				result[i].Available = false

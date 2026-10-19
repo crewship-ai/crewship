@@ -30,10 +30,21 @@ existing Document protocol and are not generic Artifact mutations.
 
 The registry's export format metadata describes a format, not an available
 export execution path. Generic Document export returns `ErrUnsupported` from
-`Check`; there is no export success stub or new export service. Other compiled
-content formats keep their existing entrypoints and are explicitly unsupported
-by this operation adapter until their own implementations are added.
+`Check`; there is no export success stub or new export service. Other compiled content formats retain their existing entrypoints.
 
 Tests exercise declarations against every compiled format and a migrated real
 SQLite database: create, commit, checkpoint, version listing, restore, exact
 retry, revoked authorization on every operation and unsupported stored schemas.
+
+`SlidesAdapter` binds the existing Slides Store through the optional
+`WithSlidesAdapter` registry option. Both server and adapter flags, plus an
+installed nonnil Store, are required. Creation returns its native receipt;
+reads return State without manufacturing a creation State through a second read.
+Apply uses Patch, versions uses History, and restore uses the existing append
+protocol. Original live authorization runs before a schema capability check in
+the same fenced transaction on both Store callbacks, including exact retries.
+Only schema 1 is available: current heads and exact restore targets must match,
+and version lists reject unsupported rows as a whole. Snapshot and export are
+explicitly unsupported. Errors return zero results, including after a final
+Store authorization failure. This contract installs no public routes or runtime
+and does not activate image reads or select a Slides format.
