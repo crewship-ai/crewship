@@ -380,6 +380,7 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCr
 POST /api/v1/workspaces/{workspaceId}/pipeline-templates roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/drafts roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/import roleCreate
@@ -410,6 +411,8 @@ POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleInline
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive roleManage
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore roleManage
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
