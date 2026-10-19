@@ -203,8 +203,8 @@ func runSeed(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--ui-tour: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "")
-		cli.PrintSuccess(fmt.Sprintf("UI tour complete: %d routines, %d schedules, %d folder tags, %d runs, %d projects, %d labels, %d issues, %d comments added",
-			stats.Routines, stats.Schedules, stats.Tags, stats.Runs, stats.Projects, stats.Labels, stats.Issues, stats.Comments))
+		cli.PrintSuccess(fmt.Sprintf("UI tour complete: %d routines, %d schedules, %d folders (%d routines filed), %d tags, %d runs, %d projects, %d labels, %d issues, %d comments added",
+			stats.Routines, stats.Schedules, stats.Folders, stats.Filed, stats.Tags, stats.Runs, stats.Projects, stats.Labels, stats.Issues, stats.Comments))
 		return nil
 	}
 

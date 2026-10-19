@@ -114,6 +114,7 @@ type uiTourCounts struct {
 	routines, schedules, upcoming, runs, completed, waiting, failed int
 	taggedRoutines, folders, issues, issueStates, projects          int
 	comments, inbox, inboxKinds, pendingApprovals                   int
+	routineFolders, filedRoutines                                   int
 }
 
 func readUITourCounts(t *testing.T, db *sql.DB) uiTourCounts {
@@ -145,6 +146,8 @@ func readUITourCounts(t *testing.T, db *sql.DB) uiTourCounts {
 		inbox:            q(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id=?`, ws),
 		inboxKinds:       q(`SELECT COUNT(DISTINCT kind) FROM inbox_items WHERE workspace_id=?`, ws),
 		pendingApprovals: q(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE workspace_id=? AND status='pending'`, ws),
+		routineFolders:   q(`SELECT COUNT(*) FROM routine_folders WHERE workspace_id=?`, ws),
+		filedRoutines:    q(`SELECT COUNT(*) FROM routine_folder_members WHERE workspace_id=?`, ws),
 	}
 }
 
@@ -170,7 +173,9 @@ func TestAcceptance_SeedUITour_PopulatesTheTourAndIsIdempotent(t *testing.T) {
 		{"failed runs with an error", first.failed, 1},
 		{"pending approvals", first.pendingApprovals, 1},
 		{"routines in a folder", first.taggedRoutines, 8},
-		{"routine folders", first.folders, 3},
+		{"routine folder tags", first.folders, 3},
+		{"routine folders", first.routineFolders, 4},
+		{"routines filed in a folder", first.filedRoutines, 10},
 		{"issues", first.issues, 15},
 		{"issue states", first.issueStates, 5},
 		{"projects with issues", first.projects, 4},
@@ -208,12 +213,49 @@ func TestAcceptance_SeedUITour_PopulatesTheTourAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Each tour routine sits in the folder the catalogue names.
+	folderNames := map[string]string{}
+	for _, f := range seeddata.TourFolders {
+		folderNames[f.Tag] = f.Name
+	}
+	for _, r := range seeddata.TourRoutines {
+		var folder string
+		err := db.QueryRow(`SELECT f.name FROM routine_folder_members m
+			JOIN routine_folders f ON f.id = m.folder_id
+			JOIN pipelines p ON p.id = m.pipeline_id
+			WHERE p.workspace_id = ? AND p.slug = ?`, uiTourAcceptanceWorkspaceID, r.Slug).Scan(&folder)
+		if err != nil {
+			t.Errorf("routine %s is not in a folder: %v", r.Slug, err)
+			continue
+		}
+		if want := folderNames[r.Folder]; folder != want {
+			t.Errorf("routine %s is in folder %q, want %q", r.Slug, folder, want)
+		}
+	}
+
+	// A person's later move survives a re-run: the tour files only routines
+	// that are in no folder.
+	if _, err := db.Exec(`DELETE FROM routine_folder_members WHERE pipeline_id =
+		(SELECT id FROM pipelines WHERE workspace_id = ? AND slug = 'weekly-sales-summary')`, uiTourAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO routine_folder_members (pipeline_id, folder_id, workspace_id)
+		SELECT p.id, f.id, p.workspace_id FROM pipelines p, routine_folders f
+		WHERE p.workspace_id = ? AND p.slug = 'weekly-sales-summary' AND f.workspace_id = p.workspace_id AND f.name = 'Finance'`, uiTourAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+
 	again, err := runUITourSeedCLI(t, serverURL, cfgPath)
 	if err != nil {
 		t.Fatalf("second seed --ui-tour failed: %v\n%s", err, again)
 	}
 	if second := readUITourCounts(t, db); second != first {
 		t.Fatalf("second run changed the workspace:\nfirst  %+v\nsecond %+v\n%s", first, second, again)
+	}
+	var moved string
+	if err := db.QueryRow(`SELECT f.name FROM routine_folder_members m JOIN routine_folders f ON f.id = m.folder_id
+		JOIN pipelines p ON p.id = m.pipeline_id WHERE p.workspace_id = ? AND p.slug = 'weekly-sales-summary'`, uiTourAcceptanceWorkspaceID).Scan(&moved); err != nil || moved != "Finance" {
+		t.Fatalf("re-run undid a person's folder move: folder = %q, err = %v", moved, err)
 	}
 }
 

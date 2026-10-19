@@ -47,7 +47,7 @@ func checkUITourFlags(cmd *cobra.Command) error {
 
 // uiTourStats counts what one tour pass created; a second pass reports zeros.
 type uiTourStats struct {
-	Routines, Tags, Schedules, Runs, Projects, Labels, Issues, Comments int
+	Routines, Tags, Folders, Filed, Schedules, Runs, Projects, Labels, Issues, Comments int
 }
 
 // tourCrewSlugs are the default demo crews the tour builds on.
@@ -80,6 +80,9 @@ func seedUITour(ctx context.Context, client *cli.Client) (uiTourStats, error) {
 	fmt.Fprintln(os.Stderr, "UI tour: routines, schedules and folders...")
 	scheduleIDs, err := seedTourRoutines(ctx, client, wsID, crewIDs, agentIDs, &stats)
 	if err != nil {
+		return stats, err
+	}
+	if err := seedTourFolders(ctx, client, wsID, &stats); err != nil {
 		return stats, err
 	}
 	fmt.Fprintln(os.Stderr, "UI tour: run history...")
@@ -279,6 +282,106 @@ func seedTourTag(client *cli.Client, routinePath, tag string) (bool, error) {
 	// The routine read may not carry tags; only count a tag the PUT reports
 	// as new relative to what the routine had.
 	return len(after.Tags) > len(routine.Tags), nil
+}
+
+// seedTourFolders creates the tour's routine folders by name and files each
+// tour routine that is in no folder yet. A routine a person has since moved
+// (or filed elsewhere) stays where it is.
+func seedTourFolders(ctx context.Context, client *cli.Client, wsID string, stats *uiTourStats) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	base := "/api/v1/workspaces/" + url.PathEscape(wsID)
+	folderIDs, err := tourFolderIDs(client, base)
+	if err != nil {
+		return fmt.Errorf("list routine folders: %w", err)
+	}
+	for _, f := range seeddata.TourFolders {
+		if folderIDs[f.Name] != "" {
+			continue
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		status, err := tourPost(client, base+"/pipeline-folders", map[string]any{"name": f.Name, "color": f.Color}, &created)
+		if err != nil {
+			return fmt.Errorf("routine folder %s: %w", f.Name, err)
+		}
+		if status == http.StatusConflict || created.ID == "" {
+			// Created concurrently: read it back by name.
+			if folderIDs, err = tourFolderIDs(client, base); err != nil {
+				return fmt.Errorf("routine folder %s: %w", f.Name, err)
+			}
+			if folderIDs[f.Name] == "" {
+				return fmt.Errorf("routine folder %s: exists but cannot be read back", f.Name)
+			}
+			continue
+		}
+		folderIDs[f.Name] = created.ID
+		stats.Folders++
+		fmt.Fprintf(os.Stderr, "  + Folder: %s\n", f.Name)
+	}
+
+	resp, err := client.Get(base + "/pipelines?limit=500")
+	if err != nil {
+		return err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("list routines: %w", err)
+	}
+	var routines []struct {
+		Slug     string `json:"slug"`
+		FolderID string `json:"folder_id"`
+	}
+	if err := cli.ReadJSON(resp, &routines); err != nil {
+		return fmt.Errorf("list routines: %w", err)
+	}
+	filed := map[string]bool{}
+	present := map[string]bool{}
+	for _, r := range routines {
+		present[r.Slug] = true
+		filed[r.Slug] = r.FolderID != ""
+	}
+	for _, f := range seeddata.TourFolders {
+		var slugs []string
+		for _, r := range seeddata.TourRoutines {
+			if r.Folder == f.Tag && present[r.Slug] && !filed[r.Slug] {
+				slugs = append(slugs, r.Slug)
+			}
+		}
+		if len(slugs) == 0 {
+			continue
+		}
+		folderID := folderIDs[f.Name]
+		if _, err := tourPost(client, base+"/pipeline-folders/move", map[string]any{"slugs": slugs, "folder_id": folderID}, nil); err != nil {
+			return fmt.Errorf("file routines in %s: %w", f.Name, err)
+		}
+		stats.Filed += len(slugs)
+		fmt.Fprintf(os.Stderr, "  + Filed in %s: %s\n", f.Name, strings.Join(slugs, ", "))
+	}
+	return nil
+}
+
+func tourFolderIDs(client *cli.Client, base string) (map[string]string, error) {
+	resp, err := client.Get(base + "/pipeline-folders")
+	if err != nil {
+		return nil, err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var folders []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := cli.ReadJSON(resp, &folders); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(folders))
+	for _, f := range folders {
+		out[f.Name] = f.ID
+	}
+	return out, nil
 }
 
 type tourRunResult struct {

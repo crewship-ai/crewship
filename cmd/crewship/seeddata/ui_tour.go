@@ -13,18 +13,18 @@ package seeddata
 // and notify steps only. The tour therefore needs no provider credentials,
 // and the schedules it creates never spend a token when they fire.
 
-// TourFolder groups tour routines. Routines have no folder resource, so a
-// folder is carried as a routine tag (the list filters by ?tag=); Name is the
-// label a person reads.
+// TourFolder groups tour routines. Name is the routine folder (the
+// /pipeline-folders resource the Routines panel groups by); Tag is the same
+// grouping as a routine tag, so `routine list --tag` finds it too.
 type TourFolder struct {
-	Tag, Name string
+	Tag, Name, Color string
 }
 
 var TourFolders = []TourFolder{
-	{Tag: "daily-operations", Name: "Daily operations"},
-	{Tag: "customer-care", Name: "Customer care"},
-	{Tag: "finance", Name: "Finance"},
-	{Tag: "reports", Name: "Reports"},
+	{Tag: "daily-operations", Name: "Daily operations", Color: "green"},
+	{Tag: "customer-care", Name: "Customer care", Color: "blue"},
+	{Tag: "finance", Name: "Finance", Color: "amber"},
+	{Tag: "reports", Name: "Reports", Color: "violet"},
 }
 
 // TourSchedule is the cron plan a tour routine is saved with.

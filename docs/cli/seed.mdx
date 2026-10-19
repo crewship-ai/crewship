@@ -226,16 +226,20 @@ It only adds, and every write goes through the HTTP API:
 | Issues | 22 issues across Sales, Shipping, Finance, Marketing and a new Warehouse move project, in every board state, with labels, assignees and a few comments. |
 | Activity, Dashboard | The journal entries and counts the writes above produce. |
 
-Running it again adds nothing: routines are matched by slug, schedules by
-routine and name, issues by title in their crew, projects and labels by name,
+Running it again adds nothing: routines are matched by slug, folders by name,
+schedules by routine and name, issues by title in their crew, projects and labels by name,
 and a routine that already has runs keeps its history. The routines use only
 transform, code (`expr`/`cel`), query, wait and notify steps, so the tour
 needs no provider credentials (`--offline-demo` workspaces work too) and its
 schedules never spend tokens when they fire.
 
-Limits: routine folders are carried as routine tags (routines have no folder
-resource yet), and run timestamps are the time of seeding — the API cannot
-backdate a run, so history across past days accrues as the schedules fire.
+The four folders are real routine folders (`crewship routine folders`); each
+routine also carries the folder as a tag. A routine that is already in a
+folder — for example one a person moved after the first run — is not moved
+back.
+
+Limit: run timestamps are the time of seeding — the API cannot backdate a
+run, so history across past days accrues as the schedules fire.
 
 ## crewship seed verify
 
