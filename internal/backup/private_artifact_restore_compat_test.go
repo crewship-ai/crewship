@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func TestPrivateArtifactMarkerUserReconciliation(t *testing.T) {
@@ -51,7 +52,7 @@ func TestPrivateArtifactMarkerUserReconciliation(t *testing.T) {
 }
 
 func TestPrivateArtifactPortableRestorePreflight(t *testing.T) {
-	for _, kind := range []string{"artifact era missing marker", "artifact era missing marker and visibility", "artifact era group missing marker", "pre artifacts ordinary", "new ordinary explicit null"} {
+	for _, kind := range []string{"artifact era missing marker", "artifact era missing marker and visibility", "artifact era group missing marker", "pre artifacts ordinary", "new ordinary explicit null", "new protected into old target"} {
 		t.Run(kind, func(t *testing.T) {
 			source := openMigratedDBCov(t)
 			ws, _ := seedCovWorkspace(t, source, "private-marker-dump")
@@ -76,14 +77,23 @@ func TestPrivateArtifactPortableRestorePreflight(t *testing.T) {
 				if kind == "new ordinary explicit null" {
 					row["private_artifact_author_user_id"] = nil
 				}
+				if kind == "new protected into old target" {
+					row["private_artifact_author_user_id"] = row["created_by"]
+				}
 			}
 			if kind == "pre artifacts ordinary" {
 				delete(dump.Tables, "document_creations")
 			}
 			target := openMigratedDBCov(t)
+			if kind == "new protected into old target" {
+				target = testutil.NewMemDB(t)
+				if err := database.MigrateSkipping(t.Context(), target, slog.New(slog.NewTextHandler(io.Discard, nil)), "private_artifact_conversation_context"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			touched := false
 			_, err = RestoreDumpTxHooks(t.Context(), target, dump, &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error { touched = true; return nil }})
-			unsafe := strings.HasPrefix(kind, "artifact era")
+			unsafe := strings.HasPrefix(kind, "artifact era") || kind == "new protected into old target"
 			if unsafe {
 				if err == nil || !strings.Contains(err.Error(), "private artifact conversation classification") {
 					t.Errorf("ambiguous artifact-era bundle was not rejected specifically: %v", err)
