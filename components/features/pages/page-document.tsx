@@ -127,10 +127,10 @@ function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, 
   const eligible = available && !denied
   const visible = open && eligible
   const history = useDocumentHistory({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}` })
-  const restore = useDocumentHistoryRestore({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}`,
+  const restore = useDocumentHistoryRestore({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}:denied:${denied}`,
     head, snapshot: history.snapshot, historyScopeKey: history.scopeKey, blocked, onStart, onRestored, onRefused })
   const restoring = restore.status === "pending" || restore.status === "uncertain"
-  useEffect(() => { if (!eligible) setOpen(false) }, [eligible])
+  useEffect(() => { if (!eligible && !restoring) setOpen(false) }, [eligible, restoring])
   const close = () => { setOpen(false); opener.current?.focus() }
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {

@@ -56,6 +56,21 @@ describe("explicit human checkpoint restore", () => {
     await act(async () => late.resolve(response({ page_id: "page", id: packet.id, rev: 9, kind: "restore", epoch: "new" })))
     expect(input.onRestored).not.toHaveBeenCalled(); expect(view.result.current.status).toBe("idle")
   })
+  it("keeps an uncertain packet through unavailability and retries only after availability returns", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("lost ACK")).mockRejectedValueOnce(new Error("still unavailable"))
+    const input=restoreInput(),view=renderHook(props=>useDocumentHistoryRestore(props),{initialProps:input})
+    act(()=>view.result.current.onConfirm())
+    await waitFor(()=>expect(view.result.current.status).toBe("uncertain"))
+    const packet=fetchMock.mock.calls[0][1]?.body
+    view.rerender({...input,enabled:false,blocked:true})
+    expect(view.result.current.status).toBe("uncertain")
+    act(()=>view.result.current.onRetry());expect(fetchMock).toHaveBeenCalledTimes(1)
+    view.rerender({...input,enabled:true,blocked:true,head:{...input.head,rev:9,epoch:"later"}})
+    act(()=>view.result.current.onRetry())
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(packet)
+    expect(input.onRestored).not.toHaveBeenCalled()
+  })
   it.each([403, 409, 503])("never publishes returned receipt fields on HTTP %s", async status => {
     fetchMock.mockResolvedValueOnce(response({ id: "ignored", rev: 9, epoch: "ignored" }, status))
     const input = restoreInput(), { result } = renderHook(() => useDocumentHistoryRestore(input))

@@ -171,6 +171,26 @@ it("never offers restore over a real pending local draft",async()=>{
     expect(request.mock.calls.some(([url])=>url.includes("/restore"))).toBe(false)
   } finally {f.view.unmount();f.saved.destroy()}
 })
+it("retains exact restore retry through service unavailability without unlocking the real editor",async()=>{
+  const f=await historyFixture(),read=request.getMockImplementation()!
+  request.mockImplementation((url:string,init?:RequestInit)=>url.includes("/restore")
+    ?Promise.resolve({ok:false,status:503,json:async()=>({error:"unconfirmed"})}):read(url,init))
+  try {
+    await openHistory()
+    fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+    fireEvent.click(screen.getByRole("button",{name:"Confirm restore"}))
+    await screen.findByRole("button",{name:"Retry exact restore"})
+    const packet=request.mock.calls.find(([url])=>url.includes("/restore"))![1].body
+    availability.enabled=false;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    expect(screen.queryByRole("region",{name:"Document history"})).toBeNull()
+    expect(f.editor.isEditable).toBe(false)
+    availability.enabled=true;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    fireEvent.click(await screen.findByRole("button",{name:"Retry exact restore"}))
+    await waitFor(()=>expect(request.mock.calls.filter(([url])=>url.includes("/restore"))).toHaveLength(2))
+    expect(request.mock.calls.filter(([url])=>url.includes("/restore"))[1][1].body).toBe(packet)
+    expect(f.editor.isEditable).toBe(false)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
 it("browses immutable history and closes without replacing the real editor or unsaved draft",async()=>{
   const f=await historyFixture()
   try {

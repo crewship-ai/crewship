@@ -145,7 +145,9 @@ interface RestoreScope extends DocumentHistoryScope {
  * packet from a later head; the service/Store retain receipt and epoch fencing. */
 export function useDocumentHistoryRestore(input: RestoreScope) {
   const { workspaceId, humanId, pageId, activationKey, enabled, head, snapshot, blocked } = input
-  const key = JSON.stringify([workspaceId, humanId, pageId, activationKey, enabled === true])
+  // Availability may disappear after a write commits. Keep its exact retry
+  // packet across an outage; the caller changes activationKey on auth loss.
+  const key = JSON.stringify([workspaceId, humanId, pageId, activationKey])
   const latest = useRef(input); latest.current = input
   const current = useRef(key); current.current = key
   const inFlight = useRef<AbortController>()
@@ -198,6 +200,6 @@ export function useDocumentHistoryRestore(input: RestoreScope) {
     request.current = captured
     void run(captured)
   }
-  const onRetry = () => { const captured = request.current; if (captured?.key === key && status === "uncertain") void run(captured) }
+  const onRetry = () => { const captured = request.current; if (enabled === true && captured?.key === key && status === "uncertain") void run(captured) }
   return { allowed: Boolean(allowed), baseKey: JSON.stringify([head?.page_id, head?.rev, head?.epoch, head?.schema]), status, onConfirm, onRetry }
 }
