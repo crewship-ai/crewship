@@ -40,6 +40,16 @@ afterEach(() => {
 })
 
 describe("WorkspaceDefaultCard", () => {
+  it("saves the shared default only on its button, never on its own", async () => {
+    render(<WorkspaceDefaultCard />)
+    // Mounting, and the admin's own personal changes, must not touch the shared value.
+    markExplicit("accent")
+    await new Promise((r) => setTimeout(r, 50))
+    expect(apiFetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Use my look as default" }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+  })
+
   it("lets an admin set the current look as the workspace default", async () => {
     render(<WorkspaceDefaultCard />)
     fireEvent.click(screen.getByRole("button", { name: "Use my look as default" }))

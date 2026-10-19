@@ -108,3 +108,10 @@ export function clearExplicit(fields: readonly ExplicitField[]): void {
   writeKey(APPEARANCE_EXPLICIT_STORAGE_KEY, set)
   emitAppearanceChange()
 }
+
+/** Puts both sets back exactly as they were (Undo in Settings › Appearance). */
+export function restoreMarks(explicit: ReadonlySet<ExplicitField>, inherited: ReadonlySet<ExplicitField>): void {
+  writeKey(APPEARANCE_INHERITED_STORAGE_KEY, new Set(inherited))
+  writeKey(APPEARANCE_EXPLICIT_STORAGE_KEY, new Set(explicit))
+  emitAppearanceChange()
+}
