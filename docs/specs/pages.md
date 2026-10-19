@@ -298,6 +298,14 @@ human's private output writes a content-free audit before metadata or content is
 released; unavailable audit storage refuses that access. Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
+Private read checks require a live account, workspace and membership. Guest
+catalogs omit unauthorized private outputs without failing the whole listing.
+The Page metadata reader checks a live custodian independently of trusted
+mutation authority; the account-wide Guest ceiling disables the OWNER override
+for others' outputs. Public routes retain the Guest allowlist, and the Document
+engine retains its trusted-account gate: this metadata check does not enable
+Document content access for a globally restricted custodian. Private mutation
+checks retain their separate trusted-account requirement.
 
 
 The requirement: creator owns the page; a page created by an agent is owned by the human who

@@ -35,6 +35,7 @@ export function useDocumentViewerRead({ workspaceId, chatId, currentUserId, acti
   const [generation, setGeneration] = useState(0)
   const refresh = useCallback(() => setGeneration(value => value + 1), [])
   useRealtimeEventSafe("page.updated", refresh)
+  useRealtimeEventSafe("page.deleted", refresh)
   useRealtimeEventSafe("realtime.reconnected", refresh)
   const pageId = target?.pageId
   const available = enabled === true && nonempty(workspaceId) && nonempty(chatId) && nonempty(currentUserId) && nonempty(activationKey, 1024)
