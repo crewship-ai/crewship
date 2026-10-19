@@ -1483,6 +1483,13 @@ type provisionSummaryCrew struct {
 	Error string `json:"error,omitempty"`
 }
 
+// provisionSummaryResponse is the body of GET /api/v1/crews/provisioning-summary.
+type provisionSummaryResponse struct {
+	Failed         []provisionSummaryCrew `json:"failed"`
+	NeedsProvision []provisionSummaryCrew `json:"needs_provision"`
+	Total          int                    `json:"total"`
+}
+
 // ProvisionSummary reports, for the caller's workspace, the crews whose
 // latest build failed and the crews that have no built image yet. It applies
 // the same rules as ProvisionStatus for each crew, but answers for the whole
@@ -1552,9 +1559,5 @@ func (h *ProvisioningHandler) ProvisionSummary(w http.ResponseWriter, r *http.Re
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"failed":          failed,
-		"needs_provision": needs,
-		"total":           len(failed) + len(needs),
-	})
+	writeJSON(w, http.StatusOK, provisionSummaryResponse{Failed: failed, NeedsProvision: needs, Total: len(failed) + len(needs)})
 }

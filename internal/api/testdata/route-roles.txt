@@ -40,6 +40,7 @@ DELETE /api/v1/credentials/{credentialId} roleManage
 DELETE /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 DELETE /api/v1/crew-connections/{connectionId} roleCreate
 DELETE /api/v1/crews/{crewId} roleManage
+DELETE /api/v1/crews/{crewId}/budget roleManage
 DELETE /api/v1/crews/{crewId}/escalations roleManage
 DELETE /api/v1/crews/{crewId}/files/delete roleCreate
 DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -203,6 +204,7 @@ POST /api/v1/agents/{agentId}/credentials roleManage
 POST /api/v1/agents/{agentId}/integrations roleCreate
 POST /api/v1/agents/{agentId}/persona/suggest roleCreate
 POST /api/v1/agents/{agentId}/rehire roleCreate
+POST /api/v1/agents/{agentId}/release roleCreate
 POST /api/v1/agents/{agentId}/restricted-cli-chats roleSelf
 POST /api/v1/agents/{agentId}/skills roleCreate
 POST /api/v1/agents/{agentId}/stop roleCreate
@@ -429,6 +431,7 @@ PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
 PUT /api/v1/crews/{crewId} roleManage
+PUT /api/v1/crews/{crewId}/budget roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate
 PUT /api/v1/crews/{crewId}/persona roleCreate

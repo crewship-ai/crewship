@@ -47,6 +47,10 @@ var responseShapeContracts = []struct {
 }{
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
 	{name: "WorkspaceArtifactCreationPolicyError", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyError", value: WorkspaceArtifactCreationPolicyError{}},
+	{name: "CrewProvisioningSummaryV1", pointer: "/components/schemas/CrewProvisioningSummaryV1", value: provisionSummaryResponse{}},
+	{name: "CrewProvisioningSummaryCrew", pointer: "/components/schemas/CrewProvisioningSummaryV1/properties/failed/items", value: provisionSummaryCrew{}},
+	{name: "CrewBudgetV1", pointer: "/components/schemas/CrewBudgetV1", value: crewBudgetResponse{}},
+	{name: "AgentReleasedV1", pointer: "/components/schemas/AgentReleasedV1", value: agentReleasedResponse{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},

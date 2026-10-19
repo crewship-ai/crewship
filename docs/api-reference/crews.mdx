@@ -24,6 +24,7 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}`](#get-crew) | Get a single crew |
 | PATCH / PUT | [`/api/v1/crews/{crewId}`](#update-crew) | Update a crew |
 | DELETE | [`/api/v1/crews/{crewId}`](#delete-crew) | Soft-delete a crew |
+| GET / PUT / DELETE | [`/api/v1/crews/{crewId}/budget`](#budget) | Read, set or clear the crew's monthly spend limit |
 | GET | [`/api/v1/crews/{crewId}/members`](#list-members) | List crew members |
 | POST | [`/api/v1/crews/{crewId}/members`](#add-member) | Add a crew member |
 | PATCH | [`/api/v1/crews/{crewId}/members/{memberId}`](#update-member-role) | Update a member's per-crew role |
@@ -664,6 +665,51 @@ state and the freshly-recorded audit triple.
 |--------|-----------|
 | `400` | Invalid enum value, the forbidden `full` + `block` combination, or `reason` missing when `autonomy_level=full` |
 | `404` | Crew not found |
+
+---
+
+## Budget
+
+```
+GET    /api/v1/crews/{crewId}/budget
+PUT    /api/v1/crews/{crewId}/budget
+DELETE /api/v1/crews/{crewId}/budget
+```
+
+The crew's monthly spend limit: a cap on what its agents may spend in a calendar month (UTC). It is the crew-scope, month-window row of `budget_limits`, the table admission and run preflight already read, so a limit set here is enforced there. A workspace or agent limit is a different row and is not shown here.
+
+**Auth:** Session or CLI token + workspace membership, ADMIN or higher, for reads and writes. Scoped CLI tokens also need `crews:write` for `PUT` and `DELETE`.
+
+**`PUT` request:**
+
+```json
+{ "limit_usd": 80, "mode": "tiered" }
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `limit_usd` | yes | Greater than 0. |
+| `mode` | no | `tiered` (default: warn from 80 %, stop new runs at 100 %), `soft` (warn only) or `hard` (stop at 100 %). |
+
+**Response:** `200 OK` for all three calls.
+
+```json
+{ "crew_id": "crew_1", "window": "month", "limit_usd": 80, "mode": "tiered", "spent_usd": 12.4, "state": "ok" }
+```
+
+`limit_usd` is `null` and `state` is `none` when no limit is set. `state` is otherwise `ok`, `warn` or `exceeded`. `DELETE` on a crew without a limit succeeds.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `limit_usd` missing, zero or negative, or an unknown `mode` |
+| `403` | Caller below ADMIN |
+| `404` | Crew not found |
+
+<Note>
+  A `hard` or `tiered` limit makes admission refuse legacy proxy traffic that cannot be metered per request; those calls need the restricted broker.
+</Note>
+
+CLI: `crewship crew budget get|set|clear`.
 
 ---
 

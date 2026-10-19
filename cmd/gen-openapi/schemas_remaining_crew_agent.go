@@ -147,6 +147,14 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	summaryCrew["required"] = []string{"id", "slug", "name"}
 	provisionSummary := object(map[string]any{"failed": array(summaryCrew), "needs_provision": array(summaryCrew), "total": integer()})
 	provisionSummary["required"] = []string{"failed", "needs_provision", "total"}
+	crewBudget := object(map[string]any{"crew_id": str(), "window": str(), "limit_usd": nullable("number"), "mode": str(), "spent_usd": map[string]any{"type": "number"}, "state": str()})
+	crewBudget["required"] = []string{"crew_id", "window", "limit_usd", "spent_usd", "state"}
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		add(method, "/api/v1/crews/{crewId}/budget", "CrewBudgetV1", crewBudget)
+	}
+	released := object(map[string]any{"id": str(), "expired_at": str(), "released": boolean()})
+	released["required"] = []string{"id", "expired_at", "released"}
+	add("POST", "/api/v1/agents/{agentId}/release", "AgentReleasedV1", released)
 	add("GET", "/api/v1/crews/provisioning-summary", "CrewProvisioningSummaryV1", provisionSummary)
 	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", provisionStatus)
 	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
@@ -237,6 +245,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
 	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
 	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
+	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "exclusiveMinimum": 0}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
+	crewBudgetRequest["required"] = []string{"limit_usd"}
+	addRequest("PUT", "/api/v1/crews/{crewId}/budget", "CrewBudgetRequestV1", crewBudgetRequest)
 	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", crewPolicyRequest)
 
 	// Remaining subroute actions. These handlers deliberately return compact

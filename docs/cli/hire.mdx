@@ -18,6 +18,7 @@ For the lifecycle walkthrough and operator workflows see [Ephemeral agents](/gui
 ```bash
 crewship hire   --crew <slug> --template <name> --reason <text> [flags]
 crewship rehire <agent-slug-or-id>             --reason <text> [flags]
+crewship release <agent-slug-or-id>            [--yes]
 ```
 
 ---
@@ -176,6 +177,19 @@ Same as `hire`: `0` on success, `1` on any failure with the cause in the stderr 
 
 - The agent isn't ephemeral (you can't rehire a permanent agent — the lifecycle doesn't apply).
 - The policy rejects rehire on a `strict` crew (matches the hire rejection — re-promoting a ghost still needs policy approval).
+
+---
+
+## `crewship release`
+
+End a temporary hire now instead of at its expiry. The agent becomes an expired hire: runs, chats and memory notes stay, and `crewship rehire` brings it back. A hire that is running (stop its run first) or still waits for approval (deny it instead) is refused with the reason. Releasing an expired hire does nothing. Needs the Manager role.
+
+```bash
+crewship release pager
+crewship release pager --yes
+```
+
+Calls `POST /api/v1/agents/{id}/release`.
 
 ---
 

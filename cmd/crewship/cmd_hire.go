@@ -234,6 +234,54 @@ expires_at without changing the live/ghost count toward the quota.`,
 	},
 }
 
+var releaseCmd = &cobra.Command{
+	Use:   "release <agent-slug-or-id>",
+	Short: "End a temporary hire now instead of at its expiry",
+	Long: `Release a temporary agent before its TTL elapses. It becomes an expired
+hire at once: its runs, chats and memory notes stay, and 'crewship rehire'
+brings it back. A hire that is running (stop its run first) or still waits for
+approval (deny it instead) is refused. Releasing an expired hire does nothing.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Release temporary agent %q now?", args[0])); err != nil {
+			return err
+		}
+		resp, err := client.Post("/api/v1/agents/"+agentID+"/release", nil)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			ID        string `json:"id" yaml:"id"`
+			ExpiredAt string `json:"expired_at" yaml:"expired_at"`
+			Released  bool   `json:"released" yaml:"released"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		if body.Released {
+			cli.PrintSuccess("Released " + args[0])
+		} else {
+			cli.PrintSuccess(args[0] + " was already expired")
+		}
+		return newFormatter().AutoDetail(body, [][]string{{"ID", body.ID}, {"Expired At", body.ExpiredAt}})
+	},
+}
+
 // printHireResponse decodes the API body into a hireResponseShape and
 // renders it via the configured formatter. JSON/yaml/ndjson modes get
 // the raw payload via AutoDetail's fallthrough; table mode gets a
@@ -339,5 +387,7 @@ func init() {
 
 	hireCmd.AddCommand(hireApproveCmd)
 	rootCmd.AddCommand(hireCmd)
+	releaseCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	rootCmd.AddCommand(rehireCmd)
+	rootCmd.AddCommand(releaseCmd)
 }
