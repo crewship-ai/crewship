@@ -2459,3 +2459,12 @@ return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
 
 Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+
+## Personal Documents view
+
+When Documents are enabled, **My space** in Artifacts shows the current user's private Documents within the existing workspace. It does not create another workspace. Custody access to another user's private output belongs to the workspace OWNER and remains a separate audited access path.
+
+Authorized Page index rows include the read-only boolean `private_audience`. A personal view requires both `private_audience: true` and the current user's `owner` reference; an unfiled Page or an ownership reference alone does not establish privacy. Existing `crewship page list --format json` output exposes this classification. Missing audience information is unknown, rather than permission to infer that a Page is public.
+
+The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
