@@ -8,7 +8,7 @@ describe("circuit breaker copy", () => {
     for (const text of [BREAKER_ON_AGAIN, BREAKER_OFF_HINT]) {
       expect(text).not.toMatch(/next successful run/i)
     }
-    expect(BREAKER_ON_AGAIN).toMatch(/starts again from zero/i)
-    expect(BREAKER_OFF_HINT).toMatch(/starts again from zero/i)
+    expect(BREAKER_ON_AGAIN).toMatch(/back to zero/i)
+    expect(BREAKER_OFF_HINT).toMatch(/back to zero/i)
   })
 })
