@@ -119,6 +119,12 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	rec, ok := h.grantPage(w, r, wsID)
 	if !ok {
@@ -135,6 +141,10 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -550,11 +560,11 @@ func (h *PageHandler) grantSubjectLabel(ctx context.Context, wsID, subjectType, 
 	case pageSubjectWorkspace:
 		return pageSubjectWorkspace
 	case pageSubjectUser:
-		err = h.db.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, subjectID).Scan(&label)
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, subjectID).Scan(&label)
 	case pageSubjectCrew:
-		err = h.db.QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ? AND workspace_id = ?`, subjectID, wsID).Scan(&label)
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ? AND workspace_id = ?`, subjectID, wsID).Scan(&label)
 	case pageSubjectAgent:
-		err = h.db.QueryRowContext(ctx, `SELECT slug FROM agents WHERE id = ? AND workspace_id = ?`, subjectID, wsID).Scan(&label)
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT slug FROM agents WHERE id = ? AND workspace_id = ?`, subjectID, wsID).Scan(&label)
 	}
 	if err != nil || strings.TrimSpace(label) == "" {
 		return subjectID
@@ -651,16 +661,16 @@ func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subj
 		// carries no COLLATE NOCASE, so a grant issued as `Alice@Example.com`
 		// could not be revoked with that same string — the asymmetry between
 		// issue and revoke being the very failure this function exists to end.
-		err = h.db.QueryRowContext(ctx, `
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
 			SELECT u.id, u.email FROM users u
 			JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
 			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label)
 	case pageSubjectCrew:
-		err = h.db.QueryRowContext(ctx, `
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
 			SELECT id, slug FROM crews
 			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
 	case pageSubjectAgent:
-		err = h.db.QueryRowContext(ctx, `
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
 			SELECT id, slug FROM agents
 			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
 	default:

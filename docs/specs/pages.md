@@ -307,6 +307,20 @@ engine retains its trusted-account gate: this metadata check does not enable
 Document content access for a globally restricted custodian. Private mutation
 checks retain their separate trusted-account requirement.
 
+Metadata detail, export, versions, grants and Page/subject access reports retain
+one read snapshot for classification, custody, role and the emitted metadata.
+Ordinary reads use a read-only transaction without acquiring the SQLite writer
+lock. Private reads restart with fresh authorization inside a writer transaction;
+subject access re-prepares its final page once and audits only private entries
+actually emitted. Required audit inserts and the complete final batch are checked
+natively and committed before metadata is released. A later audit insert removing
+an earlier row, an ignored insert or commit failure withholds the response.
+Document engine reads retain their separately captured actual-read custodian;
+this metadata boundary does not replace that identity with a later owner lookup.
+Project/publication source and panel-history reads are not newly qualified by
+these metadata consumers.
+
+
 
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant

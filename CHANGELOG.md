@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Audit OWNER reads of another human’s private Page export, version history and access report atomically before disclosure; ignored or removed audit rows withhold the response. Ordinary Page reads retain a read-only snapshot without taking the SQLite writer lock.
+
 - Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.

@@ -206,7 +206,7 @@ func scanPageFolder(row interface{ Scan(...any) error }) (*pageFolderRecord, err
 // loadFoldersIn is every folder in the workspace, keyed by id, in ONE
 // statement — the index calls it for the whole workspace.
 func (h *PageHandler) loadFoldersIn(ctx context.Context, wsID string) (map[string]*pageFolderRecord, error) {
-	rows, err := h.db.QueryContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ?`, wsID)
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ?`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,13 +223,13 @@ func (h *PageHandler) loadFoldersIn(ctx context.Context, wsID string) (map[strin
 }
 
 func (h *PageHandler) loadFolder(ctx context.Context, wsID, slug string) (*pageFolderRecord, error) {
-	return scanPageFolder(h.db.QueryRowContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ? AND f.slug = ?`, wsID, slug))
+	return scanPageFolder(h.pageAuthReader(ctx).QueryRowContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ? AND f.slug = ?`, wsID, slug))
 }
 
 // loadFolderByID is the loader a page's folder_id needs. The workspace is
 // not re-checked: the id came from a pages row already scoped to it.
 func (h *PageHandler) loadFolderByID(ctx context.Context, id string) (*pageFolderRecord, error) {
-	return scanPageFolder(h.db.QueryRowContext(ctx, pageFolderSelect+` WHERE f.id = ?`, id))
+	return scanPageFolder(h.pageAuthReader(ctx).QueryRowContext(ctx, pageFolderSelect+` WHERE f.id = ?`, id))
 }
 
 // folderRefFor is the single-page read's folder, for pageDocumentFor. One
