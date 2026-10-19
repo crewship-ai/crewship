@@ -16,6 +16,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: nav.push, replace: vi.fn() }),
 }))
 const sonner = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() }))
+// The routine's name is read from the server; these tests use the slug's words.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: async () => ({ ok: false, json: async () => ({}) }) }))
 vi.mock("sonner", () => ({ toast: sonner }))
 
 import { RealtimeToasts } from "../realtime-toasts"
@@ -54,7 +56,7 @@ describe("realtime toasts — event table", () => {
   it("a failed routine stays until closed", () => {
     render(<RealtimeToasts />)
     fire("pipeline.run.failed", { pipeline_slug: "weekly-scan" })
-    expect(sonner.error).toHaveBeenCalledWith("Routine weekly-scan couldn’t finish", expect.objectContaining({ duration: Infinity, id: "routine-failed:weekly-scan" }))
+    expect(sonner.error).toHaveBeenCalledWith("Routine Weekly scan couldn’t finish", expect.objectContaining({ duration: Infinity, id: "routine-failed:weekly-scan" }))
   })
 
   it("an escalation points to the Inbox, and does not toast while on it", () => {

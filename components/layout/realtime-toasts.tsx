@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
@@ -15,6 +16,34 @@ function agentName(slug: string | undefined): string {
   if (!slug) return "An agent"
   const s = slug.replace(/^@/, "")
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** "overdue-invoice-reminders" → "Overdue invoice reminders", until the name arrives. */
+export function routineLabel(slug: string): string {
+  const s = slug.replace(/[-_]+/g, " ").trim()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : "routine"
+}
+
+/** A wait step the person denied: the run stopped because they said no. */
+const DENIED = /\(approval\) denied\s*$/i
+
+// Routine names by workspace and slug, read once per session.
+const routineNames = new Map<string, string>()
+async function routineName(workspaceId: string | null | undefined, slug: string): Promise<string | null> {
+  if (!workspaceId) return null
+  const key = `${workspaceId}:${slug}`
+  const known = routineNames.get(key)
+  if (known) return known
+  try {
+    const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`)
+    if (!res.ok) return null
+    const name = ((await res.json()) as { name?: unknown }).name
+    if (typeof name !== "string" || name.trim() === "") return null
+    routineNames.set(key, name)
+    return name
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -108,16 +137,32 @@ export function RealtimeToasts() {
     "pipeline.run.failed",
     useCallback((event) => {
       if (asString(event.payload.status) === "CANCELLED") return
-      const routine = asString(event.payload.pipeline_slug) ?? "routine"
-      const id = `routine-failed:${routine}`
-      toast.error(counted(id, `Routine ${routine} couldn’t finish`), {
+      const slug = asString(event.payload.pipeline_slug) ?? "routine"
+      const known = workspaceId ? routineNames.get(`${workspaceId}:${slug}`) : undefined
+      const message = asString(event.payload.error_message)
+      // A deliberate deny stops the run on purpose: say so, plainly, for the
+      // usual 4 s — not a sticky red failure (owner, 19. 10.).
+      if (message && DENIED.test(message)) {
+        const id = `routine-denied:${slug}`
+        const say = (name: string) => toast.info(`Denied · ${name} stopped`, { id })
+        say(known ?? routineLabel(slug))
+        if (!known) void routineName(workspaceId, slug).then((name) => { if (name) say(name) })
+        return
+      }
+      const id = `routine-failed:${slug}`
+      const title = counted(id, `Routine ${known ?? routineLabel(slug)} couldn’t finish`)
+      const show = (t: string) => toast.error(t, {
         id,
-        description:
-          asString(event.payload.error_message) ??
-          "The routine run stopped with an error.",
+        description: message ?? "The routine run stopped with an error.",
         onDismiss: onDismiss(id),
       })
-    }, []),
+      show(title)
+      if (!known) {
+        void routineName(workspaceId, slug).then((name) => {
+          if (name) show(title.replace(`Routine ${routineLabel(slug)} `, `Routine ${name} `))
+        })
+      }
+    }, [workspaceId]),
   )
 
   useRealtimeEvent(

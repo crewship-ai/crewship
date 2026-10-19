@@ -24,6 +24,8 @@ vi.mock("@/hooks/use-inbox", () => ({
     refresh: vi.fn(async () => {}), patch: m.patch, actOnInboxItem: vi.fn(async () => {}),
   }),
   useInboxItem: () => ({ data: undefined, isFetching: false }),
+  // A server without counts (inbox-counts-ui): the loaded rows are the feed.
+  useInboxCounts: () => ({ data: null }),
 }))
 vi.mock("@/hooks/use-approvals", () => ({
   useApprovals: () => ({ rows: [], loading: false, error: m.approvalsError, notConfigured: false, refresh: m.refreshApprovals, patchRow: vi.fn() }),
