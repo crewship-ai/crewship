@@ -595,6 +595,14 @@ A monotonic admission epoch captured before database authentication prevents
 late registration with a pre-revocation validation result. No TTL or batch skips
 extend access. The registry retains active requests/connections only.
 
+Container terminals share that same source-credential authenticator and registry.
+They fence PTY output, terminal input, resize and ping replies; credential loss
+also wakes idle connections and closes the PTY. Restricted chat/run text streams,
+including native project-file requests, check the credential before each text or
+done frame and emit no error body after credential loss. This does not permit
+restricted accounts to open terminals or widen their workspace access.
+
+
 Revocation stops admission of the next frame; already authorized or in-flight
 bytes cannot be recalled. Ordinary logout does not cancel an already started
 routine: its account and grant authority is a separate execution contract.

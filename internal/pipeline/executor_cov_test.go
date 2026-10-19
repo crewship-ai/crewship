@@ -729,6 +729,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 // with a RunStore in these tests (FK-free variant of the v83 schema).
 const runsProjectionDDL = `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+ start_phase TEXT,
 invocation_source_run_id TEXT,
 chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
@@ -822,9 +823,9 @@ func TestExecutor_RunStorePersistence_FullLifecycle(t *testing.T) {
 	}
 }
 
-func TestExecutor_RunStorePersistence_BrokenProjectionIsNonFatal(t *testing.T) {
-	// Wire a RunStore whose table doesn't exist: every projection write
-	// fails, persistWarn fires, and the run still completes.
+func TestExecutor_RunStorePersistence_BrokenStartRejectsRun(t *testing.T) {
+	// A wired RunStore is the durable start boundary: failed admission
+	// must prevent execution rather than continue without a run identity.
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, newMockRunner(), nil).WithRunStore(NewRunStore(store.db))
@@ -837,11 +838,8 @@ func TestExecutor_RunStorePersistence_BrokenProjectionIsNonFatal(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
-	if err != nil {
-		t.Fatalf("run must survive projection failures: %v", err)
-	}
-	if res.Status != "COMPLETED" {
-		t.Errorf("status: %q", res.Status)
+	if err == nil || res != nil {
+		t.Fatalf("run must reject failed durable start: result=%+v error=%v", res, err)
 	}
 }
 

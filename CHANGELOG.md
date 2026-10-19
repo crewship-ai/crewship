@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. PTY input/output, control replies and restricted text frames retain per-delivery checks without per-frame database queries.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
@@ -16,6 +18,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Preserve the configured v1 audit/journal root in encrypted instance recovery kits after secret re-encryption; successful envelope conversion does not authorize retiring that root.
+
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
