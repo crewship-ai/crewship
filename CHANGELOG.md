@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+
 - Commit Page grant creation, reissue and revocation with their chained audit records; failed audits leave permissions unchanged and publish no change notification.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.

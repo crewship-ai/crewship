@@ -281,6 +281,14 @@ var ErrUnknownRunCursor = errors.New("pipeline_runs: unknown cursor")
 // CreatedAt + UpdatedAt are server-stamped if zero so callers can pass
 // a partially-filled struct without remembering boilerplate.
 func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
+	return s.insert(ctx, s.db, r)
+}
+
+type runInserter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *RunStore) insert(ctx context.Context, db runInserter, r *RunRecord) error {
 	if r.ID == "" {
 		return errors.New("pipeline_runs: id required")
 	}
@@ -319,7 +327,7 @@ func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
 		r.UpdatedAt = now
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (
     id, workspace_id, pipeline_id, pipeline_slug, pipeline_version, definition_hash,
     status, mode, started_at, ended_at, current_step_id,
