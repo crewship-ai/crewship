@@ -1056,7 +1056,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// policy or tier floor changes who may reveal the value, so it needs the
 	// manage tier; the target folder's tier floor must hold for the level the
 	// row ends up with, so a move cannot park a low-tier secret in a strict
-	// folder.
+	// folder: a move without a tier lifts it to the floor, a tier named below
+	// the floor is refused.
 	movedFrom, movedTo := "", ""
 	folderChanged := false
 	if raw, ok := body["folder_id"]; ok {
@@ -1104,12 +1105,19 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			level := currentLevel
+			named := false
 			if n, ok := body["security_level"].(int); ok {
-				level = n
+				level, named = n, true
 			}
 			if fp != nil && level < fp.minLevel {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf("This folder requires Keeper tier L%d or higher", fp.minLevel))
-				return
+				// Filing a secret into a stricter folder applies the folder's
+				// floor (#3706), the same as creating it there without a tier.
+				// A tier the caller names below the floor is still refused.
+				if named || !folderChanged {
+					replyError(w, http.StatusBadRequest, fmt.Sprintf("This folder requires Keeper tier L%d or higher", fp.minLevel))
+					return
+				}
+				body["security_level"] = fp.minLevel
 			}
 		}
 		if folderChanged {

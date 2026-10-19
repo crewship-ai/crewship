@@ -83,6 +83,32 @@ func TestAcceptance_CredentialFolders_Lifecycle(t *testing.T) {
 	}
 }
 
+// #3706: raising a folder's floor through the CLI lifts the secrets already in
+// it (Keeper reads the tier from the secret), and filing a secret into a
+// stricter folder without a tier raises it to the floor.
+func TestAcceptance_CredentialFolders_FloorRaiseLiftsSecrets(t *testing.T) {
+	rig := startCredAdminServer(t)
+	ownerJSON := rig.config(credAdminOwnerToken, "json")
+
+	rig.must(ownerJSON, "credential", "folder", "create", "Ops")
+	rig.must(ownerJSON, "credential", "folder", "create", "Locked", "--min-security-level", "3")
+	rig.must(ownerJSON, "credential", "create", "--name", "ops-key", "--type", "SECRET", "--provider", "GITHUB", "--value", "v1", "--folder", "Ops")
+	rig.must(ownerJSON, "credential", "create", "--name", "loose-key", "--type", "SECRET", "--provider", "GITHUB", "--value", "v2")
+
+	rig.must(ownerJSON, "credential", "folder", "update", "Ops", "--min-security-level", "4")
+	var c credRow
+	rig.mustJSON(ownerJSON, &c, "credential", "get", "ops-key")
+	if c.SecurityLevel != 4 {
+		t.Errorf("after raising the folder floor to L4 the secret is L%d", c.SecurityLevel)
+	}
+
+	rig.must(ownerJSON, "credential", "update", "loose-key", "--folder", "Locked")
+	rig.mustJSON(ownerJSON, &c, "credential", "get", "loose-key")
+	if c.SecurityLevel != 3 {
+		t.Errorf("filed into an L3 folder the secret is L%d, want L3", c.SecurityLevel)
+	}
+}
+
 // `paymaster credential-spend` reaches /paymaster/credential-spend: the calendar
 // month's metered $ per key for OWNER/ADMIN, a refusal for everyone below.
 func TestAcceptance_PaymasterCredentialSpend(t *testing.T) {

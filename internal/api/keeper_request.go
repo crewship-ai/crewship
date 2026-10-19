@@ -162,8 +162,10 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// that can no longer be used.
 	var credName string
 	var secLevel int
+	// The tier is the credential's own, never below its Vault folder's floor
+	// (credentialEffectiveLevelSQL).
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT c.name, COALESCE(c.security_level, 1)
+		SELECT c.name, `+credentialEffectiveLevelSQL("c")+`
 		FROM credentials c
 		JOIN agent_credentials ac ON ac.credential_id = c.id
 		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?

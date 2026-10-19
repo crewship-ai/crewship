@@ -16,7 +16,16 @@ package api
 // changing them needs the manage tier (OWNER/ADMIN); organising (name,
 // description, parent, reminder) needs the update tier (MANAGER+). Deleting
 // needs manage and only an empty folder is deleted — a credential is never
-// silently unfiled. Folder grants (Can use / Can manage for people and crews)
+// silently unfiled.
+//
+// Protection never loosens as a side effect (#3706). A move (to the top level
+// or under another parent) that would leave the folder with a looser
+// EFFECTIVE reveal policy or a lower effective tier floor is the same decision
+// as setting that policy directly, so it needs OWNER/ADMIN; a move that only
+// tightens stays open to MANAGER. Whenever a folder write leaves a floor
+// higher than a member's tier — a raised min_security_level, or a move under a
+// stricter parent — the members in the folder and its subfolders are lifted
+// to the floor in the same transaction. Nothing is ever lowered. Folder grants (Can use / Can manage for people and crews)
 // are NOT here: sharing still flows through credential crew assignment.
 
 import (
@@ -403,8 +412,22 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
+	// The write, the loosening check and the member lift are one transaction:
+	// the effective policy is read back from the row as it will be, so a move
+	// that loosens it is rolled back before anyone could act on it.
+	before, err := loadFolderPolicy(r.Context(), h.db, ws, id)
+	if err != nil || before == nil {
+		replyInternalError(w, h.logger, "load folder policy", fmt.Errorf("before update: %v", err))
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin tx (update credential folder)", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
 	q, args := ub.Build("credential_folders", "id = ? AND workspace_id = ?", id, ws)
-	if _, err := h.db.ExecContext(r.Context(), q, args...); err != nil {
+	if _, err := tx.ExecContext(r.Context(), q, args...); err != nil {
 		if folderNameConflict(err) {
 			replyError(w, http.StatusConflict, "A folder with this name already exists here")
 			return
@@ -412,10 +435,76 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		replyInternalError(w, h.logger, "update credential folder", err)
 		return
 	}
-	auditFromRequest(r, h.db, "credential_folder.update", "CREDENTIAL_FOLDER", id, map[string]interface{}{
-		"policy_changed": req.touchesPolicy(),
-	})
+	after, err := loadFolderPolicy(r.Context(), tx, ws, id)
+	if err != nil || after == nil {
+		replyInternalError(w, h.logger, "load folder policy", fmt.Errorf("after update: %v", err))
+		return
+	}
+	// A move (to root, or under another parent) can drop a restriction the
+	// folder only inherited. Loosening the effective policy is the same
+	// decision as setting the looser policy directly, so it needs the manage
+	// tier; tightening is organising and stays open to MANAGER.
+	if after.looserThan(before) && !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, msgFolderMoveLoosens)
+		return
+	}
+	raised, err := raiseFolderMembersToFloor(r.Context(), tx, ws, id)
+	if err != nil {
+		replyInternalError(w, h.logger, "raise folder members to floor", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit credential folder update", err)
+		return
+	}
+	meta := map[string]interface{}{"policy_changed": req.touchesPolicy() || req.ParentID.set}
+	if len(raised) > 0 {
+		meta["raised_to_floor"] = raised
+	}
+	auditFromRequest(r, h.db, "credential_folder.update", "CREDENTIAL_FOLDER", id, meta)
 	h.reply(w, r, http.StatusOK, ws, id)
+}
+
+const msgFolderMoveLoosens = "This move would loosen the reveal policy or tier floor the folder's secrets are held to; that needs OWNER or ADMIN"
+
+// raiseFolderMembersToFloor lifts every credential filed in the folder or in
+// one of its subfolders to the effective tier floor of the folder it sits in,
+// and returns the ids it lifted. It only ever raises: a floor is "nobody can
+// hold a secret here below it", and Keeper reads the tier from the credential
+// row, so a floor that left existing members below it would protect nothing.
+// Soft-deleted rows are lifted too, so a restore cannot bring back a low tier.
+func raiseFolderMembersToFloor(ctx context.Context, tx *sql.Tx, ws, folderID string) ([]string, error) {
+	floor := folderFloorSQL("credentials.folder_id")
+	where := ` WHERE workspace_id = ? AND folder_id IN
+		(SELECT id FROM credential_folders WHERE workspace_id = ? AND (id = ? OR parent_id = ?))
+		AND COALESCE(security_level, 1) < ` + floor
+	args := []any{ws, ws, folderID, folderID}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM credentials`+where+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `UPDATE credentials SET security_level = `+floor+`, updated_at = ?`+where,
+		append([]any{now}, args...)...); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // Delete DELETE /api/v1/credential-folders/{folderId}
@@ -468,6 +557,24 @@ type folderPolicy struct {
 	revealPolicy string
 	minLevel     int
 	defLevel     *int
+}
+
+// revealRank orders reveal policies from loosest to strictest.
+func revealRank(p string) int {
+	switch p {
+	case folderRevealNobody:
+		return 2
+	case folderRevealAdmins:
+		return 1
+	}
+	return 0
+}
+
+// looserThan reports whether p protects less than prev on any axis: a looser
+// reveal policy or a lower tier floor. Each axis counts on its own, so a move
+// that tightens one and loosens the other is still a loosening.
+func (p *folderPolicy) looserThan(prev *folderPolicy) bool {
+	return revealRank(p.revealPolicy) < revealRank(prev.revealPolicy) || p.minLevel < prev.minLevel
 }
 
 // restricted reports whether filing a credential in (or taking it out of) this
@@ -598,4 +705,23 @@ func applyFolderInfo(c *credentialResponse, fi folderInfo, now time.Time) {
 		c.ReplaceAfter = &s
 		c.ReplaceDue = !fi.replaceAfter.After(now)
 	}
+}
+
+// folderFloorSQL is the effective tier floor (the folder's own, raised by its
+// parent's) of the folder whose id is the SQL expression folderIDExpr; NULL
+// when that is NULL or names no folder.
+func folderFloorSQL(folderIDExpr string) string {
+	return `(SELECT MAX(ff.min_security_level, COALESCE(fp.min_security_level, 1))
+		FROM credential_folders ff LEFT JOIN credential_folders fp ON fp.id = ff.parent_id
+		WHERE ff.id = ` + folderIDExpr + `)`
+}
+
+// credentialEffectiveLevelSQL is the Keeper tier a credential (table alias)
+// is held to: its own security_level, never below the effective floor of the
+// folder it is filed in. Folder writes already lift members to the floor
+// (raiseFolderMembersToFloor); this is the defence in depth for a row that
+// got below it some other way (an old backup bundle, a hand edit), so the
+// gatekeeper never decides on a tier lower than the folder promises.
+func credentialEffectiveLevelSQL(alias string) string {
+	return `MAX(COALESCE(` + alias + `.security_level, 1), COALESCE(` + folderFloorSQL(alias+`.folder_id`) + `, 1))`
 }

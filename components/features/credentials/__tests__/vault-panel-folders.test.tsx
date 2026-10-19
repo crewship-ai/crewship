@@ -61,6 +61,19 @@ describe("Vault panel folders", () => {
     expect(onNewFolder).toHaveBeenCalled()
   })
 
+  it("offers Edit folder for the open folder only to people who may edit", () => {
+    panel({ filters: { ...EMPTY_CREDENTIAL_FILTERS, folder: ["pay"] } })
+    expect(screen.queryByRole("button", { name: "Edit folder Payments" })).toBeNull()
+    cleanup()
+    const onEditFolder = vi.fn()
+    panel({ onEditFolder })
+    expect(screen.queryByRole("button", { name: /^Edit folder/ })).toBeNull()
+    cleanup()
+    panel({ onEditFolder, filters: { ...EMPTY_CREDENTIAL_FILTERS, folder: ["pay"] } })
+    fireEvent.click(screen.getByRole("button", { name: "Edit folder Payments" }))
+    expect(onEditFolder).toHaveBeenCalledWith(expect.objectContaining({ id: "pay" }))
+  })
+
   it("shows the Folders section empty state for someone who can create", () => {
     panel({ folders: [], onNewFolder: vi.fn() })
     expect(screen.getByText("No folders yet.")).toBeInTheDocument()
