@@ -166,7 +166,7 @@ func (h *PipelineHandler) GetRunTree(w http.ResponseWriter, r *http.Request) {
 	for _, n := range nodes {
 		out = append(out, node{n.ID, n.ParentID, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": out})
+	writeCostAwareJSON(w, r, http.StatusOK, map[string]any{"nodes": out})
 }
 
 // Track signal resumes on the same lifecycle/drain as webhook dispatches.

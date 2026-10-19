@@ -103,7 +103,8 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"input_sha256", "target_revision", "state", "state_reason", "generation",
 		"attempt_count", "priority", "eligible_at", "deadline_at", "replay_of",
 		"replay_reason", "created_at", "updated_at", "terminal_at",
-		"agent", "crew", "event_type", "duration_ms", "cost_usd",
+		"agent", "crew", "event_type", "duration_ms",
+		// cost_usd is omitted below ADMIN (#3590), so it is not required.
 	}
 
 	// The detail is the summary plus the two lists. The summary's counter is
@@ -136,7 +137,7 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"cost_usd":      number(),
 		}, "run_id", "attempt", "generation", "lease_owner", "lease_expires_at",
 			"heartbeat_at", "runtime_locator", "started_at", "start_reason",
-			"ended_at", "end_reason", "exit_evidence", "cost_usd"),
+			"ended_at", "end_reason", "exit_evidence"), // cost_usd: OWNER/ADMIN only (#3590)
 		"WorkEvent": object(map[string]any{
 			"seq": integer(),
 			"at":  dateTime(),

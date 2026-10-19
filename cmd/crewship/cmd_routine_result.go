@@ -75,8 +75,10 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 		// Human view: one status line, the error (if any), then the
 		// deliverable.
 		fmt.Printf("Run %s: %s", detail.ID, strings.ToUpper(detail.Status))
-		if detail.DurationMs > 0 || detail.CostUSD > 0 {
-			fmt.Printf(" (%dms, $%.4f)", detail.DurationMs, detail.CostUSD)
+		if detail.CostUSD != nil && (detail.DurationMs > 0 || *detail.CostUSD > 0) {
+			fmt.Printf(" (%dms, $%.4f)", detail.DurationMs, *detail.CostUSD)
+		} else if detail.DurationMs > 0 {
+			fmt.Printf(" (%dms)", detail.DurationMs)
 		}
 		fmt.Println()
 		if detail.ErrorMessage != "" {

@@ -172,7 +172,7 @@ func (h *PipelineHandler) ReplayRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, code, err.Error())
 		return
 	}
-	writeJSON(w, code, res)
+	writeCostAwareJSON(w, r, code, res) // MANAGER may replay; cost stays OWNER/ADMIN (#3590)
 }
 
 // bulkReplayBody selects which failed runs to replay: an explicit list

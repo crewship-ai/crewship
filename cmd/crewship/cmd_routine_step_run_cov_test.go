@@ -110,7 +110,7 @@ func TestRoutineStepRunRunE_PrintsVerdictAndOutput(t *testing.T) {
 	defer s.Close()
 	s.OnPost(covStepRunPath, clitest.JSONResponse(200, cli.StepRunResult{
 		StepID: "extract", StepType: "agent_run", Adapter: "claude_code", Model: "claude-haiku-4-5",
-		Output: `{"total":42}`, Valid: true, CostUSD: 0.0021, TokensIn: 120, TokensOut: 40,
+		Output: `{"total":42}`, Valid: true, CostUSD: usdPtr(0.0021), TokensIn: 120, TokensOut: 40,
 		DurationMs: 4210, Simulated: true,
 	}))
 	covSetupCli10(t, s.URL())

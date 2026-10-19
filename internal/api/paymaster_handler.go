@@ -26,18 +26,6 @@ func NewPaymasterHandler(db *sql.DB, logger *slog.Logger) *PaymasterHandler {
 	return &PaymasterHandler{db: db, logger: logger}
 }
 
-// requireSpendReader is the read rule for every cost endpoint (#3590):
-// OWNER and ADMIN only. Spend is an operator figure; the UI hides it from
-// everyone else, and this makes the server agree. 403 for every other role
-// (including GUEST and an empty role) after the workspace check.
-func requireSpendReader(w http.ResponseWriter, r *http.Request) bool {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "Spend requires OWNER or ADMIN")
-		return false
-	}
-	return true
-}
-
 // SpendByCrew serves GET /api/v1/paymaster/spend/by-crew?since=<d>
 // Returns one row per crew with total cost + call count + token totals
 // within the window (default last 7 days). Used by the Paymaster
