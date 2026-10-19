@@ -222,7 +222,12 @@ export function CrewsLayout({
       workspaceId={workspaceId}
       crews={crews}
       currentCrewSlug={selectedCrewSlug ?? (selectedAgent?.crew_id ? crews.find((c) => c.id === selectedAgent.crew_id)?.slug ?? null : null)}
-      onCrewCreated={onRefresh}
+      onCrewCreated={(slug) => {
+        // Through the selection, not router.replace: it reads the URL once,
+        // so a navigation left the auto-opened crew on the canvas.
+        onRefresh()
+        selectCrew(slug)
+      }}
       onAgentCreated={(slug) => {
         onRefresh()
         if (slug !== selectedAgentSlug) {

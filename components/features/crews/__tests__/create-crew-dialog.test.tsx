@@ -163,7 +163,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
 
     await waitFor(() => {
-      expect(onCreated).toHaveBeenCalled()
+      expect(onCreated).toHaveBeenCalledWith("engineering")
     })
 
     // Submitted exactly one POST to /api/v1/crews (no deploy, no PATCH)
