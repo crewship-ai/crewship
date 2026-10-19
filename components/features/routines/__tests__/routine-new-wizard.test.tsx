@@ -44,6 +44,9 @@ function mockServer() {
         { id: "a3", name: "Opsy", slug: "opsy", agent_role: "LEAD", crew_id: "crew_ops" },
       ])
     if (path.endsWith("/pipeline-schedules/preview")) {
+      const q = new URL(url, "http://x").searchParams
+      if (q.get("phrase") === "whenever the moon is full") return json({ error: "could not understand that schedule" }, 400)
+      if (q.get("phrase")) return json({ cron_expr: "30 8 * * 1-5", phrase: q.get("phrase"), timezone: "Europe/Prague", occurrences: ["2026-10-22T06:30:00Z"] })
       return json({ cron_expr: new URL(url, "http://x").searchParams.get("cron_expr"), timezone: "Europe/Prague", occurrences: ["2026-10-22T06:00:00Z", "2026-10-29T07:00:00Z", "2026-11-05T07:00:00Z"] })
     }
     if (path.endsWith("/pipelines/test_run")) {
@@ -201,6 +204,29 @@ describe("<RoutineNewWizard> step 2 · When", () => {
     await waitFor(() => expect(screen.getByTestId("routine-cron")).toHaveTextContent("30 9 * * 1"))
   })
 
+  it("Custom takes the schedule in words: the server turns it into a cron (ODCH-RT-15)", async () => {
+    renderWizard()
+    await basics()
+    fireEvent.click(screen.getByRole("radio", { name: /^On a schedule/ }))
+    fireEvent.click(screen.getByRole("radio", { name: "Custom (cron)" }))
+    fireEvent.change(screen.getByLabelText("Or say it in words"), { target: { value: "every weekday at 8:30" } })
+    fireEvent.click(screen.getByRole("button", { name: "Use these words" }))
+    await waitFor(() => expect(screen.getByTestId("routine-cron")).toHaveTextContent("30 8 * * 1-5"))
+    const asked = calls("/pipeline-schedules/preview", "GET").find(([url]) => String(url).includes("phrase="))!
+    expect(new URL(String(asked[0]), "http://x").searchParams.get("phrase")).toBe("every weekday at 8:30")
+    expect(screen.getByLabelText("Cron expression")).toHaveValue("30 8 * * 1-5")
+  })
+
+  it("says so, in the server's words, when the words are not a schedule", async () => {
+    renderWizard()
+    await basics()
+    fireEvent.click(screen.getByRole("radio", { name: /^On a schedule/ }))
+    fireEvent.click(screen.getByRole("radio", { name: "Custom (cron)" }))
+    fireEvent.change(screen.getByLabelText("Or say it in words"), { target: { value: "whenever the moon is full" } })
+    fireEvent.click(screen.getByRole("button", { name: "Use these words" }))
+    expect(await screen.findByText("could not understand that schedule")).toBeInTheDocument()
+  })
+
   it("a one-time start must be in the future", async () => {
     renderWizard()
     await basics()
@@ -240,12 +266,24 @@ describe("<RoutineNewWizard> step 3 · Steps", () => {
 })
 
 describe("<RoutineNewWizard> step 4 · Limits", () => {
-  it("never offers Skip the new start; side by side sets max_concurrent", async () => {
+  it("Skip the new start sets concurrency_policy skip with one run at a time (ODCH-RT-25)", async () => {
     renderWizard()
     await basics()
     await manualWhen()
     await oneAgentStep()
-    expect(screen.queryByRole("radio", { name: /Skip the new start/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("radio", { name: "Skip the new start" }))
+    expect(screen.getByText(/a start that finds it running is dropped/)).toBeInTheDocument()
+    goOn()
+    fireEvent.click(screen.getByRole("button", { name: "Run the test" }))
+    await screen.findByText("Test passed")
+    expect(sent("/pipelines/test_run").definition).toMatchObject({ max_concurrent: 1, concurrency_key: "weekly-report", concurrency_policy: "skip" })
+  })
+
+  it("side by side sets max_concurrent and no policy", async () => {
+    renderWizard()
+    await basics()
+    await manualWhen()
+    await oneAgentStep()
     fireEvent.click(screen.getByRole("radio", { name: "Run side by side" }))
     fireEvent.change(screen.getByLabelText("Runs at the same time"), { target: { value: "4" } })
     fireEvent.change(screen.getByLabelText("Cost limit per run"), { target: { value: "2" } })
@@ -254,6 +292,7 @@ describe("<RoutineNewWizard> step 4 · Limits", () => {
     await screen.findByText("Test passed")
     const def = sent("/pipelines/test_run").definition
     expect(def).toMatchObject({ max_concurrent: 4, concurrency_key: "weekly-report", max_cost_usd: 2 })
+    expect(def).not.toHaveProperty("concurrency_policy")
   })
 })
 

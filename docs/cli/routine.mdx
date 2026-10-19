@@ -28,11 +28,15 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Core | `run <slug>` | Invoke a routine against the live execution tier |
 | Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
 | Core | `delete <slug>` | Soft-delete a routine |
+| Core | `folders list/create/update/delete/move` | Organise routines into folders |
 | Governance | `approve <slug>` | Approve a proposed routine (MANAGER+) — flips it live |
 | Governance | `reject <slug>` | Reject a proposed routine (MANAGER+) — removes it |
 | Governance | `disable <slug>` | Disable a routine (OWNER/ADMIN) — cancels in-flight runs, refuses new ones |
 | Governance | `enable <slug>` | Re-enable a disabled routine (OWNER/ADMIN) |
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
+| Diagnostics | `checkup <slug>` | The server's checklist: agents, credentials, cost cap, failures in a row, schedule breaker, untested changes |
+| Diagnostics | `health [--days N]` | Per routine: last 20 outcomes, success rate, runs and spend in a window |
+| Core | `templates list/get/create/use/delete` | Keep routine definitions as templates; `use` saves a draft |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (live execution) |
 | Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
@@ -96,8 +100,67 @@ crewship routine list --order name
 | `--order` | `popularity` | Sort: `popularity` (invocation_count DESC), `recent` (updated_at DESC), `name` (alpha) |
 | `--status` | (unset) | Filter by governance status: `active`, `proposed`, `disabled` |
 | `--tag` | (unset) | Filter routines by definition tag (cross-crew discovery) |
+| `--search` | (unset) | Words that must all appear in the name, slug, description or the text of a step (ids, names, agents, prompts, commands); case-insensitive |
 
 **Output columns:** SLUG, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
+
+---
+
+## `crewship routine health`
+
+```bash
+crewship routine health              # last 30 days
+crewship routine health --days 7 -f json
+```
+
+For every routine that has run: its last 20 outcomes oldest first
+(`+` completed, `x` failed, `-` stopped, `?` waiting for a person, `~`
+running), the success rate over the finished ones, and the runs and spend of
+the window. Test and dry runs are not counted. This is the table the
+Routines overview shows.
+
+## `crewship routine checkup <slug>`
+
+The server's checklist for one routine, the same the routine page's Checkup
+card draws: it is turned on and approved, its agents exist in the crew, the
+credentials it declares are active, it has a cost cap, how many runs in a row
+failed, whether a schedule's circuit breaker turned it off, and whether the
+changes that are not live passed a test. Worst first. Exits non-zero while a
+check is `bad`. `routine doctor` stays the preflight that also looks at the
+crew's container and the egress list.
+
+## `crewship routine templates`
+
+```bash
+crewship routine templates create "Daily digest" --from-routine daily-digest --category ops
+crewship routine templates create "From a file" --file definition.json
+crewship routine templates list
+crewship routine templates get <template_id>
+crewship routine templates use <template_id> --slug morning-digest --crew-id <crew>
+crewship routine templates delete <template_id>
+```
+
+A template is a name and a routine definition the workspace keeps. `use`
+saves a **draft** (nothing is published): test it and publish it from the
+routine page. A definition that could not be saved as a routine is refused at
+`create`. Names are unique per workspace, ignoring case.
+
+## `crewship routine folders`
+
+Folders organise the Routines panel (Group by Folder). They grant no access.
+
+```bash
+crewship routine folders create "Market intel" --color teal
+crewship routine folders list
+crewship routine folders move weekly-scan daily-news --folder <folder_id>
+crewship routine folders move weekly-scan --none      # take it out of its folder
+crewship routine folders update <folder_id> --name "Intel"
+crewship routine folders delete <folder_id>           # routines are kept, unfiled
+```
+
+`create` and `update` refuse a name another folder already has (ignoring case).
+`move` is all-or-nothing and takes up to 200 routines. Creating, renaming and
+moving need MANAGER or above.
 
 ---
 
@@ -1708,7 +1771,8 @@ crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague 
 
 | Flag | Required | Description |
 |------|:---:|-------------|
-| `--cron` | ✓ | Five-field cron expression to preview. |
+| `--cron` | one of | Five-field cron expression to preview. |
+| `--when` | one of | The schedule in words, e.g. `"every weekday at 8:30"`. The server derives the cron (`GET .../preview?phrase=`) and the output shows it. Not with `--cron`. |
 | `--timezone` | | IANA timezone (default `UTC`). |
 | `--count` | | How many fire times to show (default `5`, capped at `20`). |
 

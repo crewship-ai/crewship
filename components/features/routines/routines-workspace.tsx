@@ -15,6 +15,7 @@ import {
   type RoutineFilterState,
 } from "@/lib/routine-filters"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
+import { useRoutineHealth } from "@/hooks/use-routine-health"
 import { RoutinesDashboard, outcomeKpis, windowCoverage } from "./routines-dashboard"
 import { RoutinesOverviewBoard } from "./routines-overview-board"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -77,6 +78,8 @@ interface RoutinesWorkspaceProps {
   /** Search and filters belong to the explorer sidebar; the list only applies them. */
   search?: string
   filters?: RoutineFilterState
+  /** Slugs matched by the text of their steps, added to the name match. */
+  stepMatches?: ReadonlySet<string> | null
   /** Load the list again after an error. */
   onRetry?: () => void
   /** Open a run page (from Needs you and Running now). */
@@ -131,11 +134,12 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
 
   const visible = props.routines as ListRoutine[]
   const displayed = visible.filter(
-    (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search),
+    (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search, props.stepMatches),
   )
   const { role } = useAbilities()
   const { waitpoints, decide } = useWorkspaceWaitpoints(props.workspaceId)
   const { summary: spend } = useBudgetSummary(props.workspaceId)
+  const health = useRoutineHealth(props.workspaceId)
   // The 7-day figure counts the history rows of the routines on screen; an
   // older active run is not part of "the newest N runs" (routines-dashboard).
   const boardKpis = useMemo(() => {
@@ -214,6 +218,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 pendingStarts={pendingStarts}
                 schedules={schedules}
                 spend={spend}
+                health={health}
                 onSelect={props.onSelect}
               />
               </div>

@@ -857,6 +857,15 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// surfaced through the retained delivery receipt.
 	if h.runs != nil {
 		if cerr := h.runs.PrecheckConcurrency(r.Context(), targetDSL, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
+			// concurrency_policy "skip" (ODCH-RT-25): dropped on purpose, so the
+			// sender is told it was skipped and has nothing to retry.
+			if targetDSL.ConcurrencyPolicy == pipeline.ConcurrencyPolicySkip {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status": "SKIPPED",
+					"reason": "another run of this routine is still in progress",
+				})
+				return
+			}
 			// Record the throttled attempt (parity with the old
 			// synchronous handler, which stamped FAILED before
 			// answering 429).

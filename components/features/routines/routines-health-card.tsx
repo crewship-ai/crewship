@@ -6,16 +6,16 @@ import { HeartPulse } from "lucide-react"
 import { DashCard } from "@/components/features/dashboard/dash-card"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
-import { routineHealthRows, type HealthRoutine, type HealthRun } from "@/lib/routine-health"
+import { routineHealthRows, type HealthRoutine, type HealthRun, type ServerRoutineHealth } from "@/lib/routine-health"
 import type { RunBarTone } from "@/lib/routine-page"
 import type { BudgetSummary } from "@/hooks/use-routine-budget"
 import { RoutineGlyph } from "./routine-glyph"
 
 // Health (Harbor 2 RT-07): one row per routine — its last 20 runs as bars,
-// the success rate over the finished ones, and what it spent this calendar
-// month (GET /pipelines/budget-summary). The runs are the newest ones the page
-// already loaded, and the figures say so; a per-routine 30-day aggregate is
-// backend work (#3468).
+// the success rate over the finished ones, and what it spent in 30 days
+// (GET /pipeline-health). Before that answers, or if it cannot, the runs the
+// page already loaded and this calendar month's spend stand in, and the
+// footnote says so.
 
 const BAR: Record<RunBarTone, string> = {
   ok: "bg-success",
@@ -31,14 +31,17 @@ export function RoutinesHealthCard({
   routines,
   runs,
   spend,
+  health = null,
   onSelect,
 }: {
   routines: (HealthRoutine & { id?: string })[]
   runs: HealthRun[]
   spend: BudgetSummary | null
+  /** GET /pipeline-health, by slug; null until it answers. */
+  health?: ReadonlyMap<string, ServerRoutineHealth> | null
   onSelect: (slug: string) => void
 }) {
-  const rows = React.useMemo(() => routineHealthRows(routines, runs, spend), [routines, runs, spend])
+  const rows = React.useMemo(() => routineHealthRows(routines, runs, spend, 20, health), [routines, runs, spend, health])
   const toFix = rows.filter((r) => r.checkup.bad > 0).length
   const toCheck = rows.filter((r) => r.checkup.bad === 0 && r.checkup.warn > 0).length
   const byslug = new Map(routines.map((r) => [r.slug, r]))
@@ -67,25 +70,37 @@ export function RoutinesHealthCard({
                 <RoutineGlyph routine={byslug.get(row.slug) ?? { slug: row.slug }} />
                 <span className="truncate text-body font-medium text-foreground">{row.name}</span>
               </button>
-              <span className="flex h-4 w-28 items-end gap-px" role="img" aria-label={row.runCount ? `Last ${plural(row.runCount, "run", "runs")}, oldest first` : "No runs"}>
-                {row.bars.map((b) => (
-                  <i key={b.id} data-testid="health-bar" title={b.label} className={cn("h-full min-w-px flex-1 rounded-sm", BAR[b.tone], b.tone === "mut" && "h-1/3")} />
-                ))}
-              </span>
-              <span className="text-label tabular-nums text-muted-foreground">
-                {row.successPct === null ? "—" : `${row.successPct}%`}
-                <span className="text-muted-foreground-soft">{row.finished ? ` · ${row.ok} of ${row.finished}` : " · no finished runs"}</span>
-              </span>
-              {row.spentMonth !== null && <span className="text-label tabular-nums text-muted-foreground">${row.spentMonth.toFixed(2)} this month</span>}
-              <span className={cn("text-label", row.checkup.bad ? "text-destructive" : row.checkup.warn ? "text-warn" : "text-success")}>
-                {row.checkup.bad ? `${row.checkup.bad} to fix` : row.checkup.warn ? `${row.checkup.warn} to check` : "All good"}
-              </span>
+              {row.runCount === 0 ? (
+                <span className="text-label text-muted-foreground-soft">No runs yet</span>
+              ) : (
+                <>
+                  <span className="flex h-4 w-28 items-end gap-px" role="img" aria-label={`Last ${plural(row.runCount, "run", "runs")}, oldest first`}>
+                    {row.bars.map((b) => (
+                      <i key={b.id} data-testid="health-bar" title={b.label} className={cn("h-full min-w-px flex-1 rounded-sm", BAR[b.tone], b.tone === "mut" && "h-1/3")} />
+                    ))}
+                  </span>
+                  {row.successPct !== null && (
+                    <span className="text-label tabular-nums text-muted-foreground">
+                      {row.successPct}%<span className="text-muted-foreground-soft"> · {row.ok} of {row.finished}</span>
+                    </span>
+                  )}
+                </>
+              )}
+              {/* Quiet when fine (v67): spend only once something was spent, a verdict only when there is one. */}
+              {row.spent !== null && row.spent > 0 && <span className="text-label tabular-nums text-muted-foreground">${row.spent.toFixed(2)} {row.spentWindow === "30 days" ? "in 30 days" : "this month"}</span>}
+              {(row.checkup.bad > 0 || row.checkup.warn > 0) && (
+                <span className={cn("text-label", row.checkup.bad ? "text-destructive" : "text-warn")}>
+                  {row.checkup.bad ? `${row.checkup.bad} to fix` : `${row.checkup.warn} to check`}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       )}
       <p className="mt-2 text-label text-muted-foreground-soft">
-        Success counts the newest runs loaded for each routine (up to 20); spend is this calendar month.
+        {health
+          ? "Success counts each routine's last 20 runs; spend is the last 30 days."
+          : "Success counts the newest runs loaded for each routine (up to 20); spend is this calendar month."}
       </p>
     </DashCard>
   )

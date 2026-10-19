@@ -30,6 +30,8 @@ import {
   normalizeRoutineStatus,
   roleAtLeast,
   routinePermissions,
+  BREAKER_ON_AGAIN,
+  BREAKER_OFF_HINT,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
@@ -512,8 +514,8 @@ export function RoutinesDetailPanel({
   }
 
   // A schedule the circuit breaker turned off. Turning it back on is the
-  // schedule's own PATCH (Owner/Admin); updateSchedule zeroes the failure
-  // count and the reason straight away.
+  // schedule's own PATCH (Owner/Admin); the failure count restarts at zero
+  // when it is on again (updateSchedule).
   const breaker = schedules.find(
     (s) => (s.target_pipeline_id === routine?.id || s.target_pipeline_slug === slug) && !s.enabled && s.disabled_reason === "circuit_breaker",
   )
@@ -522,7 +524,7 @@ export function RoutinesDetailPanel({
     setBusyGov("enable")
     try {
       await updateSchedule(breaker.id, { cron_expr: breaker.cron_expr, enabled: true })
-      toast.success("Schedule is on again", { description: "The failure count is back to zero." })
+      toast.success("Schedule is on again", { description: BREAKER_ON_AGAIN })
       onChanged()
     } catch (e) {
       toast.error("Could not turn the schedule back on", { description: e instanceof Error ? e.message : String(e) })
@@ -796,7 +798,7 @@ export function RoutinesDetailPanel({
                     <p className="text-sm font-medium">Turned off after {breaker.consecutive_failures} failures in a row</p>
                     <p className="text-xs text-muted-foreground">
                       The schedule “{breaker.name}” is paused; webhooks and manual runs still work.
-                      {permissions.manage ? " Turn it back on once the cause is fixed; the failure count is back to zero as soon as you do." : " An Owner or Admin can turn it back on."}
+                      {permissions.manage ? ` ${BREAKER_OFF_HINT}` : " An Owner or Admin can turn it back on."}
                     </p>
                   </section>
                 )}
@@ -974,7 +976,7 @@ async function routineFromDraftOnly(
     author_crew_id: text(doc.author_crew_id) || undefined,
     icon: text(doc.icon) || undefined,
     color: text(doc.color) || undefined,
-    draft: { id: draft.id, revision: draft.revision, updated_at: draft.updated_at ?? "", updated_by: draft.updated_by },
+    draft: { id: draft.id, revision: draft.revision, updated_at: draft.updated_at ?? "", updated_by: draft.updated_by, test_result: draft.test_result },
     draft_only: true,
   }
 }

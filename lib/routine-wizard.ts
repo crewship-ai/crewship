@@ -106,7 +106,8 @@ export interface WizardState {
   steps: WizardStep[]
   /** Dollars as typed; empty = no cap. */
   maxCost: string
-  concurrency: "queue" | "parallel"
+  /** queue: wait in line; parallel: side by side; skip: drop the new start while one runs. */
+  concurrency: "queue" | "parallel" | "skip"
   sideBySide: number
   /** Top-level definition fields a copied routine carries that the wizard
    *  does not edit (execution tier, outputs, credentials…). */
@@ -439,7 +440,7 @@ function hostOf(url: string | undefined): string | null {
 export function buildDefinition(s: WizardState): Record<string, unknown> {
   // The copied routine's own identity never wins over the new one.
   const extra = Object.fromEntries(
-    Object.entries(s.extra).filter(([k]) => !["dsl_version", "name", "display_name", "description", "inputs", "steps", "max_cost_usd", "concurrency_key", "max_concurrent", "slash", "egress_targets"].includes(k)),
+    Object.entries(s.extra).filter(([k]) => !["dsl_version", "name", "display_name", "description", "inputs", "steps", "max_cost_usd", "concurrency_key", "max_concurrent", "concurrency_policy", "slash", "egress_targets"].includes(k)),
   )
   const cost = Number(s.maxCost)
   const hosts = s.steps.filter((st) => st.kind === "http").map((st) => hostOf(st.url)).filter((h): h is string => !!h)
@@ -456,6 +457,7 @@ export function buildDefinition(s: WizardState): Record<string, unknown> {
     ...(s.maxCost.trim() && Number.isFinite(cost) && cost > 0 ? { max_cost_usd: cost } : {}),
     concurrency_key: s.slug,
     max_concurrent: s.concurrency === "parallel" ? Math.max(2, Math.round(s.sideBySide)) : 1,
+    ...(s.concurrency === "skip" ? { concurrency_policy: "skip" } : {}),
     ...(s.slash ? { slash: { enabled: true, label: s.name.trim() } } : {}),
     ...(egress.length ? { egress_targets: egress } : {}),
   }
@@ -629,13 +631,13 @@ export function wizardFromDefinition(def: Record<string, unknown>): Pick<WizardS
   const steps = Array.isArray(def.steps) ? (def.steps as Record<string, unknown>[]) : []
   const max = typeof def.max_concurrent === "number" ? def.max_concurrent : 1
   const extra = Object.fromEntries(
-    Object.entries(def).filter(([k]) => !["dsl_version", "name", "display_name", "description", "inputs", "steps", "max_cost_usd", "concurrency_key", "max_concurrent", "slash"].includes(k)),
+    Object.entries(def).filter(([k]) => !["dsl_version", "name", "display_name", "description", "inputs", "steps", "max_cost_usd", "concurrency_key", "max_concurrent", "concurrency_policy", "slash"].includes(k)),
   )
   return {
     steps: steps.map((st, i) => stepFromDsl(st, String(i))),
     inputs: Array.isArray(def.inputs) ? (def.inputs as RoutineInputSpec[]) : [],
     maxCost: typeof def.max_cost_usd === "number" ? String(def.max_cost_usd) : "",
-    concurrency: max > 1 ? "parallel" : "queue",
+    concurrency: max > 1 ? "parallel" : def.concurrency_policy === "skip" ? "skip" : "queue",
     sideBySide: max > 1 ? max : 3,
     extra,
     slash: !!(def.slash && typeof def.slash === "object" && (def.slash as { enabled?: boolean }).enabled),

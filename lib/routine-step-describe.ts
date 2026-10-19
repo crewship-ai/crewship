@@ -277,6 +277,7 @@ function describeStepAction(step: unknown, position: number): ReadableStep {
       const action = asString(step.action)
       const names: Record<string, string> = {
         "page.write": "Update an artifact panel",
+        "page.create": "Create an artifact page",
         "issue.create": "Create an issue",
         "issue.update": "Update an issue",
         "issue.comment": "Comment on an issue",

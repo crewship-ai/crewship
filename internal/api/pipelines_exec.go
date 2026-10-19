@@ -826,6 +826,18 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		defHash := definitionHashHex(body.Definition)
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
+	// Keep the outcome against the tested definition, so the draft and the
+	// versions holding it can say "Test run passed" truthfully (ODCH-RT-13).
+	if res != nil {
+		testedBy := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			testedBy = user.ID
+		}
+		passed := res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED"
+		if err := h.store.RecordTestResult(r.Context(), workspaceID, definitionHashHex(body.Definition), passed, res.Status, testedBy); err != nil {
+			h.logger.Warn("pipeline test_run: record result", "error", err)
+		}
+	}
 	type testRunResponse struct {
 		*pipeline.RunResult
 		SaveToken string `json:"save_token,omitempty"`

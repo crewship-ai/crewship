@@ -33,6 +33,8 @@ vi.mock("../routines-explorer", async (importOriginal) => ({
     <button onClick={() => p.onChange({ ...p.filters, showTestRoutines: true })}>Show test routines</button>
   </nav>,
 }))
+vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: () => ({ runs: [], loading: false, error: null }) }))
+vi.mock("@/hooks/use-routine-budget", () => ({ useBudgetSummary: () => ({ summary: null, loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("../routines-workspace", () => ({ RoutinesWorkspace: ({ search }: { search: string }) => <div>Overview search: {search}</div> }))
 vi.mock("../routines-views", () => ({ needsYou: () => [], RoutinesViewPane: ({ view }: { view: string }) => <div>View pane {view}</div> }))
 vi.mock("../routines-detail-panel", () => ({ RoutinesDetailPanel: (p: { slug: string; onClose: () => void; onChanged: () => void; onRunStarted: (s: string) => void }) => <section aria-label={`Detail ${p.slug}`}><button onClick={p.onClose}>Close detail</button><button onClick={p.onChanged}>Refresh detail</button><button onClick={() => p.onRunStarted("run-1")}>Start historical run</button></section> }))
@@ -61,8 +63,10 @@ afterEach(cleanup)
 
 it("keeps navigation in the URL, clears stale run/edit selection and preserves explorer search", () => {
   render(<RoutinesLayout workspaceId="workspace" />)
-  expect(screen.getByText("1 routine · 1 run")).toBeInTheDocument()
-  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Overview")
+  // The breadcrumb carries no counts any more; the overview opens with its own page head.
+  expect(screen.queryByText("1 routine · 1 run")).not.toBeInTheDocument()
+  // The sub-bar hands the h1 to the overview (RoutinesOverviewBoard) when it has routines.
+  expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Select Fixture" })).not.toBeInTheDocument()
   fireEvent.change(screen.getByRole("textbox", { name: "Routine search" }), { target: { value: "night" } })
   fireEvent.click(screen.getByRole("button", { name: "Select Nightly report" }))

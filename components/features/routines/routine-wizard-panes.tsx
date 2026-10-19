@@ -415,15 +415,33 @@ export function WhenPane({
   set,
   cron,
   next,
+  onPhrase,
 }: {
   state: WizardState
   set: (patch: Partial<WizardState>) => void
   cron: string
   next: NextStarts
+  /** Turns words into a cron on the server (GET .../preview?phrase=); resolves to the cron or the server's refusal. */
+  onPhrase?: (phrase: string, timezone: string) => Promise<{ cron: string } | { error: string }>
 }) {
+  const [phrase, setPhrase] = React.useState("")
+  const [phraseError, setPhraseError] = React.useState<string | null>(null)
+  const [phraseBusy, setPhraseBusy] = React.useState(false)
   const t = state.trigger
   const setT = (patch: Partial<WizardTrigger>) => set({ trigger: { ...t, ...patch } })
-  const ids = { at: React.useId(), minute: React.useId(), tz: React.useId(), cron: React.useId(), once: React.useId(), fails: React.useId(), tzList: React.useId() }
+  const ids = { at: React.useId(), minute: React.useId(), tz: React.useId(), cron: React.useId(), once: React.useId(), fails: React.useId(), tzList: React.useId(), words: React.useId() }
+  const applyPhrase = async () => {
+    if (!onPhrase || !phrase.trim() || phraseBusy) return
+    setPhraseBusy(true)
+    setPhraseError(null)
+    try {
+      const res = await onPhrase(phrase.trim(), t.timezone)
+      if ("error" in res) setPhraseError(res.error)
+      else setT({ cron: res.cron })
+    } finally {
+      setPhraseBusy(false)
+    }
+  }
   const zones = React.useMemo(timeZones, [])
   const onceLocal = t.fireAt ? toLocalInput(t.fireAt) : ""
   const once = t.kind === "once" ? onceProblem(t.fireAt) : null
@@ -456,6 +474,32 @@ export function WhenPane({
           {t.preset === "custom" && (
             <CreateSurfaceField label="Cron expression" htmlFor={ids.cron} hint="5 fields: minute hour day month weekday. @daily and @weekly work too.">
               <Input id={ids.cron} value={t.cron} onChange={(e) => setT({ cron: e.target.value })} className={cn(INPUT, "font-mono")} />
+            </CreateSurfaceField>
+          )}
+          {t.preset === "custom" && onPhrase && (
+            <CreateSurfaceField label="Or say it in words" htmlFor={ids.words} hint='For example "every weekday at 8:30" or "every 15 minutes". The server turns it into the cron above.'>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id={ids.words}
+                  value={phrase}
+                  onChange={(e) => {
+                    setPhrase(e.target.value)
+                    if (phraseError) setPhraseError(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      void applyPhrase()
+                    }
+                  }}
+                  className={cn(INPUT, "min-w-0 flex-1 basis-56")}
+                />
+                <Button type="button" variant="outline" size="sm" className="coarse:h-[44px]" disabled={!phrase.trim() || phraseBusy} onClick={() => void applyPhrase()}>
+                  Use these words
+                </Button>
+              </div>
+              {phraseError && <p role="alert" className="mt-1 text-xs text-destructive">{phraseError}</p>}
             </CreateSurfaceField>
           )}
           <CreateSurfaceGrid cols={3}>
@@ -1095,7 +1139,13 @@ export function LimitsPane({
         </CreateSurfaceField>
         <CreateSurfaceField
           label="If it is still running when the next start comes"
-          hint={state.concurrency === "parallel" ? `Up to ${state.sideBySide} runs at once.` : "One run at a time; the next start waits in line."}
+          hint={
+            state.concurrency === "parallel"
+              ? `Up to ${state.sideBySide} runs at once.`
+              : state.concurrency === "skip"
+                ? "One run at a time; a start that finds it running is dropped, and the schedule shows it as skipped."
+                : "One run at a time; the next start waits in line."
+          }
         >
           <CreateSurfaceChoice
             ariaLabel="If it is still running when the next start comes"
@@ -1104,6 +1154,7 @@ export function LimitsPane({
             options={[
               { value: "queue", label: "Wait in line" },
               { value: "parallel", label: "Run side by side" },
+              { value: "skip", label: "Skip the new start" },
             ]}
           />
         </CreateSurfaceField>

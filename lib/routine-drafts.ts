@@ -17,6 +17,8 @@ export interface RoutineDraft {
   document: Record<string, unknown>
   updated_by?: string
   updated_at?: string
+  /** The latest Test run of exactly this document's definition (ODCH-RT-13). */
+  test_result?: import("@/hooks/use-pipelines").RoutineTestResult
 }
 
 /** The rows GET …/pipelines/drafts returns: one per saved draft. */

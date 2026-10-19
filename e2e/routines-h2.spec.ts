@@ -274,7 +274,7 @@ test("RT-04 the overview opens with four figures, Needs you, Running now and Nex
   await expect(figures).toBeVisible({ timeout: TIMEOUT })
   await expect(figures.getByRole("listitem")).toHaveText([/^Needs you/, /^Running now/, /^Runs · 7 days/, /^Spend · /])
   for (const name of ["Needs you", "Running now", "Next 24 hours"]) await expect(page.getByRole("region", { name })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/calendar")
+  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Calendar", exact: true })).toHaveAttribute("href", "/calendar")
 })
 
 test("RT-05 Run opens one dialog: Run now · Test run · Later, limits in the footer", async ({ page }) => {

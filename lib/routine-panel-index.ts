@@ -100,7 +100,7 @@ export function primaryTrigger(kinds: readonly RoutineTriggerKind[] | undefined)
 }
 
 export type RoutineSort = "next" | "recent" | "name" | "spend"
-export type RoutineGroupBy = "crew" | "trigger" | "none"
+export type RoutineGroupBy = "folder" | "crew" | "trigger" | "none"
 
 interface SortableRoutine {
   slug: string
@@ -136,17 +136,32 @@ export interface RoutineGroup<T> {
 }
 
 const NO_CREW = "__none__"
+const NO_FOLDER = "__nofolder__"
 
 /** The panel's sections. By crew: alphabetical, "No crew" last. By trigger:
  *  the facet order, "Only when someone presses Run" last; a routine sits
  *  under the first way it starts, so it is listed once. */
-export function groupRoutines<T extends SortableRoutine & { author_crew_id?: string }>(
+export function groupRoutines<T extends SortableRoutine & { author_crew_id?: string; folder_id?: string }>(
   rows: readonly T[],
   groupBy: RoutineGroupBy,
   index: RoutinePanelIndex,
   crews: ReadonlyMap<string, { id: string; name: string }>,
+  opts: { folders?: ReadonlyMap<string, { id: string; name: string }>; includeEmptyFolders?: boolean } = {},
 ): RoutineGroup<T>[] {
   if (groupBy === "none") return [{ id: "all", label: "Routines", rows: [...rows] }]
+  if (groupBy === "folder") {
+    const folders = opts.folders ?? new Map()
+    const map = new Map<string, T[]>()
+    for (const r of rows) {
+      // A folder that is gone (deleted since the list loaded) counts as unfiled.
+      const key = r.folder_id && folders.has(r.folder_id) ? r.folder_id : NO_FOLDER
+      map.set(key, [...(map.get(key) ?? []), r])
+    }
+    if (opts.includeEmptyFolders) for (const id of folders.keys()) if (!map.has(id)) map.set(id, [])
+    return [...map.entries()]
+      .map(([id, list]) => ({ id: `folder-${id}`, label: id === NO_FOLDER ? "No folder" : folders.get(id)!.name, rows: list }))
+      .sort((a, b) => (a.id === `folder-${NO_FOLDER}` ? 1 : b.id === `folder-${NO_FOLDER}` ? -1 : a.label.localeCompare(b.label)))
+  }
   const map = new Map<string, T[]>()
   const keyOf = (r: T) =>
     groupBy === "trigger" ? primaryTrigger(index.triggers.get(r.slug)) : r.author_crew_id && crews.has(r.author_crew_id) ? r.author_crew_id : NO_CREW

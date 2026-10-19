@@ -125,6 +125,8 @@ func executionSchemaComponents() map[string]any {
 	// just the cron/timezone/count that produced the occurrences.
 	schedulePreview := obj(map[string]any{
 		"cron_expr": str(), "timezone": str(), "occurrences": arr(timeString()),
+		// phrase: the words the caller sent instead of a cron (ODCH-RT-15).
+		"phrase": str(),
 	})
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})

@@ -30,7 +30,12 @@ import { RoutineRunPeek } from "./routine-run-peek"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { ImportRoutineDialog } from "./routine-import-dialog"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
+import { useBudgetSummary } from "@/hooks/use-routine-budget"
+import { outcomeKpis, type DashboardRun } from "./routines-dashboard"
 import { useRoutinePanelIndex } from "@/hooks/use-routine-panel-index"
+import { useRoutineStepSearch } from "@/hooks/use-routine-step-search"
+import { useRoutineFolders } from "@/hooks/use-routine-folders"
 
 // Keep the shared panel mounted across the views, a routine and a run. The
 // URL identifies the view (?view=needs|live|runs|drafts), the routine
@@ -58,6 +63,23 @@ const EMPTY_FILTERS: RoutineFilters = {
 }
 
 const LIST_VIEWS = new Set<RoutinesView>(["needs", "live", "runs", "drafts"])
+
+/** "How routines work" with the week's real figures (ODCH-RT-08). Mounted only
+ *  while the intro is open, so the run feed is not read for it otherwise. */
+function IntroPane({ workspaceId, onNew, onOverview }: { workspaceId: string; onNew?: () => void; onOverview: () => void }) {
+  const { runs } = usePipelineRuns(workspaceId, "all", 200)
+  const { summary } = useBudgetSummary(workspaceId)
+  const proof = useMemo(() => {
+    const k = outcomeKpis(runs as DashboardRun[])
+    return {
+      runs: k.total,
+      finishedPct: k.successPct,
+      spendUsd: summary ? summary.total_spent_usd : null,
+      month: summary?.month ? new Date(`${summary.month}-01T12:00:00Z`).toLocaleString("en-GB", { month: "long" }) : "this month",
+    }
+  }, [runs, summary])
+  return <RoutinesIntro onNew={onNew} proof={proof} onOverview={onOverview} />
+}
 
 function useWorkspaceCrews(workspaceId: string): ReadonlyMap<string, PanelCrew> {
   const [crews, setCrews] = useState<PanelCrew[]>([])
@@ -97,6 +119,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     [pipelines, filters.showTestRoutines],
   )
   const panelIndex = useRoutinePanelIndex(workspaceId, pipelines)
+  const stepMatches = useRoutineStepSearch(workspaceId, search)
   // Select several in the panel (PNL-03): Turn off (Owner/Admin, one
   // disable per routine) and Run now (routines that need no answer).
   const nameOf = (slug: string) => pipelines.find((p) => p.slug === slug)?.name || slug
@@ -168,6 +191,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     refresh()
     loadDrafts()
   }, [refresh, loadDrafts])
+  // Folders (ODCH-RT-01): Manager and above create and move; everyone sees them.
+  const routineFolders = useRoutineFolders(workspaceId, changed)
+  const folderProps = {
+    list: routineFolders.folders,
+    onCreate: canCreate ? routineFolders.create : undefined,
+    onMove: canCreate ? routineFolders.move : undefined,
+  }
 
   // The lead's "Open the draft" link: /routines?draft=<slug>&draft_id=…
   // (&workspace=…). The routine page itself shows the draft, so the link
@@ -268,7 +298,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const crewName = selectedRoutine?.author_crew_id ? crews.get(selectedRoutine.author_crew_id)?.name : undefined
   const needsCount = useMemo(() => needsYou(visiblePipelines, activeRuns).length, [visiblePipelines, activeRuns])
   const liveCount = activeRuns.filter((r) => !isAwaitingApproval(r.status)).length
-  const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
+
+  const overviewHead = !selectedSlug && !selectedRun && !showIntro && listView === "overview" && visiblePipelines.length > 0
 
   const section = selectedRun
     ? [selectedRoutine?.name || selectedSlug || "Routine", "Run"].join(" › ")
@@ -326,14 +357,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         icon={Workflow}
         title="Routines"
         section={section}
-        description={
-          !selectedSlug && !selectedRun ? (
-            <>
-              {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns} {totalRuns === 1 ? "run" : "runs"}
-            </>
-          ) : undefined
-        }
         ariaLabel="Routines"
+        // The overview draws its own h1 (v67 page head) when it has routines.
+        heading={!overviewHead}
         actions={!selectedSlug && !selectedRun ? createActions : undefined}
       />
 
@@ -353,6 +379,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             crews={crews}
             index={panelIndex}
             bulk={isMobile ? undefined : bulk}
+            folders={folderProps}
+            stepMatches={stepMatches}
             runsOf={
               selectedRun && selectedSlug && !routinesInPanel
                 ? {
@@ -418,7 +446,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 </motion.div>
               ) : showIntro ? (
                 <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-auto">
-                  <RoutinesIntro onNew={canCreate ? () => setCreateDialogOpen(true) : undefined} />
+                  <IntroPane workspaceId={workspaceId} onNew={canCreate ? () => setCreateDialogOpen(true) : undefined} onOverview={() => setViewParam(null)} />
                 </motion.div>
               ) : listView !== "overview" ? (
                 <motion.div key={`view-${listView}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-hidden">
@@ -436,6 +464,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   <RoutinesWorkspace
                     search={search}
                     filters={filters}
+                    stepMatches={stepMatches}
                     workspaceId={workspaceId}
                     routines={visiblePipelines}
                     loading={loading}

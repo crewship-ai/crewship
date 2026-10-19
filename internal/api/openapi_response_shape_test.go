@@ -46,6 +46,14 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
+	{name: "RoutineFolder", pointer: "/components/schemas/RoutineFolder", value: routineFolderResponse{}},
+	{name: "RoutineFolderMoveResult", pointer: "/components/schemas/RoutineFolderMoveResult", value: routineFolderMoveResult{}},
+	{name: "RoutineTemplate", pointer: "/components/schemas/RoutineTemplate", value: routineTemplateResponse{}},
+	{name: "RoutineHealth", pointer: "/components/schemas/RoutineHealth", value: routineHealthResponse{}},
+	{name: "RoutineHealthRow", pointer: "/components/schemas/RoutineHealthRow", value: routineHealthRow{}},
+	{name: "RoutineCheckup", pointer: "/components/schemas/RoutineCheckup", value: checkupResponse{}},
+	{name: "RoutineCheckupCheck", pointer: "/components/schemas/RoutineCheckupCheck", value: checkupCheck{}},
+	{name: "RoutineTestResult", pointer: "/components/schemas/RoutineTestResult", value: pipeline.TestResult{}},
 	{name: "WorkspaceArtifactCreationPolicyError", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyError", value: WorkspaceArtifactCreationPolicyError{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},

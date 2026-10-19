@@ -66,6 +66,11 @@
       "minimum": 1,
       "description": "Cap on simultaneous runs for the resolved concurrency_key. Defaults to 1 when concurrency_key is set, ignored otherwise."
     },
+    "concurrency_policy": {
+      "type": "string",
+      "enum": ["queue", "skip"],
+      "description": "What a start does when concurrency_key is already at max_concurrent. queue (default): a manual run or webhook is refused, a deferred start waits. skip: a scheduled fire or webhook delivery is dropped (recorded SKIPPED; no failure, alert or circuit-breaker tick). skip needs a concurrency_key."
+    },
     "egress_targets": {
       "type": "array",
       "items": { "type": "string" },
@@ -271,7 +276,7 @@
         "pipeline_slug": { "type": "string", "description": "Used by call_pipeline." },
         "action": {
           "type": "string",
-          "enum": ["issue.create", "issue.update", "issue.comment", "issue.link", "assignment.create", "escalation.create", "page.write"],
+          "enum": ["issue.create", "issue.update", "issue.comment", "issue.link", "assignment.create", "escalation.create", "page.create", "page.write"],
           "description": "Used by crewship. The namespaced verb this step performs against Crewship's own API. Every verb is bounded by a policy action resolved against the author crew's autonomy_level; a verb declared without one is refused at save time. All seven are available."
         },
         "args": {

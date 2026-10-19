@@ -596,3 +596,59 @@ func TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous(t *testing.T) {
 		t.Errorf("runner invoked %d times for an inactive routine, want 0", n)
 	}
 }
+
+// ODCH-RT-25: with concurrency_policy "skip" an over-limit delivery is not a
+// 429 the sender must retry: the start is dropped on purpose and the sender
+// is told so (200, status skipped). No run is created and the runner is not
+// called again.
+func TestPipelineWebhooks_Fire_ConcurrencyPolicySkip_AnswersSkipped(t *testing.T) {
+	runner := newBlockingRunner()
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	h.SetRunRegistry(pipeline.NewRunRegistry())
+	seedConcurrencyGatedPipeline(t, db, wsID, "pln_skip", "skip-target")
+	if _, err := db.Exec(`UPDATE pipelines SET definition_json = ? WHERE id = 'pln_skip'`,
+		`{"name":"skip-target","concurrency_key":"serial","concurrency_policy":"skip","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	wh := seedWebhookRow(t, db, wsID, "pln_skip", "skip-secret", true)
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	t.Cleanup(release)
+
+	fire := func(body, idemKey string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+		req.SetPathValue("token", wh.Token)
+		req.Header.Set("X-Crewship-Signature", covPSWSign("skip-secret", body))
+		req.Header.Set("Idempotency-Key", idemKey)
+		rr := httptest.NewRecorder()
+		h.FireWebhook(rr, req)
+		return rr
+	}
+	if rr := fire(`{"n":1}`, "evt-1"); rr.Code != 202 {
+		t.Fatalf("first fire = %d: %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run never started")
+	}
+
+	rr := fire(`{"n":2}`, "evt-2")
+	if rr.Code != 200 {
+		t.Fatalf("skipped fire = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil || resp["status"] != "SKIPPED" || resp["run_id"] != nil {
+		t.Fatalf("skipped body = %v (%v)", resp, err)
+	}
+	if rr.Header().Get("Retry-After") != "" {
+		t.Error("a deliberate skip must not ask the sender to retry")
+	}
+	if n := runner.callCount(); n != 1 {
+		t.Errorf("runner called %d times, want 1", n)
+	}
+	release()
+	h.WaitWebhookDispatches()
+}

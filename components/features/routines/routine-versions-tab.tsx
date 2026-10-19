@@ -29,6 +29,8 @@ interface PipelineVersion {
   author_id: string
   change_summary?: string
   created_at: string
+  /** The latest Test run of exactly this definition, when there was one (ODCH-RT-13). */
+  test_result?: { passed: boolean; status: string; tested_at: string }
 }
 interface VersionDetail extends PipelineVersion {
   definition: Record<string, unknown>
@@ -236,6 +238,9 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     {v.is_head && <StatusPill size="md" tone="success" label="Published · Run uses this" />}
+                    {v.test_result && (
+                      <StatusPill size="md" tone={v.test_result.passed ? "success" : "danger"} label={v.test_result.passed ? "Test run passed" : "Test run failed"} title={`Tested ${formatRoutineTime(v.test_result.tested_at)}`} />
+                    )}
                     <span className="text-xs text-muted-foreground">{formatRoutineTime(v.created_at)}</span>
                   </div>
                   <p className="mt-1 text-xs">{v.change_summary || "Saved recipe"}</p>

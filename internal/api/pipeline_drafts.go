@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,7 +22,27 @@ func (h *PipelineHandler) GetDraft(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "Could not load routine draft")
 		return
 	}
+	h.attachDraftTestResult(r.Context(), d)
 	writeJSON(w, 200, d)
+}
+
+// attachDraftTestResult sets d.TestResult to the latest Test run of the exact
+// definition the draft holds (ODCH-RT-13). A draft nobody tested, or whose
+// definition changed since, has none.
+func (h *PipelineHandler) attachDraftTestResult(ctx context.Context, d *pipeline.Draft) {
+	var doc struct {
+		Definition json.RawMessage `json:"definition"`
+	}
+	if d == nil || json.Unmarshal(d.Document, &doc) != nil || len(doc.Definition) == 0 {
+		return
+	}
+	hash := definitionHashHex(doc.Definition)
+	results, err := h.store.TestResults(ctx, d.WorkspaceID, []string{hash})
+	if err != nil {
+		h.logger.Warn("draft test result", "error", err)
+		return
+	}
+	d.TestResult = results[hash]
 }
 
 type routineDraftListEntry struct {
@@ -105,6 +126,7 @@ func (h *PipelineHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "Could not save routine draft")
 		return
 	}
+	h.attachDraftTestResult(r.Context(), saved)
 	writeJSON(w, 200, saved)
 }
 
