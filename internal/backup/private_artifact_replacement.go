@@ -62,6 +62,24 @@ func rejectPrivateArtifactTargetReplacement(ctx context.Context, target privateA
 	return nil
 }
 
+// Preflight before service maintenance or file preparation. The writer transaction
+// repeats this check immediately before deleting rows to close admission races.
+func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, bundleID, bundleSlug string) error {
+	if bundleID == "" {
+		return fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ids, err := resolveTargetWorkspaceIDs(ctx, tx, bundleID, bundleSlug)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	return rejectPrivateArtifactTargetReplacement(ctx, tx, ids)
+}
+
 // Recovery is offline. Inspect the existing database before prepareDataDir can
 // remove it; do not migrate it or follow a database symlink during this check.
 func rejectPrivateArtifactRecoveryTarget(ctx context.Context, dataDir string) error {
