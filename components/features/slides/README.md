@@ -25,8 +25,9 @@ The parent must retain confirmed workspace/Page identity, revision, order versio
 hash and saved deck separately from the candidate; authorize each real read/write;
 bind save preconditions to that saved base; and verify acknowledgement and the
 exact saved revision before replacing the candidate or reporting success. Scope
-changes must remove old content. This cut adds no Page wrapper, API, CLI, hook,
-feature activation, asset retrieval, comments, selected-agent request or export.
+changes must remove old content. The saved wrapper and hook above supply only
+read-only admission; this cut adds no API, CLI, Page dispatch, feature activation,
+asset retrieval, comments, selected-agent request or export.
 
 The defensive parsed-prop boundary rejects unknown fields/types, invalid scalars,
 geometry/text limits and aggregate table-cell budgets. Duplicate JSON-key
