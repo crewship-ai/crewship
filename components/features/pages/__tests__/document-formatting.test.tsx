@@ -11,7 +11,7 @@ import { PageDocument } from "../page-document"
 import { encodeUpdate } from "@/hooks/use-page-document"
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({data:true,isPending:false}) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
 afterEach(() => { cleanup(); request.mockReset() })
 it("validates actual heading, Enter, list, and table updates including retained stable IDs", async () => {

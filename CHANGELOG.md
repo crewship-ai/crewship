@@ -25,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Browse retained Document checkpoints in a separate read-only history view without replacing the live draft or editor. Every API and CLI history read rechecks current human access.
+
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
 - Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
