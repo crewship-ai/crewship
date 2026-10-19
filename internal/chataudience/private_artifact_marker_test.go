@@ -35,6 +35,17 @@ func TestPrivateArtifactContextMigrationBackfillsAndCannotBeCleared(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	// A pre-classification NULL actor is ambiguous, unlike later annotation loss.
+	for _, q := range []string{
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('marker-null-origin','marker-ws','marker-agent','marker-author','private')`,
+		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('marker-page','marker-ws','marker-page','Fixture','marker-author','{}')`,
+		`INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES('marker-ws','marker-page',3,x'00','[]')`,
+		`INSERT INTO document_creations(page_id,workspace_id,run_id,agent_id,human_user_id,source_chat_id,submission_id,mutation_id,request_digest,created_at) VALUES('marker-page','marker-ws','marker-run','marker-agent',NULL,'marker-null-origin','marker-submission','marker-mutation',printf('%064d',0),'2026-10-19T00:00:00Z')`,
+	} {
+		if _, err := db.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := database.Migrate(t.Context(), db, logger); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +56,7 @@ func TestPrivateArtifactContextMigrationBackfillsAndCannotBeCleared(t *testing.T
 		{"marker-valid", sql.NullString{String: "marker-author", Valid: true}},
 		{"marker-mixed", sql.NullString{String: "", Valid: true}},
 		{"marker-ordinary", sql.NullString{}},
+		{"marker-null-origin", sql.NullString{String: "", Valid: true}},
 	} {
 		var marker sql.NullString
 		if err := db.QueryRowContext(t.Context(), `SELECT private_artifact_author_user_id FROM chats WHERE id=?`, tc.chat).Scan(&marker); err != nil {

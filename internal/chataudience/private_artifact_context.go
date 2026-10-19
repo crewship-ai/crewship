@@ -10,7 +10,7 @@ var ErrPrivateArtifactContext = errors.New("private artifact conversation proven
 // These fixed predicates refer only to the outer chats c. Authority expires;
 // transcript classification does not. Never filter by consent state, live
 // grants, current Page placement, result existence or document revision.
-const privateArtifactSourceSQL = `EXISTS(SELECT 1 FROM document_creation_consents s WHERE s.chat_id=c.id)
+const privateArtifactSourceSQL = `c.private_artifact_author_user_id IS NOT NULL OR EXISTS(SELECT 1 FROM document_creation_consents s WHERE s.chat_id=c.id)
  OR EXISTS(SELECT 1 FROM document_creations d WHERE d.source_chat_id=c.id)`
 const privateArtifactInvalidSQL = `EXISTS(SELECT 1 FROM document_creation_consents s
  LEFT JOIN conversation_messages m ON m.id=s.message_id WHERE s.chat_id=c.id AND
@@ -18,8 +18,11 @@ const privateArtifactInvalidSQL = `EXISTS(SELECT 1 FROM document_creation_consen
  OR m.id IS NULL OR m.session_id IS NOT c.id OR m.agent_id IS NOT c.agent_id
  OR m.author_user_id IS NOT s.human_user_id OR m.role IS NOT 'user'))
  OR EXISTS(SELECT 1 FROM document_creations d WHERE d.source_chat_id=c.id AND
- (d.workspace_id IS NOT c.workspace_id OR d.human_user_id IS NOT c.created_by OR d.agent_id IS NOT c.agent_id))`
-const privateArtifactValidSQL = `c.visibility='private' AND COALESCE(c.created_by,'')<>''
+ (d.workspace_id IS NOT c.workspace_id
+ OR (d.human_user_id IS NOT NULL AND d.human_user_id IS NOT c.private_artifact_author_user_id)
+ OR (d.agent_id IS NOT NULL AND d.agent_id IS NOT c.agent_id)))`
+const privateArtifactValidSQL = `c.visibility='private' AND COALESCE(c.private_artifact_author_user_id,'')<>''
+ AND c.private_artifact_author_user_id IS c.created_by
  AND COALESCE(c.agent_id,'')<>'' AND NOT (` + privateArtifactInvalidSQL + `)`
 
 // NoPrivateArtifactContextSQL excludes ANY provenance, including inconsistent
@@ -56,7 +59,7 @@ func ResolvePrivateArtifactContext(ctx context.Context, q Queryer, workspaceID, 
 		return value, ErrPrivateArtifactContext
 	}
 	var valid bool
-	err := q.QueryRowContext(ctx, `SELECT c.workspace_id,c.id,COALESCE(c.created_by,''),(`+privateArtifactSourceSQL+`),(`+privateArtifactValidSQL+`) FROM chats c WHERE c.workspace_id=? AND c.id=?`, workspaceID, chatID).Scan(&value.WorkspaceID, &value.ChatID, &value.AuthorUserID, &value.Sealed, &valid)
+	err := q.QueryRowContext(ctx, `SELECT c.workspace_id,c.id,COALESCE(c.private_artifact_author_user_id,c.created_by,''),(`+privateArtifactSourceSQL+`),(`+privateArtifactValidSQL+`) FROM chats c WHERE c.workspace_id=? AND c.id=?`, workspaceID, chatID).Scan(&value.WorkspaceID, &value.ChatID, &value.AuthorUserID, &value.Sealed, &valid)
 	if err != nil {
 		return PrivateArtifactContext{}, err
 	}

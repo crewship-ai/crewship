@@ -1084,6 +1084,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err := rejectRunAdmissionInput(dump, false); err != nil {
 		return stats, err
 	}
+	if err := validatePrivateArtifactContextDump(dump); err != nil {
+		return stats, err
+	}
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
 	// BeginTx. db.Conn pins us to a single pooled connection; we

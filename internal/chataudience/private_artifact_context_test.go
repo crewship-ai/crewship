@@ -73,7 +73,7 @@ func TestPrivateArtifactContextDurableClassification(t *testing.T) {
 	}
 }
 func TestPrivateArtifactContextMalformedProvenanceFailsClosed(t *testing.T) {
-	for _, change := range []string{"foreign author", "mixed authors", "wrong workspace", "wrong message agent", "wrong message author", "group", "creation null author", "creation wrong agent"} {
+	for _, change := range []string{"foreign author", "mixed authors", "wrong workspace", "wrong message agent", "wrong message author", "group", "creation wrong agent"} {
 		t.Run(change, func(t *testing.T) {
 			db := audienceDB(t)
 			artifactConsent(t, db, "consent", "author")
@@ -90,9 +90,6 @@ func TestPrivateArtifactContextMalformedProvenanceFailsClosed(t *testing.T) {
 				audienceExec(t, db, `UPDATE conversation_messages SET author_user_id='other' WHERE id='consent'`)
 			case "group":
 				audienceExec(t, db, `UPDATE chats SET visibility='group' WHERE id='private'`)
-			case "creation null author":
-				artifactCreation(t, db)
-				audienceExec(t, db, `UPDATE document_creations SET human_user_id=NULL`)
 			case "creation wrong agent":
 				artifactCreation(t, db)
 				audienceExec(t, db, `UPDATE document_creations SET agent_id='other-agent'`)
@@ -164,5 +161,46 @@ func TestPrivateArtifactConversationRestrictedReadBoundary(t *testing.T) {
 		if err != nil || ok == trustedOnly {
 			t.Fatalf("restricted original policy trustedOnly=%v: %v %v", trustedOnly, ok, err)
 		}
+	}
+}
+
+// A historical actor annotation is not authority. Losing it after the original
+// audience was durably classified cannot either unseal the chat or erase custody.
+func TestPrivateArtifactContextHistoricalActorLossRetainsKnownAudience(t *testing.T) {
+	db := audienceDB(t)
+	artifactConsent(t, db, "original-consent", "author")
+	artifactCreation(t, db)
+	audienceExec(t, db, `DELETE FROM document_creation_consents`)
+	audienceExec(t, db, `UPDATE document_creations SET human_user_id=NULL`)
+	for _, tc := range []struct {
+		user    string
+		allowed bool
+	}{{"author", true}, {"owner", true}, {"admin", false}} {
+		ok, err := CanReadArtifactConversation(t.Context(), db, "private", tc.user, "ws", true)
+		if err != nil || ok != tc.allowed {
+			t.Errorf("retained audience %s: %v %v", tc.user, ok, err)
+		}
+	}
+}
+
+func TestPrivateArtifactCatalogBatchFiltersAndAudits(t *testing.T) {
+	db := audienceDB(t)
+	db.SetMaxOpenConns(1)
+	artifactConsent(t, db, "consent", "author")
+	for _, tc := range []struct {
+		user    string
+		private bool
+	}{{"author", true}, {"owner", true}, {"admin", false}} {
+		allowed, err := FilterReadableArtifactConversations(t.Context(), db, "ws", tc.user, []string{"private", "group", "missing"})
+		if err != nil || allowed["private"] != tc.private || !allowed["group"] || allowed["missing"] {
+			t.Errorf("batch %s: %v %v", tc.user, allowed, err)
+		}
+	}
+	audienceExec(t, db, `CREATE TRIGGER reject_batch_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	if _, err := FilterReadableArtifactConversations(t.Context(), db, "ws", "owner", []string{"private"}); err == nil {
+		t.Fatal("catalog released protected output despite audit failure")
+	}
+	if _, err := FilterReadableArtifactConversations(t.Context(), db, "ws", "author", make([]string, 101)); err == nil {
+		t.Fatal("unbounded catalog accepted")
 	}
 }
