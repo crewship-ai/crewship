@@ -229,7 +229,7 @@ describe("<RoutinesDashboard>", () => {
       { id: "p_failed", pipeline_slug: "invoice", fire_at: hoursAgo(5), status: "failed", last_error: "The routine is no longer active." },
       { id: "p_expired", pipeline_slug: "briefing", fire_at: hoursAgo(6), status: "expired" },
       { id: "p_old", pipeline_slug: "invoice", fire_at: hoursAgo(24 * 10), status: "failed" },
-      { id: "p_wait", pipeline_slug: "briefing", fire_at: hoursAgo(0.1), status: "pending", dispatch_attempts: 2 },
+      { id: "p_wait", pipeline_slug: "briefing", fire_at: hoursAgo(0.1), status: "pending", reason_code: "routine_capacity", dispatch_attempts: 2 },
       { id: "p_fired", pipeline_slug: "invoice", fire_at: hoursAgo(1), status: "fired", run_id: "" },
       { id: "p_other", pipeline_slug: "not-mine", fire_at: hoursAgo(1), status: "failed" },
     ]

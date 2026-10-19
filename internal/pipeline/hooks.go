@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // parseRunMetadata decodes a run's metadata_json into a map for
@@ -42,9 +43,26 @@ func buildStepRenderContext(inputs map[string]any, stepOutputs map[string]string
 // hook renders against a minimal context built from the run's inputs +
 // safe env, NOT the main run's step outputs (a hook is a wrapper, not a
 // pipeline step). Returns the hook's output + error.
-func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, runID, pipelineSlug string) (string, error) {
+func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, runID, pipelineSlug string, teardown bool) (string, error) {
 	if hook == nil {
 		return "", nil
+	}
+	if in.Mode == ModeRun && in.pipeline != nil {
+		raw, hash := in.pipeline.DefinitionJSON, in.pipeline.DefinitionHash
+		if in.resume {
+			raw, hash = "", ""
+		}
+		readCtx := ctx
+		if teardown && ctx.Err() != nil {
+			// Cleanup keeps its existing dispatch context and live actor gate.
+			// Only the publication read may outlive the expired run briefly.
+			var cancel context.CancelFunc
+			readCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+		}
+		if err := checkGenericPublication(readCtx, e.store.db, in.pipeline.ID, in.WorkspaceID, in.pipeline.genericVersion, raw, hash); err != nil {
+			return "", err
+		}
 	}
 	// Hooks run at the Run() boundary — BEFORE runDSL merges input
 	// defaults — so merge here too, else a hook referencing a defaulted
@@ -95,7 +113,7 @@ func (e *Executor) runHooksAround(ctx context.Context, in RunInput, runID, pipel
 	// teardown/failure hook that never fires on the resume path leaves
 	// credentials unreleased and failures unannounced.
 	if !in.resume && hooks.BeforeAll != nil {
-		if _, err := e.runRoutineHook(ctx, hooks.BeforeAll, in, runID, pipelineSlug); err != nil {
+		if _, err := e.runRoutineHook(ctx, hooks.BeforeAll, in, runID, pipelineSlug, false); err != nil {
 			e.persistWarn("hook before_all", runID, err)
 			return &RunResult{
 				RunID:        runID,
@@ -116,7 +134,7 @@ func (e *Executor) runHooksAround(ctx context.Context, in RunInput, runID, pipel
 		switch res.Status {
 		case "COMPLETED":
 			if hooks.AfterAll != nil {
-				if _, herr := e.runRoutineHook(ctx, hooks.AfterAll, in, runID, pipelineSlug); herr != nil {
+				if _, herr := e.runRoutineHook(ctx, hooks.AfterAll, in, runID, pipelineSlug, true); herr != nil {
 					e.persistWarn("hook after_all", runID, herr)
 					// A failed teardown hook (credential-release,
 					// cost-meter-close, ...) must not flip a COMPLETED
@@ -128,7 +146,7 @@ func (e *Executor) runHooksAround(ctx context.Context, in RunInput, runID, pipel
 			}
 		case "FAILED":
 			if hooks.OnFailure != nil {
-				if _, herr := e.runRoutineHook(ctx, hooks.OnFailure, in, runID, pipelineSlug); herr != nil {
+				if _, herr := e.runRoutineHook(ctx, hooks.OnFailure, in, runID, pipelineSlug, true); herr != nil {
 					e.persistWarn("hook on_failure", runID, herr)
 					e.recordRunWarning(ctx, runID, "hook on_failure", herr)
 				}

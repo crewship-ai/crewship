@@ -201,6 +201,9 @@ func TestGenericPublicationGuardResume(t *testing.T) {
 	}
 	exec := NewExecutor(store, NewResolver(db), newMockRunner(), nil).WithRunStore(NewRunStore(db))
 	rec := &RunRecord{ID: "old-run", WorkspaceID: p.WorkspaceID, PipelineID: p.ID, Mode: ModeRun, DefinitionHash: p.DefinitionHash}
+	if err := exec.runStore.Insert(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
 	if _, reason := exec.buildResumePlan(t.Context(), rec); reason != "" {
 		t.Fatalf("legacy resume positive: %s", reason)
 	}

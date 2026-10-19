@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
@@ -102,6 +104,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
 - Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
+- Deferred routine receipts expose stable waiting reasons in API, CLI and Plan, including neutral legacy causes and recovery attention.
 
 ### Added
 

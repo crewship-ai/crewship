@@ -19583,6 +19583,9 @@
           "priority": {
             "type": "integer"
           },
+          "reason_code": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -19610,7 +19613,8 @@
           "run_id",
           "dispatch_attempts",
           "last_error",
-          "can_cancel"
+          "can_cancel",
+          "reason_code"
         ],
         "type": "object"
       },
@@ -19658,6 +19662,9 @@
             "priority": {
               "type": "integer"
             },
+            "reason_code": {
+              "type": "string"
+            },
             "run_id": {
               "type": "string"
             },
@@ -19685,7 +19692,8 @@
             "run_id",
             "dispatch_attempts",
             "last_error",
-            "can_cancel"
+            "can_cancel",
+            "reason_code"
           ],
           "type": "object"
         },
