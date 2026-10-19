@@ -1448,6 +1448,13 @@ body {
   .bare-state { display: grid; grid-template-columns: min(640px, 100%); place-content: center; gap: 20px; min-height: 100dvh; padding: 24px 16px; background: var(--background); }
   .bare-state-lockup { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 650; color: var(--foreground); }
   .bare-state > .page-state { padding: 0; }
+  /* Signed-out and restarting screens (components/branding/signed-out-screen.tsx,
+     #3787): the sail breathes while the app waits for the server, and only
+     where the person allows motion. */
+  @keyframes signed-out-pulse { 50% { transform: scale(0.94); opacity: 0.75; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .signed-out-pulse { display: block; animation: signed-out-pulse 2.2s ease-in-out infinite; }
+  }
   .page-stale { opacity: 0.55; filter: saturate(0.6); pointer-events: none; }
   .page-cf {
     border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));

@@ -20,6 +20,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { safeRedirectPath } from "./safe-redirect"
 import { returnPageName } from "./return-to"
 import { serverFetch } from "@/lib/server-base"
+import { SignedOutScreen } from "@/components/branding/signed-out-screen"
+import { forgetSignedOut, readSignedOut, signedOutKindFromQuery } from "@/lib/signed-out"
 
 export default function LoginPage() {
   return (
@@ -42,7 +44,11 @@ function LoginForm() {
   // doesn't leak who is registered. The banner has to stay as vague as
   // the API response is.
   const signupSubmitted = searchParams.get("signup") === "submitted"
-  const expired = searchParams.get("reason") === "expired"
+  // Reached because a session ended (#3787): the page opens on that state's
+  // full screen and shows the form once the person chooses to sign in.
+  const signedOut = signedOutKindFromQuery(searchParams.get("reason"))
+  const [formOpen, setFormOpen] = useState(false)
+  const [remembered, setRemembered] = useState<{ email: string | null; draftAgent: string | null }>({ email: null, draftAgent: null })
   // A sign-in refused on the server side (e.g. Google for a suspended
   // account) lands here; like a wrong password, it does not say why.
   const refused = searchParams.get("error") === "signin"
@@ -57,6 +63,10 @@ function LoginForm() {
   // every page load.
   const [gateChecked, setGateChecked] = useState(false)
   const [signupAllowed, setSignupAllowed] = useState(true)
+
+  // Same tab, set by the auth provider just before it came here. Read with
+  // the first-run gate, which holds the page anyway.
+  useEffect(() => { setRemembered(readSignedOut()) }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -104,6 +114,7 @@ function LoginForm() {
       return
     }
 
+    forgetSignedOut()
     router.push(redirectTarget)
   }
 
@@ -118,6 +129,26 @@ function LoginForm() {
     )
   }
 
+  if (signedOut && !formOpen) {
+    return (
+      <SignedOutScreen
+        kind={signedOut}
+        email={remembered.email}
+        draftAgent={remembered.draftAgent}
+        onSignIn={() => {
+          if (remembered.email) setEmail(remembered.email)
+          setFormOpen(true)
+        }}
+        onUseAnotherAccount={() => {
+          forgetSignedOut()
+          setRemembered({ email: null, draftAgent: null })
+          setEmail("")
+          setFormOpen(true)
+        }}
+      />
+    )
+  }
+
   // One rank per kind of feedback: a redirect state is a banner in the card,
   // anything the server refused is the band above the footer.
   const banner = registered ? (
@@ -126,8 +157,6 @@ function LoginForm() {
     // As vague as the API: the same sentence whether or not the address
     // already had an account.
     <AuthBanner tone="ok">If that address was not registered yet, the account is ready. Sign in below.</AuthBanner>
-  ) : expired && !error ? (
-    <AuthBanner tone="warn">Your session expired. Please sign in again.</AuthBanner>
   ) : null
   const refusal = error ?? (refused ? "We could not sign you in. Try again, or ask your administrator." : null)
 

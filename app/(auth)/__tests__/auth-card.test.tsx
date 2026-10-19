@@ -104,10 +104,14 @@ describe("login card", () => {
     expect(banner).not.toHaveTextContent(/welcome|already has|thanks|created/i)
   })
 
-  it("expired banner hides when a submit error is shown", async () => {
+  it("reason=expired opens on the session-expired screen; its form has no second warning (#3787)", async () => {
     auth.signIn.mockResolvedValue({ ok: false, error: "Invalid email or password" })
-    await renderLogin("reason=expired")
-    expect(screen.getByRole("status")).toHaveTextContent("Your session expired. Please sign in again.")
+    nav.query = "reason=expired"
+    setupStatus({ needs_bootstrap: false, allow_signup: true })
+    render(<LoginPage />)
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }))
+    await screen.findByRole("heading", { name: "Sign in to Crewship" })
+    expect(screen.queryByText("Your session expired. Please sign in again.")).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } })
     fireEvent.change(screen.getByLabelText("Password", { exact: true }), { target: { value: "wrong-passphrase" } })
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Sign in" })) })

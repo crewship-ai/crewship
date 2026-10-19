@@ -22,6 +22,7 @@ import { useSidebarOptional } from "@/components/ui/sidebar"
 import { buildLabel, editionName } from "@/lib/build-info"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
+import { afterSignOut } from "@/lib/signed-out"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -236,7 +237,7 @@ export function UserMenu({ placement = "toolbar" }: {
           <div className="p-1">
             <MenuSheetItem
               className={ITEM}
-              onClick={() => { signOut().then(() => window.location.href = "/login") }}
+              onClick={() => { signOut().then((ok) => { window.location.href = afterSignOut(ok) }) }}
             >
               <LogOut className={ICON} />
               Log out
