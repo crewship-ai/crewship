@@ -47,6 +47,8 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # Everything this suite creates, torn down even when an assertion fails: a
 # cycling pair left enabled on a shared slot keeps firing after the run ends.
 _CREATED_AUTOMATIONS=()
+# Called indirectly by the EXIT trap below, including after failed assertions.
+# shellcheck disable=SC2317
 cleanup_automations() {
   for id in ${_CREATED_AUTOMATIONS[@]+"${_CREATED_AUTOMATIONS[@]}"}; do
     cs automation delete "$id" >/dev/null 2>&1 || true

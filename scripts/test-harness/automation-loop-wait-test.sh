@@ -72,9 +72,12 @@ chmod +x "$WORKDIR/stalled-cli"
 export CREWSHIP="$WORKDIR/stalled-cli" SERVER='http://fixture.invalid' WORKDIR
 {
   printf '%s\n' "$budget_cli"
-  printf 'automation_loop_now() { date +%%s; }\n_CS_ARGS=()\n'
-  printf 'automation_loop_cli "$(( $(date +%%s) + 1 ))" routine records fixture\n'
-  printf 'printf "inner-status=%%s\\n" "$?" > "$WORKDIR/budget-result"\n'
+  cat <<'PROBE'
+automation_loop_now() { date +%s; }
+_CS_ARGS=()
+automation_loop_cli "$(( $(date +%s) + 1 ))" routine records fixture
+printf "inner-status=%s\n" "$?" > "$WORKDIR/budget-result"
+PROBE
 } > "$WORKDIR/budget-probe.sh"
 timeout 3 bash "$WORKDIR/budget-probe.sh" || true
 grep -Eq '^inner-status=(124|137)$' "$WORKDIR/budget-result"
