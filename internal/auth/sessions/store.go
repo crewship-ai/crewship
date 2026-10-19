@@ -237,6 +237,51 @@ func (s *DBStore) Revoke(ctx context.Context, id, reason string) error {
 	return nil
 }
 
+// RevokeWithChange retains Revoke's repeat timestamp/reason behavior while
+// reporting only the committed active-to-revoked transition. Notifiers use this
+// instead of a racy Get followed by Revoke. The ordinary Store API is unchanged.
+func (s *DBStore) RevokeWithChange(ctx context.Context, id, reason string) (bool, error) {
+	if id == "" {
+		return false, errors.New("session id required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("revoke session: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	now := s.clock().UTC().Format(time.RFC3339)
+	result, err := tx.ExecContext(ctx, `UPDATE user_sessions SET revoked_at=?,revoked_reason=? WHERE id=? AND revoked_at IS NULL`, now, reason, id)
+	if err != nil {
+		return false, fmt.Errorf("revoke session: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		// Repeat calls may update forensic metadata, but cannot revoke a newly
+		// active row without reporting a transition.
+		result, err = tx.ExecContext(ctx, `UPDATE user_sessions SET revoked_at=?,revoked_reason=? WHERE id=? AND revoked_at IS NOT NULL`, now, reason, id)
+		if err != nil {
+			return false, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if count == 0 {
+			return false, ErrNotFound
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	s.touchMu.Lock()
+	delete(s.touchCache, id)
+	s.touchMu.Unlock()
+	return changed > 0, nil
+}
+
 // RevokeAllForUser flips every active session for the given user.
 // Used by password-change and admin force-logout.
 func (s *DBStore) RevokeAllForUser(ctx context.Context, userID, reason string) (int64, error) {
