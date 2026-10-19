@@ -9,7 +9,7 @@ const pin = { workspaceId: "w", pageId: "p1", mode: "revision" as const, revisio
 const good = { page_id: "p1", id: "cp 9", rev: 3, schema: 3, content: { type: "doc" } }
 
 it("reads through the checkpoint endpoint and never with a revision query", async () => {
-  const fetcher = vi.fn(async () => ({ status: 200, body: good }))
+  const fetcher = vi.fn(async (_path: string, _signal?: AbortSignal) => ({ status: 200, body: good as unknown }))
   const read = await readExactRevision(fetcher, pin)
   expect(fetcher.mock.calls[0][0]).toBe("/api/v1/pages/%40p1/document/checkpoints/cp%209")
   expect(checkpointPath(pin)).not.toMatch(/revision=|\?/)
