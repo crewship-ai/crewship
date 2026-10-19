@@ -15,6 +15,13 @@ export const documentKeys = { all: (workspace: string) => ["page-document",works
 class UnconfirmedReceipt extends Error {}
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
+/** Where unsent work stands. Only "confirmed" means the server holds everything. */
+export type DocumentDurability =
+  | "confirmed" // nothing unsent
+  | "writing"   // unsent; the browser journal write has not resolved yet
+  | "local"     // unsent; the journal write resolved, so it survives a reload
+  | "unsaved"   // unsent and not retained by the browser either
+  | "held"      // an earlier unsent draft is held in this browser, not restored
 export class DocumentAPIError extends Error { constructor(message: string, public status: number, public code?: string) { super(message) } }
 export async function documentRequest<T>(workspace: string, slug: string, path = "", body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await apiFetch(`/api/v1/pages/${encodeURIComponent(slug)}/document${path}?workspace_id=${encodeURIComponent(workspace)}`, body === undefined ? {signal} : { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -44,6 +51,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const [recovery, setRecovery] = useState(false)
   const [denied, setDenied] = useState(false)
   const [storageReady, setStorageReady] = useState(false)
+  const [journalWrites, setJournalWrites] = useState(0)
+  const [journalFailed, setJournalFailed] = useState(false)
   const [recoveredDrafts, setRecoveredDrafts] = useState<DocumentDraft[]>([])
   const discardRecovery = useRef<() => Promise<void>>(async () => {})
   const discardRecoveredDrafts = useCallback(() => discardRecovery.current(), [])
@@ -52,7 +61,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
-    setStorageReady(false); setRecoveredDrafts([])
+    setStorageReady(false); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
     discardRecovery.current = async () => {}
     authorizationLost.current=false
     setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
@@ -68,13 +77,16 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     const persist = (batch: DocumentDraft) => {
       // Capture immutable bytes now; later edits must not alter a queued write.
       const saved = structuredClone(batch)
+      setJournalWrites(count => count + 1)
       persistence = persistence.then(async () => {
         if (!storage) throw new DocumentStorageError("Private document storage is unavailable.")
         await storage.put(saved)
       })
+      // Counted down when this write settles, success or not.
+      void persistence.then(() => undefined, () => undefined).then(() => { if (active) setJournalWrites(count => Math.max(0, count - 1)) })
       void persistence.catch(cause => {
         if (!active) return
-        blocked=true;setStorageReady(false);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
+        blocked=true;setStorageReady(false);setJournalFailed(true);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
         setError(cause instanceof Error ? cause.message : "Could not retain draft.")
       })
     }
@@ -169,7 +181,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (!active) return
         setPending(queue.length)
         if (cause instanceof DocumentStorageError) {
-          blocked=true;setStorageReady(false);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
+          blocked=true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (cause instanceof UnconfirmedReceipt) {
           blocked=true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status)) {
@@ -203,5 +215,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
   }, [current, pending])
-  return { doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, editable: Boolean(current && state?.can_write && storageReady && allowWrites && !recovery && !denied) }
+  let durability: DocumentDurability = "confirmed"
+  if (recoveredDrafts.length) durability = "held"
+  else if (pending > 0) durability = journalFailed || !storageReady ? (journalWrites > 0 && !journalFailed ? "writing" : "unsaved") : journalWrites > 0 ? "writing" : "local"
+  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, editable: Boolean(current && state?.can_write && storageReady && allowWrites && !recovery && !denied) }
 }
