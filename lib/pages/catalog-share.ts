@@ -36,6 +36,23 @@ export function catalogItemScope(page: PageView): CatalogScope {
   return "unknown"
 }
 
+/**
+ * Wire form of the filters, per the agreed narrow contract (FE-REQ-F4-3):
+ * a repeated parameter is OR within one dimension, dimensions are AND, and
+ * the server applies them after authorization and before paging. Not sent yet
+ * (the list route only knows `audience`, `limit`, `offset`); filtering stays
+ * on the loaded rows until it does, so wiring is a swap of this call.
+ * `type` is only the Document / Page compatibility split.
+ */
+export function catalogFilterParams(f: CatalogFilters): URLSearchParams {
+  const params = new URLSearchParams()
+  for (const t of f.types) params.append("type", t)
+  for (const s of f.scopes) params.append("scope", s)
+  for (const o of f.owners) params.append("owner", o)
+  for (const st of f.states) params.append("state", st)
+  return params
+}
+
 export function filterCatalog(pages: readonly PageView[], f: CatalogFilters): PageView[] {
   return pages.filter(p =>
     (f.types.length === 0 || f.types.includes(catalogItemType(p)))

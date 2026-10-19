@@ -3,6 +3,7 @@ import { toPageView } from "@/hooks/use-pages"
 import {
   EMPTY_CATALOG_FILTERS,
   catalogFacets,
+  catalogFilterParams,
   catalogItemType,
   filterCatalog,
   outcomeOf,
@@ -79,5 +80,13 @@ describe("bulk results", () => {
       { slug: "c", name: "C", outcome: "conflict" },
     ])
     expect(s).toEqual({ success: 1, forbidden: 1, conflict: 1, not_found: 0, failed: 0 })
+  })
+})
+
+describe("filter wire form", () => {
+  it("repeats a parameter per value and omits empty dimensions", () => {
+    const params = catalogFilterParams({ types: ["document"], scopes: ["private", "unknown"], owners: ["crew/ops"], states: ["never_produced", "stale"] })
+    expect(params.toString()).toBe("type=document&scope=private&scope=unknown&owner=crew%2Fops&state=never_produced&state=stale")
+    expect(catalogFilterParams(EMPTY_CATALOG_FILTERS).toString()).toBe("")
   })
 })

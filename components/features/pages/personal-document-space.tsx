@@ -6,7 +6,7 @@ import { usePages } from "@/hooks/use-pages"
 import type { PageView } from "@/hooks/use-pages"
 import { DocumentCatalog } from "./document-catalog"
 import { artifactCopyMove } from "@/lib/feature-flags"
-import { duplicatePage } from "@/lib/pages/catalog-duplicate"
+import { DuplicateError, duplicatePage, newMutationId } from "@/lib/pages/catalog-duplicate"
 import { ShareToFolderDialog } from "./share-to-folder-dialog"
 
 /** Documents-only view of this workspace, not another workspace or grant.
@@ -23,11 +23,17 @@ export function PersonalDocumentSpace({ workspaceId, onSelect }: {
   const { pages, loading, error } = usePages(workspaceId, "personal")
   const [copyError, setCopyError] = React.useState<string | null>(null)
   const copying = React.useRef(false)
+  // One key per user action, kept until it succeeds so a retry after a lost
+  // answer replays the same mutation instead of making a second copy.
+  const mutationIds = React.useRef(new Map<string, string>())
   const duplicate = (page: PageView) => {
     if (!workspaceId || !page.immutablePageId || copying.current) return
     copying.current = true
     setCopyError(null)
-    duplicatePage(workspaceId, page.immutablePageId).then(copy => onSelect(`@${copy.id}`), error => setCopyError(error instanceof Error ? error.message : "The copy could not be made.")).finally(() => { copying.current = false })
+    const id = page.immutablePageId
+    const mutationId = mutationIds.current.get(id) ?? newMutationId()
+    mutationIds.current.set(id, mutationId)
+    duplicatePage(workspaceId, { id, mutationId, pagesVersion: page.pagesVersion }).then(copy => { mutationIds.current.delete(id); onSelect(`@${copy.id}`) }, error => { if (error instanceof DuplicateError && error.status < 500) mutationIds.current.delete(id); setCopyError(error instanceof Error ? error.message : "The copy could not be made.") }).finally(() => { copying.current = false })
   }
   const [sharing, setSharing] = React.useState<PageView[] | null>(null)
   const ownedDocuments = human && workspaceId && !error ? pages.filter(page =>

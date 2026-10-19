@@ -106,3 +106,21 @@ it("wires Duplicate once per click and opens the copy by its new ID", async () =
  await waitFor(() => expect(view.select).toHaveBeenCalledWith("@copy-id"))
  vi.unstubAllEnvs()
 })
+
+it("replays the same mutation key when a failed Duplicate is retried", async () => {
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACT_COPY_MOVE", "true")
+ const keys: string[] = []
+ let attempt = 0
+ request.mockImplementation(async (url: string, init?: RequestInit) => {
+  if (init?.method === "POST") { keys.push((init.headers as Record<string, string>)["Idempotency-Key"]); return attempt++ === 0 ? Response.json({ error: "Unavailable" }, { status: 503 }) : Response.json({ page: { id: "copy-id", slug: "copy" } }, { status: 201 }) }
+  return Response.json([row("Own private", { id: "src-id", private_audience: true })])
+ })
+ mount()
+ const button = await screen.findByRole("button", { name: "Duplicate Own private" })
+ fireEvent.click(button)
+ await screen.findByRole("alert")
+ fireEvent.click(button)
+ await waitFor(() => expect(keys).toHaveLength(2))
+ expect(keys[1]).toBe(keys[0])
+ vi.unstubAllEnvs()
+})

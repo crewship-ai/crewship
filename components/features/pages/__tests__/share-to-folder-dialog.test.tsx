@@ -108,6 +108,8 @@ it("lists a result with the reason for every item in a bulk move", async () => {
   expect(items.map(li => li.getAttribute("data-outcome"))).toEqual(["success", "forbidden", "conflict", "not_found", "failed"])
   expect(items[4].textContent).toMatch(/Failed: nope/)
   expect(moves.map(m => m.id)).toEqual(["a", "b", "c", "d", "e"])
+  // The existing batch route is all-or-nothing and gives no per-item result.
+  expect(request.mock.calls.some(c => String(c[0]).includes(":batch"))).toBe(false)
 })
 
 it("cannot be closed while items are still moving, and keeps the results", async () => {
