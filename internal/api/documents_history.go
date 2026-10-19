@@ -16,6 +16,18 @@ type documentCheckpointSummary struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type documentCheckpointListResponse struct {
+	Checkpoints []documentCheckpointSummary `json:"checkpoints"`
+}
+
+type documentCheckpointResponse struct {
+	PageID  string          `json:"page_id"`
+	ID      string          `json:"id"`
+	Rev     int64           `json:"rev"`
+	Schema  int             `json:"schema"`
+	Content json.RawMessage `json:"content"`
+}
+
 func (h *PageHandler) ListDocumentCheckpoints(w http.ResponseWriter, r *http.Request) {
 	h.serveDocumentHistory(w, r, false)
 }
@@ -58,9 +70,7 @@ func (h *PageHandler) serveDocumentHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !selected {
-		var value struct {
-			Checkpoints []documentCheckpointSummary `json:"checkpoints"`
-		}
+		var value documentCheckpointListResponse
 		if json.Unmarshal(raw, &value) != nil || value.Checkpoints == nil || len(value.Checkpoints) > 1000 {
 			replyError(w, 502, "invalid document history response")
 			return
@@ -93,5 +103,5 @@ func (h *PageHandler) serveDocumentHistory(w http.ResponseWriter, r *http.Reques
 		replyError(w, 409, "unsupported document checkpoint schema")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"page_id": rec.ID, "id": value.ID, "rev": value.Rev, "schema": value.Schema, "content": value.Content})
+	writeJSON(w, 200, documentCheckpointResponse{PageID: rec.ID, ID: value.ID, Rev: value.Rev, Schema: value.Schema, Content: value.Content})
 }
