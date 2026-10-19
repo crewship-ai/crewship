@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { CalendarAgenda, CalendarMonth, CalendarWeek } from "../calendar-views"
+import { CalendarAgenda, CalendarLanes, CalendarMonth, CalendarWeek } from "../calendar-views"
 import { at, entry, items } from "./fixtures"
 
 const NOW = new Date(2026, 9, 15, 8, 16) // Thu 15 Oct 2026, 08:16
@@ -11,23 +11,26 @@ describe("calendar-week", () => {
     entry({ id: "a", at: at(2026, 10, 15, 8), slug: "scan" }),
     entry({ id: "b", at: at(2026, 10, 15, 2), slug: "triage", kind: "run", status: "failed" }),
     entry({ id: "c", at: at(2026, 10, 16, 14), slug: "scan", kind: "pending" }),
-    ...Array.from({ length: 5 }, (_, i) => entry({ id: `d${i}`, at: at(2026, 10, 17, 9, i * 10), slug: "triage" })),
+    ...Array.from({ length: 5 }, (_, i) => entry({ id: `d${i}`, at: at(2026, 10, 17, 9, 0), slug: "triage" })),
+    entry({ id: "h", at: at(2026, 10, 14, 7, 30), slug: "scan" }),
   ])
 
-  it("shows only hours with items, caps a cell and plans from an empty slot", () => {
+  it("has a row for each time that has an item (07:30, not 07:00), caps a cell and plans from an empty slot", () => {
     const onOpenDay = vi.fn()
     const onPlan = vi.fn()
     render(<CalendarWeek items={week} from={MONDAY} selectedId={null} onPick={vi.fn()} onOpenDay={onOpenDay} onPlan={onPlan} now={NOW} />)
     const grid = screen.getByRole("grid", { name: "Week" })
-    expect([...grid.querySelectorAll("[data-hour-label]")].map((n) => n.textContent)).toEqual(["02:00", "08:00", "09:00", "14:00"])
+    expect([...grid.querySelectorAll("[data-hour-label]")].map((n) => n.textContent)).toEqual(["02:00", "07:30", "08:00", "09:00", "14:00"])
     // No date-only items yet: no All day row.
     expect(within(grid).queryByText("All day")).toBeNull()
-    const busy = screen.getByTestId("week-cell-2026-10-17-9")
+    const busy = screen.getByTestId("week-cell-2026-10-17-09:00")
     expect(within(busy).getAllByRole("button", { pressed: false })).toHaveLength(3)
     fireEvent.click(within(busy).getByRole("button", { name: "+2" }))
     expect(onOpenDay).toHaveBeenCalledWith("2026-10-17")
     fireEvent.click(screen.getByRole("button", { name: "Schedule a start on Fri 16 Oct at 14:00" }))
-    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 16, 14))
+    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 16, 14, 0))
+    fireEvent.click(screen.getByRole("button", { name: "Schedule a start on Wed 14 Oct at 07:30" }))
+    expect(onPlan).toHaveBeenCalledWith(new Date(2026, 9, 14, 7, 30))
   })
 
   it("draws the now line only in the current week", () => {
@@ -40,7 +43,7 @@ describe("calendar-week", () => {
   it("names an item's state with an icon label, not colour alone, and picks it", () => {
     const onPick = vi.fn()
     render(<CalendarWeek items={week} from={MONDAY} selectedId={null} onPick={onPick} onOpenDay={vi.fn()} now={NOW} />)
-    const failed = screen.getByTestId("week-cell-2026-10-15-2")
+    const failed = screen.getByTestId("week-cell-2026-10-15-02:00")
     expect(within(failed).getByRole("img", { name: "Could not finish" })).toBeInTheDocument()
     fireEvent.click(within(failed).getByRole("button", { name: /Nightly triage/ }))
     expect(onPick).toHaveBeenCalledWith("run:b")
@@ -85,5 +88,25 @@ describe("calendar-month", () => {
     fireEvent.click(within(day).getByRole("button", { name: "+3 more" }))
     expect(onOpenDay).toHaveBeenCalledWith("2026-10-15")
     expect(within(screen.getByTestId("month-day-2026-10-02")).queryByRole("img", { name: "Something could not finish" })).toBeNull()
+  })
+})
+
+describe("calendar-lanes (Agents view)", () => {
+  const scout = { id: "ag-scout", slug: "scout", name: "Scout" }
+  const lanes = items([
+    entry({ id: "a", at: at(2026, 10, 15, 8), slug: "scan", agents: [scout] }),
+    entry({ id: "b", at: at(2026, 10, 16, 9), slug: "triage" }),
+  ])
+
+  it("draws one row per agent and a No agent row at the bottom", () => {
+    const onPick = vi.fn()
+    render(<CalendarLanes items={lanes} from={MONDAY} selectedId={null} onPick={onPick} now={NOW} />)
+    const grid = screen.getByRole("grid", { name: "Agents" })
+    const rows = within(grid).getAllByRole("row")
+    expect(rows[1]).toHaveTextContent("Scout")
+    expect(rows[rows.length - 1]).toHaveTextContent("No agent")
+    fireEvent.click(within(rows[1]).getByRole("button", { name: /Weekly scan/ }))
+    expect(onPick).toHaveBeenCalledWith("planned:a")
+    expect(within(rows[rows.length - 1]).getByRole("button", { name: /Nightly triage/ })).toBeInTheDocument()
   })
 })

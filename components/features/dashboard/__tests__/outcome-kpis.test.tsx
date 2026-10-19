@@ -41,6 +41,34 @@ describe("DashboardKpis", () => {
     expect(container.querySelectorAll('[data-slot="kpi-spark"]')).toHaveLength(0)
   })
 
+  it("draws Success, P95 and Spend sparklines from their own series, skipping buckets with no value", () => {
+    const ran = { ...EMPTY, completed: 3, successOk: 3, successTotal: 4, successPct: 75, p95Ms: 60_000, p50Ms: 20_000 }
+    const { container } = render(
+      <DashboardKpis
+        data={ran}
+        window="7d"
+        spendUsd={1.2}
+        completedSeries={[1, 2, 3]}
+        successSeries={[100, null, 50, null, 75]}
+        p95Series={[null, 4000, 9000, 6000]}
+        spendSeries={[0, 0.4, 0.8]}
+      />,
+    )
+    const tile = (label: string) => [...container.querySelectorAll('[data-slot="kpi"]')].find((t) => t.textContent?.includes(label))!
+    for (const label of ["Completed", "Success", "P95 duration", "Spend"]) {
+      expect(tile(label).querySelector('[data-slot="kpi-spark"]'), label).not.toBeNull()
+    }
+    // Three real points, not five: a bucket with no finished run is not a zero.
+    const points = tile("Success").querySelector("polyline:last-of-type")!.getAttribute("points")!.trim().split(" ")
+    expect(points).toHaveLength(3)
+  })
+
+  it("draws no sparkline from fewer than two values, or a flat zero", () => {
+    const ran = { ...EMPTY, completed: 3, successOk: 3, successTotal: 4, successPct: 75, p95Ms: 60_000, p50Ms: 20_000 }
+    const { container } = render(<DashboardKpis data={ran} window="24h" spendUsd={0} successSeries={[null, 80, null]} p95Series={[0, 0, 0]} spendSeries={[0, 0, 0]} />)
+    expect(container.querySelectorAll('[data-slot="kpi-spark"]')).toHaveLength(0)
+  })
+
   it("puts context, not invented change, under each figure", () => {
     render(<DashboardKpis data={{ ...EMPTY, completed: 3, successOk: 3, successTotal: 4, successPct: 75, p95Ms: 60_000, p50Ms: 20_000 }} window="24h" spendUsd={1.2} spendPerRun={0.3} />)
     expect(screen.getByText("1 failed")).toBeTruthy()

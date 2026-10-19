@@ -7,6 +7,7 @@ import type { CrewMember } from "@/lib/types/crew"
 
 import { CrCard, CrNote } from "./cr-card"
 import { CrewMembers } from "./crew-members"
+import { CrewBudgetCard } from "./crew-budget"
 import { CrewCommandLine } from "./crew-yaml"
 import { SettingsTab } from "./crew-canvas-tabs/settings-tab"
 import type { AgentSummary, CrewRecord } from "./crew-canvas-tabs/types"
@@ -70,6 +71,8 @@ export function CrewSettings({
           </div>
         )}
       </CrCard>
+
+      {isAdmin && <CrewBudgetCard workspaceId={workspaceId} crewId={crew.id} />}
 
       <CrewCommandLine workspaceId={workspaceId} crew={crew} />
     </div>

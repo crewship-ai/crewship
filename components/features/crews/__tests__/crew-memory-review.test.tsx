@@ -127,3 +127,68 @@ describe("Memory › Waiting for review", () => {
     expect(within(card).getByRole("link", { name: /Inbox/ })).toHaveAttribute("href", expect.stringContaining("/inbox"))
   })
 })
+
+describe("Memory › Waiting for review › skill proposals", () => {
+  const skill = { file_name: "skill-g2-scraper.md", name: "g2-scraper", description: "Reads G2 reviews for a product", description_quality: "ok", category: "research" }
+
+  function skillServer(opts: { skills?: unknown; skillsStatus?: number; decide?: Response } = {}) {
+    const calls: Call[] = []
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+      if (url.includes("/api/v1/inbox")) return new Response(JSON.stringify({ rows: [] }))
+      if (url.includes("/api/v1/skills/proposed/") && method === "POST") return opts.decide ?? new Response("{}")
+      if (url.includes("/api/v1/skills/proposed")) return opts.skillsStatus ? new Response("{}", { status: opts.skillsStatus }) : new Response(JSON.stringify(opts.skills ?? [skill]))
+      return new Response("{}", { status: 404 })
+    })
+    return calls
+  }
+  const skillView = (canReviewSkills = true) => render(<CrewMemoryReview workspaceId="ws1" crewId="c1" canDecide={false} canReviewSkills={canReviewSkills} />)
+
+  it("lists the skills the crew proposes next to the memory notes", async () => {
+    const calls = skillServer()
+    skillView()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    expect(within(card).getByText("Skill “g2-scraper”")).toBeInTheDocument()
+    expect(within(card).getByText(/Reads G2 reviews for a product/)).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes("/api/v1/skills/proposed?crew_id=c1"))).toBe(true)
+  })
+
+  it("Accept imports the skill; Reject discards it; both name the crew and the file", async () => {
+    const calls = skillServer()
+    skillView()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Reject" }))
+    await waitFor(() => expect(screen.queryByRole("region", { name: /Waiting for review/ })).toBeNull())
+    expect(calls.find((c) => c.method === "POST")).toMatchObject({ url: expect.stringContaining("/api/v1/skills/proposed/reject"), body: { crew_id: "c1", file_name: "skill-g2-scraper.md" } })
+    cleanup()
+    const again = skillServer()
+    skillView()
+    fireEvent.click(within(await screen.findByRole("region", { name: "Waiting for review · 1" })).getByRole("button", { name: "Accept" }))
+    await waitFor(() => expect(again.some((c) => c.method === "POST" && c.url.includes("/skills/proposed/approve"))).toBe(true))
+  })
+
+  it("asks nothing for someone who may not review skills (Manager and above)", async () => {
+    const calls = skillServer()
+    skillView(false)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(calls.some((c) => c.url.includes("/skills/proposed"))).toBe(false)
+    expect(screen.queryByRole("region", { name: /Waiting for review/ })).toBeNull()
+  })
+
+  it("a skill list that fails does not hide the memory proposals and says so", async () => {
+    skillServer({ skillsStatus: 500 })
+    skillView()
+    expect(await screen.findByText(/Skill proposals could not be loaded/)).toBeInTheDocument()
+  })
+
+  it("a refused decision keeps the row and says why", async () => {
+    skillServer({ decide: new Response(JSON.stringify({ error: "staged skill not found" }), { status: 404 }) })
+    skillView()
+    const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }))
+    expect(await screen.findByText(/staged skill not found/)).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Waiting for review · 1" })).toBeInTheDocument()
+  })
+})

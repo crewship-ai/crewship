@@ -38,8 +38,10 @@ The output is always structured JSON (or YAML with `--format yaml`). Pipe throug
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--series <name>` | `""` | Fetch a timeseries for the named metric instead of the mission summary. Routes to `/api/v1/metrics/timeseries`. |
-| `--range <window>` | `24h` | Window for `--series` — `1h`, `24h`, `7d` are the supported sugar values. |
+| `--series <name>` | `""` | Fetch a timeseries for the named metric (`issues_closed`, `cost_usd`, `runs_count`, `active_missions`, `success_rate`, `p95_duration_ms`) instead of the mission summary. Routes to `/api/v1/metrics/timeseries`. |
+| `--window <window>` | `24h` | Window for `--series`: `24h`, `7d` or `30d`. |
+| `--bucket <size>` | server default `1h` | Bucket for `--series`: `15m`, `1h` or `1d`. A window and bucket that make more than 200 buckets are refused. |
+| `--range <window>` | | Deprecated name of `--window`. |
 | `--filter <jq-expr>` | `""` | Pipe JSON output through `jq <expr>` (requires `jq` in `$PATH`). |
 
 The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured. The default is indented JSON because the data here is structured records without a single canonical "table" shape.
@@ -49,7 +51,7 @@ The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is h
 | Mode | Endpoint |
 | --- | --- |
 | Default | `GET /api/v1/mission-metrics` |
-| `--series <name>` | `GET /api/v1/metrics/timeseries?metric=<name>&range=<window>` |
+| `--series <name>` | `GET /api/v1/metrics/timeseries?metric=<name>&window=<window>&bucket=<size>` |
 
 ## Examples
 
@@ -75,13 +77,13 @@ crewship metrics
 ### Active-runs timeseries over the last hour
 
 ```bash
-crewship metrics --series active_runs --range 1h
+crewship metrics --series runs_count --window 24h --bucket 1h
 ```
 
 ### Week-long window
 
 ```bash
-crewship metrics --series active_runs --range 7d
+crewship metrics --series success_rate --window 7d --bucket 1d
 ```
 
 ### Pull a single field via jq

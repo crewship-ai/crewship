@@ -48,8 +48,26 @@ describe("CrewTeam", () => {
     expect(within(active).getByText(/Expires in 38 min/)).toBeInTheDocument()
     fireEvent.click(within(expired).getByRole("button", { name: /Rehire/ }))
     expect(p.onRehire).toHaveBeenCalledWith(expect.objectContaining({ id: "a4" }))
-    // Release now has no endpoint yet (#3454): never offered, on any row.
+    // Without the right to release, no row offers it.
     expect(screen.queryByRole("button", { name: /Release now/ })).toBeNull()
+  })
+
+  it("Release now (POST /agents/{id}/release) is on a live hire only, and only for people who may", () => {
+    const onRelease = vi.fn()
+    renderTeam({ onRelease })
+    const pending = document.querySelector('[data-hire-state="pending"]') as HTMLElement
+    const active = document.querySelector('[data-hire-state="active"]') as HTMLElement
+    const expired = document.querySelector('[data-hire-state="expired"]') as HTMLElement
+    expect(within(pending).queryByRole("button", { name: /Release now/ })).toBeNull()
+    expect(within(expired).queryByRole("button", { name: /Release now/ })).toBeNull()
+    fireEvent.click(within(active).getByRole("button", { name: "Release now" }))
+    expect(onRelease).toHaveBeenCalledWith(expect.objectContaining({ id: "a3" }))
+  })
+
+  it("keeps Release now off while that hire's request is running", () => {
+    renderTeam({ onRelease: vi.fn(), busyAgentId: "a3" })
+    const active = document.querySelector('[data-hire-state="active"]') as HTMLElement
+    expect(within(active).getByRole("button", { name: "Release now" })).toBeDisabled()
   })
 
   it("counts hires in use against the crew's limit", () => {

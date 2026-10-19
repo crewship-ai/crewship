@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { CalendarPage } from "../calendar-page"
 import { ROUTINES, at } from "./fixtures"
@@ -137,5 +137,56 @@ describe("calendar-states", () => {
     render(<CalendarPage workspaceId="ws" />)
     expect(await screen.findByText("Nothing scheduled")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Schedule a start/ })).toBeNull()
+  })
+})
+
+describe("calendar-agents", () => {
+  const scout = { id: "ag-scout", slug: "scout", name: "Scout" }
+  const events = [
+    { id: "a", kind: "planned", at: at(2026, 10, 15, 8), slug: "scan", agents: [scout] },
+    { id: "b", kind: "planned", at: at(2026, 10, 15, 9), slug: "triage" },
+  ]
+
+  it("the Agents view draws a lane per agent", async () => {
+    serve(() => ({ ok: true, events }))
+    h.url.view = "lanes"
+    render(<CalendarPage workspaceId="ws" />)
+    const grid = await screen.findByRole("grid", { name: "Agents" })
+    expect(grid).toHaveTextContent("Scout")
+    expect(grid).toHaveTextContent("No agent")
+  })
+
+  it("picking an agent in the panel filters the page, names it, and Clear brings everything back", async () => {
+    serve(() => ({ ok: true, events }))
+    render(<CalendarPage workspaceId="ws" />)
+    await waitFor(() => expect(screen.getByTestId("calendar-summary")).toHaveTextContent("2 dates"))
+    fireEvent.click(await screen.findByRole("button", { name: /^Scout/ }))
+    await waitFor(() => expect(screen.getByTestId("calendar-summary")).toHaveTextContent("Scout · 1 date you can open"))
+    const bar = screen.getByTestId("calendar-agent-bar")
+    expect(bar).toHaveTextContent("Scout")
+    fireEvent.click(within(bar).getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(screen.getByTestId("calendar-summary")).toHaveTextContent("2 dates"))
+  })
+})
+
+describe("calendar-ics", () => {
+  it("Download .ics asks for the next 31 days as a file and saves it", async () => {
+    h.fetcher.mockImplementation(async (url: string) => {
+      if (String(url).includes("calendar.ics")) return { ok: true, status: 200, blob: async () => new Blob(["BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"], { type: "text/calendar" }) }
+      if (String(url).startsWith("/api/v1/crews")) return { ok: true, json: async () => [] }
+      return { ok: true, status: 200, json: async () => ({ events: [], truncated: false }) }
+    })
+    const created: Blob[] = []
+    Object.assign(URL, { createObjectURL: vi.fn((b: Blob) => { created.push(b); return "blob:x" }), revokeObjectURL: vi.fn() })
+    const saved: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { saved.push(this.download) })
+    render(<CalendarPage workspaceId="ws" />)
+    fireEvent.click(await screen.findByRole("button", { name: "Download .ics" }))
+    await waitFor(() => expect(saved).toEqual(["crewship-calendar.ics"]))
+    const call = h.fetcher.mock.calls.find(([u]) => String(u).includes("calendar.ics"))!
+    const q = new URL(String(call[0]), "https://x.test").searchParams
+    // 31 local days: an hour either way when a clock change falls inside.
+    expect(Math.abs(Date.parse(q.get("to")!) - Date.parse(q.get("from")!) - 31 * 86_400_000)).toBeLessThanOrEqual(3_600_000)
+    expect(await created[0].text()).toContain("BEGIN:VCALENDAR")
   })
 })

@@ -121,7 +121,6 @@ export function CrewCanvas({
   const spend = useCrewSpend(workspaceId, crewId, isAdmin)
 
   useRealtimeEvent("crew.updated", useCallback(() => setTick((n) => n + 1), []))
-
   // Everything the head, Overview and Health read, per crew. A failed call
   // contributes nothing rather than a false "all fine".
   useEffect(() => {
@@ -205,6 +204,21 @@ export function CrewCanvas({
       onCrewChanged()
     } catch (err) {
       toast.error(`Could not approve ${agent.name}`, { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBusyAgent(null)
+    }
+  }, [ws, roster, onCrewChanged])
+
+  const releaseHire = useCallback(async (agent: AgentSummary) => {
+    setBusyAgent(agent.id)
+    try {
+      const res = await apiFetch(`/api/v1/agents/${agent.id}/release?workspace_id=${ws}`, { method: "POST" })
+      if (!res.ok) throw await toApiError(res, `HTTP ${res.status}`)
+      toast.success(`${agent.name} released`, { description: "Its runs and notes stay. Rehire brings it back." })
+      void roster.refresh()
+      onCrewChanged()
+    } catch (err) {
+      toast.error(`Could not release ${agent.name}`, { description: err instanceof Error ? err.message : String(err) })
     } finally {
       setBusyAgent(null)
     }
@@ -331,6 +345,7 @@ export function CrewCanvas({
                 onApprove={(a) => void approveHire(a)}
                 onRehire={(a) => { setExtendingHire(false); setRehireAgent(a) }}
                 onExtend={canUpdate ? (a) => { setExtendingHire(true); setRehireAgent(a) } : undefined}
+                onRelease={canUpdate ? (a) => void releaseHire(a) : undefined}
                 costByAgent={spend?.byAgent ?? null}
                 busyAgentId={busyAgent}
               />
@@ -356,7 +371,7 @@ export function CrewCanvas({
           )}
           {tab === "memory" && (
             <>
-              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} canDecideProposals={isAdmin} />
+              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} canDecideProposals={isAdmin} canReviewSkills={canUpdate} />
               <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />
             </>
           )}

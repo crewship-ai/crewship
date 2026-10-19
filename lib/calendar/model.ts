@@ -10,9 +10,9 @@ import { routineRunPresentation } from "@/lib/routine-run-presentation"
 // milestones and decision deadlines join when the backend serves them.
 // Everything here is pure so the views and their tests share one truth.
 
-export const CALENDAR_PAGE_VIEWS = ["agenda", "week", "month"] as const
+export const CALENDAR_PAGE_VIEWS = ["agenda", "week", "lanes", "month"] as const
 export type CalendarPageView = (typeof CALENDAR_PAGE_VIEWS)[number]
-export const CALENDAR_VIEW_LABELS: Record<CalendarPageView, string> = { agenda: "Agenda", week: "Week", month: "Month" }
+export const CALENDAR_VIEW_LABELS: Record<CalendarPageView, string> = { agenda: "Agenda", week: "Week", lanes: "Agents", month: "Month" }
 export const isCalendarPageView = (v: string | null | undefined): v is CalendarPageView =>
   CALENDAR_PAGE_VIEWS.includes(v as CalendarPageView)
 
@@ -25,6 +25,12 @@ export type CalendarItemStatus = "plan" | "ok" | "wait" | "bad" | "run" | "info"
 /** Layers with a live source. The others (issues, milestones, decisions) need the backend. */
 export type CalendarLayer = "routine"
 export const CALENDAR_LAYER_LABELS: Record<CalendarLayer, string> = { routine: "Routine starts and runs" }
+
+export interface CalendarAgent {
+  id: string
+  slug: string
+  name: string
+}
 
 export interface CalendarItem {
   /** Unique across kinds: a run and a pending start may share an id space. */
@@ -42,6 +48,8 @@ export interface CalendarItem {
   /** The viewer published the routine behind it. */
   mine: boolean
   crewId: string | null
+  /** The agents the routine's steps run; empty when it has none. */
+  agents: CalendarAgent[]
   slug: string
   /** The schedule's own zone, when it has one. */
   timezone?: string
@@ -99,6 +107,7 @@ export function routineItems(events: CalendarEntry[], routines: Pipeline[], meId
       status: itemStatus(entry),
       mine: !!meId && routine.author_user_id === meId,
       crewId: routine.author_crew_id || null,
+      agents: entry.agents ?? [],
       slug: entry.slug,
       timezone: entry.timezone,
       entry,
@@ -115,7 +124,7 @@ export const AGENDA_DAYS = 14
 /** The local days a view shows: [from, to). */
 export function pageRange(anchor: Date, view: CalendarPageView): { from: Date; to: Date } {
   const day = addDays(anchor, 0)
-  if (view === "week") {
+  if (view === "week" || view === "lanes") {
     const from = mondayOf(day)
     return { from, to: addDays(from, 7) }
   }
@@ -146,7 +155,7 @@ export function apiWindows(from: Date, to: Date, maxDays = 31): { from: Date; to
 
 export function movePage(anchor: Date, view: CalendarPageView, direction: number): Date {
   if (view === "month") return new Date(anchor.getFullYear(), anchor.getMonth() + direction, 1)
-  return addDays(anchor, direction * (view === "week" ? 7 : AGENDA_DAYS))
+  return addDays(anchor, direction * (view === "week" || view === "lanes" ? 7 : AGENDA_DAYS))
 }
 
 const fmt = (d: Date, o: Intl.DateTimeFormatOptions) => d.toLocaleDateString("en-GB", o)
@@ -183,13 +192,22 @@ export const STATUS_FACETS = [
 ] as const
 export type StatusFacet = (typeof STATUS_FACETS)[number]["id"]
 
+export const AGENT_FACETS = [
+  { id: "has", label: "Has an agent", test: (i: CalendarItem) => i.agents.length > 0 },
+  { id: "none", label: "No agent", test: (i: CalendarItem) => i.agents.length === 0 },
+] as const
+export type AgentFacet = (typeof AGENT_FACETS)[number]["id"]
+
 export interface CalendarFilters {
   scope: CalendarScope
   crewId: string | null
+  /** One agent: the dates of the routines it runs. */
+  agentId: string | null
   statuses: StatusFacet[]
+  agentFacets: AgentFacet[]
   query: string
 }
-export const EMPTY_CALENDAR_FILTERS: CalendarFilters = { scope: "mine", crewId: null, statuses: [], query: "" }
+export const EMPTY_CALENDAR_FILTERS: CalendarFilters = { scope: "mine", crewId: null, agentId: null, statuses: [], agentFacets: [], query: "" }
 
 const inScope = (i: CalendarItem, scope: CalendarScope) => scope === "workspace" || i.mine
 const matchesQuery = (i: CalendarItem, q: string) => {
@@ -200,11 +218,16 @@ const matchesQuery = (i: CalendarItem, q: string) => {
 const matchesStatus = (i: CalendarItem, statuses: StatusFacet[]) =>
   !statuses.length || STATUS_FACETS.some((f) => statuses.includes(f.id) && f.test(i.status))
 
-export function filterItems(items: CalendarItem[], f: CalendarFilters, skip?: "status" | "scope" | "crew"): CalendarItem[] {
+const matchesAgentFacet = (i: CalendarItem, facets: AgentFacet[]) =>
+  !facets.length || AGENT_FACETS.some((f) => facets.includes(f.id) && f.test(i))
+
+export function filterItems(items: CalendarItem[], f: CalendarFilters, skip?: "status" | "scope" | "crew" | "agent" | "agentFacet"): CalendarItem[] {
   return items.filter(
     (i) =>
       (skip === "scope" || inScope(i, f.scope)) &&
       (skip === "crew" || !f.crewId || i.crewId === f.crewId) &&
+      (skip === "agent" || !f.agentId || i.agents.some((a) => a.id === f.agentId)) &&
+      (skip === "agentFacet" || matchesAgentFacet(i, f.agentFacets)) &&
       (skip === "status" || matchesStatus(i, f.statuses)) &&
       matchesQuery(i, f.query),
   )
@@ -215,9 +238,21 @@ export function calendarCounts(items: CalendarItem[], f: CalendarFilters) {
   const byScope = filterItems(items, f, "scope")
   const byCrew = filterItems(items, f, "crew")
   const byStatus = filterItems(items, f, "status")
+  const byAgent = filterItems(items, f, "agent")
+  const byAgentFacet = filterItems(items, f, "agentFacet")
   const crews = new Map<string, number>()
   for (const i of byCrew) if (i.crewId) crews.set(i.crewId, (crews.get(i.crewId) ?? 0) + 1)
+  const agents = new Map<string, { agent: CalendarAgent; count: number }>()
+  for (const i of byAgent) {
+    for (const a of i.agents) {
+      const row = agents.get(a.id)
+      if (row) row.count += 1
+      else agents.set(a.id, { agent: a, count: 1 })
+    }
+  }
   return {
+    agents: new Map([...agents.entries()].sort(([, a], [, b]) => a.agent.name.localeCompare(b.agent.name))),
+    agentFacets: Object.fromEntries(AGENT_FACETS.map((x) => [x.id, byAgentFacet.filter((i) => x.test(i)).length])) as Record<AgentFacet, number>,
     mine: byScope.filter((i) => i.mine).length,
     workspace: byScope.length,
     crews,
@@ -236,20 +271,38 @@ export function needYouSoon(items: CalendarItem[], now = new Date(), cap = 4): C
 
 /* ------------------------------------------------------------------- views */
 
-/** Week: the days, an All day row for date-only items, and only the hours that have something. */
+/** Week: the days, an All day row for date-only items, and a row for each exact time ("07:30") that has something. */
 export function weekLayout(items: CalendarItem[], from: Date) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(from, i))
   const keys = new Set(days.map(dateKey))
   const inWeek = items.filter((i) => keys.has(i.day))
-  const hours = [...new Set(inWeek.filter((i) => i.time).map((i) => i.at.getHours()))].sort((a, b) => a - b)
-  return { days, allDay: inWeek.filter((i) => !i.time), timed: inWeek.filter((i) => i.time), hours }
+  const times = [...new Set(inWeek.flatMap((i) => (i.time ? [i.time] : [])))].sort()
+  return { days, allDay: inWeek.filter((i) => !i.time), timed: inWeek.filter((i) => i.time), times }
 }
 
-/** Where the "now" line sits: after the last shown hour at or before now; -1 = above the first row. */
-export function nowLineAfter(hours: number[], now: Date): number {
+/** The Agents view: one lane per agent that has something this week, then the dates nobody works on. */
+export function agentLanes(items: CalendarItem[], from: Date) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(from, i))
+  const keys = new Set(days.map(dateKey))
+  const inWeek = items.filter((i) => keys.has(i.day))
+  const byAgent = new Map<string, { agent: CalendarAgent; byDay: Map<string, CalendarItem[]> }>()
+  for (const i of inWeek) {
+    for (const a of i.agents) {
+      const lane = byAgent.get(a.id) ?? byAgent.set(a.id, { agent: a, byDay: new Map() }).get(a.id)!
+      const day = lane.byDay.get(i.day) ?? lane.byDay.set(i.day, []).get(i.day)!
+      day.push(i)
+    }
+  }
+  const lanes = [...byAgent.values()].sort((a, b) => a.agent.name.localeCompare(b.agent.name))
+  return { days, lanes, none: inWeek.filter((i) => i.agents.length === 0) }
+}
+
+/** Where the "now" line sits: after the last shown time at or before now; -1 = above the first row. */
+export function nowLineAfter(times: string[], now: Date): number {
+  const clock = clockOf(now)
   let at = -1
-  hours.forEach((h, idx) => {
-    if (h <= now.getHours()) at = idx
+  times.forEach((t, idx) => {
+    if (t <= clock) at = idx
   })
   return at
 }

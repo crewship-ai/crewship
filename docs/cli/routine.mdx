@@ -1598,17 +1598,19 @@ never yesterday's cron extrapolated backwards.
 crewship routine calendar                                     # the coming week
 crewship routine calendar --from 2026-10-01T00:00:00Z --to 2026-10-08T00:00:00Z
 crewship routine calendar --to 2026-09-20T00:00:00Z -f json
+crewship routine calendar --ics > crewship.ics               # import into a calendar app
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--from` | RFC3339 start of the window (default: now). Sent as `?from=` |
 | `--to` | RFC3339 end of the window, at most 32 days after `--from` (default: `--from` + 7 days). Sent as `?to=` |
+| `--ics` | Write the window as an iCalendar file to stdout (`GET .../pipelines/calendar.ics`) instead of a table |
 
 **Output columns:** AT, KIND, ROUTINE, RESULT (`status/outcome` for `run` rows), VERSION (pinned recipe for `pending` rows and pinned plans), INPUTS (the read-only preset preview, `—` for runs), ID (`schedule_id:instant` for planned, `pending_id`, or `run_id`).
 
 The table is sorted by time; `-f json` is the endpoint's body `{ events[],
-truncated }` in the server's order (planned, pending, run). Planned and pending
+truncated }` in the server's order (planned, pending, run); each event also lists its `agents` (id, slug, name of the agents its routine's steps run). Planned and pending
 events carry an `inputs` preview that keeps safe primitives and replaces
 credential, file and secret-looking values with `{type: "credential"|"file"|"redacted"}`
 — it cannot replay a run. A window holding more than the server returns

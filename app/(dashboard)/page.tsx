@@ -13,6 +13,7 @@ import {
   DashboardKpis,
   DashboardUpNext,
   buildAttentionItems,
+  expiringKeys,
   deriveFleetHealth,
   kpisFromInsights,
 } from "@/components/features/dashboard/dashboard-overview"
@@ -46,6 +47,8 @@ import {
   useMetricsTimeseries,
   useRunsInsights,
   useRuntimeCapacity,
+  useProvisioningSummary,
+  useDashboardCredentials,
   type TimeseriesParams,
 } from "@/hooks/use-dashboard-data"
 import type { DashboardWindow } from "./dashboard-types"
@@ -86,6 +89,17 @@ function runVolumeParams(window: DashboardWindow): TimeseriesParams {
     bucket: window === "24h" ? "1h" : "1d",
     group_by: "crew",
   }
+}
+
+/** The same window and bucket as run volume, one total per bucket, for the KPI sparklines. */
+function kpiSeriesParams(window: DashboardWindow, metric: string): TimeseriesParams {
+  return { metric, window, bucket: window === "24h" ? "1h" : "1d", group_by: "none" }
+}
+
+/** One value per bucket, oldest first; null where the server sent none (no run finished). */
+function totalsOf(data: { buckets: { series: Record<string, number> }[] } | null | undefined): (number | null)[] | undefined {
+  if (!data?.buckets) return undefined
+  return data.buckets.map((b) => (typeof b.series?.total === "number" ? b.series.total : null))
 }
 
 export default function DashboardPage() {
@@ -133,12 +147,18 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
+  const provisioningQ = useProvisioningSummary(workspaceId, queryOpts)
+  const credentialsQ = useDashboardCredentials(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
+  const successSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "success_rate"), [reportWindow]), queryOpts)
+  const p95SeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "p95_duration_ms"), [reportWindow]), queryOpts)
   // The ledger read is OWNER/ADMIN on the server (#3590): other roles neither
-  // ask for it nor see the Spend tile.
+  // ask for it (nor for its sparkline) nor see the Spend tile.
   const canSeeSpend = roleAtLeast(role, "ADMIN")
-  const spendQ = useCrewSpend(workspaceId, reportWindow, { ...queryOpts, enabled: (queryOpts?.enabled ?? true) && canSeeSpend })
+  const spendOpts = { ...queryOpts, enabled: (queryOpts?.enabled ?? true) && canSeeSpend }
+  const spendSeriesQ = useMetricsTimeseries(workspaceId, useMemo(() => kpiSeriesParams(reportWindow, "cost_usd"), [reportWindow]), spendOpts)
+  const spendQ = useCrewSpend(workspaceId, reportWindow, spendOpts)
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
   const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
@@ -175,6 +195,8 @@ export default function DashboardPage() {
   useRealtimeEvent("pipeline.run.started", debouncedRefresh)
   useRealtimeEvent("pipeline.run.completed", debouncedRefresh)
   useRealtimeEvent("pipeline.run.failed", debouncedRefresh)
+  useRealtimeEvent("provision.completed", debouncedRefresh)
+  useRealtimeEvent("provision.failed", debouncedRefresh)
   useRealtimeEvent("realtime.reconnected", debouncedRefresh)
 
   const gapsByCrew = useMemo(() => {
@@ -193,8 +215,17 @@ export default function DashboardPage() {
     [capacityQ.data, crews],
   )
 
+  const rebuildCrews = useMemo(
+    () => [...(provisioningQ.data?.failed ?? []), ...(provisioningQ.data?.needs_provision ?? [])],
+    [provisioningQ.data],
+  )
+
+  const expiring = useMemo(() => expiringKeys(Array.isArray(credentialsQ.data) ? credentialsQ.data : null), [credentialsQ.data])
+
   const attentionItems = useMemo(
     () => buildAttentionItems({
+      rebuildCrews,
+      expiringKeys: expiring,
       inbox: inbox.items,
       heldCrews,
       reviewCount: reviewQ.data?.length ?? 0,
@@ -202,7 +233,7 @@ export default function DashboardPage() {
       activeByKind: inbox.activeByKind,
       decisionCount: inbox.decisionCount,
     }),
-    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, reviewQ.data],
+    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, rebuildCrews, expiring, reviewQ.data],
   )
   const attention = attentionState({ items: attentionItems, inboxLoading: inbox.loading, inboxError: inbox.error })
 
@@ -346,6 +377,9 @@ export default function DashboardPage() {
               spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
               completedSeries={volumeFailed ? undefined : runsPerBucket}
               completedSeriesLabel={`Runs started per ${reportWindow === "24h" ? "hour" : "day"}`}
+              successSeries={totalsOf(successSeriesQ.data)}
+              p95Series={totalsOf(p95SeriesQ.data)}
+              spendSeries={totalsOf(spendSeriesQ.data)?.map((v) => v ?? 0)}
             />
           )}
 

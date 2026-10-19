@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CalendarDays, CalendarClock, ChevronLeft, ChevronRight, Layers, Plus } from "lucide-react"
+import { CalendarDays, CalendarClock, ChevronLeft, ChevronRight, Download, Layers, Plus } from "lucide-react"
+import { toast } from "@/lib/toast"
 import { SubBar, SubBarIconButton } from "@/components/layout/sub-bar"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
@@ -21,6 +22,7 @@ import { routinePermissions } from "@/lib/routine-governance"
 import { routineTimeZone } from "@/lib/routine-time"
 import { addDays, dateKey, parseCalendarDate } from "@/lib/routine-calendar"
 import {
+  AGENT_FACETS,
   CALENDAR_PAGE_VIEWS,
   CALENDAR_SCOPE_LABELS,
   CALENDAR_VIEW_LABELS,
@@ -36,11 +38,10 @@ import {
   type CalendarFilters,
   type CalendarPageView,
   type CalendarScope,
-  type StatusFacet,
 } from "@/lib/calendar/model"
 import { cn } from "@/lib/utils"
 import { CalendarPanel, type CalendarCrew } from "./calendar-panel"
-import { CalendarAgenda, CalendarMonth, CalendarWeek, STATUS_ICON } from "./calendar-views"
+import { CalendarAgenda, CalendarLanes, CalendarMonth, CalendarWeek, STATUS_ICON } from "./calendar-views"
 import { CalendarPeek } from "./calendar-peek"
 import { ScheduleStartDialog } from "./schedule-start-dialog"
 
@@ -66,6 +67,28 @@ function useCrews(workspaceId: string): CalendarCrew[] {
   return crews
 }
 
+/** The next 31 days as an iCalendar file (GET .../pipelines/calendar.ics), saved through a temporary link. */
+async function downloadIcs(workspaceId: string) {
+  const from = new Date(new Date().setHours(0, 0, 0, 0))
+  const to = addDays(from, 31)
+  const qs = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
+  try {
+    const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/calendar.ics?${qs}`)
+    if (!res.ok) throw new Error(`calendar.ics ${res.status}`)
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "crewship-calendar.ics"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+    toast.success("crewship-calendar.ics downloaded")
+  } catch {
+    toast.error("The calendar could not be exported", { description: "Nothing was changed. Try again, or run crewship routine calendar --ics." })
+  }
+}
+
 /**
  * /calendar (Harbor 2, F-01). A view, not a store: every date belongs to an
  * object that already exists and changes there. The URL holds what a reload
@@ -83,7 +106,7 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
 
   const [pref, setPref] = useUserPreference<{ scope?: CalendarScope }>("calendar.view", { scope: "mine" })
   const scope: CalendarScope = pref?.scope === "workspace" ? "workspace" : "mine"
-  const [local, setLocal] = useState<{ crewId: string | null; statuses: StatusFacet[]; query: string }>({ crewId: null, statuses: [], query: "" })
+  const [local, setLocal] = useState<Omit<CalendarFilters, "scope">>({ crewId: null, agentId: null, statuses: [], agentFacets: [], query: "" })
   const filters: CalendarFilters = useMemo(() => ({ ...local, scope }), [local, scope])
   const onChange = useCallback(
     (patch: Partial<CalendarFilters>) => {
@@ -93,7 +116,15 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
     },
     [pref, setPref],
   )
-  const clearFilters = () => setLocal({ crewId: null, statuses: [], query: "" })
+  const applyView = useCallback(
+    (f: CalendarFilters) => {
+      const { scope: nextScope, ...rest } = f
+      setPref({ ...pref, scope: nextScope })
+      setLocal(rest)
+    },
+    [pref, setPref],
+  )
+  const clearFilters = () => setLocal({ crewId: null, agentId: null, statuses: [], agentFacets: [], query: "" })
 
   const { pipelines, error: routinesError } = usePipelines(workspaceId)
   const calendar = useCalendarEvents(workspaceId, from, to)
@@ -110,7 +141,8 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
   const [planAt, setPlanAt] = useState<Date | null>(null)
 
   const crewName = filters.crewId ? crews.find((c) => c.id === filters.crewId)?.name ?? "Crew" : null
-  const scopeTitle = crewName ? `${crewName} crew` : CALENDAR_SCOPE_LABELS[scope]
+  const agentName = filters.agentId ? items.flatMap((i) => i.agents).find((a) => a.id === filters.agentId)?.name ?? "Agent" : null
+  const scopeTitle = agentName ? agentName : crewName ? `${crewName} crew` : CALENDAR_SCOPE_LABELS[scope]
 
   const setView = (v: CalendarPageView) => setViewParam(v, { replace: true })
   const goTo = (d: Date) => setDateParam(dateKey(d), { replace: true })
@@ -179,7 +211,9 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
   const filterWords = [
     CALENDAR_SCOPE_LABELS[scope],
     crewName,
+    agentName,
     ...STATUS_FACETS.filter((f) => filters.statuses.includes(f.id)).map((f) => f.label),
+    ...AGENT_FACETS.filter((f) => filters.agentFacets.includes(f.id)).map((f) => f.label),
     filters.query && `“${filters.query}”`,
   ]
     .filter(Boolean)
@@ -210,13 +244,15 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
     body = (
       <PageNoResults
         filters={filterWords}
-        onClear={filters.crewId || filters.statuses.length || filters.query ? clearFilters : undefined}
+        onClear={filters.crewId || filters.agentId || filters.statuses.length || filters.agentFacets.length || filters.query ? clearFilters : undefined}
         onWiden={scope === "mine" ? () => onChange({ scope: "workspace" }) : undefined}
         widenLabel="Show Workspace"
       />
     )
   } else if (view === "week") {
     body = <CalendarWeek items={visible} from={from} selectedId={selectedId} onPick={setSelectedId} onOpenDay={openDay} onPlan={plan} />
+  } else if (view === "lanes") {
+    body = <CalendarLanes items={visible} from={from} selectedId={selectedId} onPick={setSelectedId} />
   } else if (view === "month") {
     body = <CalendarMonth items={visible} anchor={anchor} selectedId={selectedId} onPick={setSelectedId} onOpenDay={openDay} />
   } else {
@@ -228,7 +264,7 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
       <SubBar icon={CalendarDays} title="Calendar" section={scopeTitle} heading={false} ariaLabel="Calendar" actions={isMobile ? addDate : undefined} />
       <div className="relative flex flex-1 overflow-hidden">
         <SecondaryPanel id="calendar" label="Calendar views and filters">
-          <CalendarPanel items={items} filters={filters} crews={crews} onChange={onChange} onPicked={closePanelSheet} />
+          <CalendarPanel items={items} filters={filters} crews={crews} onChange={onChange} onPicked={closePanelSheet} workspaceId={workspaceId} onApplyView={applyView} />
         </SecondaryPanel>
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto grid max-w-[1400px] gap-3 px-4 py-4 md:px-6 md:py-5">
@@ -272,6 +308,13 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
                 })}
               </div>
             )}
+            {agentName && (
+              <div role="status" data-testid="calendar-agent-bar" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-card px-3 py-2 text-body">
+                <b className="font-medium">{agentName}</b>
+                <span className="text-muted-foreground">Routine starts and runs that involve it.</span>
+                <Button size="sm" variant="ghost" onClick={() => onChange({ agentId: null })}>Clear</Button>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2.5">
               <ButtonGroup aria-label="Calendar view">
                 {CALENDAR_PAGE_VIEWS.map((v) => (
@@ -296,6 +339,12 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
               </h2>
               <span className="font-mono text-label text-muted-foreground">{routineTimeZone()}</span>
               <span className="flex-1" />
+              {!isMobile && (
+                <Button size="sm" variant="ghost" onClick={() => void downloadIcs(workspaceId)} title="The next 31 days as an iCalendar file">
+                  <Download className="size-3.5" aria-hidden />
+                  Download .ics
+                </Button>
+              )}
               {!isMobile && addDate}
             </div>
             {calendar.truncated && (

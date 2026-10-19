@@ -27,6 +27,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | POST | [/api/v1/agents/{agentId}/webhook-secret/rotate](#rotate-webhook-secret) | Rotate and return an agent webhook secret once |
 | POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
 | POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
+| POST | [/api/v1/agents/{agentId}/release](#release-agent) | End a temporary hire now |
 | POST | [/api/v1/agents/{agentId}/approve-hire](#approve-hire) | Approve a guided-autonomy pending hire |
 | GET | [/api/v1/agents/{agentId}/persona](#get-persona) | Get the resolved persona |
 | PUT | [/api/v1/agents/{agentId}/persona](#set-persona) | Operator-only direct persona write |
@@ -723,6 +724,24 @@ agent's persisted `status` (rehire does not change it) and the updated
 | `403` | Caller lacks MANAGER+, or `strict` autonomy rejected the rehire. |
 | `404` | Agent not found in this workspace, or the agent is **not ephemeral**. |
 | `429` | Crew quota reached (only when rehiring a ghost). |
+
+### Release Agent
+
+```
+POST /api/v1/agents/{agentId}/release?workspace_id={workspaceId}
+```
+
+Ends a temporary hire before its TTL: the agent becomes an expired hire (`expired_at` and `expires_at` set to now, a `release` line appended to `hire_reason`) exactly as the expiry sweeper would make it. Runs, chats and memory stay, and Rehire brings it back. Releasing a hire that has already expired changes nothing.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role. No request body.
+
+**Response:** `200 OK`, `{ "id": "...", "expired_at": "...", "released": true }`; `released` is `false` when the hire had already expired.
+
+| Status | Condition |
+|---|---|
+| `403` | Caller below MANAGER. |
+| `404` | Agent not found in this workspace, or the agent is **not ephemeral**. |
+| `409` | The hire is running (stop its run first) or still waits for approval (deny it instead). |
 
 ### Approve Hire
 

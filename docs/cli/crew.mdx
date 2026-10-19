@@ -46,6 +46,8 @@ crewship crew <subcommand> [flags]
 | `containers` | Show every live container the crew has, with state and usage |
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
+| `provision summary` | List crews whose build failed or that need a build |
+| `budget get\|set\|clear` | Show, set or remove the crew's monthly spend limit |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
 | `image-status` | Report whether the running container is behind its image tag |
 | `refresh-image` | Pull the current image and recycle the container so agents pick it up |
@@ -870,6 +872,17 @@ seconds having started nothing at all.
 To start the container, use [`crewship crew start`](#crewship-crew-start).
 </Warning>
 
+### `crewship crew provision summary`
+
+List, for the whole workspace and in one request, the crews whose latest image build failed and the crews that have no built image yet.
+
+```bash
+crewship crew provision summary
+crewship crew provision summary -o json
+```
+
+Columns: slug, name, state (`failed` or `needs_provision`) and the build error when there is one. Calls `GET /api/v1/crews/provisioning-summary`.
+
 ### `crewship crew provision status`
 
 Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Pass `--watch` to stream live progress until the build completes. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
@@ -1174,6 +1187,25 @@ update` says so on the spot when the crew is running, so the gap does not have
 to be discovered here.
 
 ---
+
+## `crewship crew budget`
+
+Show, set or remove a crew's monthly spend limit (calendar month, UTC). Needs the Admin role.
+
+```bash
+crewship crew budget get <slug-or-id>
+crewship crew budget set <slug-or-id> --limit 80
+crewship crew budget set <slug-or-id> --limit 80 --mode soft
+crewship crew budget clear <slug-or-id> --yes
+```
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `--limit` | `set` | Monthly limit in US dollars, greater than 0 (required). |
+| `--mode` | `set` | `tiered` (default: warn from 80 %, stop new runs at 100 %), `soft` (warn only) or `hard` (stop at 100 %). |
+| `--yes` | `clear` | Skip the confirmation. |
+
+Each call prints the limit, mode, this month's spend and the state (`none`, `ok`, `warn`, `exceeded`). They call `GET`, `PUT` and `DELETE /api/v1/crews/{id}/budget`.
 
 ## `crewship crew restart-agents`
 

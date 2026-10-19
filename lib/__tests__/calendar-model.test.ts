@@ -4,6 +4,7 @@ import type { CalendarEntry } from "@/lib/routine-calendar-groups"
 import {
   EMPTY_CALENDAR_FILTERS,
   agendaLayout,
+  agentLanes,
   apiWindows,
   calendarCounts,
   calendarHrefFromRoutines,
@@ -139,13 +140,13 @@ describe("views", () => {
     "me",
   )
 
-  it("week shows only hours with items and an All day row for date-only items", () => {
+  it("week has a row for each time that has an item (07:30, 07:45) and an All day row for date-only items", () => {
     const week = weekLayout(many, new Date(2026, 9, 12))
-    expect(week.hours).toEqual([7, 10, 11, 12, 13, 14])
+    expect(week.times).toEqual(["07:30", "07:45", "10:00", "11:00", "12:00", "13:00", "14:00"])
     expect(week.allDay).toEqual([])
     expect(week.days).toHaveLength(7)
-    expect(nowLineAfter(week.hours, new Date(2026, 9, 15, 8, 16))).toBe(0)
-    expect(nowLineAfter(week.hours, new Date(2026, 9, 15, 6))).toBe(-1)
+    expect(nowLineAfter(week.times, new Date(2026, 9, 15, 8, 16))).toBe(1)
+    expect(nowLineAfter(week.times, new Date(2026, 9, 15, 7, 29))).toBe(-1)
   })
 
   it("month caps three items per day with +N more and a risk dot", () => {
@@ -168,5 +169,45 @@ describe("views", () => {
     expect(calendarHrefFromRoutines("year", "2026-01-01")).toBe("/calendar?view=month&date=2026-01-01&layers=routine")
     expect(calendarHrefFromRoutines("three-days", "bad")).toBe("/calendar?view=week&layers=routine")
     expect(calendarHrefFromRoutines(null, null)).toBe("/calendar?view=month&layers=routine")
+  })
+})
+
+describe("agents on events (Agents view and agent filter)", () => {
+  const scout = { id: "ag-scout", slug: "scout", name: "Scout" }
+  const writer = { id: "ag-writer", slug: "writer", name: "Writer" }
+  const list = routineItems(
+    [
+      ev({ id: "a", at: at(2026, 10, 15, 8), slug: "scan", agents: [scout, writer] }),
+      ev({ id: "b", at: at(2026, 10, 15, 9), slug: "triage", agents: [writer] }),
+      ev({ id: "c", at: at(2026, 10, 16, 9), slug: "triage" }),
+    ],
+    routines,
+    "me",
+  )
+
+  it("carries the agents onto the item, none when the routine has none", () => {
+    expect(list.map((i) => i.agents.map((a) => a.slug))).toEqual([["scout", "writer"], ["writer"], []])
+  })
+
+  it("filters to one agent, or to the dates nobody works on", () => {
+    const base = { ...EMPTY_CALENDAR_FILTERS, scope: "workspace" as const }
+    expect(filterItems(list, { ...base, agentId: "ag-scout" }).map((i) => i.id)).toEqual(["planned:a"])
+    expect(filterItems(list, { ...base, agentId: "ag-writer" }).map((i) => i.id)).toEqual(["planned:a", "planned:b"])
+    expect(filterItems(list, { ...base, agentFacets: ["none"] }).map((i) => i.id)).toEqual(["planned:c"])
+    expect(filterItems(list, { ...base, agentFacets: ["has"] }).map((i) => i.id)).toEqual(["planned:a", "planned:b"])
+    expect(filterItems(list, { ...base, agentFacets: ["has", "none"] })).toHaveLength(3)
+  })
+
+  it("counts dates per agent without letting the agent pick zero the others", () => {
+    const counts = calendarCounts(list, { ...EMPTY_CALENDAR_FILTERS, scope: "workspace", agentId: "ag-scout" })
+    expect([...counts.agents.values()].map((a) => [a.agent.slug, a.count])).toEqual([["scout", 1], ["writer", 2]])
+    expect(calendarCounts(list, { ...EMPTY_CALENDAR_FILTERS, scope: "workspace" }).agentFacets).toEqual({ has: 2, none: 1 })
+  })
+
+  it("lays out a lane per agent, busiest week first by name, and No agent last", () => {
+    const lanes = agentLanes(list, new Date(2026, 9, 12))
+    expect(lanes.lanes.map((l) => l.agent.slug)).toEqual(["scout", "writer"])
+    expect(lanes.lanes[1].byDay.get("2026-10-15")?.map((i) => i.id)).toEqual(["planned:a", "planned:b"])
+    expect(lanes.none.map((i) => i.id)).toEqual(["planned:c"])
   })
 })

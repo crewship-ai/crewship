@@ -103,18 +103,51 @@ export const ATTENTION_VISIBLE = 4
 /**
  * The items past the fourth tile. Returned rather than dropped so the row can
  * name them and keep their links — the order is fixed (decisions, failures,
- * reviews, capacity, schedules), so the later operational alerts would
+ * reviews, capacity, rebuilds, expiring keys, schedules), so the later operational alerts would
  * otherwise vanish exactly when the first tiles are full (#2187).
  */
 export function attentionOverflow(items: AttentionTile[]): AttentionTile[] {
   return items.slice(ATTENTION_VISIBLE)
 }
 
+/** Keys that run out within this many days get a tile. */
+export const KEY_EXPIRY_DAYS = 7
+
+export interface ExpiringKey {
+  id: string
+  name: string
+  /** Whole days left; 0 = today. */
+  days: number
+}
+
+/**
+ * The active credentials whose token expires within a week, soonest first
+ * (GET /api/v1/credentials already serves token_expires_at). An unreadable
+ * date is no information, never "expired"; keys that are already expired,
+ * revoked or in error are the Credentials page's business, not this tile's.
+ */
+export function expiringKeys(
+  credentials: { id: string; name: string; status: string; token_expires_at?: string | null }[] | null | undefined,
+  now: number = Date.now(),
+): ExpiringKey[] {
+  const out: ExpiringKey[] = []
+  for (const c of credentials ?? []) {
+    if (c.status !== "ACTIVE" || !c.token_expires_at) continue
+    const at = Date.parse(c.token_expires_at)
+    if (Number.isNaN(at) || at < now) continue
+    const days = Math.floor((at - now) / 86_400_000)
+    if (days <= KEY_EXPIRY_DAYS) out.push({ id: c.id, name: c.name, days })
+  }
+  return out.sort((a, b) => a.days - b.days || a.name.localeCompare(b.name))
+}
+
+const daysLeft = (n: number) => (n <= 0 ? "today" : n === 1 ? "tomorrow" : `${n} days`)
+
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
 /**
  * The attention tiles, in a fixed priority order: decisions, failures,
- * reviews, capacity, schedules. A kind with nothing waiting has no tile.
+ * reviews, capacity, rebuilds, expiring keys, schedules. A kind with nothing waiting has no tile.
  */
 export function buildAttentionItems({
   inbox,
@@ -123,6 +156,8 @@ export function buildAttentionItems({
   reviewIdentifiers = [],
   activeByKind,
   decisionCount,
+  rebuildCrews = [],
+  expiringKeys: keys = [],
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
@@ -134,6 +169,12 @@ export function buildAttentionItems({
    *  and the headline silently plateaued there (#2187). */
   activeByKind?: Record<string, number>
   decisionCount?: number
+  /** Crews whose image build failed or that have no built image yet, from
+   *  GET /api/v1/crews/provisioning-summary — the same crews the Crews panel
+   *  lists under "Needs you". */
+  rebuildCrews?: { id: string; name: string; slug?: string }[]
+  /** Credentials that expire within a week (see expiringKeys). */
+  expiringKeys?: ExpiringKey[]
 }): AttentionTile[] {
   const items: AttentionTile[] = []
   const decisions = inbox.filter(isBlockingInboxItem)
@@ -195,6 +236,30 @@ export function buildAttentionItems({
       title: "Waiting for capacity",
       detail: heldCrews[0]?.detail || "View host admission details",
       href: "/settings",
+      tone: "warn",
+    })
+  }
+  if (rebuildCrews.length > 0) {
+    const n = rebuildCrews.length
+    items.push({
+      id: "rebuild",
+      label: `${n} ${plural(n, "crew needs", "crews need")} a rebuild`,
+      count: String(n),
+      title: plural(n, "Crew needs a rebuild", "Crews need a rebuild"),
+      detail: rebuildCrews[0]?.name || "Open Crews",
+      href: "/crews",
+      tone: "warn",
+    })
+  }
+  if (keys.length > 0) {
+    const n = keys.length
+    items.push({
+      id: "keys",
+      label: `${n} ${plural(n, "key", "keys")} expiring`,
+      count: String(n),
+      title: plural(n, "Key expiring", "Keys expiring"),
+      detail: `${keys[0].name} · ${daysLeft(keys[0].days)}`,
+      href: "/credentials",
       tone: "warn",
     })
   }
@@ -392,6 +457,9 @@ export function DashboardKpis({
   showSpend = true,
   completedSeries,
   completedSeriesLabel,
+  successSeries,
+  p95Series,
+  spendSeries,
 }: {
   data: DashboardKpiData
   window: DashboardWindow
@@ -404,6 +472,12 @@ export function DashboardKpis({
   /** Runs per bucket across the window, oldest first. */
   completedSeries?: number[]
   completedSeriesLabel?: string
+  /** Success percentage per bucket, oldest first; null where no run finished. */
+  successSeries?: (number | null)[]
+  /** P95 duration (ms) per bucket; null where no run finished. */
+  p95Series?: (number | null)[]
+  /** Metered spend per bucket. */
+  spendSeries?: number[]
 }) {
   // Nothing ran in the window: four tiles of zeros and dashes say one thing,
   // so say it once.
@@ -417,6 +491,12 @@ export function DashboardKpis({
     )
   }
   const failed = data.successTotal - data.successOk
+  // A bucket with no value is left out, not drawn as zero; fewer than two
+  // values or nothing above zero is no trend.
+  const sparkOf = (series: (number | null)[] | undefined, label: string) => {
+    const values = (series ?? []).filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    return values.length > 1 && values.some((v) => v > 0) ? <KpiSpark values={values} label={label} /> : undefined
+  }
   const tiles: { label: string; value: string; context?: string; spark?: React.ReactNode }[] = [
     {
       label: "Completed",
@@ -429,11 +509,13 @@ export function DashboardKpis({
       label: "Success",
       value: data.successPct == null ? "—" : `${data.successPct}%`,
       context: data.successTotal > 0 ? `${failed} failed` : "no finished runs",
+      spark: sparkOf(successSeries, "Success rate over the window"),
     },
     {
       label: "P95 duration",
       value: data.p95Ms > 0 ? formatDuration(data.p95Ms) : "—",
       context: data.p50Ms > 0 ? `median ${formatDuration(data.p50Ms)}` : undefined,
+      spark: sparkOf(p95Series, "P95 duration over the window"),
     },
     // The metered LEDGER, and it says so: on a flat-rate subscription
     // paymaster meters nothing (#2193), and that case renders "not metered",
@@ -442,6 +524,7 @@ export function DashboardKpis({
       label: "Spend",
       value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
       context: spendUsd === undefined ? "unavailable" : spendUsd === null ? "not metered" : spendPerRun != null ? `per run $${spendPerRun.toFixed(2)}` : undefined,
+      spark: typeof spendUsd === "number" ? sparkOf(spendSeries, "Spend over the window") : undefined,
     },
   ].filter((tile) => showSpend || tile.label !== "Spend")
 

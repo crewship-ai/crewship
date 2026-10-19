@@ -73,6 +73,8 @@ export const dashboardKeys = {
   runInsights: (ws: string, window: DashboardWindow) =>
     ["runs-insights", ws, { window }] as const,
   runtimeCapacity: () => ["runtime-capacity"] as const,
+  credentials: (ws: string) => ["dashboard-credentials", ws] as const,
+  provisioningSummary: (ws: string) => ["provisioning-summary", ws] as const,
   memoryHealth: (ws: string) => ["memory-health", ws] as const,
   crewSpend: (ws: string, window: DashboardWindow) =>
     ["crew-spend", ws, { window }] as const,
@@ -308,6 +310,59 @@ export function useRuntimeCapacity(opts?: DashboardQueryOpts) {
   })
 }
 
+/** Crews whose build failed or that have no built image yet: one request for
+ *  the workspace (GET /api/v1/crews/provisioning-summary) instead of one
+ *  provision call per crew. */
+export interface ProvisioningSummaryCrew {
+  id: string
+  slug: string
+  name: string
+  error?: string
+}
+export interface ProvisioningSummaryResponse {
+  failed: ProvisioningSummaryCrew[]
+  needs_provision: ProvisioningSummaryCrew[]
+  total: number
+}
+
+export function useProvisioningSummary(workspaceId: string | null, opts?: DashboardQueryOpts) {
+  return useQuery<ProvisioningSummaryResponse | null>({
+    queryKey: dashboardKeys.provisioningSummary(workspaceId ?? ""),
+    queryFn: ({ signal }) =>
+      fetchOr<ProvisioningSummaryResponse | null>(
+        `/api/v1/crews/provisioning-summary?workspace_id=${encodeURIComponent(workspaceId!)}`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+    staleTime: 30_000,
+  })
+}
+
+/** The workspace's credentials, for the "key expiring" tile. A member who may not list them gets null and no tile. */
+export interface DashboardCredential {
+  id: string
+  name: string
+  status: string
+  token_expires_at?: string | null
+}
+
+export function useDashboardCredentials(workspaceId: string | null, opts?: DashboardQueryOpts) {
+  return useQuery<DashboardCredential[] | null>({
+    queryKey: dashboardKeys.credentials(workspaceId ?? ""),
+    queryFn: ({ signal }) =>
+      fetchOr<DashboardCredential[] | null>(
+        `/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useMemoryHealth(workspaceId: string | null, opts?: DashboardQueryOpts) {
   return useQuery<MemoryHealthResponse | null>({
     queryKey: dashboardKeys.memoryHealth(workspaceId ?? ""),
@@ -431,6 +486,7 @@ export function useInvalidateDashboard(workspaceId: string | null) {
       dashboardKeys.missionMetrics(workspaceId),
       dashboardKeys.runs(workspaceId),
       dashboardKeys.escalationCount(workspaceId),
+      dashboardKeys.provisioningSummary(workspaceId),
       dashboardKeys.keeperRequests(workspaceId),
       dashboardKeys.timeseries(workspaceId, DASHBOARD_THROUGHPUT_PARAMS),
       dashboardKeys.timeseries(workspaceId, DASHBOARD_COST_PARAMS),

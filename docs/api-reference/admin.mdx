@@ -4207,7 +4207,7 @@ Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucke
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `metric` | string | -- | Required. One of `issues_closed`, `cost_usd`, `runs_count`, `active_missions`. |
+| `metric` | string | -- | Required. One of `issues_closed`, `cost_usd`, `runs_count`, `active_missions`, `success_rate`, `p95_duration_ms`. `success_rate` is the percentage of finished runs that succeeded and `p95_duration_ms` the nearest-rank p95 run duration, both per bucket by the run's start, from the same rules as `GET /api/v1/runs/insights` (cancelled and running runs are not counted as success or failure). A bucket in which nothing finished has no `total` value instead of a zero. These two accept only `group_by=none`. |
 | `window` | string | `"24h"` | One of `24h`, `7d`, `30d`. |
 | `bucket` | string | `"1h"` | One of `15m`, `1h`, `1d`. Combinations producing &gt;200 buckets are rejected. |
 | `group_by` | string | `"none"` | One of `none`, `crew`, `model`, `status`. Some group-by values are metric-specific (see error matrix). |

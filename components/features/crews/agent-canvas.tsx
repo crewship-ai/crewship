@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "@/lib/toast"
-import { Brain, CalendarClock, ChevronLeft, Clock, Lock, RotateCcw, Trash2 } from "lucide-react"
+import { Brain, ChevronLeft, Clock, Lock, RotateCcw, Trash2 } from "lucide-react"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { AgentHeadTile } from "./agent-ring-avatar"
 import { getModelLabel } from "@/lib/cli-adapters"
@@ -39,6 +39,7 @@ import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
 import { AgentCommandLine } from "./agent-command-line"
+import { RoutinesMovedNote } from "./agent-settings-parts"
 import { CrCard, CrLine, HeadChip, LeadMark } from "./cr-card"
 import { useCrewSpend } from "./crew-spend"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
@@ -417,11 +418,7 @@ export function AgentCanvas({
           {tab === "model" && (
             <>
               <CreateAgentDialog key={`model:${editorKey}`} {...editorProps} inlineSections={["model", "access"]} inlineLabel="Model and limits" />
-              <div className="flex items-start gap-2.5 rounded-card border border-border bg-card px-4 py-3 text-body text-muted-foreground">
-                <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <span className="flex-1">Schedules and webhooks moved to Routines.</span>
-                <Button asChild variant="ghost" size="sm"><Link href="/routines">Routines</Link></Button>
-              </div>
+              <RoutinesMovedNote />
             </>
           )}
           {tab === "tools" && (

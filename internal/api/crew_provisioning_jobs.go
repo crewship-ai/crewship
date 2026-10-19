@@ -1474,3 +1474,90 @@ func crewPreparationChanged(ctx context.Context, db *sql.DB, crewID, workspaceID
 	}
 	return strings.Join(adapters, ",") != strings.Join(builtAdapters, ","), nil
 }
+
+// provisionSummaryCrew is one row of GET /api/v1/crews/provisioning-summary.
+type provisionSummaryCrew struct {
+	ID    string `json:"id"`
+	Slug  string `json:"slug"`
+	Name  string `json:"name"`
+	Error string `json:"error,omitempty"`
+}
+
+// provisionSummaryResponse is the body of GET /api/v1/crews/provisioning-summary.
+type provisionSummaryResponse struct {
+	Failed         []provisionSummaryCrew `json:"failed"`
+	NeedsProvision []provisionSummaryCrew `json:"needs_provision"`
+	Total          int                    `json:"total"`
+}
+
+// ProvisionSummary reports, for the caller's workspace, the crews whose
+// latest build failed and the crews that have no built image yet. It applies
+// the same rules as ProvisionStatus for each crew, but answers for the whole
+// workspace in one request so the Dashboard does not fan out one call per
+// crew. Readable by every member, like the crew list it mirrors (same
+// workspace, not deleted, not the onboarding setup crew).
+// GET /api/v1/crews/provisioning-summary
+func (h *ProvisioningHandler) ProvisionSummary(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, slug, name, COALESCE(cached_image, '')
+		 FROM crews
+		 WHERE workspace_id = ? AND deleted_at IS NULL AND kind != 'setup'
+		 ORDER BY name COLLATE NOCASE ASC, id ASC
+		 LIMIT 500`, workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "query crew provisioning summary", err)
+		return
+	}
+	type crewRow struct{ id, slug, name, cached string }
+	var crews []crewRow
+	for rows.Next() {
+		var c crewRow
+		if err := rows.Scan(&c.id, &c.slug, &c.name, &c.cached); err != nil {
+			rows.Close()
+			replyInternalError(w, h.logger, "scan crew provisioning summary", err)
+			return
+		}
+		crews = append(crews, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		replyInternalError(w, h.logger, "rows iteration (provision summary)", err)
+		return
+	}
+	rows.Close()
+
+	failed := []provisionSummaryCrew{}
+	needs := []provisionSummaryCrew{}
+	for _, c := range crews {
+		entry := provisionSummaryCrew{ID: c.id, Slug: c.slug, Name: c.name}
+		h.mu.RLock()
+		job, hasJob := h.jobs[c.id]
+		var jobStatus, jobErr string
+		if hasJob {
+			jobStatus, jobErr = job.Status, job.Error
+		}
+		h.mu.RUnlock()
+		switch {
+		case hasJob:
+			if jobStatus == "failed" {
+				entry.Error = jobErr
+				failed = append(failed, entry)
+			} else if jobStatus != "running" && jobStatus != "pending" && c.cached == "" {
+				needs = append(needs, entry)
+			}
+		default:
+			if fail, ok := h.latestBuildFailure(r.Context(), workspaceID, c.id); ok {
+				entry.Error = fail.errMsg
+				failed = append(failed, entry)
+			} else if c.cached == "" {
+				needs = append(needs, entry)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, provisionSummaryResponse{Failed: failed, NeedsProvision: needs, Total: len(failed) + len(needs)})
+}

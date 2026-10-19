@@ -150,7 +150,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	prefCell := object(map[string]any{"category": str(), "channel_id": str(), "state": map[string]any{"type": "string", "enum": []string{"off", "immediate"}}})
 	timeseriesBucket := object(map[string]any{"ts": dateTime(), "series": map[string]any{"type": "object", "additionalProperties": number()}})
 	timeseries := object(map[string]any{
-		"metric":   map[string]any{"type": "string", "enum": []string{"issues_closed", "cost_usd", "runs_count", "active_missions"}},
+		"metric":   map[string]any{"type": "string", "enum": []string{"issues_closed", "cost_usd", "runs_count", "active_missions", "success_rate", "p95_duration_ms"}},
 		"window":   map[string]any{"type": "string", "enum": []string{"24h", "7d", "30d"}},
 		"bucket":   map[string]any{"type": "string", "enum": []string{"15m", "1h", "1d"}},
 		"group_by": map[string]any{"type": "string", "enum": []string{"crew", "model", "status", "none"}},

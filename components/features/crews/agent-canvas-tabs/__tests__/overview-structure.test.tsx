@@ -19,6 +19,9 @@ vi.mock("@/hooks/use-agent-reach", () => ({
 vi.mock("@/components/features/crews/agent-canvas-managers", () => ({
   SkillsManager: () => <div data-testid="skills-manager" />,
 }))
+vi.mock("@/components/features/crews/agent-skills-picker", () => ({
+  AgentSkillsPicker: ({ open, agentName }: { open: boolean; agentName: string }) => (open ? <div role="dialog" aria-label={`Give skills to ${agentName}`} data-testid="skills-picker" /> : null),
+}))
 vi.mock("@/components/features/integrations/composio/access-editor", () => ({
   AgentConnectorsCard: () => <div data-testid="connectors-manager" />,
 }))
@@ -112,6 +115,14 @@ describe("agent overview structure", () => {
     // Only its own manager — this replaced a drawer that showed all four.
     expect(screen.queryByTestId("connectors-manager")).not.toBeInTheDocument()
     expect(screen.queryByTestId("channels-manager")).not.toBeInTheDocument()
+  })
+
+  // K09: Add skill is on the Skills card, not behind Manage skills > dialog > Add skill.
+  it("Add skill on the Skills card opens the picker directly, without the manager dialog", async () => {
+    renderTab()
+    fireEvent.click(screen.getByRole("button", { name: "Add skill" }))
+    expect(await screen.findByTestId("skills-picker")).toBeInTheDocument()
+    expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
   })
 
   it("counts enabled skills against the total in the card header", async () => {
