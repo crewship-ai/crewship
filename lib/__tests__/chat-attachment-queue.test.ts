@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
+  PROVISIONAL_ATTACHMENT_LIMITS,
+  refusalMessage,
   createUploadQueue,
   filesFromClipboard,
   validateAttachmentBatch,
@@ -8,6 +10,14 @@ import {
 
 const file = (name: string, size: number) => new File([new Uint8Array(size)], name)
 const limits: AttachmentLimits = { maxCount: 3, maxBytes: 100 }
+
+describe("provisional limits", () => {
+  it("are the single source for the refusal text", () => {
+    const m = refusalMessage("x", "too_many")
+    expect(m).toContain(String(PROVISIONAL_ATTACHMENT_LIMITS.maxCount))
+    expect(refusalMessage("x", "too_large")).toContain(String(Math.round(PROVISIONAL_ATTACHMENT_LIMITS.maxBytes / 1048576)))
+  })
+})
 
 describe("validateAttachmentBatch", () => {
   it("accepts in order and refuses by reason", () => {

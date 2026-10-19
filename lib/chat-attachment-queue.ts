@@ -6,9 +6,13 @@ export interface AttachmentLimits {
   maxBytes: number
 }
 
-/** Defaults used until the server's capabilities for the context say otherwise
- *  (CH-17). The size cap matches the upload endpoint's existing 25 MB guard. */
-export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
+/** PROVISIONAL client-side limits. The server has not approved any attachment
+ *  limit yet: 25 MB is the existing upload guard, and the count of 10 is a
+ *  placeholder, not a product or server limit. This is the only place either
+ *  number is written; the composer, the refusal text and the tests all read
+ *  it, so swapping in server capabilities (CH-17) means replacing this one
+ *  constant (or passing `limits` through). */
+export const PROVISIONAL_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxCount: 10,
   maxBytes: 25 * 1024 * 1024,
 }
@@ -40,7 +44,7 @@ export interface BatchValidation {
 export function validateAttachmentBatch(
   existingCount: number,
   files: File[],
-  limits: AttachmentLimits = DEFAULT_ATTACHMENT_LIMITS,
+  limits: AttachmentLimits = PROVISIONAL_ATTACHMENT_LIMITS,
 ): BatchValidation {
   const accepted: File[] = []
   const rejected: RejectedFile[] = []
@@ -56,7 +60,7 @@ export function validateAttachmentBatch(
 export function refusalMessage(
   name: string,
   reason: AttachmentRefusal,
-  limits: AttachmentLimits = DEFAULT_ATTACHMENT_LIMITS,
+  limits: AttachmentLimits = PROVISIONAL_ATTACHMENT_LIMITS,
 ): string {
   switch (reason) {
     case "too_large":

@@ -15,7 +15,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
 import {
-  DEFAULT_ATTACHMENT_LIMITS,
+  PROVISIONAL_ATTACHMENT_LIMITS,
   createUploadQueue,
   filesFromClipboard,
   textFromClipboard,
@@ -344,7 +344,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       ).length
       const { accepted, rejected } = validateAttachmentBatch(counted, files)
       for (const { file: f, reason } of rejected) {
-        toast.error(refusalMessage(f.name, reason, DEFAULT_ATTACHMENT_LIMITS))
+        toast.error(refusalMessage(f.name, reason, PROVISIONAL_ATTACHMENT_LIMITS))
         // A refusal that never reached the network is still a failed
         // attachment to the person holding the phone, and it is the one the
         // server-side logs can never show.
@@ -403,8 +403,8 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       const others = (useComposerStore.getState().attachments[sessionId] ?? []).filter(
         (a) => a.id !== id && a.status !== "cancelled" && a.status !== "error",
       ).length
-      if (others >= DEFAULT_ATTACHMENT_LIMITS.maxCount) {
-        toast.error(refusalMessage(att.name, "too_many", DEFAULT_ATTACHMENT_LIMITS))
+      if (others >= PROVISIONAL_ATTACHMENT_LIMITS.maxCount) {
+        toast.error(refusalMessage(att.name, "too_many", PROVISIONAL_ATTACHMENT_LIMITS))
         return
       }
       updateAttachment(sessionId, id, { status: "validating", error: undefined })
