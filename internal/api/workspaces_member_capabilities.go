@@ -27,7 +27,9 @@ package api
 // downgrade-then-restore stunt).
 //
 // Every changed set writes a chained member.capabilities_changed event in the
-// same transaction. Values remain on the ADMIN-only endpoint, not in the journal.
+// same transaction with the previous and resulting sets. Those durable audit
+// values are omitted from the general feed; current values remain available
+// through the ADMIN-only capability endpoint.
 
 import (
 	"context"
@@ -323,10 +325,20 @@ func (h *WorkspaceHandler) PatchMemberCapabilities(w http.ResponseWriter, r *htt
 	notify, err := appendAuthorizationAudit(r.Context(), tx, h.policyJournal, journal.Entry{
 		WorkspaceID: workspaceID, Type: journal.EntryMemberCapabilitiesChanged,
 		ActorType: journal.ActorUser, ActorID: caller.ID, Summary: "Member capabilities changed",
-		Payload: map[string]any{"subject_user_id": memberID, "action": "capabilities_changed"},
+		Payload: map[string]any{"subject_user_id": memberID, "action": "capabilities_changed",
+			"previous_capabilities": capsAsSortedSlice(current), "capabilities": capsAsSortedSlice(next)},
 	})
 	if err != nil {
 		replyInternalError(w, h.logger, "audit capabilities mutation", err)
+		return
+	}
+	var savedCapabilities, savedRole string
+	if err := tx.QueryRowContext(r.Context(), `SELECT capabilities,role FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, memberID).Scan(&savedCapabilities, &savedRole); err != nil {
+		replyInternalError(w, h.logger, "acknowledge capabilities mutation", err)
+		return
+	}
+	if savedCapabilities != serialized || savedRole != targetRole {
+		replyInternalError(w, h.logger, "acknowledge capabilities mutation", errors.New("capabilities mutation did not persist"))
 		return
 	}
 	if err := tx.Commit(); err != nil {
