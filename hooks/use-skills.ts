@@ -245,6 +245,22 @@ export function useBulkImportSkills(workspaceId: string | null | undefined) {
   })
 }
 
+/** Move a skill into or out of the Archived view (OWNER/ADMIN; built-ins cannot be archived). */
+export function useSetSkillLifecycle(workspaceId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ skillId, action }: { skillId: string; action: "archive" | "restore" }) => {
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId!)}/skills/${encodeURIComponent(skillId)}/${action}`, {
+        method: "POST",
+      })
+      if (!res.ok) throw new Error(await skillsErrorMessage(res, action === "archive" ? "Could not archive the skill" : "Could not restore the skill"))
+    },
+    onSettled: () => {
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: skillsKeys.all(workspaceId) })
+    },
+  })
+}
+
 /** Remove a skill from the workspace catalog (not possible for built-ins). */
 export function useDeleteSkill(workspaceId: string | null | undefined) {
   const queryClient = useQueryClient()

@@ -318,6 +318,68 @@ func TestAcceptance_RoutineWebhooksUpdate_RotateSecret_ChangesSecretNotURL(t *te
 	}
 }
 
+// ODCH-INT-11: --grace keeps the replaced secret valid for a while, so a sender
+// can be switched over without a window of 401s. Driven through the binary.
+func TestAcceptance_RoutineWebhooksUpdate_RotateSecretWithGrace(t *testing.T) {
+	cfgPath, serverURL := startReliabilityAcceptanceServer(t)
+
+	createOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "create",
+		"--slug", "rel-routine", "--name", "rotate-with-grace", "--base-url", serverURL)
+	if err != nil {
+		t.Fatalf("routine webhooks create failed: %v\n%s", err, createOut)
+	}
+	var created struct {
+		ID            string `json:"id"`
+		PublicURL     string `json:"public_url"`
+		SigningSecret string `json:"signing_secret"`
+	}
+	if err := json.Unmarshal([]byte(createOut), &created); err != nil {
+		t.Fatalf("decode create output: %v\nraw: %s", err, createOut)
+	}
+
+	// A grace window without a rotation, and an odd window, are refused before any call.
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "webhooks", "update", created.ID, "--grace", "1h"); err == nil {
+		t.Fatalf("--grace without --rotate-secret must be refused, got:\n%s", out)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "routine", "webhooks", "update", created.ID, "--rotate-secret", "--grace", "5m"); err == nil {
+		t.Fatalf("an odd --grace must be refused, got:\n%s", out)
+	}
+
+	rotateOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "update", created.ID,
+		"--rotate-secret", "--grace", "1h")
+	if err != nil {
+		t.Fatalf("update --rotate-secret --grace 1h failed: %v\n%s", err, rotateOut)
+	}
+	var rotated struct {
+		SigningSecret         string `json:"signing_secret"`
+		PreviousSecretExpires string `json:"previous_secret_expires_at"`
+	}
+	if err := json.Unmarshal([]byte(rotateOut), &rotated); err != nil {
+		t.Fatalf("decode rotate output: %v\nraw: %s", err, rotateOut)
+	}
+	if rotated.PreviousSecretExpires == "" {
+		t.Fatalf("the response must say when the old secret stops:\n%s", rotateOut)
+	}
+	fire := func(secret, delivery string) int {
+		body := []byte(`{"hello":"world"}`)
+		req, _ := http.NewRequest(http.MethodPost, created.PublicURL, bytes.NewReader(body))
+		req.Header.Set("X-Crewship-Signature", "sha256="+hmacSHA256Hex(secret, body))
+		req.Header.Set("Idempotency-Key", delivery)
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil {
+			t.Fatalf("fire: %v", derr)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := fire(created.SigningSecret, "grace-old"); got != http.StatusAccepted {
+		t.Errorf("the OLD secret inside its grace window = %d, want 202", got)
+	}
+	if got := fire(rotated.SigningSecret, "grace-new"); got != http.StatusAccepted {
+		t.Errorf("the NEW secret = %d, want 202", got)
+	}
+}
+
 // TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin drives the CLI
 // parity fields `update` shares with `schedules update` — code review on
 // this PR found them missing from the CLI even though the server, the

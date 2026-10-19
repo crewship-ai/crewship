@@ -206,6 +206,8 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "skill.unassigned",
       "skill.imported",
       "skill.deleted",
+      "skill.archived",
+      "skill.restored",
     ],
   },
   {

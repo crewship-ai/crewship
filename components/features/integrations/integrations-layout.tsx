@@ -14,6 +14,7 @@ import { useSession } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useNotificationChannels, type ChannelPatchBody } from "@/hooks/use-notification-channels"
+import { useWebhookDeliverySummary } from "@/hooks/use-webhook-deliveries"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
 import { NotificationPrefsSection } from "./notification-prefs-section"
@@ -216,7 +217,12 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       rowMatches(r, search),
   )
 
-  const tRows = React.useMemo(() => triggerRows(incoming.rows), [incoming.rows])
+  const callSummary = useWebhookDeliverySummary(workspaceId)
+  const agentCalls = React.useMemo(
+    () => (callSummary.items ? new Map(callSummary.items.filter((s) => s.endpoint_kind === "agent").map((s) => [s.endpoint_id, s.calls])) : undefined),
+    [callSummary.items],
+  )
+  const tRows = React.useMemo(() => triggerRows(incoming.rows, [], agentCalls), [incoming.rows, agentCalls])
   const triggerView = (["all", "failing", "off"].includes(route.view) ? route.view : "all") as TriggerView
   const visibleTriggers = filterTriggers(tRows, { view: triggerView, starts: route.starts, target: route.target, checks: filters.checks, search })
   const pageTargets = incoming.targets.filter((t) => t.kind === "page" && (!route.target || t.id === route.target || t.slug === route.target) && `${t.name} ${t.slug}`.toLowerCase().includes(search.trim().toLowerCase()))

@@ -5,7 +5,9 @@ import type { JournalEntry } from "@/lib/types/journal"
 import {
   EMPTY_FILTERS,
   bundleRepeats,
+  activeFacetCount,
   changeFromEntry,
+  changePasses,
   changeSentence,
   feedCsv,
   feedUrlParams,
@@ -284,6 +286,36 @@ describe("time range", () => {
     expect(stepRange("1h", -1)).toBeNull()
     // A preset outside the steps steps from 7 days.
     expect(stepRange("week", 1)).toBe("30d")
+  })
+})
+
+describe("the Skill facet (ODCH-SK-14)", () => {
+  const used = work(chain("r1", { skills: [{ id: "sk1", slug: "tdd", name: "TDD", uses: 3 }], skill_count: 1 }))
+  const unused = work(chain("r2"))
+
+  it("maps a chain's skills onto the work row", () => {
+    expect(used.skills).toEqual([{ id: "sk1", name: "TDD" }])
+    expect(unused.skills).toEqual([])
+  })
+
+  it("keeps only work whose agents called the skill, and counts as a facet", () => {
+    const f = { ...EMPTY_FILTERS, skill: "sk1" }
+    expect(workPasses(used, f)).toBe(true)
+    expect(workPasses(unused, f)).toBe(false)
+    expect(workPasses(used, { ...EMPTY_FILTERS, skill: "other" })).toBe(false)
+    expect(activeFacetCount(f)).toBe(1)
+  })
+
+  it("hides changes, which are not work a skill was called in", () => {
+    const c = changeFromEntry(entry("e1", { mission_id: "m1" }))!
+    expect(changePasses(c, { ...EMPTY_FILTERS, skill: "sk1" })).toBe(false)
+    expect(changePasses(c, EMPTY_FILTERS)).toBe(true)
+  })
+
+  it("travels in the link as ?skill=", () => {
+    const s = parseFeedUrl(new URLSearchParams("skill=sk1"))
+    expect(s.filters.skill).toBe("sk1")
+    expect(feedUrlParams(s).toString()).toBe("skill=sk1")
   })
 })
 

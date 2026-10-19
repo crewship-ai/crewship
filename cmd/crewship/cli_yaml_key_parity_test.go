@@ -111,6 +111,8 @@ func yamlParityTypes() []any {
 		webhookCreateResult{},
 		webhookUpdateResult{},
 		webhookURLResult{},
+		// cmd_routine_webhooks_dryrun.go
+		webhookDryRunResult{},
 		// cmd_routine_webhooks_fire.go
 		webhookFireResult{},
 		// Payloads this change turned from "panics under -f yaml" into

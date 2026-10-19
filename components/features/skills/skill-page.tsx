@@ -6,6 +6,8 @@ import { Streamdown } from "streamdown"
 import {
   Activity,
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
   Bot,
   Check,
   ChevronLeft,
@@ -41,7 +43,8 @@ import { Switch } from "@/components/ui/switch"
 import { PageError, PageLoading, PageNotFound } from "@/components/layout/page-state"
 import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { useJournalList } from "@/hooks/use-journal-list"
-import { useDeleteSkill, useSetSkillAssignment, useSkillDetail } from "@/hooks/use-skills"
+import { activityUrl } from "@/lib/activity-url"
+import { useDeleteSkill, useSetSkillAssignment, useSetSkillLifecycle, useSkillDetail } from "@/hooks/use-skills"
 import { entityHref } from "@/lib/entity-links"
 import { formatRelativeShort } from "@/lib/time"
 import { cn } from "@/lib/utils"
@@ -52,6 +55,7 @@ import {
   SKILL_TABS,
   attentionReasons,
   domainMeta,
+  isArchived,
   isMadeHere,
   runtimeLabel,
   scanState,
@@ -171,6 +175,11 @@ function downloadSkill(s: SkillDetail) {
 
 const ACTIVITY_TYPES = "skill.invoked,skill.assigned,skill.unassigned,skill.imported"
 
+/** Activity narrowed to the work that called this skill (?walk=skill:<id>). */
+export function skillActivityHref(id: string, label: string): string {
+  return activityUrl("/activity", { path: { stops: [{ kind: "skill", id, label }], dropped: 0 }, lens: "workflows" })
+}
+
 function useSkillJournal(skill: SkillRow, workspaceId: string) {
   const { entries, loading, error } = useJournalList({ workspaceId, params: { entry_type: ACTIVITY_TYPES }, limit: 200 })
   const mine = useMemo(
@@ -228,13 +237,13 @@ function OverviewTab({ skill, onTab }: { skill: SkillRow; onTab: (t: SkillTab) =
             </p>
           </div>
         </Card>
-        <Card title="Last 7 days" icon={Activity}>
+        <Card title="Last 30 days" icon={Activity}>
           <KV
             rows={[
-              ["Uses", <span key="u" className="tabular-nums">{usage?.uses_7d ?? 0}</span>],
+              ["Uses", <span key="u" className="tabular-nums">{usage?.uses_30d ?? usage?.uses_7d ?? 0}</span>],
               ["Last used", usage?.last_used_at ? formatRelativeShort(usage.last_used_at) : "Never"],
               ["Agents", String(holders.length)],
-              ["Errors", <span key="e" className={cn("tabular-nums", usage?.errors_7d ? "text-destructive" : undefined)}>{usage?.errors_7d ?? 0}</span>],
+              ["Errors", <span key="e" className={cn("tabular-nums", (usage?.errors_30d ?? usage?.errors_7d) ? "text-destructive" : undefined)}>{usage?.errors_30d ?? usage?.errors_7d ?? 0}</span>],
             ]}
           />
         </Card>
@@ -653,6 +662,7 @@ export interface SkillPageProps {
 export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab, onBack, onGive, onDeleted, onEditor, canGive, canManage }: SkillPageProps) {
   const { data, isLoading, isError, error, refetch } = useSkillDetail(workspaceId, skillId)
   const del = useDeleteSkill(workspaceId)
+  const lifecycle = useSetSkillLifecycle(workspaceId)
   const assign = useSetSkillAssignment(workspaceId)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const recentRef = useRef<HTMLDivElement>(null)
@@ -692,18 +702,20 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
   const holders = skill.installed_on ?? []
   const licence = skill.spdx_license || detail?.license
 
+  const setLifecycle = async (action: "archive" | "restore") => {
+    try {
+      await lifecycle.mutateAsync({ skillId: skill.id, action })
+      toast.success(action === "archive" ? `${skillName(skill)} archived · agents keep it until removed` : `${skillName(skill)} restored to the library`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change the skill")
+    }
+  }
+
   const takeFromAll = async () => {
     const results = await Promise.allSettled(holders.map((a) => assign.mutateAsync({ agentId: a.agent_id, skillId: skill.id, on: false })))
     const bad = results.filter((r) => r.status === "rejected").length
     if (bad) toast.error(`${bad} of ${holders.length} agents still have ${skillName(skill)}`)
     else toast.success(`${skillName(skill)} taken from ${holders.length} ${holders.length === 1 ? "agent" : "agents"}`)
-  }
-
-  // v67 opens Activity filtered to the skill, but Activity has no skill
-  // filter yet; until it does, the skill's own record is Used by › Recent uses.
-  const openActivity = () => {
-    onTab("used")
-    setTimeout(() => recentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)
   }
 
   return (
@@ -715,8 +727,10 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
         actions={
           <>
             {/* Named apart from the shell's own Activity button in the same bar. */}
-            <SubBarSecondary icon={Activity} onClick={openActivity} aria-label="Skill activity">
-              <span className="max-md:sr-only">Activity</span>
+            <SubBarSecondary asChild icon={Activity}>
+              <Link href={skillActivityHref(skill.id, skillName(skill))} aria-label="Skill activity" title="Activity">
+                <span className="max-xl:sr-only">Activity</span>
+              </Link>
             </SubBarSecondary>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -748,6 +762,17 @@ export function SkillPage({ workspaceId, skillId, row, agents, crews, tab, onTab
                 {canManage && (
                   <>
                     <DropdownMenuSeparator />
+                    {isArchived(skill) ? (
+                      <DropdownMenuItem onSelect={() => setLifecycle("restore")}>
+                        <ArchiveRestore className="size-3.5" />
+                        Restore to the library
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem disabled={builtIn} onSelect={() => setLifecycle("archive")}>
+                        <Archive className="size-3.5" />
+                        Archive
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem variant="destructive" disabled={builtIn} onSelect={() => setConfirmDelete(true)}>
                       <Trash2 className="size-3.5" />
                       Remove from library…

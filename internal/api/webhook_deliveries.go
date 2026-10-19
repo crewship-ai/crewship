@@ -273,3 +273,62 @@ func (h *WebhookDeliveriesHandler) readDelivery(r *http.Request, workspaceID, de
 	}
 	return item, true, nil
 }
+
+// webhookDeliverySummary is one endpoint's calls over the window (ODCH-INT-06).
+// Every trigger kind writes the same ledger, so the Triggers table can show a
+// count for agent and page triggers, not only routine ones.
+type webhookDeliverySummary struct {
+	EndpointID     string `json:"endpoint_id"`
+	EndpointKind   string `json:"endpoint_kind"`
+	Calls          int    `json:"calls"`
+	Accepted       int    `json:"accepted"`
+	Ignored        int    `json:"ignored"`
+	LastReceivedAt string `json:"last_received_at"`
+}
+
+// Summary serves GET /workspaces/{ws}/webhook-deliveries/summary?since=: one
+// row per endpoint that received a delivery, counted in SQL. since= keeps to a
+// window (RFC 3339); without it every recorded delivery counts, which is as far
+// back as the ledger's retention goes.
+func (h *WebhookDeliveriesHandler) Summary(w http.ResponseWriter, r *http.Request) {
+	ws, ok := workReadContext(w, r)
+	if !ok {
+		return
+	}
+	since, ok := ledgerSince(r.URL.Query().Get("since"))
+	if !ok {
+		replyError(w, http.StatusBadRequest, "since must be an RFC 3339 time, e.g. 2026-10-08T00:00:00Z")
+		return
+	}
+	query := `SELECT endpoint_id, endpoint_kind, COUNT(*),
+		COALESCE(SUM(CASE WHEN filter_decision = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN filter_decision = ? THEN 1 ELSE 0 END), 0),
+		MAX(received_at)
+		FROM webhook_deliveries WHERE workspace_id = ?`
+	args := []any{work.FilterAccepted, work.FilterIgnored, ws}
+	if since != "" {
+		query += ` AND received_at >= ?`
+		args = append(args, since)
+	}
+	query += ` GROUP BY endpoint_id, endpoint_kind ORDER BY endpoint_id`
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		replyInternalError(w, h.logger, "summarise webhook deliveries", err)
+		return
+	}
+	defer rows.Close()
+	items := make([]webhookDeliverySummary, 0)
+	for rows.Next() {
+		var s webhookDeliverySummary
+		if err := rows.Scan(&s.EndpointID, &s.EndpointKind, &s.Calls, &s.Accepted, &s.Ignored, &s.LastReceivedAt); err != nil {
+			replyInternalError(w, h.logger, "scan webhook delivery summary", err)
+			return
+		}
+		items = append(items, s)
+	}
+	if err := rows.Err(); err != nil {
+		replyInternalError(w, h.logger, "iterate webhook delivery summary", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}

@@ -45,6 +45,16 @@ describe("TriggerPage", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith("w1", { rotate_secret: true }))
   })
 
+  it("rotate can keep the old secret for a while and says so (ODCH-INT-11)", async () => {
+    const { update } = setup()
+    fireEvent.click(screen.getByRole("button", { name: "Rotate…" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.change(within(dialog).getByLabelText("Old value keeps working for"), { target: { value: "86400" } })
+    expect(dialog).toHaveTextContent("Rotate secret? The old one keeps working for 24 hours.")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rotate secret" }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith("w1", { rotate_secret: true, rotate_grace_seconds: 86400 }))
+  })
+
   it("delete has its own text and waits for the server", async () => {
     const { remove, onDeleted } = setup()
     fireEvent.click(screen.getByRole("button", { name: "Delete…" }))
@@ -55,10 +65,10 @@ describe("TriggerPage", () => {
     expect(onDeleted).toHaveBeenCalled()
   })
 
-  it("never offers Replay, Test mapping or Send test", () => {
+  it("never offers Replay or Send test", () => {
     setup("mapping")
     expect(screen.getByDisplayValue("repo")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Replay|Test mapping|Use last call|Send test/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Replay|Use last call|Send test/ })).not.toBeInTheDocument()
   })
 })
 
@@ -90,6 +100,31 @@ describe("TriggerPage › Mapping", () => {
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("w1", { inputs_template: { repo: "{{ inputs.event.repo }}", pr_number: "{{ inputs.event.pull_request.number }}" } }),
     )
+  })
+
+  it("Test mapping posts the sample to the dry run and shows what the routine would get (ODCH-INT-09)", async () => {
+    const test = vi.fn(async () => ({ inputs: { repo: "acme/web", event: {}, raw: "", headers: {} }, ignored_template_keys: ["raw"], valid: true }))
+    const data = { targets: [r1, r2], rows: [endpoint], hooks: { update: vi.fn(), test, remove: vi.fn() }, refresh: vi.fn(), loading: false, error: null } as unknown as IncomingData
+    render(
+      <PageSaveProvider>
+        <TriggerPage workspaceId="ws" row={triggerRows([endpoint])[0]} data={data} pane="mapping" onPane={vi.fn()} canEdit onBack={vi.fn()} onDeleted={vi.fn()} />
+        <PageSaveBar />
+      </PageSaveProvider>,
+    )
+    const button = screen.getByRole("button", { name: "Test mapping" })
+    expect(button).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Sample call JSON"), { target: { value: "nope" } })
+    fireEvent.click(button)
+    expect(await screen.findByRole("alert")).toHaveTextContent("not valid JSON")
+    expect(test).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText("Sample call JSON"), { target: { value: '{"action":"opened"}' } })
+    fireEvent.click(button)
+    await waitFor(() => expect(test).toHaveBeenCalledWith("w1", { action: "opened" }))
+    expect(await screen.findByText("The routine would accept this call.")).toBeInTheDocument()
+    expect(screen.getByText("acme/web")).toBeInTheDocument()
+    // The test reads the saved mapping, so an unsaved draft pauses it.
+    fireEvent.change(screen.getByLabelText("Input name 1"), { target: { value: "repository" } })
+    expect(button).toBeDisabled()
   })
 
   it("removing every input saves an empty mapping", async () => {

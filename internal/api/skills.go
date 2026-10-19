@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/skills"
@@ -92,7 +93,9 @@ type skillResponse struct {
 // skillUsage is a skill's invocation summary inside one workspace.
 type skillUsage struct {
 	Uses7d     int     `json:"uses_7d"`
+	Uses30d    int     `json:"uses_30d"`
 	Errors7d   int     `json:"errors_7d"`
+	Errors30d  int     `json:"errors_30d"`
 	UsesTotal  int     `json:"uses_total"`
 	LastUsedAt *string `json:"last_used_at"`
 }
@@ -292,7 +295,9 @@ func (h *SkillHandler) populateUsage(r *http.Request, rows []skillResponse) erro
 		SELECT skill_id,
 		       COUNT(*),
 		       COALESCE(SUM(CASE WHEN julianday(invoked_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN julianday(invoked_at) >= julianday('now', '-30 days') THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN exit_code != 0 AND julianday(invoked_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN exit_code != 0 AND julianday(invoked_at) >= julianday('now', '-30 days') THEN 1 ELSE 0 END), 0),
 		       MAX(invoked_at)
 		FROM skill_invocations
 		WHERE workspace_id = ?
@@ -304,7 +309,7 @@ func (h *SkillHandler) populateUsage(r *http.Request, rows []skillResponse) erro
 	for q.Next() {
 		var skillID string
 		var u skillUsage
-		if err := q.Scan(&skillID, &u.UsesTotal, &u.Uses7d, &u.Errors7d, &u.LastUsedAt); err != nil {
+		if err := q.Scan(&skillID, &u.UsesTotal, &u.Uses7d, &u.Uses30d, &u.Errors7d, &u.Errors30d, &u.LastUsedAt); err != nil {
 			return err
 		}
 		if i, ok := idx[skillID]; ok {
@@ -750,5 +755,91 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"deleted":  true,
 		"skill_id": skillID,
+	})
+}
+
+// Archive handles POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive:
+// the manual side of the keeper's lifecycle sweep. Archived skills are hidden
+// from the library and from agent pickers; agents that already hold one keep it.
+func (h *SkillHandler) Archive(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycle(w, r, skills.LifecycleArchived)
+}
+
+// Restore handles POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore:
+// an archived skill goes back to active. The keeper sweep still judges it by
+// use and assignment, so a restored skill nobody holds or calls is stale again
+// after 30 days and archived after 90.
+func (h *SkillHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycle(w, r, skills.LifecycleActive)
+}
+
+func (h *SkillHandler) setLifecycle(w http.ResponseWriter, r *http.Request, next skills.LifecycleState) {
+	problem := func(status int, detail string) {
+		writeJSON(w, status, map[string]interface{}{
+			"type": "about:blank", "title": http.StatusText(status),
+			"status": status, "detail": detail, "instance": r.URL.Path,
+		})
+	}
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		problem(http.StatusForbidden, "Forbidden")
+		return
+	}
+	skillID := r.PathValue("skillId")
+	var current, source string
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT lifecycle_state, source FROM skills WHERE id = ?", skillID).Scan(&current, &source)
+	if errors.Is(err, sql.ErrNoRows) {
+		problem(http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "skill lifecycle lookup", err)
+		return
+	}
+	if skills.LifecycleState(current) == skills.LifecycleDeprecated {
+		problem(http.StatusConflict, "a deprecated skill cannot be archived or restored")
+		return
+	}
+	// The catalog row is shared by every workspace, and the keeper
+	// re-seeds BUNDLED skills: one workspace may not hide them for the rest.
+	if next == skills.LifecycleArchived && source == "BUNDLED" {
+		problem(http.StatusForbidden, "BUNDLED skills are shared by every workspace; refusing to archive. Unassign it from the agents instead.")
+		return
+	}
+	// Restore only moves an archived skill; archiving leaves an archived one
+	// alone. Anything else is already where the caller wants it.
+	moves := (next == skills.LifecycleArchived && skills.LifecycleState(current) != skills.LifecycleArchived) ||
+		(next == skills.LifecycleActive && skills.LifecycleState(current) == skills.LifecycleArchived)
+	if moves {
+		if _, err := h.db.ExecContext(r.Context(),
+			`UPDATE skills SET lifecycle_state = ?, updated_at = ? WHERE id = ?`,
+			string(next), time.Now().UTC().Format(time.RFC3339), skillID); err != nil {
+			replyInternalError(w, h.logger, "skill lifecycle update", err)
+			return
+		}
+		entryType, verb := journal.EntrySkillArchived, "archived"
+		if next == skills.LifecycleActive {
+			entryType, verb = journal.EntrySkillRestored, "restored"
+		}
+		var actorID string
+		if user := UserFromContext(r.Context()); user != nil {
+			actorID = user.ID
+		}
+		if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+			WorkspaceID: WorkspaceIDFromContext(r.Context()),
+			Type:        entryType,
+			Severity:    journal.SeverityNotice,
+			ActorType:   journal.ActorUser,
+			ActorID:     actorID,
+			Summary:     "skill " + verb + ": " + skillID,
+			Payload:     map[string]any{"skill_id": skillID, "from": current, "to": string(next)},
+		}); jerr != nil {
+			h.logger.Warn("skill lifecycle journal emit failed", "error", jerr)
+		}
+		current = string(next)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"skill_id":        skillID,
+		"lifecycle_state": current,
 	})
 }

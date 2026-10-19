@@ -44,7 +44,10 @@ export interface SkillAgentRef {
 /** This workspace's invocations of the skill. */
 export interface SkillUsage {
   uses_7d: number
+  /** 30-day figures; absent on a server older than the Library window. */
+  uses_30d?: number
   errors_7d: number
+  errors_30d?: number
   uses_total: number
   last_used_at: string | null
 }
@@ -542,6 +545,11 @@ export function isSkillSort(v: string | null | undefined): v is SkillSort {
   return v === "used" || v === "updated" || v === "name"
 }
 
+/** Uses in the Library window: 30 days, or the 7-day figure from an older server. */
+export function usesInWindow(s: Pick<SkillRow, "usage">): number {
+  return s.usage?.uses_30d ?? s.usage?.uses_7d ?? 0
+}
+
 export function sortSkills(rows: SkillRow[], sort: SkillSort): SkillRow[] {
   const byName = (a: SkillRow, b: SkillRow) => skillName(a).localeCompare(skillName(b))
   const out = [...rows]
@@ -549,7 +557,7 @@ export function sortSkills(rows: SkillRow[], sort: SkillSort): SkillRow[] {
   if (sort === "updated") return out.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || byName(a, b))
   return out.sort(
     (a, b) =>
-      (b.usage?.uses_7d ?? 0) - (a.usage?.uses_7d ?? 0) ||
+      usesInWindow(b) - usesInWindow(a) ||
       (b.usage?.uses_total ?? 0) - (a.usage?.uses_total ?? 0) ||
       (b.installed_on?.length ?? 0) - (a.installed_on?.length ?? 0) ||
       byName(a, b),

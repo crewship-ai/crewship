@@ -103,6 +103,7 @@ Examples:
 			} `json:"installed_on,omitempty" yaml:"installed_on,omitempty"`
 			Usage struct {
 				Uses7d     int     `json:"uses_7d" yaml:"uses_7d"`
+				Uses30d    int     `json:"uses_30d" yaml:"uses_30d"`
 				Errors7d   int     `json:"errors_7d" yaml:"errors_7d"`
 				UsesTotal  int     `json:"uses_total" yaml:"uses_total"`
 				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
@@ -113,7 +114,7 @@ Examples:
 		}
 
 		f := newFormatter()
-		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "AGENTS", "USES 7D"}
+		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "AGENTS", "USES 7D", "USES 30D"}
 		var rows [][]string
 		for _, s := range skills {
 			vendor := "—"
@@ -121,7 +122,7 @@ Examples:
 				vendor = *s.Vendor
 			}
 			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus,
-				strconv.Itoa(len(s.InstalledOn)), strconv.Itoa(s.Usage.Uses7d)})
+				strconv.Itoa(len(s.InstalledOn)), strconv.Itoa(s.Usage.Uses7d), strconv.Itoa(s.Usage.Uses30d)})
 		}
 		return f.Auto(skills, headers, rows)
 	},

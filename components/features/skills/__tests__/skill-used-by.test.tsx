@@ -1,3 +1,5 @@
+import { parseActivityUrl } from "@/lib/activity-url"
+import { currentStop } from "@/lib/activity-selection"
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { SkillPage, type SkillPageProps } from "@/components/features/skills/skill-page"
@@ -12,6 +14,7 @@ const h = vi.hoisted(() => ({ detail: null as unknown, mutate: (() => Promise.re
 vi.mock("@/hooks/use-skills", () => ({
   useSkillDetail: () => ({ data: h.detail, isLoading: false, isError: false, error: null, refetch: vi.fn() }),
   useDeleteSkill: () => ({ mutateAsync: vi.fn() }),
+  useSetSkillLifecycle: () => ({ mutateAsync: vi.fn() }),
   useSetSkillAssignment: () => ({ mutateAsync: (p: { agentId: string; on: boolean }) => h.mutate(p) }),
 }))
 
@@ -40,34 +43,30 @@ function renderUsedBy(mutate: typeof h.mutate) {
   render(<SkillPage {...props} />)
 }
 
-describe("Activity action (ODCH-SK-14)", () => {
-  function renderOverview(onTab = vi.fn()) {
+describe("Activity button", () => {
+  it("has its own name next to the shell's Activity button and opens Activity filtered to the skill", () => {
     h.mutate = () => Promise.resolve()
     h.detail = {
       id: "sk", name: "web", slug: "web", display_name: "Web", description: null, version: null, author: null, category: "RESEARCH",
       source: "BUNDLED", icon: null, scan_status: "CLEAN", verification: "VERIFIED", content: "", license: null, agent_count: 0, installed_on: [],
     } satisfies SkillDetail
+    const onTab = vi.fn()
     render(
       <SkillPage workspaceId="ws" skillId="sk" agents={agents} crews={crews} tab="overview" onTab={onTab} onBack={vi.fn()} onGive={vi.fn()}
         onDeleted={vi.fn()} onEditor={vi.fn()} canGive canManage />,
     )
-    return onTab
-  }
-
-  // Activity cannot filter by skill yet (FeedFilters has no skill, so a
-  // ?walk=skill: link landed on the unfiltered list). Until it can, the
-  // action opens the skill's own record: Used by › Recent uses.
-  it("opens Used by › Recent uses, with its own name next to the shell's Activity button", () => {
-    const onTab = renderOverview()
+    // The top bar already has the shell's "Activity" (live runs) button.
     expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Skill activity" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Skill activity" }))
-    expect(onTab).toHaveBeenCalledWith("used")
-  })
-
-  it("is not hidden at phone width", () => {
-    renderOverview()
-    expect(screen.getByRole("button", { name: "Skill activity" }).className).not.toMatch(/max-sm:hidden/)
+    const link = screen.getByRole("link", { name: "Skill activity" })
+    // ODCH-SK-14: on a phone too (an icon there, like the bar's other actions).
+    expect(link.className).not.toMatch(/max-sm:hidden/)
+    const href = link.getAttribute("href") ?? ""
+    expect(href).toMatch(/^\/activity\?/)
+    // The link carries the skill as a walk stop, which the Activity page turns
+    // into its Skill facet (applyStop).
+    const last = currentStop(parseActivityUrl(new URLSearchParams(href.split("?")[1])).path)
+    expect(last).toMatchObject({ kind: "skill", id: "sk" })
+    expect(onTab).not.toHaveBeenCalled()
   })
 })
 

@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({ detail: null as unknown, error: null as Error | nu
 vi.mock("@/hooks/use-skills", () => ({
   useSkillDetail: () => ({ data: h.error ? undefined : h.detail, isLoading: false, isError: !!h.error, error: h.error, refetch: vi.fn() }),
   useDeleteSkill: () => ({ mutateAsync: vi.fn() }),
+  useSetSkillLifecycle: () => ({ mutateAsync: vi.fn() }),
   useSetSkillAssignment: () => ({ mutateAsync: vi.fn() }),
 }))
 
@@ -21,7 +22,7 @@ const base: SkillDetail = {
   category: "RESEARCH", source: "CUSTOM", icon: null, vendor: "community", homepage: "https://github.com/acme/skills",
   spdx_license: "MIT", runtime: "INSTRUCTIONS", scan_status: "CLEAN", verification: "VERIFIED",
   content: "## Instructions\n1. Search", license: null, agent_count: 0, installed_on: [],
-  usage: { uses_7d: 3, errors_7d: 1, uses_total: 9, last_used_at: null },
+  usage: { uses_7d: 3, uses_30d: 8, errors_7d: 1, errors_30d: 2, uses_total: 9, last_used_at: null },
 }
 
 function renderPage(over: Partial<SkillPageProps> = {}, skill: Partial<SkillDetail> = {}) {
@@ -70,7 +71,7 @@ describe("skill overview", () => {
     expect(document.querySelector("[data-slot=skill-head] p.font-mono")?.textContent).toBe("code-reviewer")
   })
 
-  it("PAR-153 draws the Last 7 days numerals sans and tabular", () => {
+  it("PAR-153 draws the Last 30 days numerals sans and tabular", () => {
     renderPage()
     const uses = screen.getByText("Uses").nextElementSibling ?? screen.getByText("Uses").parentElement!.lastElementChild!
     expect(uses.innerHTML).toContain("tabular-nums")
@@ -81,7 +82,9 @@ describe("skill overview", () => {
     renderPage()
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "SKILL.md", "Used by 0", "Security", "Version"])
     expect(screen.getByText("When an agent uses it")).toBeInTheDocument()
-    expect(screen.getByText("Last 7 days")).toBeInTheDocument()
+    expect(screen.getByText("Last 30 days")).toBeInTheDocument()
+    // The card reports the 30-day figures, not the 7-day ones.
+    expect(screen.getByText("Uses").nextElementSibling?.textContent).toBe("8")
     expect(screen.getByText(".claude/skills/web-search/SKILL.md")).toBeInTheDocument()
     expect(screen.getByText("No credentials. Uses only what the agent already has.")).toBeInTheDocument()
     expect(screen.queryByText("How it works")).not.toBeInTheDocument()

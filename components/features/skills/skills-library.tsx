@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Bot, ChevronDown, ChevronRight, X } from "lucide-react"
+import { Archive, ArchiveRestore, Bot, ChevronDown, ChevronRight, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -21,6 +21,8 @@ import {
   type SkillGroup,
   type SkillRow,
   type SkillSort,
+  isArchived,
+  usesInWindow,
 } from "./skills-model"
 
 // The library (Harbor 2 #3396): one table that works for 20 skills or 2 000.
@@ -101,7 +103,7 @@ function TableRow({ s, checked, selectable, onCheck, onOpen }: RowProps) {
       <td className="whitespace-nowrap px-3.5 py-2 text-label">
         <UsedBy s={s} />
       </td>
-      <td className="whitespace-nowrap px-3.5 py-2 text-right tabular-nums">{s.usage?.uses_7d || "—"}</td>
+      <td className="whitespace-nowrap px-3.5 py-2 text-right tabular-nums">{usesInWindow(s) || "—"}</td>
     </tr>
   )
 }
@@ -129,7 +131,7 @@ function Table({ rows, sel, selectable, onCheck, onOpen }: { rows: SkillRow[]; s
             <th className="px-3.5 py-2 font-medium">Domain</th>
             <th className="px-3.5 py-2 font-medium">Trust</th>
             <th className="px-3.5 py-2 font-medium">Used by</th>
-            <th className="px-3.5 py-2 text-right font-medium">Uses · 7 d</th>
+            <th className="px-3.5 py-2 text-right font-medium">Uses · 30 d</th>
           </tr>
         </thead>
         <tbody>
@@ -180,12 +182,14 @@ export interface SkillsLibraryProps {
   /** Managers and above may give skills; others see no checkboxes. */
   canGive: boolean
   onGiveToCrew: (rows: SkillRow[]) => void
+  /** Managers only: archive the selection, or restore it in the Archived view. */
+  onLifecycle?: (rows: SkillRow[], action: "archive" | "restore") => void
   phone: boolean
   /** Rendered in place of the table when nothing matches. */
   empty?: React.ReactNode
 }
 
-export function SkillsLibrary({ rows, sort, group, onSort, onGroup, onOpen, onShowGroup, canGive, onGiveToCrew, phone, empty }: SkillsLibraryProps) {
+export function SkillsLibrary({ rows, sort, group, onSort, onGroup, onOpen, onShowGroup, canGive, onGiveToCrew, onLifecycle, phone, empty }: SkillsLibraryProps) {
   const sorted = useMemo(() => sortSkills(rows, sort), [rows, sort])
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -299,6 +303,18 @@ export function SkillsLibrary({ rows, sort, group, onSort, onGroup, onOpen, onSh
             <Bot className="size-3.5" aria-hidden />
             Give to crew
           </Button>
+          {onLifecycle &&
+            (selectedRows.every(isArchived) ? (
+              <Button size="sm" variant="ghost" className="text-background hover:bg-background/15 hover:text-background" onClick={() => onLifecycle(selectedRows, "restore")}>
+                <ArchiveRestore className="size-3.5" aria-hidden />
+                Restore
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" className="text-background hover:bg-background/15 hover:text-background" onClick={() => onLifecycle(selectedRows, "archive")}>
+                <Archive className="size-3.5" aria-hidden />
+                Archive
+              </Button>
+            ))}
           <Button size="icon-sm" variant="ghost" aria-label="Clear selection" className="text-background hover:bg-background/15 hover:text-background" onClick={() => setSel(new Set())}>
             <X className="size-3.5" />
           </Button>
