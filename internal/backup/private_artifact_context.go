@@ -11,11 +11,20 @@ const privateArtifactMarker = "private_artifact_author_user_id"
 // Old artifact-era bundles excluded runtime consents. Without the retained
 // classification even an unsuccessful creation cannot be distinguished from
 // an ordinary chat. Refuse before any restore hook or data mutation.
-func validatePrivateArtifactContextDump(dump *DBDump) error {
+func validatePrivateArtifactContextDump(dump *DBDump, sourceVersions []int) error {
 	if dump == nil {
 		return nil
 	}
-	if _, artifactEra := dump.Tables["document_creations"]; !artifactEra {
+	_, artifactEra := dump.Tables["document_creations"]
+	// Crew scope intentionally omits the creation tables. Its source registry
+	// still proves whether creation consent existed; absent metadata is unknown,
+	// not evidence that historical transcripts were ordinary.
+	for _, version := range sourceVersions {
+		if version >= 20261018074721 { // shipped document_creation_consents
+			artifactEra = true
+		}
+	}
+	if !artifactEra && len(sourceVersions) > 0 {
 		return nil
 	}
 	for _, row := range dump.Tables["chats"] {

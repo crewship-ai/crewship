@@ -40,6 +40,9 @@ data or fencing existing services; upgrade the source and create a fresh bundle.
 This also applies to dry-run validation. Instance recovery must complete the
 privacy backfill with the original vault key before discarding runtime consents.
 Retaining this classification never restores permission to execute a run.
+Crew bundles without the classification also require source migration evidence
+that they predate Document creation; missing evidence is refused, not inferred
+from omitted tables. Protected bundles require a migrated target schema.
 
 ## Key concepts
 

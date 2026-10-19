@@ -446,7 +446,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Apply the same pure privacy preflight before dry-run success or any
 	// replacement service fence can mutate the current installation.
 	if !opts.FilesOnly {
-		if err := validatePrivateArtifactContextDump(extracted.DBDump); err != nil {
+		if err := validatePrivateArtifactContextDump(extracted.DBDump, manifest.SchemaMigrationVersions); err != nil {
 			return nil, err
 		}
 		if err := validatePrivateArtifactContextTarget(ctx, db, extracted.DBDump); err != nil {
