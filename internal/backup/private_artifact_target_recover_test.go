@@ -45,7 +45,8 @@ func TestPrivateArtifactTargetForceRecover(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer target.Close()
-			assertReplacementOutcome(t, target.DB, logPath, before, kind, recoverErr)
+			// Physical recovery replaces SQL with the archived one-message snapshot.
+			assertReplacementOutcome(t, target.DB, logPath, before, kind, 1, recoverErr)
 		})
 	}
 }

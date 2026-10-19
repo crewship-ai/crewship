@@ -42,7 +42,8 @@ func TestPrivateArtifactTargetWorkspaceReplace(t *testing.T) {
 				Path: bundle.Path, Identities: []age.Identity{f.identity}, Replace: true,
 				Actor: backup.Actor{UserID: "u_admin", Role: "OWNER"}, ConversationRoot: f.paths.Output,
 			})
-			assertReplacementOutcome(t, f.db, logPath, before, kind, err)
+			// Workspace restore reconciles the retained newer transcript into SQL.
+			assertReplacementOutcome(t, f.db, logPath, before, kind, 2, err)
 		})
 	}
 }
@@ -83,7 +84,7 @@ func advanceReplacementTarget(t *testing.T, db *sql.DB, output, logs, kind strin
 		replacementExec(t, db, `INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,created_at) VALUES('replace-original','ws_e2e_1','u_admin','replace-chat','replace-submission','2026-10-19T00:00:00Z')`)
 		if kind == "created" {
 			seedBackupDocument(t, db, "ws_e2e_1", "replace-document", "u_admin")
-			replacementExec(t, db, `UPDATE pages SET private_audience=1,owner_user_id='user/u_admin' WHERE id='replace-document'`)
+			replacementExec(t, db, `UPDATE pages SET private_audience=1 WHERE id='replace-document'`)
 			replacementExec(t, db, `INSERT INTO document_creations(page_id,workspace_id,run_id,agent_id,human_user_id,source_chat_id,submission_id,mutation_id,request_digest,created_at) VALUES('replace-document','ws_e2e_1','replace-run','a_alice','u_admin','replace-chat','replace-submission','replace-mutation',?,'2026-10-19T00:00:00Z')`, strings.Repeat("a", 64))
 		}
 	}
@@ -109,7 +110,7 @@ func advanceReplacementTarget(t *testing.T, db *sql.DB, output, logs, kind strin
 	return path, raw
 }
 
-func assertReplacementOutcome(t *testing.T, db *sql.DB, logPath string, before []byte, kind string, restoreErr error) {
+func assertReplacementOutcome(t *testing.T, db *sql.DB, logPath string, before []byte, kind string, ordinaryMessages int, restoreErr error) {
 	t.Helper()
 	protected := kind != "ordinary"
 	if protected {
@@ -128,7 +129,7 @@ func assertReplacementOutcome(t *testing.T, db *sql.DB, logPath string, before [
 	if protected && (name != "newer target state" || !marker.Valid || marker.String != "u_admin" || messages != 2) {
 		t.Errorf("protected target changed: sentinel=%v marker=%v messages=%d", name == "newer target state", marker, messages)
 	}
-	if !protected && (name != "E2E Workspace" || marker.Valid || messages != 1) {
+	if !protected && (name != "E2E Workspace" || marker.Valid || messages != ordinaryMessages) {
 		t.Errorf("ordinary snapshot not restored: name=%q sealed=%v messages=%d", name, marker.Valid, messages)
 	}
 	after, err := os.ReadFile(logPath)
