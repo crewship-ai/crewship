@@ -56,6 +56,7 @@ type Config struct {
 	License   LicenseConfig   `yaml:"license"`
 	Composio  ComposioConfig  `yaml:"composio"`
 	Documents DocumentsConfig `yaml:"documents"`
+	Slides    SlidesConfig    `yaml:"slides"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -521,6 +522,9 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
+		cfg.Slides.Enabled = v == "true" || v == "1"
+	}
 	for name, target := range map[string]*int{
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
 		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,

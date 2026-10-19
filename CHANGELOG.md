@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Read saved schema-1 native Slides through the API and CLI behind an explicit default-off server switch, retaining current private access and required OWNER audits.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.

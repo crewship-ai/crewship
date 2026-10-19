@@ -334,6 +334,9 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range workflowRequestComponents {
 		schemas[name] = schema
 	}
+	for name, schema := range slidesSchemaComponents() {
+		schemas[name] = schema
+	}
 	for name, schema := range documentSchemaComponents() {
 		schemas[name] = schema
 	}
@@ -646,6 +649,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range routineTrustSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range slidesSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range documentSchemaCatalog() {

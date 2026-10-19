@@ -2424,3 +2424,27 @@ hidden count. Results contain no document contents, transcript or execution
 credentials. A missing or inaccessible chat returns 404; invalid credentials
 return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
+
+
+## Read saved native Slides
+
+`GET /api/v1/pages/{slug}/slides`
+
+Available only when the server enables `slides.enabled` or
+`CREWSHIP_SLIDES_ENABLED=true` (also `1`). The default is disabled; this switch
+requires no document engine, socket or service credential. A disabled instance
+does not install this route. A slug or immutable `@PageID` identifies the Page in
+the selected workspace.
+
+Authentication: current human session or CLI credential, current Page read
+permission, and `pages:read` for scoped CLI credentials. Agent/internal contexts
+are refused. The closed response contains `page_id`, `schema_version: 1`,
+`revision`, `order_version`, `content_hash` and `deck`. Other saved schemas return
+a content-free 409; this read does not upgrade or mutate them. Private audiences
+retain the custodian/OWNER boundary and required foreign-OWNER audit.
+
+Statuses: 200 confirmed native deck; 400 missing workspace; 401 invalid/revoked
+credential; 403 human-only or missing scope; 404 unavailable Page/Slides;
+409 unsupported schema; 500 required audit failure; 503 persistence unavailable.
+Installed route responses, including errors, use `Cache-Control: no-store`.
+CLI: `crewship slide read`.

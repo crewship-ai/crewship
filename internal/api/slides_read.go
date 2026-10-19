@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -20,12 +21,19 @@ type SlidesReadResponse struct {
 }
 
 type slidesHumanRead struct {
-	pages *PageHandler
-	store *slides.Store
+	pages    *PageHandler
+	store    *slides.Store
+	registry *artifacts.Registry
 }
 
 var errSlidesHumanOnly = errors.New("human Slides reader required")
 var errSlidesCredential = errors.New("current human credential required")
+
+// WithSlidesRead installs native Slides reads only when trusted server config
+// opts in. The reader still checks the original human authority on every read.
+func WithSlidesRead(enabled bool) RouterOption {
+	return func(r *Router) { r.slidesEnabled = enabled }
+}
 
 // Availability is supplied by trusted server configuration, never by a request.
 // The caller must opt in explicitly; no request can activate this route.
@@ -37,6 +45,7 @@ func (r *Router) registerSlidesReadRoutes(enabled bool) {
 	if r.db != nil {
 		h.store = slides.New(r.db, slides.Options{})
 	}
+	h.registry = artifacts.NewRegistry(artifacts.EnabledTypes{"slides": enabled}, nil, artifacts.WithSlidesAdapter(artifacts.NewSlidesAdapter(h.store, enabled)))
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// openapi: responses 200,401,403,404,409,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides", slidesReadHeaders(authed(wsCtx(http.HandlerFunc(h.read)))))
@@ -141,7 +150,12 @@ func (h *slidesHumanRead) read(w http.ResponseWriter, r *http.Request) {
 		admitted = &snapshot
 		return "user:" + UserFromContext(ctx).ID, nil
 	}
-	state, err := h.store.Read(r.Context(), key, 0, authorize)
+	operations, installed := h.registry.Slides()
+	if !installed {
+		replyError(w, 503, "Slides persistence unavailable")
+		return
+	}
+	state, err := operations.Read(r.Context(), key, authorize)
 	// Store may populate a candidate state before its final authorization fails.
 	// No candidate, metadata or bytes may be published on any error.
 	if err != nil {
@@ -173,7 +187,7 @@ func slidesHumanReadError(w http.ResponseWriter, err error) {
 		replyError(w, 401, "current human credential required")
 	case errors.Is(err, sql.ErrNoRows), errors.Is(err, slides.ErrNotFound):
 		replyError(w, 404, "Slides not found")
-	case errors.Is(err, slides.ErrSchema):
+	case errors.Is(err, slides.ErrSchema), errors.Is(err, artifacts.ErrUnsupported):
 		replyError(w, 409, "unsupported Slides schema")
 	default:
 		replyError(w, 503, "Slides read unavailable")

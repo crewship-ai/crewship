@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -52,6 +53,15 @@ var responseShapeContracts = []struct {
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "SlidesRead", pointer: "/components/schemas/SlidesRead", value: SlidesReadResponse{}},
+	{name: "SlidesDeck", pointer: "/components/schemas/SlidesRead/properties/deck", value: slides.Deck{}},
+	{name: "SlidesTheme", pointer: "/components/schemas/SlidesRead/properties/deck/properties/theme", value: slides.Theme{}},
+	{name: "SlidesSlide", pointer: "/components/schemas/SlidesRead/properties/deck/properties/slides/items", value: slides.Slide{}},
+	{name: "SlidesElement", pointer: "/components/schemas/SlidesRead/properties/deck/properties/slides/items/properties/elements/items", value: slides.Element{}},
+	{name: "SlidesText", pointer: "/components/schemas/SlidesRead/properties/deck/properties/slides/items/properties/elements/items/properties/text", value: slides.Text{}},
+	{name: "SlidesShape", pointer: "/components/schemas/SlidesRead/properties/deck/properties/slides/items/properties/elements/items/properties/shape", value: slides.Shape{}},
+	{name: "SlidesTable", pointer: "/components/schemas/SlidesRead/properties/deck/properties/slides/items/properties/elements/items/properties/table", value: slides.Table{}},
+
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
 	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},

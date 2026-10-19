@@ -338,6 +338,7 @@
               "cli/routine",
               "cli/page",
               "cli/doc",
+              "cli/slide",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",

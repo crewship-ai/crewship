@@ -1,0 +1,28 @@
+---
+title: "Slides Commands"
+description: "Read the current saved native presentation with current Page permissions."
+icon: "presentation"
+stability: experimental
+tag: Experimental
+---
+
+# crewship slide
+
+## `crewship slide read <slug|@ID>`
+
+Read an existing native presentation in the selected workspace. Use an immutable
+Page reference such as `@page-id` to keep following the same presentation after
+its address changes. The response includes `page_id`, `schema_version`,
+`revision`, `order_version`, `content_hash` and the saved `deck`.
+
+The instance must enable native Slides reads. A current human session or CLI
+credential needs current Page access; scoped CLI credentials also need
+`pages:read`. Agent and internal credentials cannot use this human read path.
+Private presentations are visible only to their human custodian and workspace
+OWNER. An OWNER reading another person's private presentation is audited before
+content is returned. Other workspace roles receive 404 without private content.
+
+This reader supports schema 1. Image-bearing schema 2 and unknown versions return
+a conflict without their deck or hash. Confirmed data remains unchanged. The
+command reads saved state only; it creates no Page, presentation or editing
+permission. Output is JSON by default and honors the standard `--format` option.

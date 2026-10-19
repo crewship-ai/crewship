@@ -1041,6 +1041,7 @@ func (s *Server) mountAPIRouter(
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
+	opts = append(opts, goapi.WithSlidesRead(cfg.Slides.Enabled))
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)

@@ -62,6 +62,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	slidesEnabled          bool
 	documentsServiceSocket string
 	documentsClient        *http.Client
 	documentsSocket        string
