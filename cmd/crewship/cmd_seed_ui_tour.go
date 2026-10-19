@@ -106,8 +106,8 @@ func tourListBySlug(client *cli.Client, path string) (map[string]string, error) 
 		return nil, err
 	}
 	var items []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return nil, err
@@ -168,9 +168,9 @@ func seedTourRoutines(ctx context.Context, client *cli.Client, wsID string, crew
 		return nil, fmt.Errorf("list schedules: %w", err)
 	}
 	var existing []struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		TargetSlug string `json:"target_pipeline_slug"`
+		ID         string `json:"id" yaml:"id"`
+		Name       string `json:"name" yaml:"name"`
+		TargetSlug string `json:"target_pipeline_slug" yaml:"target_pipeline_slug"`
 	}
 	if err := cli.ReadJSON(resp, &existing); err != nil {
 		return nil, fmt.Errorf("list schedules: %w", err)
@@ -235,7 +235,7 @@ func seedTourRoutines(ctx context.Context, client *cli.Client, wsID string, crew
 			body["inputs"] = r.Schedule.Inputs
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if _, err := tourPost(client, base+"/pipeline-schedules", body, &created); err != nil {
 			return nil, fmt.Errorf("schedule for %s: %w", r.Slug, err)
@@ -257,7 +257,7 @@ func seedTourTag(client *cli.Client, routinePath, tag string) (bool, error) {
 		return false, err
 	}
 	var routine struct {
-		Tags []string `json:"tags"`
+		Tags []string `json:"tags" yaml:"tags"`
 	}
 	if err := cli.ReadJSON(resp, &routine); err != nil {
 		return false, err
@@ -276,7 +276,7 @@ func seedTourTag(client *cli.Client, routinePath, tag string) (bool, error) {
 		return false, err
 	}
 	var after struct {
-		Tags []string `json:"tags"`
+		Tags []string `json:"tags" yaml:"tags"`
 	}
 	_ = cli.ReadJSON(put, &after)
 	// The routine read may not carry tags; only count a tag the PUT reports
@@ -301,7 +301,7 @@ func seedTourFolders(ctx context.Context, client *cli.Client, wsID string, stats
 			continue
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		status, err := tourPost(client, base+"/pipeline-folders", map[string]any{"name": f.Name, "color": f.Color}, &created)
 		if err != nil {
@@ -330,8 +330,8 @@ func seedTourFolders(ctx context.Context, client *cli.Client, wsID string, stats
 		return fmt.Errorf("list routines: %w", err)
 	}
 	var routines []struct {
-		Slug     string `json:"slug"`
-		FolderID string `json:"folder_id"`
+		Slug     string `json:"slug" yaml:"slug"`
+		FolderID string `json:"folder_id" yaml:"folder_id"`
 	}
 	if err := cli.ReadJSON(resp, &routines); err != nil {
 		return fmt.Errorf("list routines: %w", err)
@@ -371,8 +371,8 @@ func tourFolderIDs(client *cli.Client, base string) (map[string]string, error) {
 		return nil, err
 	}
 	var folders []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &folders); err != nil {
 		return nil, err
@@ -385,10 +385,10 @@ func tourFolderIDs(client *cli.Client, base string) (map[string]string, error) {
 }
 
 type tourRunResult struct {
-	RunID          string `json:"run_id"`
-	Status         string `json:"status"`
-	ErrorMessage   string `json:"error_message"`
-	WaitpointToken string `json:"waitpoint_token"`
+	RunID          string `json:"run_id" yaml:"run_id"`
+	Status         string `json:"status" yaml:"status"`
+	ErrorMessage   string `json:"error_message" yaml:"error_message"`
+	WaitpointToken string `json:"waitpoint_token" yaml:"waitpoint_token"`
 }
 
 // seedTourRuns plays each routine's history once: a routine that already has
@@ -410,7 +410,7 @@ func seedTourRuns(ctx context.Context, client *cli.Client, wsID string, schedule
 			return fmt.Errorf("history of %s: %w", r.Slug, err)
 		}
 		var prior []struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &prior); err != nil {
 			return fmt.Errorf("history of %s: %w", r.Slug, err)
@@ -480,8 +480,8 @@ func seedTourRun(client *cli.Client, base string, r seeddata.TourRoutine, run se
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		var rec struct {
-			Status       string `json:"status"`
-			ErrorMessage string `json:"error_message"`
+			Status       string `json:"status" yaml:"status"`
+			ErrorMessage string `json:"error_message" yaml:"error_message"`
 		}
 		resp, err := client.Get(base + "/pipeline-runs/" + url.PathEscape(res.RunID))
 		if err != nil {
@@ -516,7 +516,7 @@ func seedTourIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs m
 		}
 		if id == "" {
 			var created struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			if _, err := tourPost(client, "/api/v1/labels", l, &created); err != nil {
 				return fmt.Errorf("label %s: %w", l.Name, err)
@@ -540,7 +540,7 @@ func seedTourIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs m
 		}
 		if id == "" {
 			var created struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			status, err := tourPost(client, "/api/v1/projects", map[string]any{
 				"name": p.Name, "color": p.Color, "icon": p.Icon, "status": p.Status, "priority": p.Priority,
@@ -578,8 +578,8 @@ func seedTourIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs m
 			body["project_id"] = pid
 		}
 		var created struct {
-			ID         string  `json:"id"`
-			Identifier *string `json:"identifier"`
+			ID         string  `json:"id" yaml:"id"`
+			Identifier *string `json:"identifier" yaml:"identifier"`
 		}
 		issuesPath := "/api/v1/crews/" + url.PathEscape(crewID) + "/issues"
 		if _, err := tourPost(client, issuesPath, body, &created); err != nil {
@@ -631,8 +631,8 @@ func tourFindByName(client *cli.Client, path, name string) (string, error) {
 		return "", err
 	}
 	var items []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return "", err
