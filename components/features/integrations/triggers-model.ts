@@ -4,8 +4,10 @@
 //   agent    an agent's webhook secret (/webhooks/{crew}/{agent}/trigger)
 //   page     page webhooks — tokens per page, read per page
 //
-// A count of calls exists only for routine triggers (fire_count / receipts);
-// agent and page triggers show "—" rather than a zero they do not know.
+// A count of calls exists for routine triggers (fire_count / receipts) and for
+// agent triggers (the webhook delivery ledger, once its summary has loaded).
+// Page triggers write neither, so they say "calls not counted" rather than a
+// zero they do not know.
 
 import type { IncomingEndpoint, IncomingKind, IncomingTarget } from "./incoming-model"
 
@@ -20,7 +22,7 @@ export interface TriggerRow {
   checks: string
   enabled: boolean
   failing: boolean
-  /** Routine triggers only; null = not counted for this source. */
+  /** Routine and agent triggers; null = not counted for this source. */
   calls: number | null
   last: string | null
   endpoint?: IncomingEndpoint
@@ -38,7 +40,12 @@ export function checksLabel(e: IncomingEndpoint): string {
   return "Crewship signature"
 }
 
-export function triggerRows(endpoints: IncomingEndpoint[], pages: { target: IncomingTarget; hooks: PageWebhookLite[] }[] = []): TriggerRow[] {
+export function triggerRows(
+  endpoints: IncomingEndpoint[],
+  pages: { target: IncomingTarget; hooks: PageWebhookLite[] }[] = [],
+  /** Calls per agent id from the delivery ledger; undefined until it has loaded. */
+  agentCalls?: ReadonlyMap<string, number>,
+): TriggerRow[] {
   const rows: TriggerRow[] = endpoints.map((e) => ({
     id: e.id,
     name: e.name,
@@ -47,7 +54,7 @@ export function triggerRows(endpoints: IncomingEndpoint[], pages: { target: Inco
     checks: checksLabel(e),
     enabled: e.enabled,
     failing: e.routine?.last_status === "FAILED",
-    calls: e.routine ? e.routine.fire_count : null,
+    calls: e.routine ? e.routine.fire_count : e.target.kind === "agent" && agentCalls ? (agentCalls.get(e.target.id) ?? 0) : null,
     last: e.last ?? null,
     endpoint: e,
   }))

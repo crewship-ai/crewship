@@ -29,6 +29,15 @@ describe("triggerRows", () => {
     expect(c).toEqual({ total: 4, calls: 49, countedSources: 2, failing: 1, off: 1 })
   })
 
+  it("counts an agent trigger's calls from the delivery ledger once it has loaded (ODCH-INT-06)", () => {
+    const withLedger = triggerRows(endpoints, [], new Map([["a1", 12]]))
+    expect(withLedger.find((r) => r.kind === "agent")!.calls).toBe(12)
+    // Loaded, but the agent was never called: a real zero, not "not counted".
+    expect(triggerRows(endpoints, [], new Map()).find((r) => r.kind === "agent")!.calls).toBe(0)
+    // Routine triggers keep their own counter either way.
+    expect(withLedger.find((r) => r.id === "w1")!.calls).toBe(46)
+  })
+
   it("filters by view, Starts, target and checks", () => {
     const rows = triggerRows(endpoints)
     const f = { view: "all" as const, starts: null, target: null, checks: null, search: "" }

@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -370,6 +371,15 @@ func TestAcceptance_WorkDeliveries_AuditWithoutPublishingThePayload(t *testing.T
 	}
 	if strings.Contains(getOut, workAcceptanceWebhookSecret) {
 		t.Fatalf("the delivery detail printed the raw payload:\n%s", getOut)
+	}
+
+	// ODCH-INT-06: calls per trigger, counted by the server.
+	summaryOut, err := runWorkCLI(t, cfgPath, "work", "deliveries", "summary")
+	if err != nil {
+		t.Fatalf("work deliveries summary failed: %v\n%s", err, summaryOut)
+	}
+	if !regexp.MustCompile(`ep-acc\s+agent\s+3\s+2\s+1`).MatchString(summaryOut) {
+		t.Fatalf("the summary must count ep-acc's 3 calls (2 accepted, 1 ignored):\n%s", summaryOut)
 	}
 
 	expiredOut, err := runWorkCLI(t, cfgPath, "work", "deliveries", "get", "dlv-expired-01")

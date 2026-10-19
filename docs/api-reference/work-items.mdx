@@ -155,6 +155,7 @@ Check `raw_body_available` on the delivery before offering a replay control.
 | Method | Path | Auth | Request | Response | Status |
 |---|---|---|---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries` | member (`read`) | No body; optional `?endpoint_id=`, `?source_delivery_id=`, `?decision=`, `?event_type=`, `?since=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries/summary` | member (`read`) | No body; optional `?since=` (RFC 3339) | `{ items[] }`, one per endpoint: `endpoint_id`, `endpoint_kind`, `calls`, `accepted`, `ignored`, `last_received_at` | `200`, `400`, `401`, `403`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}` | member (`read`) | No body | One delivery record | `200`, `400`, `401`, `403`, `404`, `500` |
 
 Every inbound webhook is recorded before anything is dispatched, including the
