@@ -52,16 +52,58 @@ const buttonVariants = cva(
   }
 )
 
+/**
+ * `tap` (phone pilot, MOBIL-DOPORUCENI 2a): a compact control that is a real
+ * 44 × 44 px button on any coarse pointer — phone, tablet, touch laptop — with
+ * the variant drawn on a smaller inner (32 px). The button box itself is the
+ * target, so neighbours keep 44 px each in the layout and cannot overlap, which
+ * an invisible ::after ring can (and a parent's overflow can clip). A fine
+ * pointer gets the inner's own size: nothing changes on a desktop.
+ * Not for `asChild`: the inner is a span inside the button.
+ */
+const TAP_OUTER =
+  "group/tap relative inline-flex shrink-0 items-center justify-center rounded-md outline-none disabled:pointer-events-none coarse:min-h-[44px] coarse:min-w-[44px] focus-visible:[&>[data-slot=button-inner]]:ring-[3px] focus-visible:[&>[data-slot=button-inner]]:ring-ring/50"
+const ICON_SIZES = new Set(["icon", "icon-xs", "icon-sm", "icon-lg"])
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  tap = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    tap?: boolean
   }) {
+  if (tap && !asChild) {
+    const icon = ICON_SIZES.has(size ?? "default")
+    return (
+      <button
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        data-tap=""
+        className={TAP_OUTER}
+        {...props}
+      >
+        <span
+          data-slot="button-inner"
+          className={cn(
+            buttonVariants({ variant, size }),
+            "group-disabled/tap:opacity-50",
+            icon ? "coarse:size-8" : "coarse:h-8",
+            className,
+          )}
+        >
+          {children}
+        </span>
+      </button>
+    )
+  }
+
   const Comp = asChild ? Slot.Root : "button"
 
   return (
@@ -71,7 +113,9 @@ function Button({
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {children}
+    </Comp>
   )
 }
 

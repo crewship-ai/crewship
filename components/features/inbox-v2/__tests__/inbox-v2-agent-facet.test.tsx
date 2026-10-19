@@ -136,7 +136,8 @@ describe("the Agent facet in the panel", () => {
     const onFilters = show({ agent: "ag_1" }, { visible: [] })
     expect(screen.getByRole("button", { name: "Remove filter Agent: unknown" })).toBeInTheDocument()
     expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    // The empty list's own Clear filters (the chip row above has one too).
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!)
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ agent: null }))
   })
 

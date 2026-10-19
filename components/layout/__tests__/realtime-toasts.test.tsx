@@ -16,6 +16,8 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-current" }),
 }))
 const toastError = vi.fn()
+// The routine's name is read from the server; these tests use the slug's words.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: async () => ({ ok: false, json: async () => ({}) }) }))
 vi.mock("sonner", () => ({
   toast: { error: (...a: unknown[]) => toastError(...a), warning: vi.fn(), success: vi.fn() },
 }))

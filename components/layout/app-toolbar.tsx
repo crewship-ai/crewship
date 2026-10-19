@@ -6,6 +6,7 @@ import Link from "next/link"
 import { ChevronRight, PanelLeft, Search } from "lucide-react"
 
 import { areaOf } from "@/lib/nav-sections"
+import { SAIL_PATH } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -55,6 +56,26 @@ import { MobileMoreSheet } from "./mobile-more-sheet"
 // The agent detail surface is now /crews?agent=<slug> on the /crews canvas,
 // which carries its own sub-bar, and the one deep page that still needs a way
 // back — chat — has the breadcrumb below pointing exactly there.
+/**
+ * Phone pilot (MOBIL-DOPORUCENI 2a, PILOT-TELEFON-STAV row 1): a phone list
+ * header starts with the Crewship sail, not the area tile. Only the pilot
+ * areas for now; the rest follow once the pilot has been evaluated.
+ */
+const SAIL_AREAS = ["/inbox", "/settings"]
+function pilotSail(pathname: string): boolean {
+  return SAIL_AREAS.some((a) => pathname === a || pathname.startsWith(`${a}/`))
+}
+
+function PhoneSail() {
+  return (
+    <span data-slot="area-sail" aria-hidden className="grid size-7 shrink-0 place-items-center text-primary">
+      <svg viewBox="0 0 1024 1024" className="size-[22px]" fill="currentColor">
+        <g transform="translate(194.6 234.9) scale(0.79360 0.79360)"><path d={SAIL_PATH} /></g>
+      </svg>
+    </span>
+  )
+}
+
 export function AppToolbar() {
   const pathname = usePathname()
   // Inbox and runs are not on the restricted allowlist: their bells are not
@@ -151,7 +172,7 @@ export function AppToolbar() {
       <div className="flex items-center gap-1.5 min-w-0" data-slot="area-crumb">
         {area ? (
           <>
-            <span className="area-tile" aria-hidden><area.icon /></span>
+            {isMobile && pilotSail(pathname) ? <PhoneSail /> : <span className="area-tile" aria-hidden><area.icon /></span>}
             {breadcrumbs.length > 0 ? (
               <Link href={area.href} className="truncate text-sm text-muted-foreground transition-colors hover:text-foreground">{area.title}</Link>
             ) : (

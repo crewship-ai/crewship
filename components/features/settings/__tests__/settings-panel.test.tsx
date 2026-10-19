@@ -6,10 +6,10 @@ import { render, screen, cleanup, fireEvent, act, within, waitFor } from "@testi
 // sheet on a phone (it used to be a hand-made 280 px aside and a left Sheet
 // behind a hamburger on the sub-bar).
 
-const h = vi.hoisted(() => ({ mobile: false }))
+const h = vi.hoisted(() => ({ mobile: false, push: vi.fn(), replace: vi.fn() }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ replace: h.replace, push: h.push, prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(window.location.search),
   usePathname: () => "/settings",
 }))
@@ -49,6 +49,9 @@ let store: Map<string, string>
 beforeEach(() => {
   cleanup()
   h.mobile = false
+  h.push.mockReset()
+  h.replace.mockReset()
+  sessionStorage.clear()
   store = new Map()
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
@@ -101,7 +104,8 @@ describe("Settings navigation panel", () => {
     const sheet = screen.getByRole("dialog", { name: "Settings navigation" })
     fireEvent.click(within(sheet).getByRole("button", { name: "General" }))
     await waitFor(() => expect(useAppStore.getState().secondaryPanelOpen).toBe(false))
-    expect(new URLSearchParams(window.location.search).get("tab")).toBe("general")
+    // Phone pilot: a section is a history entry of its own (the browser's Back returns).
+    expect(h.push).toHaveBeenCalledWith("/settings?tab=general")
   })
 })
 
@@ -124,12 +128,14 @@ describe("Settings on a phone: list → section → back (PNL-05)", () => {
     render(<SettingsLayout />)
     fireEvent.click(await screen.findByRole("button", { name: "General" }))
     expect(await screen.findByTestId("general-section")).toBeInTheDocument()
-    expect(new URLSearchParams(window.location.search).get("tab")).toBe("general")
+    // Phone pilot: a section is a history entry of its own (the browser's Back returns).
+    expect(h.push).toHaveBeenCalledWith("/settings?tab=general")
 
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }))
     await waitFor(() => expect(screen.queryByTestId("general-section")).toBeNull())
     expect(screen.getByRole("button", { name: "Profile" })).toBeInTheDocument()
-    expect(new URLSearchParams(window.location.search).has("tab")).toBe(false)
+    // The (mocked) router never moved to the section, so Back lands on the list address.
+    expect(h.replace).toHaveBeenCalledWith("/settings")
   })
 })
 

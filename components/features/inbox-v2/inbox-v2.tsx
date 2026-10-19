@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
-import { Activity, Archive, ArrowLeft, Check, ChevronDown, ChevronUp, Inbox, ShieldX, X } from "lucide-react"
+import { Activity, Archive, Check, ChevronDown, ChevronUp, Inbox, ShieldX, X } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
@@ -15,7 +15,9 @@ import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-stat
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
-import { SubBar } from "@/components/layout/sub-bar"
+import { SubBar, SubBarBack } from "@/components/layout/sub-bar"
+import { MenuSheetItem } from "@/components/ui/menu-sheet"
+import { usePhoneListDetail } from "@/hooks/use-phone-list-detail"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxCounts, useInboxItem } from "@/hooks/use-inbox"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
@@ -31,7 +33,7 @@ import { cn } from "@/lib/utils"
 
 import {
   approvalEntry, EMPTY_INBOX_V2_FILTERS, endOfLocalDay, entryKindPill, facetCounts, serverFacetCounts, INBOX_SORTS, INBOX_V2_TYPES,
-  groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
+  entryTitle, groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
   type InboxSort, type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { requestedAgentOf, useInboxV2DeepLink } from "./inbox-v2-deeplink"
@@ -42,6 +44,12 @@ import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
 import type { InboxRoutineRef, InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
+
+/** What the list keeps while a detail is open, per workspace (phone pilot). */
+interface InboxListState {
+  filters?: Partial<InboxV2Filters>
+  view?: InboxV2View | null
+}
 
 export function InboxV2() {
   const { workspaceId, role } = useWorkspace()
@@ -64,7 +72,12 @@ export function InboxV2() {
   // the URL after mount.
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
-  const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch, agent: requestedAgent })
+  const [filters, setFilters] = useState<InboxV2Filters>({
+    ...EMPTY_INBOX_V2_FILTERS,
+    search: requestedSearch,
+    agent: requestedAgent,
+    type: INBOX_V2_TYPES.find((entry) => entry.key === requestedKind)?.key ?? null,
+  })
   const isMobile = useIsMobile()
   const wide = useWideDetail()
   const [railSlot, setRailSlot] = useState<HTMLElement | null>(null)
@@ -81,6 +94,14 @@ export function InboxV2() {
   const live = wsStatus === "connected"
 
   useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters, requestedAgent)
+
+  // List → detail → Back (phone pilot): where Back goes from a direct link,
+  // and the list's state and scroll while a detail is open, per workspace.
+  const listQuery = new URLSearchParams(params?.toString())
+  listQuery.delete("item")
+  const listHref = listQuery.size ? `/inbox?${listQuery.toString()}` : "/inbox"
+  const phone = usePhoneListDetail<InboxListState>({ area: "inbox", workspaceId, listHref })
+  const listScroller = useRef<HTMLDivElement | null>(null)
 
   // B10 (#2364): ONE `state=all` fetch instead of two (`active` + `resolved`
   // used to each hit GET /api/v1/inbox separately, for the same workspace,
@@ -251,10 +272,20 @@ export function InboxV2() {
     () => attention ? null : serverFacetCounts(facetServerCounts, view, facetCounts(currentEntries.filter((entry) => entry.source !== "inbox" && entry.source !== "group"))),
     [attention, facetServerCounts, view, currentEntries],
   )
+  // The URL's view and kind follow later navigations; the first render
+  // already started from them (and a remembered list may have its own).
+  const appliedView = useRef<string | null | undefined>(undefined)
   useEffect(() => {
+    const first = appliedView.current === undefined
+    if (!first && appliedView.current === requestedView) return
+    appliedView.current = requestedView
+    if (first && !requestedView) return
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
+  const appliedKind = useRef(requestedKind)
   useEffect(() => {
+    if (appliedKind.current === requestedKind) return
+    appliedKind.current = requestedKind
     const type = INBOX_V2_TYPES.find((entry) => entry.key === requestedKind)?.key ?? null
     setFilters((current) => ({ ...current, type }))
   }, [requestedKind])
@@ -264,6 +295,52 @@ export function InboxV2() {
       detailRef.current.focus({ preventScroll: true })
     }
   }, [selectedKey])
+  // The list comes back as it was left — after a detail, a reload — and a
+  // workspace switch starts clean: one workspace's search and filters never
+  // show in another. A plain entry into the Inbox opens its default.
+  const listWorkspace = useRef<string | null>(null)
+  const pendingRestore = useRef<InboxV2Filters | null>(null)
+  useEffect(() => {
+    if (!workspaceId) return
+    const previous = listWorkspace.current
+    listWorkspace.current = workspaceId
+    if (previous === null) {
+      const stored = phone.returning() ? phone.readList() : null
+      if (stored?.filters) {
+        const restored: InboxV2Filters = {
+          ...filters,
+          ...stored.filters,
+          // What the link itself names wins over what was remembered.
+          ...(requestedSearch ? { search: requestedSearch } : {}),
+          ...(requestedAgent ? { agent: requestedAgent } : {}),
+        }
+        // Until this renders, the filters on screen are the ones from before
+        // the restore: they must not be saved over it.
+        pendingRestore.current = restored
+        setFilters(restored)
+      }
+      if (stored?.view && !requestedView) setView(stored.view)
+      if (!requestedID) phone.settle()
+      return
+    }
+    if (previous !== workspaceId) {
+      setFilters({ ...EMPTY_INBOX_V2_FILTERS })
+      setView(null)
+      setSelectedKey(null)
+      setConfirmation(null)
+      setPhoneOverview(false)
+    }
+    // Only a workspace change re-runs this; the rest is read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId])
+  useEffect(() => {
+    if (pendingRestore.current) {
+      if (filters !== pendingRestore.current) return
+      pendingRestore.current = null
+    }
+    if (listWorkspace.current === workspaceId) phone.saveList({ filters, view: chosenView })
+  }, [phone, workspaceId, filters, chosenView])
+
   function showView(next: InboxV2View) {
     setView(next)
     setSelectedKey(null)
@@ -422,12 +499,15 @@ export function InboxV2() {
   )
 
   function openEntry(entry: InboxV2Entry) {
+    // The list's scroll, for when Back brings it back (phone: it unmounts).
+    if (!selectedKey) phone.rememberScroll(listScroller.current)
     setSelectedKey(entry.key)
     setConfirmation(null)
     setPhoneOverview(false)
     const query = new URLSearchParams(params?.toString())
     query.set("item", entry.inboxItem?.id || entry.approval?.id || entry.key)
-    router.push(`/inbox?${query.toString()}`)
+    // Phone: the next item replaces the open one, so Back still lands on the list.
+    phone.open(`/inbox?${query.toString()}`, { replace: isMobile && Boolean(selectedKey) })
     if (entry.source === "inbox" && entry.inboxItem?.state === "unread") {
       void active.patch(entry.inboxItem.id, "read").catch(() => {})
     }
@@ -556,26 +636,70 @@ export function InboxV2() {
   ) : undefined
 
   const phoneDetail = isMobile && (Boolean(selectedKey) || phoneOverview)
+  // Back on the list (phone): its scroll comes back once its rows are there.
+  // The list may mount more than once while it settles (a banner, a refresh),
+  // so for a moment each new scroller gets the position.
+  const wasDetail = useRef(phoneDetail)
+  useEffect(() => {
+    const returned = wasDetail.current && !phoneDetail
+    wasDetail.current = phoneDetail
+    if (!returned) return
+    const until = Date.now() + 1500
+    let frame = 0
+    let done: HTMLElement | null = null
+    const attempt = () => {
+      const el = listScroller.current
+      if (el && el !== done && phone.restoreScroll(el)) done = el
+      if (Date.now() < until) frame = requestAnimationFrame(attempt)
+    }
+    attempt()
+    return () => cancelAnimationFrame(frame)
+  }, [phone, phoneDetail])
   const firstLoad = !feedsSettled && allEntries.length === 0
   const inboxFailed = feedsSettled && allEntries.length === 0 && Boolean(active.error)
   const empty = feedsSettled && !sourceState.degraded && allEntries.length === 0
   const section = displayed
-    ? entryKindPill(displayed).label
+    // Phone pilot: the detail header names the item itself (two lines).
+    ? isMobile ? entryTitle(displayed) : entryKindPill(displayed).label
     : attention
       ? ATTENTION_LABELS[attention]
       : isMobile && !phoneOverview ? undefined : "Overview"
 
+  // Back to the list it came from — browser history when the list is under
+  // it, the area's list after a direct link; never out of the app.
   const back = (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-8 w-8"
-      aria-label="Back to inbox"
-      onClick={() => { if (selectedKey) closeEntry(); setPhoneOverview(false) }}
-    >
-      <ArrowLeft className="h-4 w-4" />
-    </Button>
+    <SubBarBack
+      label="Back to inbox"
+      onClick={() => {
+        if (selectedKey) {
+          // The list at once; the address follows (history or replace).
+          setSelectedKey(null)
+          setConfirmation(null)
+          phone.back()
+        }
+        setPhoneOverview(false)
+      }}
+    />
   )
+
+  // Phone (pilot): the detail's secondary actions behind ⋯ instead of four
+  // icons in a 48 px header; deciding stays in the content.
+  const phoneMenu = isMobile && displayed && !confirmation ? (
+    <>
+      <MenuSheetItem disabled={visible.length === 0} onSelect={() => step(-1)}>
+        <ChevronUp className="h-4 w-4" aria-hidden /> Previous{position >= 0 ? ` · ${position + 1} of ${visible.length}` : ""}
+      </MenuSheetItem>
+      <MenuSheetItem disabled={visible.length === 0} onSelect={() => step(1)}>
+        <ChevronDown className="h-4 w-4" aria-hidden /> Next
+      </MenuSheetItem>
+      <MenuSheetItem disabled={!canArchive} onSelect={() => void archiveCurrent()}>
+        <Archive className="h-4 w-4" aria-hidden /> {canArchive ? "Archive" : "Archive · decide first"}
+      </MenuSheetItem>
+      {menuItem && menuItem.state !== "resolved" && (
+        <MenuSheetItem onSelect={() => { void markUnread(inboxEntry(menuItem)) }}>Mark unread</MenuSheetItem>
+      )}
+    </>
+  ) : undefined
 
   const topActions = displayed && !confirmation ? (
     <span className="flex items-center gap-0.5" data-testid="inbox-item-nav">
@@ -625,7 +749,8 @@ export function InboxV2() {
         section={section}
         meta={live ? <StatusPill tone="success" live label="Live" className="ml-1 hidden sm:inline-flex" /> : undefined}
         leading={phoneDetail ? back : undefined}
-        actions={topActions}
+        actions={isMobile && displayed ? undefined : topActions}
+        menu={phoneMenu}
         ariaLabel="Inbox"
       />
       {sourceState.degraded && !inboxFailed && (
@@ -668,6 +793,9 @@ export function InboxV2() {
             onSort={setSort}
             lookup={lookup}
             loading={firstLoad}
+            error={inboxFailed ? active.error ?? "The inbox could not load" : null}
+            onRetry={() => void refreshAll()}
+            scrollRef={listScroller}
             picking={picking}
             picked={picked}
             onTogglePicking={togglePicking}

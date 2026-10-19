@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  Activity, ArrowLeft, Building, KeyRound, Link2, MonitorSmartphone, Palette, Settings as SettingsIcon, Shield, User, Volume2,
+  Activity, Building, KeyRound, Link2, MonitorSmartphone, Palette, Settings as SettingsIcon, Shield, User, Volume2,
   type LucideIcon,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -18,7 +18,8 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useRestrictedSurfaces } from "@/hooks/use-access-mode"
 import { OwnAccessCard } from "@/components/features/settings/own-access"
 import { apiFetch } from "@/lib/api-fetch"
-import { SubBar } from "@/components/layout/sub-bar"
+import { SubBar, SubBarBack } from "@/components/layout/sub-bar"
+import { usePhoneListDetail } from "@/hooks/use-phone-list-detail"
 import { useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
 import { NotificationSoundSettings } from "./sections/notification-sounds-section"
@@ -30,7 +31,7 @@ import { GeneralSection } from "./sections/general-section"
 import { useFocusSettingsCard } from "./use-focus-settings-card"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { SectionMoved } from "./sections/section-moved"
-import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface Org {
   id: string
@@ -221,10 +222,27 @@ function SettingsPage() {
   // side and never look at this.
   const isMobile = useIsMobile()
   const [phoneDetail, setPhoneDetail] = useState(() => new URLSearchParams(search).has("tab"))
+  // The address decides on a phone: a section's ?tab= opens it, and losing it
+  // (the browser's Back to /settings) is the list again.
+  const lastPhoneSearch = useRef(search)
   useEffect(() => {
-    if (new URLSearchParams(search).has("tab")) setPhoneDetail(true)
-  }, [search])
+    if (lastPhoneSearch.current === search) return
+    lastPhoneSearch.current = search
+    const hasTab = new URLSearchParams(search).has("tab")
+    if (hasTab) setPhoneDetail(true)
+    else if (isMobile) setPhoneDetail(false)
+  }, [search, isMobile])
   const phoneList = isMobile && !phoneDetail
+
+  // List → section → Back (phone pilot): Back goes to the list under the
+  // section (history) or, after a direct link, to /settings — never out of
+  // the app; the list keeps its search and scroll, per workspace.
+  const phone = usePhoneListDetail<{ query?: string }>({ area: "settings", workspaceId, listHref: "/settings" })
+  const [initialQuery] = useState(() => (phone.returning() ? phone.readList()?.query ?? "" : ""))
+  const navScroller = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (phoneList) phone.restoreScroll(navScroller.current)
+  }, [phone, phoneList])
 
   // A deep link can name a section this role cannot see (/settings?tab=audit
   // as a MEMBER). Rendering it gives a blank pane with no nav row to escape
@@ -385,22 +403,29 @@ function SettingsPage() {
   }
 
   function handleTabChange(tab: string) {
-    setActiveTab(tab)
+    if (isMobile) {
+      // A history entry of its own, so the browser's Back returns to the list.
+      phone.rememberScroll(navScroller.current)
+      _setActiveTab(tab)
+      setFocusedCard("")
+      phone.open(`/settings?tab=${encodeURIComponent(tab)}`)
+    } else {
+      setActiveTab(tab)
+    }
     setPhoneDetail(true)
     // On a phone the pick closes the panel sheet: the section is what comes next.
     closePanelSheet()
   }
 
-  // Phone: back from a section to the list of sections, dropping ?tab= so a
-  // reload stays on the list.
+  // Phone: back from a section to the list of sections. The address follows
+  // (history, or /settings after a direct link), so a reload stays on the list.
+  // With edits pending it asks first, as every other way out of a section does.
+  const guardLeave = usePageSaveGuard()
   function backToList() {
-    setPhoneDetail(false)
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href)
-      url.searchParams.delete("tab")
-      url.searchParams.delete("card")
-      window.history.replaceState(null, "", url.toString())
-    }
+    guardLeave(() => {
+      setPhoneDetail(false)
+      phone.back()
+    })
   }
 
   // A moved section shows its one-line notice while the redirect lands; it has
@@ -418,17 +443,7 @@ function SettingsPage() {
         title="Settings"
         section={phoneList ? undefined : section?.title}
         ariaLabel="Settings"
-        leading={isMobile && !phoneList ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="kit-tap -ml-1"
-            aria-label="Back to Settings"
-            onClick={backToList}
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </Button>
-        ) : undefined}
+        leading={isMobile && !phoneList ? <SubBarBack label="Back to Settings" onClick={backToList} /> : undefined}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -440,6 +455,9 @@ function SettingsPage() {
         workspaceName={org?.name}
         role={role}
         phoneInline={phoneList}
+        initialQuery={initialQuery}
+        onQueryChange={(query) => phone.saveList({ query })}
+        scrollRef={navScroller}
       />
 
       {/* Content */}

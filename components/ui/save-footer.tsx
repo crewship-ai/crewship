@@ -17,7 +17,7 @@ import { toastSaveError, usePageSave, usePageSaveFailed, usePageSaveLabel } from
  *    there stops meaning anything; it earns its space by appearing.
  *  · Desktop: a strip pinned to the bottom of its card, so it is obvious
  *    which card it commits.
- *  · Mobile (<640px): the same element docks to the viewport bottom, where
+ *  · Mobile (<768px, the app's phone breakpoint): the same element docks to the viewport bottom, where
  *    a card-bottom strip would sit below the fold. One implementation, two
  *    anchorings — not a separate mobile component.
  *  · Optional `reason` turns it into the audit-note form that policy and
@@ -129,6 +129,7 @@ export function SaveFooter({
     <div
       role="status"
       aria-live="polite"
+      data-slot="save-footer"
       className={cn(
         "flex flex-col gap-2 px-4 py-2.5 border-t",
         saved
@@ -138,12 +139,12 @@ export function SaveFooter({
             : "border-primary/25 bg-primary/[0.05]",
         // Docked on phones: full-bleed above the home indicator, lifted over
         // the content it belongs to.
-        "max-sm:fixed max-sm:bottom-[var(--mobile-tab-bar-h)] max-sm:left-0 max-sm:right-0 max-sm:z-40",
-        "max-sm:border-t max-sm:bg-card max-sm:shadow-[0_-8px_24px_rgba(0,0,0,.45)]",
+        "max-md:fixed max-md:bottom-[calc(var(--mobile-tab-bar-h)+var(--keyboard-inset,0px))] max-md:left-0 max-md:right-0 max-md:z-40",
+        "max-md:border-t max-md:bg-card max-md:shadow-[0_-8px_24px_rgba(0,0,0,.45)]",
         // No safe-area padding of its own: below `sm` this docks on top of
         // the phone tab bar, which already clears the home indicator, and
         // adding it here again floated the buttons ~34px above their border.
-        "max-sm:pb-2.5",
+        "max-md:pb-2.5",
         className,
       )}
     >
@@ -178,7 +179,7 @@ export function SaveFooter({
         </span>
 
         {!saved && (
-          <div className="flex items-center gap-1.5 shrink-0 max-sm:flex-1 max-sm:justify-stretch">
+          <div className="flex items-center gap-1.5 shrink-0 max-md:flex-1 max-md:justify-stretch">
             {/* type="button" is load-bearing: the shared Button leaves `type`
                 unset, which HTML defaults to "submit". Dropped inside a
                 <form> that would fire onSave AND the form's onSubmit for one
@@ -189,7 +190,7 @@ export function SaveFooter({
               size="sm"
               onClick={onCancel}
               disabled={saving}
-              className="h-7 text-xs max-sm:flex-1"
+              className="h-7 text-xs max-md:flex-1"
             >
               Cancel
             </Button>
@@ -200,7 +201,7 @@ export function SaveFooter({
               onClick={onSave}
               disabled={blocked}
               data-testid={testId}
-              className="h-7 gap-1.5 text-xs max-sm:flex-1"
+              className="h-7 gap-1.5 text-xs max-md:flex-1"
             >
               {saving && <Loader2 className="h-3 w-3 animate-spin" />}
               {saving ? "Saving…" : saveLabel}

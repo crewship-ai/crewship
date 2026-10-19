@@ -4,10 +4,11 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Slot } from "radix-ui"
 import { createPortal } from "react-dom"
-import { ChevronRight, Plus } from "lucide-react"
+import { ArrowLeft, ChevronRight, MoreHorizontal, Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { MenuSheet } from "@/components/ui/menu-sheet"
 import { useAppStore } from "@/lib/store"
 import { useIsMobile } from "@/hooks/use-mobile"
 
@@ -69,6 +70,14 @@ export interface SubBarProps<T extends string = string> {
   leading?: React.ReactNode
   /** Row-1 right side. Compose with SubBarPrimary/Secondary/IconButton. */
   actions?: React.ReactNode
+  /**
+   * Secondary actions behind ⋯ (phone pilot): MenuSheetItem rows. A popover
+   * on a tablet or desktop, a bottom sheet on a phone (MenuSheet). Rendered
+   * after `actions`; omit it and there is no ⋯.
+   */
+  menu?: React.ReactNode
+  /** The ⋯ button's and the sheet's name. */
+  menuLabel?: string
 
   /** Row-2 tabs. Presence (or `tools`) is what makes the second row render. */
   tabs?: SubBarTab<T>[]
@@ -170,6 +179,8 @@ export function SubBar<T extends string = string>({
   meta,
   leading,
   actions,
+  menu,
+  menuLabel = "More actions",
   tabs,
   activeTab,
   onTabChange,
@@ -178,6 +189,7 @@ export function SubBar<T extends string = string>({
   heading = true,
   className,
 }: SubBarProps<T>) {
+  const more = menu != null ? <SubBarMenu label={menuLabel}>{menu}</SubBarMenu> : null
   const hasRow2 = (tabs != null && tabs.length > 0) || tools != null
   const Heading = heading ? "h1" : "div"
   const slot = useAppStore((s) => s.pageBarSlot)
@@ -224,7 +236,7 @@ export function SubBar<T extends string = string>({
             {meta}
             <div className="flex-1" />
             {/* Keeps the primary action off the status icons that follow. */}
-            <ActionsSlot className="pr-2">{actions}</ActionsSlot>
+            <ActionsSlot className="pr-2">{actions}{more}</ActionsSlot>
           </div>,
           slot,
         )}
@@ -249,11 +261,19 @@ export function SubBar<T extends string = string>({
             {/* v67 phone detail: the way back first, then what is open — the
                 area's name in the top bar gives way (globals.css :has rule). */}
             {leading && <div className="flex shrink-0 items-center" data-phone-back>{leading}</div>}
+            {/* Phone pilot: the open item's whole name, in at most two lines
+                (and as a tooltip); the content repeats it in full. */}
             {leading && (
-              <span className="min-w-0 truncate text-default font-semibold text-foreground">{section ?? title}</span>
+              <span
+                data-slot="sub-bar-detail-title"
+                title={typeof (section ?? title) === "string" ? String(section ?? title) : undefined}
+                className="line-clamp-2 min-w-0 flex-1 whitespace-normal break-words text-control font-semibold leading-tight text-foreground [overflow-wrap:anywhere]"
+              >
+                {section ?? title}
+              </span>
             )}
-            <div className="flex-1" />
-            <ActionsSlot>{actions}</ActionsSlot>
+            {!leading && <div className="flex-1" />}
+            <ActionsSlot>{actions}{more}</ActionsSlot>
           </div>,
           slot,
         )}
@@ -333,7 +353,7 @@ export function SubBar<T extends string = string>({
 
         <div className="flex-1" />
 
-        <ActionsSlot>{actions}</ActionsSlot>
+        <ActionsSlot>{actions}{more}</ActionsSlot>
       </div>
 
       {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
@@ -485,6 +505,42 @@ export function SubBarIconButton({ icon: Icon, className, children, ...props }: 
   return (
     <Button variant="ghost" size="icon-sm" className={className} {...props}>
       {Icon ? <Icon className="h-3.5 w-3.5" /> : children}
+    </Button>
+  )
+}
+
+/**
+ * ⋯ — the page's secondary actions (phone pilot, MOBIL-DOPORUCENI 2a): a
+ * popover on a tablet or desktop, a bottom sheet on a phone. A 44 × 44 tap
+ * target on a coarse pointer with a 32 px drawn button.
+ */
+function SubBarMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <MenuSheet
+      open={open}
+      onOpenChange={setOpen}
+      label={label}
+      trigger={
+        <Button tap variant="ghost" size="icon-sm" aria-label={label} title={label} data-slot="sub-bar-menu">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      }
+    >
+      {children}
+    </MenuSheet>
+  )
+}
+
+/**
+ * The way back in a detail header (phone pilot): a 44 × 44 tap target with a
+ * 32 px drawn button. Pass it as SubBar `leading`; `onClick` is usually
+ * usePhoneListDetail's `back`, which restores the list it came from.
+ */
+export function SubBarBack({ label, onClick, className }: { label: string; onClick: () => void; className?: string }) {
+  return (
+    <Button tap variant="ghost" size="icon-sm" aria-label={label} title={label} onClick={onClick} className={className} data-slot="sub-bar-back">
+      <ArrowLeft className="h-4 w-4" />
     </Button>
   )
 }

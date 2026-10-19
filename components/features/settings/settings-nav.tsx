@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type Ref } from "react"
 import {
   User, Building, Users, Volume2, Palette, MonitorSmartphone,
   Link2, Activity, Shield, KeyRound, ChevronRight,
@@ -171,15 +171,24 @@ interface SettingsNavProps {
   role?: string | null
   /** Phone, nothing open yet: the list is the page (list → detail → back). */
   phoneInline?: boolean
+  /** The search the list comes back with (phone pilot: kept while a section is open). */
+  initialQuery?: string
+  onQueryChange?: (query: string) => void
+  /** The sections list's scroller, so the page can keep its position. */
+  scrollRef?: Ref<HTMLElement>
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false }: SettingsNavProps) {
+export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false, initialQuery = "", onQueryChange, scrollRef }: SettingsNavProps) {
   const router = useRouter()
   // Switching section unmounts the cards; with edits pending, ask first.
   const guard = usePageSaveGuard()
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
-  const [query, setQuery] = useState("")
+  const [query, setQueryState] = useState(initialQuery)
+  const setQuery = (q: string) => {
+    setQueryState(q)
+    onQueryChange?.(q)
+  }
   const q = query.trim().toLowerCase()
 
   const filtered = useMemo(
@@ -215,7 +224,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phone
         />
       </SidebarToolbar>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
+      <nav ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
         {filtered.map((section) => (
           <SidebarSection
             key={section.label}

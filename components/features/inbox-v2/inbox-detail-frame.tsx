@@ -172,7 +172,9 @@ export function DecisionBlock({
           </span>
         )}
       </header>
-      {children && <div className="grid gap-3 p-3.5">{children}</div>}
+      {/* empty:hidden — the facts below may all render nothing (a form with
+          no fields), which drew an empty band between header and dock. */}
+      {children && <div data-slot="decision-body" className="grid gap-3 p-3.5 empty:hidden">{children}</div>}
       {(actions || note) && <Dock note={note}>{actions}</Dock>}
     </section>
   )
@@ -185,14 +187,14 @@ export function Dock({ note, children, standalone = false }: { note?: React.Reac
       data-testid="decision-dock"
       className={cn(
         "sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle px-3.5 py-2.5",
-        // Phone (v67): the actions share one row, right-aligned, instead of
-        // wrapping one under the other.
-        "max-sm:flex-nowrap max-sm:gap-1.5 max-sm:px-2.5 max-sm:[&>a]:px-2.5 max-sm:[&>button]:px-2.5",
+        // Phone (owner, 19. 10.): the note on its own line above, the actions
+        // below sharing the row. A no-wrap row pushed them off the screen.
+        "max-md:gap-1.5 max-md:px-2.5 max-md:[&>a]:px-2.5 max-md:[&>button]:px-2.5",
         standalone && "rounded-xl border",
       )}
     >
-      {note && <div className="min-w-0 text-label text-muted-foreground">{note}</div>}
-      <span className="flex-1" />
+      {note && <div className="min-w-0 text-label text-muted-foreground max-md:basis-full">{note}</div>}
+      <span className="flex-1 max-md:hidden" />
       {children}
     </div>
   )
