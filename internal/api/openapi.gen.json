@@ -18016,8 +18016,24 @@
       },
       "WorkflowReplayRequest": {
         "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "pinned_version": {
+            "minimum": 1,
             "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
           }
         },
         "type": "object"
