@@ -4,7 +4,7 @@ import { test, expect, type Page } from "@playwright/test"
 // button landed on pinned from the default hover mode).
 async function pinSidebar(page: Page) {
   await page.getByRole("button", { name: /^Sidebar: / }).click()
-  await page.getByRole("menuitemradio", { name: /^Pinned open/ }).click()
+  await page.getByRole("menuitemradio", { name: /^Expanded/ }).click()
 }
 
 // GET /api/v1/credentials/{id}/access/me as the OWNER role sees it — the
