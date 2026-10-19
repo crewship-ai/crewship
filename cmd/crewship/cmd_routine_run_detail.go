@@ -121,8 +121,13 @@ Examples:
 			if err := cli.CheckError(resp); err != nil {
 				return err
 			}
-			_, err = io.Copy(os.Stdout, resp.Body)
-			return err
+			raw, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			// Human output is the file itself, ready to redirect; -f json wraps it.
+			text := string(raw)
+			return resolvedFormatter(cmd).AutoHuman(map[string]string{"ics": text}, func() { fmt.Print(text) })
 		}
 		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/calendar%s", ws,
 			queryString("from", from, "to", to)))
