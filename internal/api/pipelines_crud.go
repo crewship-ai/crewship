@@ -27,6 +27,9 @@ import (
 //	limit=50                 defaults to 500; cap at 500
 //	offset=0                 row offset, capped at 1000000
 //	order=popularity|recent|name
+//	q=pricing page           words that must all appear in the name, slug,
+//	                         description or the text of a step (ODCH-RT-03);
+//	                         limit/offset then page the matches
 func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	q := r.URL.Query()
@@ -52,11 +55,34 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 		f.OrderBy = pipeline.OrderByPopularity
 	}
 
+	terms := routineSearchTerms(q.Get("q"))
+	if len(terms) > 0 {
+		// The match needs the definition, which SQL cannot read, so take the
+		// whole (capped) set and page the matches below.
+		f.Limit, f.Offset = 0, 0
+	}
 	rows, err := h.store.List(r.Context(), f)
 	if err != nil {
 		h.logger.Error("pipeline list", "error", err)
 		replyError(w, http.StatusInternalServerError, "list pipelines")
 		return
+	}
+	if len(terms) > 0 {
+		matched := rows[:0:0]
+		for _, p := range rows {
+			if routineMatchesTerms(p, terms) {
+				matched = append(matched, p)
+			}
+		}
+		if offset >= len(matched) {
+			matched = nil
+		} else {
+			matched = matched[offset:]
+		}
+		if len(matched) > limit {
+			matched = matched[:limit]
+		}
+		rows = matched
 	}
 	setRoutineListNextOffset(w, offset, limit, len(rows))
 	// Routine-definition tag filter (v123): browse routines by tag for
@@ -89,6 +115,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	enrichPipelineListAuthorNames(r.Context(), h.db, h.logger, out)
 	enrichPipelineListLinkedIssues(r.Context(), h.db, h.logger, workspaceID, out)
 	enrichPipelineDrafts(r.Context(), h.db, h.logger, workspaceID, out)
+	enrichPipelineFolders(r.Context(), h.db, workspaceID, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -448,10 +475,21 @@ func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		ParentVersion *int   `json:"parent_version,omitempty"`
 		ChangeSummary string `json:"change_summary,omitempty"`
 		CreatedAt     string `json:"created_at"`
+		// TestResult is the latest Test run of this exact definition (ODCH-RT-13).
+		TestResult *pipeline.TestResult `json:"test_result,omitempty"`
+	}
+	hashes := make([]string, 0, len(versions))
+	for _, v := range versions {
+		hashes = append(hashes, v.DefinitionHash)
+	}
+	tested, terr := h.store.TestResults(r.Context(), workspaceID, hashes)
+	if terr != nil {
+		h.logger.Warn("pipeline list versions: test results", "error", terr)
 	}
 	out := make([]versionRow, 0, len(versions))
 	for _, v := range versions {
 		out = append(out, versionRow{
+			TestResult:    tested[v.DefinitionHash],
 			Version:       v.Version,
 			IsHead:        v.Version == head,
 			Hash:          v.DefinitionHash,
@@ -495,7 +533,7 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to load pipeline version")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"version":         v.Version,
 		"definition_hash": v.DefinitionHash,
 		"definition":      json.RawMessage(v.DefinitionJSON),
@@ -504,7 +542,11 @@ func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 		"parent_version":  v.ParentVersion,
 		"change_summary":  v.ChangeSummary,
 		"created_at":      v.CreatedAt.Format(time.RFC3339Nano),
-	})
+	}
+	if tested, terr := h.store.TestResults(r.Context(), workspaceID, []string{v.DefinitionHash}); terr == nil && tested[v.DefinitionHash] != nil {
+		body["test_result"] = tested[v.DefinitionHash]
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // Rollback rolls the head pointer + definition_json back to a

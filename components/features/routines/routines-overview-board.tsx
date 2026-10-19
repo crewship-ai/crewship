@@ -5,9 +5,8 @@
 // Needs you (a plain approval is answered in place by a Manager or above),
 // Running now (Open run, Stop for Owner and Admin) and Next 24 hours.
 //
-// Checkup across routines and the Health table of v67 are not here: the
-// checkup has no endpoint and the per-routine health aggregate does not
-// exist (routines.md ODCH-RT-06/07).
+// The page head (h1 + one line) opens it. Checkup across routines and Health
+// follow in routines-dashboard.
 
 import * as React from "react"
 import { CalendarClock, Hand, Play, Square } from "lucide-react"
@@ -57,6 +56,7 @@ export interface RoutinesOverviewBoardProps {
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 
 export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
@@ -81,8 +81,23 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
 
   const glyph = (slug: string) => <RoutineGlyph routine={bySlug.get(slug) ?? { slug }} size="sm" />
 
+  const nextAt = next[0] ? new Date(next[0].at) : null
+  const nextDay = nextAt ? (nextAt.toDateString() === now.toDateString() ? "today" : "tomorrow") : null
+  const meta = [
+    `${p.routines.length} ${p.routines.length === 1 ? "routine" : "routines"}`,
+    `${needs.length} ${needs.length === 1 ? "needs" : "need"} you`,
+    nextAt ? `next run ${nextDay} ${hhmm(next[0].at)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+
   return (
     <div className="flex flex-col gap-3" data-testid="routines-overview-board">
+      {/* v67 .ph: the page head of the overview. */}
+      <header className="mb-1">
+        <h1 className="text-title font-semibold leading-tight tracking-tight text-foreground">Routines</h1>
+        <p data-testid="routines-page-meta" className="mt-0.5 text-body text-muted-foreground">{meta}</p>
+      </header>
       <ul aria-label="Routine figures" className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <Kpi label="Needs you" value={String(needs.length)} />
         <Kpi label="Running now" value={String(live.length)} />
@@ -190,7 +205,7 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
               </div>
             </DashCard>
 
-            <DashCard title="Next 24 hours" icon={CalendarClock} meta={String(next.length)} link={{ label: "Open calendar", href: "/calendar" }}>
+            <DashCard title="Next 24 hours" icon={CalendarClock} meta={String(next.length)} link={{ label: "Calendar", href: "/calendar" }}>
               <div className="px-2 pb-3">
               {next.length === 0 ? (
                 <p className="px-2 py-3 text-label text-muted-foreground">Nothing is planned for the next 24 hours.</p>

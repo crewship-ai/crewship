@@ -42,6 +42,23 @@ function props(over: Partial<React.ComponentProps<typeof RoutinesOverviewBoard>>
 }
 
 describe("<RoutinesOverviewBoard>", () => {
+  it("opens with the page head: h1 Routines and one line with the counts and the next run", () => {
+    render(<RoutinesOverviewBoard {...props()} />)
+    expect(screen.getByRole("heading", { level: 1, name: "Routines" })).toBeInTheDocument()
+    expect(screen.getByTestId("routines-page-meta")).toHaveTextContent(/^3 routines · 2 need you · next run (today|tomorrow) \d{2}:\d{2}$/)
+  })
+
+  it("leaves the next run out of the head line when nothing is scheduled", () => {
+    render(<RoutinesOverviewBoard {...props({ schedules: [] })} />)
+    expect(screen.getByTestId("routines-page-meta")).toHaveTextContent(/^3 routines · 2 need you$/)
+  })
+
+  it("never truncates a card title next to its link", () => {
+    render(<RoutinesOverviewBoard {...props()} />)
+    const heading = within(screen.getByRole("region", { name: "Next 24 hours" })).getByRole("heading", { name: /Next 24 hours/ })
+    expect(heading.className).not.toContain("truncate")
+  })
+
   it("shows the four KPIs: Needs you, Running now, Runs · 7 days, Spend this month", () => {
     render(<RoutinesOverviewBoard {...props()} />)
     const kpis = screen.getByRole("list", { name: "Routine figures" })
@@ -125,6 +142,6 @@ describe("<RoutinesOverviewBoard>", () => {
     const card = screen.getByRole("region", { name: "Next 24 hours" })
     const rows = within(card).getAllByRole("listitem")
     expect(rows.map((r) => r.textContent)).toEqual([expect.stringMatching(/Weekly report.*Schedule/), expect.stringMatching(/Review pull requests.*One-time/)])
-    expect(within(card).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/calendar")
+    expect(within(card).getByRole("link", { name: "Calendar" })).toHaveAttribute("href", "/calendar")
   })
 })

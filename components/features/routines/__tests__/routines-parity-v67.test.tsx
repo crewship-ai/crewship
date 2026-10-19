@@ -46,7 +46,7 @@ describe("Routines overview cards (v67)", () => {
 
   it("opens the Calendar destination from Next 24 hours, not a tab", () => {
     render(<RoutinesOverviewBoard {...board} />)
-    expect(within(screen.getByRole("region", { name: "Next 24 hours" })).getByRole("link", { name: /Open calendar/i })).toHaveAttribute("href", "/calendar")
+    expect(within(screen.getByRole("region", { name: "Next 24 hours" })).getByRole("link", { name: /^Calendar$/ })).toHaveAttribute("href", "/calendar")
   })
 
   it("draws KPI numerals in sans with tabular figures", () => {

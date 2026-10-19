@@ -132,7 +132,7 @@ type AddKind = "schedule" | "once" | "webhook" | "chat"
 export function RoutineTriggersTab({
   workspaceId,
   routine,
-  lifecycle: _lifecycle,
+  lifecycle,
   depth,
   rows,
   onOpenRun,
@@ -181,11 +181,26 @@ export function RoutineTriggersTab({
     () => pendingStartRows(starts, routine.slug, { canCancel: permissions.author, formatTime: (iso) => formatRoutineTime(iso) }),
     [starts, routine.slug, permissions.author],
   )
+  // Schedules and webhooks come from this tab's own lists — the ones Add,
+  // Edit, Delete and the On switch write through — so a save shows at once;
+  // the page's rows were computed from another copy that does not refresh.
+  const ownRows = React.useMemo(
+    () =>
+      routineTriggerRows({
+        slug: routine.slug,
+        lifecycle,
+        schedules: schedules.filter((s) => s.target_pipeline_id === routine.id || s.target_pipeline_slug === routine.slug),
+        webhooks: ourWebhooks,
+        automations: [],
+        formatTime: (iso, tz) => formatRoutineTime(iso, tz),
+      }).filter((r) => r.kind === "schedule" || r.kind === "webhook"),
+    [schedules, ourWebhooks, routine.id, routine.slug, lifecycle],
+  )
   const listed = React.useMemo(() => {
-    const base = rows.filter((r) => r.kind !== "once")
+    const base = [...ownRows, ...rows.filter((r) => r.kind !== "once" && r.kind !== "schedule" && r.kind !== "webhook")]
     const at = base.findIndex((r) => r.kind !== "schedule")
     return at < 0 ? [...base, ...onceRows] : [...base.slice(0, at), ...onceRows, ...base.slice(at)]
-  }, [rows, onceRows])
+  }, [ownRows, rows, onceRows])
 
   // Deep links (⌘K schedule hits, the calendar) end in #schedule-<id>: bring
   // that row into view and focus it once it is listed, as the Plan tab did.

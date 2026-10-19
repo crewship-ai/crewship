@@ -210,6 +210,12 @@ describe("buildDefinition", () => {
     expect(d.max_concurrent).toBe(1)
   })
 
+  it("Skip the new start drops a start that finds it running (ODCH-RT-25)", () => {
+    const d = buildDefinition(state({ concurrency: "skip", steps: [{ ...newStep("agent", []), agentSlug: "w", prompt: "x" }] }))
+    expect(d).toMatchObject({ concurrency_key: "weekly-report", max_concurrent: 1, concurrency_policy: "skip" })
+    expect(buildDefinition(state({ steps: [{ ...newStep("agent", []), agentSlug: "w", prompt: "x" }] }))).not.toHaveProperty("concurrency_policy")
+  })
+
   it("adds the host of a web call to the allowed outside hosts", () => {
     const d = buildDefinition(state({ steps: [{ ...newStep("http", []), url: "https://api.example.com/x" }], extra: { egress_targets: ["other.example.org"] } }))
     expect(d.egress_targets).toEqual(["other.example.org", "api.example.com"])
@@ -309,6 +315,12 @@ describe("copy", () => {
     expect(w.concurrency).toBe("parallel")
     expect(w.sideBySide).toBe(2)
     expect(w.extra).toEqual({ execution_tier: { preferred: "fast" } })
+  })
+
+  it("copies Skip the new start (ODCH-RT-25)", () => {
+    const w = wizardFromDefinition({ name: "s", concurrency_key: "s", max_concurrent: 1, concurrency_policy: "skip", steps: [] })
+    expect(w.concurrency).toBe("skip")
+    expect(w.extra).toEqual({})
   })
 })
 

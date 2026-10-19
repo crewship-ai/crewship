@@ -40,21 +40,34 @@ actual step actions; an unreadable recipe is shown as unavailable.
 Selecting a routine uses `?slug=` in the URL. Reload and browser history preserve
 that selection. A selected run adds `&run=` and keeps its recorded recipe version.
 
+Search in the panel also finds a routine by the text of its steps (ids, names,
+prompts, commands): `GET .../pipelines?q=`, or `crewship routine list --search`.
+
 **Filter** opens the facets inside the panel, under its toolbar: Status, Last
 run, **Trigger** (Schedule, Webhook, Issue start, Chat command) and Crew, each
-naming its choice and clearing on its own. **View** groups the routines by crew,
-by trigger or not at all, and sorts them by next run, last run, name or this
+naming its choice and clearing on its own. **View** groups the routines by
+**folder** (the default once a folder exists), crew, trigger or not at all, and sorts them by next run, last run, name or this
 month's spend. **Select several** (not on a phone) puts a checkbox on each
 routine and a bar at the bottom: **Turn off** (Owner and Admin, after one
 question) and **Run now**, which starts only the routines that need no answer
 and names the ones it skipped. With a run open, the panel lists that routine's
 runs by status and day; a row opens the run peek, and **All routines** goes back.
 
-The **Overview** opens with four figures — Needs you, Running now, runs in the
+**New folder** in the toolbar makes a folder and **Move** (in the bar while
+selecting several) files the selected routines in one, or takes them out. A
+folder only organises the panel: it grants no access, and routines are shared as
+before. Deleting a folder keeps its routines. `crewship routine folders`.
+
+The **Overview** opens with a head (**Routines**, the number of routines, how many need
+you and when the next run is) and four figures — Needs you, Running now, runs in the
 last 7 days with the share completed, and this month's spend against the budget
 — then **Needs you** (a plain approval can be approved in place by a Manager or
 above; a decision with a form opens its run), **Running now** with **Stop** for
-Owner and Admin, and **Next 24 hours** with a way to the calendar. **How routines
+Owner and Admin, and **Next 24 hours** with a way to the calendar. Under them **Checkup across routines**
+lists only the routines that have something to fix, and **Health** lists every
+routine quietly: its last 20 runs, the success rate and 30-day spend
+(`GET .../pipeline-health`, `crewship routine health`); a routine that is fine
+shows no dashes, no $0.00 and no verdict. **How routines
 work** in the top bar (`?view=intro`) explains routines in three steps; an empty
 workspace shows the same guide under its empty state. In **All runs** a row
 opens the run peek; **Open run** in it opens the run page.
@@ -304,6 +317,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
+| `concurrency_policy` | string | `queue` (default) or `skip`. With `skip`, a scheduled fire or a webhook delivery that finds the slot taken is dropped on purpose: the schedule records `SKIPPED` (no failure, alert or circuit-breaker tick) and the webhook answers `200 {"status":"SKIPPED"}`. Needs a `concurrency_key`. In the New routine dialog it is **Skip the new start**. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
 | `agentless` | boolean | Token-zero guarantee: the routine may only contain steps that can never invoke an LLM — `agent_run`, `call_pipeline` and `crewship` are rejected. See [Agentless routines](#agentless-routines). |
@@ -1260,7 +1274,10 @@ out of it — `transform` with `.identifier` gives you the new issue's key.
 | `issue.link` | Relates two issues | `identifier`, `target_identifier`, `relation_type` | `issue_write` |
 | `assignment.create` | Delegates a task to an agent in the author crew | `target_slug`, `task`, `chat_id` | `assignment_create` |
 | `escalation.create` | Raises an escalation to a human | `from_slug`, `reason`, `chat_id` | `escalation_create` |
+| `page.create` | Creates a page (name and panels) owned by the routine's author crew | `name`, `panels` | `page_create` |
 | `page.write` | Writes a panel's payload onto a page | `page`, `panel`, `data` | `page_write` |
+
+`page.create` makes the page's structure, `page.write` only its content, and they are governed apart: a strict crew holds `page_create` for approval too, which on an unattended run is a refusal. A created page is not put in a folder by the step; who a folder is shared with is decided by people.
 
 `page.write` is bounded twice over, and the first bound is not the autonomy
 level. The routine may only write a panel that **names it as the producer**, or
@@ -2023,6 +2040,25 @@ free slot. `crewship routine pending list --status all` and
 `crewship routine pending get <id>` show the same receipts.
 
 That is the opposite of a schedule, which deliberately runs current HEAD unless its `target_pipeline_version` says otherwise: a plan is a standing instruction, a deferred run is one start that a person already made.
+
+## Templates
+
+A workspace keeps routine definitions as **templates** (`crewship routine
+templates create <name> --from-routine <slug>`, or `--file definition.json`).
+`crewship routine templates use <id> --slug <new-slug>` saves a **draft** from
+one — nothing is published — and it is tested and published like any other
+draft. A definition that could not be saved as a routine is refused when the
+template is created.
+
+## Test results
+
+Each **Test run** of an unsaved definition is remembered against that exact
+definition. The draft bar and the Versions tab then say **Test run passed** or
+**Test run failed** for content that was tested, and **Not tested yet** for
+content that was not; editing a draft clears the result until it is tested again.
+`crewship routine checkup <slug>` lists what the server checks for a routine
+(agents, credentials, cost cap, failures in a row, the schedule breaker,
+untested changes).
 
 ## Dry-run preview
 

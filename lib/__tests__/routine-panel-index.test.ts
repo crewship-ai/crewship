@@ -114,3 +114,39 @@ describe("groupRoutines by trigger", () => {
     expect(groupRoutines(rows, "none", index, crews).map((g) => g.label)).toEqual(["Routines"])
   })
 })
+
+describe("groupRoutines by folder (ODCH-RT-01)", () => {
+  const rows = [
+    { id: "a", slug: "weekly", name: "Weekly", folder_id: "f_intel" },
+    { id: "b", slug: "news", name: "News", folder_id: "f_intel" },
+    { id: "c", slug: "pr", name: "PR", folder_id: "f_eng" },
+    { id: "d", slug: "loose", name: "Loose" },
+    { id: "e", slug: "stale", name: "Stale", folder_id: "f_gone" },
+  ]
+  const folders = new Map([
+    ["f_intel", { id: "f_intel", name: "Market intel" }],
+    ["f_eng", { id: "f_eng", name: "Engineering" }],
+    ["f_empty", { id: "f_empty", name: "Archive" }],
+  ])
+  const index = { triggers: new Map(), nextRun: new Map(), spend: new Map() } as unknown as RoutinePanelIndex
+
+  it("groups by folder, alphabetical, with the unfiled last (a deleted folder counts as unfiled)", () => {
+    const groups = groupRoutines(rows, "folder", index, new Map(), { folders })
+    expect(groups.map((g) => [g.label, g.rows.map((r) => r.slug)])).toEqual([
+      ["Engineering", ["pr"]],
+      ["Market intel", ["weekly", "news"]],
+      ["No folder", ["loose", "stale"]],
+    ])
+  })
+
+  it("keeps an empty folder when asked, so a new folder does not vanish", () => {
+    const groups = groupRoutines(rows, "folder", index, new Map(), { folders, includeEmptyFolders: true })
+    expect(groups.map((g) => g.label)).toEqual(["Archive", "Engineering", "Market intel", "No folder"])
+    expect(groups[0].rows).toEqual([])
+  })
+
+  it("has no No-folder section when everything is filed", () => {
+    const groups = groupRoutines(rows.slice(0, 3), "folder", index, new Map(), { folders })
+    expect(groups.map((g) => g.label)).toEqual(["Engineering", "Market intel"])
+  })
+})

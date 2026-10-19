@@ -625,6 +625,26 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     expect(screen.getByTestId("routine-draft-bar")).toHaveTextContent("This routine is not live yet")
   })
 
+  it("ODCH-RT-13: the draft bar says Not tested yet, then what the last test of exactly this content said", async () => {
+    const { unmount } = render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
+    await screen.findByRole("heading", { name: "Daily report (copy)" })
+    expect(screen.getByTestId("routine-draft-test")).toHaveTextContent("Not tested yet")
+    unmount()
+
+    for (const [passed, text] of [[true, "Test run passed"], [false, "Test run failed"]] as const) {
+      vi.mocked(apiFetch).mockImplementation(async (url) => {
+        const u = String(url)
+        if (u.endsWith("/pipelines/daily-report-copy/draft")) return okJSON({ ...DRAFT, test_result: { passed, status: passed ? "DRY_RUN_OK" : "FAILED", tested_at: new Date().toISOString() } })
+        if (u.endsWith("/pipelines/daily-report-copy")) return notFound()
+        return okJSON([])
+      })
+      const view = render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
+      await screen.findByRole("heading", { name: "Daily report (copy)" })
+      expect(await screen.findByTestId("routine-draft-test")).toHaveTextContent(text)
+      view.unmount()
+    }
+  })
+
   it("COM-12: with actionsInBar the page actions land in the SubBar's own slot, not in the page", async () => {
     render(
       <>

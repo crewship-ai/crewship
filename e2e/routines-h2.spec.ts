@@ -274,7 +274,7 @@ test("RT-04 the overview opens with four figures, Needs you, Running now and Nex
   await expect(figures).toBeVisible({ timeout: TIMEOUT })
   await expect(figures.getByRole("listitem")).toHaveText([/^Needs you/, /^Running now/, /^Runs · 7 days/, /^Spend · /])
   for (const name of ["Needs you", "Running now", "Next 24 hours"]) await expect(page.getByRole("region", { name })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/calendar")
+  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Calendar", exact: true })).toHaveAttribute("href", "/calendar")
 })
 
 test("RT-05 Run opens one dialog: Run now · Test run · Later, limits in the footer", async ({ page }) => {
@@ -482,7 +482,9 @@ for (const width of [390, 1024, 1440]) {
       await page.goto("/routines")
       const card = page.getByTestId("routines-health")
       await expect(card).toBeVisible({ timeout: TIMEOUT })
-      await expect(card).not.toContainText(/30 ?d/)
+      // Spend is the last 30 days when the aggregate answers, this month before; a healthy row stays quiet.
+      await expect(card).toContainText(/last 20 runs|newest runs loaded/)
+      await expect(card).not.toContainText("$0.00")
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow).toBeLessThanOrEqual(0)
     })

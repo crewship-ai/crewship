@@ -84,7 +84,7 @@ export function RoutineOverviewTab({
   const schedules = triggers.filter((t) => t.kind === "schedule")
   const nextRun = schedules.map((t) => t.detail.match(/next ([^·]+)/)?.[1]?.trim()).find(Boolean)
   const cap = typeof def.max_cost_usd === "number" && def.max_cost_usd > 0 ? `$${def.max_cost_usd.toFixed(2)} per run` : "no cost cap"
-  const concurrency = typeof def.max_concurrent === "number" && def.max_concurrent > 1 ? `${def.max_concurrent} at a time` : typeof def.concurrency_key === "string" && def.concurrency_key ? "1 at a time · queue if busy" : "no overlap limit"
+  const concurrency = typeof def.max_concurrent === "number" && def.max_concurrent > 1 ? `${def.max_concurrent} at a time` : typeof def.concurrency_key === "string" && def.concurrency_key ? (def.concurrency_policy === "skip" ? "1 at a time · skips a new start if busy" : "1 at a time · queue if busy") : "no overlap limit"
   const agent = routine.manifest?.agents?.[0]
 
   return (
@@ -122,12 +122,12 @@ export function RoutineOverviewTab({
       <section className="flex flex-col gap-1" aria-labelledby="routine-what-it-does">
         <h3 id="routine-what-it-does" className="type-section text-primary-hover">What it does</h3>
         <p className="max-w-prose text-sm leading-relaxed" data-testid="routine-what-it-does">{whatItDoes(routine)}</p>
-        <p className="text-xs text-muted-foreground-soft">Written from the definition, not by a model.</p>
+        <p className="text-xs text-muted-foreground-soft">Written from the definition by the server, not by a model.</p>
       </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
-          <RoutineCheckupCard routine={routine} runs={records} onTab={onTab} />
+          <RoutineCheckupCard routine={routine} runs={records} onTab={onTab} workspaceId={workspaceId} />
           <DetailCard
             title="Steps"
             icon={ListOrdered}

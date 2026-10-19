@@ -148,6 +148,12 @@ export function RoutineDraftBar({
             ? `Saved as a draft by ${who} ${relTime(draft.updated_at)}. Nothing can run until it is published. Test it, then publish it.`
             : `Edited by ${who} ${relTime(draft.updated_at)}; runs still use the live version. Test the changes, then publish them.`}
         </p>
+        {/* ODCH-RT-13: only said of content that was actually tested. */}
+        <p data-testid="routine-draft-test" className={cn("mt-0.5 text-xs font-medium", draft.test_result ? (draft.test_result.passed ? "text-success" : "text-destructive") : "text-muted-foreground")}>
+          {draft.test_result
+            ? `${draft.test_result.passed ? "Test run passed" : "Test run failed"} ${relTime(draft.test_result.tested_at)}`
+            : "Not tested yet"}
+        </p>
       </div>
       {canEdit && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
