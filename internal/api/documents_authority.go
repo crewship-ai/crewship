@@ -263,9 +263,11 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints"
+	_, agent := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read")
 	var readRecord *pageRecord
 	var capture func(*pageRecord)
-	if op == "state" || op == "checkpoints" || op == "checkpoint-read" {
+	if auditNeeded {
 		capture = func(rec *pageRecord) { readRecord = rec }
 	}
 	auth := h.authorizeWithReadRecord(r, k, !read, op == "initialize", capture)
@@ -377,8 +379,14 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 	// Audit the custodian seen by the fenced read, not an earlier public Page
 	// preflight or a later owner lookup vulnerable to transfer-back races.
 	// A failed Store result never reaches this point, even if it populated data.
-	if readRecord != nil && !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
-		return
+	if auditNeeded {
+		if readRecord == nil {
+			documentAuthorityError(w, errDocumentAccess)
+			return
+		}
+		if !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
+			return
+		}
 	}
 	writeJSON(w, 200, result)
 }
