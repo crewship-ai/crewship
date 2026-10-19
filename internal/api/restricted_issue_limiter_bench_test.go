@@ -26,7 +26,7 @@ func BenchmarkSharedSearchRetainedMemory(b *testing.B) {
 						if p == 256 {
 							project = ""
 						}
-						if ok, _ := s.take(context.Background(), fmt.Sprintf("user%d", a), "ws", project); !ok {
+						if ok, _ := s.take(context.Background(), fmt.Sprintf("user%d", a), fmt.Sprintf("ws%d", a), project); !ok {
 							b.Fatal("unexpected capacity refusal")
 						}
 						if accounts < 4096 {
@@ -62,7 +62,7 @@ func BenchmarkSharedSearchRetainedMemoryAfterChurn(b *testing.B) {
 			if project == 256 {
 				audience = ""
 			}
-			if ok, _ := s.take(context.Background(), fmt.Sprintf("u%d", user), "ws", audience); !ok {
+			if ok, _ := s.take(context.Background(), fmt.Sprintf("u%d", user), fmt.Sprintf("ws%d", user), audience); !ok {
 				b.Fatal("unexpected capacity refusal")
 			}
 		}
@@ -89,7 +89,7 @@ func BenchmarkSharedSearchRetainedMemoryAfterChurn(b *testing.B) {
 			b.Fatal("churn did not fill exact global capacity")
 		}
 		for user := 0; user < 120; user++ {
-			if len(s.accounts[sharedSearchIdentity(fmt.Sprintf("u%d", user), "ws")].audiences) != 1 {
+			if len(s.accounts[sharedSearchIdentity(fmt.Sprintf("u%d", user), fmt.Sprintf("ws%d", user))].audiences) != 1 {
 				b.Fatal("expired high-capacity map not reclaimed")
 			}
 		}

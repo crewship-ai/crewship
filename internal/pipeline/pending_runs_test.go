@@ -22,6 +22,7 @@ func newPendingDB(t *testing.T) *sql.DB {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`
 CREATE TABLE pending_runs (
+    run_id TEXT, idempotency_key TEXT, due_at TEXT, reason_code TEXT,
 chat_origin_id TEXT,
     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, pipeline_id TEXT NOT NULL,
     pipeline_slug TEXT NOT NULL, inputs_json TEXT NOT NULL DEFAULT '{}',

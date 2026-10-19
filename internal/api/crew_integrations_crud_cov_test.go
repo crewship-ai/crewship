@@ -127,7 +127,7 @@ func TestCovCIC_Delete_BindingDeleteError_500(t *testing.T) {
 
 // TestCovCIC_Delete_OAuthCredentialCascade — one OAuth credential is
 // bound on the deleted server AND on a second server: it must survive
-// (still referenced). A second credential bound only here is removed.
+// (still referenced). A second credential bound only here is tombstoned.
 func TestCovCIC_Delete_OAuthCredentialCascade(t *testing.T) {
 	h, userID, wsID, crewID := covCICFixture(t)
 	db := h.db
@@ -154,6 +154,10 @@ func TestCovCIC_Delete_OAuthCredentialCascade(t *testing.T) {
 		(id, agent_id, mcp_server_id, mcp_server_scope, credential_id, enabled)
 		VALUES ('covcic-b4', ?, 'covcic-d2', 'crew', 'covcic-cred-solo', 1)`, agent2ID)
 
+	execOrFatal(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('integration-assignment',?,'covcic-cred-solo','TOKEN')`, agent2ID)
+	execOrFatal(t, db, `INSERT INTO credential_bindings(id,workspace_id,credential_id,scope,agent_id,slot) VALUES('integration-slot',?,'covcic-cred-solo','AGENT',?,'TOKEN')`, wsID, agent2ID)
+	execOrFatal(t, db, `INSERT INTO credential_crews(credential_id,crew_id) VALUES('covcic-cred-solo',?)`, crewID)
+	execOrFatal(t, db, `INSERT INTO credential_audit(id,credential_id,workspace_id,event_type) VALUES('integration-history','covcic-cred-solo',?,'READ')`, wsID)
 	rr := covCICDelete(h, userID, wsID, crewID, "covcic-d2")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
@@ -162,19 +166,30 @@ func TestCovCIC_Delete_OAuthCredentialCascade(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id = 'covcic-cred-shared'`).Scan(&shared); err != nil {
 		t.Fatalf("count shared: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id = 'covcic-cred-solo'`).Scan(&solo); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id = 'covcic-cred-solo' AND deleted_at IS NULL`).Scan(&solo); err != nil {
 		t.Fatalf("count solo: %v", err)
 	}
 	if shared != 1 {
 		t.Errorf("shared credential deleted despite live reference on another server")
 	}
 	if solo != 0 {
-		t.Errorf("solo OAuth credential survived; want cascade delete")
+		t.Errorf("solo OAuth credential remained live; want tombstone")
 	}
+	for _, table := range []string{"agent_credentials", "credential_bindings", "credential_crews"} {
+		var claims int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE credential_id='covcic-cred-solo'").Scan(&claims); err != nil || claims != 0 {
+			t.Errorf("retirement left %s claims occupied: %d %v", table, claims, err)
+		}
+	}
+	var historical int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credential_audit a JOIN credentials c ON c.id=a.credential_id WHERE a.id='integration-history' AND c.deleted_at IS NOT NULL`).Scan(&historical); err != nil || historical != 1 {
+		t.Fatalf("integration retirement erased audit/tombstone: %d %v", historical, err)
+	}
+
 }
 
 // TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds — the
-// cascade credential DELETE fails (trigger) but the integration delete
+// credential retirement UPDATE fails (trigger) but the integration delete
 // still completes (warn-only contract).
 func TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds(t *testing.T) {
 	h, userID, wsID, crewID := covCICFixture(t)
@@ -188,7 +203,7 @@ func TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds(t *testing.T
 	execOrFatal(t, db, `INSERT INTO agent_mcp_bindings
 		(id, agent_id, mcp_server_id, mcp_server_scope, credential_id, enabled)
 		VALUES ('covcic-b5', ?, 'covcic-d3', 'crew', 'covcic-cred-lock', 1)`, agentID)
-	execOrFatal(t, db, `CREATE TRIGGER covcic_block_cred_del BEFORE DELETE ON credentials
+	execOrFatal(t, db, `CREATE TRIGGER covcic_block_cred_del BEFORE UPDATE OF deleted_at ON credentials
 		BEGIN SELECT RAISE(ABORT, 'covcic forced'); END`)
 
 	rr := covCICDelete(h, userID, wsID, crewID, "covcic-d3")

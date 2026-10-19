@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -220,7 +221,7 @@ func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	replay := h.src.ReplaySession(channel, lastSeq)
 
-	st := &runStreamWriter{w: w, flusher: flusher, rc: http.NewResponseController(w), lastSeq: lastSeq}
+	st := &runStreamWriter{credentialContext: r.Context(), w: w, flusher: flusher, rc: http.NewResponseController(w), lastSeq: lastSeq}
 	st.authorize = func() error {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -394,11 +395,12 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 // runStreamWriter serializes frames to the response and tracks the highest seq
 // already written, which is what makes replay-then-live safe to concatenate.
 type runStreamWriter struct {
-	authorize func() error
-	w         http.ResponseWriter
-	flusher   http.Flusher
-	rc        *http.ResponseController
-	lastSeq   int64
+	authorize         func() error
+	w                 http.ResponseWriter
+	credentialContext context.Context
+	flusher           http.Flusher
+	rc                *http.ResponseController
+	lastSeq           int64
 	// writeErr latches the first failed write.
 	writeErr error
 }
@@ -409,6 +411,10 @@ func (s *runStreamWriter) failed() bool { return s.writeErr != nil }
 
 func (s *runStreamWriter) write(f runStreamFrame) {
 	if s.writeErr != nil {
+		return
+	}
+	if s.credentialContext != nil && !auth.StreamCredentialCurrent(s.credentialContext) {
+		s.writeErr = context.Canceled
 		return
 	}
 	if s.authorize != nil {
@@ -436,6 +442,10 @@ func (s *runStreamWriter) write(f runStreamFrame) {
 			s.writeErr = derr
 			return
 		}
+	}
+	if s.credentialContext != nil && !auth.StreamCredentialCurrent(s.credentialContext) {
+		s.writeErr = context.Canceled
+		return
 	}
 	if _, werr := s.w.Write(append(data, '\n')); werr != nil {
 		// Latch it. The connection is gone; every further frame is wasted work

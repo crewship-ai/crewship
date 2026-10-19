@@ -147,7 +147,7 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 	}
 	routineRows.Close()
 
-	pageRows, err := h.db.QueryContext(ctx, `SELECT name, slug FROM pages WHERE workspace_id = ? ORDER BY name`, wsID)
+	pageRows, err := h.db.QueryContext(ctx, `SELECT name, slug FROM pages WHERE workspace_id = ? AND private_audience=0 ORDER BY name`, wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "workspace overview: pages", err)
 		return

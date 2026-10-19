@@ -191,6 +191,9 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if _, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID); !ok {
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"filename": filename,
 		"size":     len(body),
@@ -244,6 +247,10 @@ func (h *ProxyHandler) ListAgentChatAttachments(w http.ResponseWriter, r *http.R
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration (chat attachments)", err)
+		return
+	}
+	rows.Close()
+	if _, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -369,6 +376,15 @@ func (h *ProxyHandler) resolveChatScope(w http.ResponseWriter, r *http.Request, 
 		return chatAttachmentScope{}, false
 	}
 	if !crewID.Valid {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return chatAttachmentScope{}, false
+	}
+	allowed, err := chataudience.CanReadArtifactConversation(r.Context(), h.db, chatID, user.ID, workspaceID, false)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit private conversation attachment access", err)
+		return chatAttachmentScope{}, false
+	}
+	if !allowed {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return chatAttachmentScope{}, false
 	}

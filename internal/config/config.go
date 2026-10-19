@@ -55,6 +55,7 @@ type Config struct {
 	Keeper    KeeperConfig    `yaml:"keeper"`
 	License   LicenseConfig   `yaml:"license"`
 	Composio  ComposioConfig  `yaml:"composio"`
+	Documents DocumentsConfig `yaml:"documents"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -409,6 +410,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := c.Documents.validate(); err != nil {
+		return err
+	}
 	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
 		return fmt.Errorf("storage.run_output_path must be a clean absolute host-private path")
 	}
@@ -517,6 +521,33 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	for name, target := range map[string]*int{
+		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
+		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,
+		"CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS":    &cfg.Documents.OperationWindowSeconds,
+	} {
+		if value, ok := os.LookupEnv(name); ok {
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				n = -1
+			}
+			*target = n
+		}
+	}
+
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
+		cfg.Documents.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET"); ok {
+		cfg.Documents.AuthoritySocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_SERVICE_SOCKET"); ok {
+		cfg.Documents.ServiceSocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE"); ok {
+		cfg.Documents.ServiceTokenFile = v
+	}
+
 	if v := os.Getenv("CREWSHIP_HOST"); v != "" {
 		cfg.Server.Host = v
 	}

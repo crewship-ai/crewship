@@ -528,6 +528,8 @@ type instanceAuditEntry struct {
 	TargetWorkspaceID *string `json:"target_workspace_id" yaml:"target_workspace_id"`
 	Metadata          string  `json:"metadata" yaml:"metadata"`
 	CreatedAt         string  `json:"created_at" yaml:"created_at"`
+	UserID            *string `json:"user_id" yaml:"user_id"`
+	Integrity         string  `json:"integrity" yaml:"integrity"`
 }
 
 var adminInstanceAuditCmd = &cobra.Command{
@@ -568,16 +570,19 @@ workspace (slug).`,
 		}
 		return resolvedFormatter(cmd).AutoHuman(rows, func() {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "WHEN\tWHO\tACTION\tTARGET")
+			fmt.Fprintln(tw, "WHEN\tWHO\tACTION\tTARGET\tINTEGRITY")
 			for _, a := range rows {
 				who, target := "-", "-"
+				if a.UserID != nil {
+					who = *a.UserID
+				}
 				if a.UserEmail != nil {
 					who = *a.UserEmail
 				}
 				if a.EntityID != nil {
 					target = *a.EntityID
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.CreatedAt, who, a.Action, target)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.CreatedAt, who, a.Action, target, a.Integrity)
 			}
 			_ = tw.Flush()
 		})

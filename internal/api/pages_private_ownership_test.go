@@ -15,8 +15,7 @@ func TestPrivateOwnershipDepartureRequiresHumanSuccessor(t *testing.T) {
 			r.seedCrew(t, "custody-crew", "Custody crew", "custody-crew")
 			r.seedCrewMember(t, "custody-crew", r.userID)
 			r.seedPage(t, "private-page", "private-page", "Private output", r.userID, "")
-			mustExec(t, r.db, `CREATE TABLE `+table+` (page_id TEXT PRIMARY KEY REFERENCES pages(id))`)
-			mustExec(t, r.db, `INSERT INTO `+table+`(page_id) VALUES('private-page')`)
+			seedOwnershipOutput(t, r.db, r.wsID, "private-page", table)
 			tx, err := r.db.BeginTx(context.Background(), nil)
 			if err != nil {
 				t.Fatal(err)
@@ -56,6 +55,8 @@ func TestPrivateOwnershipExistingInvalidSchemaFailsClosed(t *testing.T) {
 	r.seedCrew(t, "schema-crew", "Schema crew", "schema-crew")
 	r.seedCrewMember(t, "schema-crew", r.userID)
 	r.seedPage(t, "invalid-schema-page", "invalid-schema-page", "Private output", r.userID, "")
+	// Replace only this isolated fixture database's installed schema.
+	mustExec(t, r.db, `DROP TABLE IF EXISTS documents`)
 	mustExec(t, r.db, `CREATE TABLE documents(id TEXT PRIMARY KEY, body TEXT)`)
 	_, _, err := privatePageOwnershipSQL(t.Context(), r.db, "pages")
 	if err == nil {

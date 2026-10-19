@@ -183,33 +183,26 @@ func TestServeHTTP_PollTearsDownRevokedSession(t *testing.T) {
 	}
 }
 
-// (c) A ticket with empty sid (CLI-derived) still connects — the check is
-// skipped even when the store would reject every lookup.
-func TestServeHTTP_EmptySidSkipsRevocationCheck(t *testing.T) {
+// Legacy CLI tickets without either source identity must no longer bypass
+// credential authentication. Browser session positives remain covered above.
+func TestServeHTTP_EmptySidWithoutSourceTokenRejected(t *testing.T) {
 	v := newTestValidator(t)
 	db := seedTerminalDB(t)
-	// A store whose Get always fails: proves the empty-sid path never
-	// consults it.
-	rejectStore := &fakeSessionStore{getFunc: func(int) (*sessions.Session, error) {
-		return nil, sessions.ErrNotFound
-	}}
-
-	serverSide, testSide := net.Pipe()
-	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
-	h := New(im, v, db, silentLogger(), rejectStore)
-
-	conn, _ := dialTerminalDone(t, h)
+	rejectStore := &fakeSessionStore{getFunc: func(int) (*sessions.Session, error) { return nil, sessions.ErrNotFound }}
+	h := New(&mockContainer{state: "running"}, v, db, silentLogger(), rejectStore)
+	conn, done := dialTerminalDone(t, h)
 	authWithTicket(t, conn, v, "", map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
-
-	go func() {
-		testSide.SetWriteDeadline(time.Now().Add(3 * time.Second))
-		_, _ = testSide.Write([]byte("cli-ok"))
-	}()
-	if got := readBinaryFrame(t, conn); string(got) != "cli-ok" {
-		t.Fatalf("CLI ticket (empty sid) should connect, got %q", got)
+	got := readJSONFrame(t, conn)
+	if got["type"] != "error" || got["message"] != "credential unavailable" {
+		t.Fatalf("missing-source ticket admitted: %+v", got)
 	}
 	if rejectStore.callCount() != 0 {
-		t.Fatalf("empty-sid ticket must not consult the sessions store, got %d Get calls", rejectStore.callCount())
+		t.Fatal("CLI source must not be looked up as a browser session")
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("unbound terminal did not close")
 	}
 }
 

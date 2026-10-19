@@ -267,6 +267,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "invitation.revoked": UserMinus,
   "invitation.accepted": UserCheck,
   "member.access_changed": ShieldCheck,
+  "member.capabilities_changed": ShieldCheck,
+  "crew.member_changed": ShieldCheck,
+  "member.role_changed": ShieldCheck,
+  "member.removed": UserMinus,
 
   // ── Memory ────────────────────────────────────────────────────────
   "memory.searched": Search,

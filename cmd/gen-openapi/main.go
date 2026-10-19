@@ -334,8 +334,15 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range workflowRequestComponents {
 		schemas[name] = schema
 	}
+	for name, schema := range documentSchemaComponents() {
+		schemas[name] = schema
+	}
 	_, ownershipComponents := workspacePageOwnershipSchemaCatalog()
 	for name, schema := range ownershipComponents {
+		schemas[name] = schema
+	}
+	_, policyComponents := artifactCreationPolicySchemaCatalog()
+	for name, schema := range policyComponents {
 		schemas[name] = schema
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
@@ -641,8 +648,15 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range routineTrustSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range documentSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	ownershipRoutes, _ := workspacePageOwnershipSchemaCatalog()
 	for key, schema := range ownershipRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	policyRoutes, _ := artifactCreationPolicySchemaCatalog()
+	for key, schema := range policyRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()

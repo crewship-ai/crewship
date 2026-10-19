@@ -10,6 +10,72 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
+- **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
+
+- Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
+
+- **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
+
+### Upgrade and recovery notes
+
+- Before downgrading across the durable routine-start migration, stop incoming triggers and drain queued and in-flight starts. Otherwise use a forward fix; downgrading with outstanding work and upgrading again can repeat accepted work.
+- Resuming a routine body provides at-least-once execution: an interrupted step can repeat external effects. This is not an exactly-once guarantee. An uncertain interrupted setup hook remains visible as interrupted rather than being automatically repeated.
+- If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
+
+### Fixed
+
+- Crew member additions, removals and role override changes now commit with their old/new membership audit or roll back, with notifications only after commit.
+- Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
+- Dispatch due manual backups reliably across fractional-second timestamp boundaries, while keeping future busy retries queued until their exact deadline.
+
+- Wait for provider sign-in recovery to release its database connection before server shutdown finishes.
+
+- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
+
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+- Keep private Document output private in its source conversation, live delivery and agent diagnostics; audit foreign OWNER inspection before returning copied data.
+- Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
+
+- Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
+
+- **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
+- Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
+- Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+- Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
+- Isolate stream admission revocation epochs by credential and user, so another user's logout cannot reject valid requests; repeated signout of an already revoked session no longer sends another revocation notification.
+
+- Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
+- Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
+
+- ⚠️ **Behaviour change: private chat Documents are visible only to their human owner and workspace OWNER.** Other roles receive 404 and no catalog title; OWNER access to another human's document is audited before disclosure. Legacy sharing cannot silently widen private audiences, and OWNER selects an explicit successor before removal of a private artifact's custodian.
+- **Agent details now show the configured provider and model** in table, JSON and YAML output; these settings remain distinct from evidence of the model serving a run.
+- ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
+- **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
+
+- Scheduled routines retain at most one waiting occurrence per schedule when capacity is full. Later capacity-blocked occurrences are recorded as skipped/missed, without failure alerts or circuit-breaker trips.
+
+### Added
+
+- **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+
+- Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
+
+- Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
+- Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
+
+- Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
+
+- Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
+
+- Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
+
+- Select Create document in the chat composer to request a private saved document using Czech or English prose, with explicit per-message consent.
+
+- Document drafting commands honor JSON, YAML and NDJSON output formats while preserving exact revision and checkpoint identities.
+
+- **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
+
+- **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
 
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 
@@ -41,6 +107,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Settings resource access offers explicit immutable presets for existing Guest resources, with exact previews and confirmation. Saved intent stays separate from live grant authority; conflicts and uncertain writes require reloading before new consent.
 
+- Clarify that resource preset preview, confirmed application and the Settings selector are available; remove obsolete foundation-only descriptions without changing access behavior.
+
 - The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
 
 - Transactional audit appends reject ignored journal inserts and withhold notifications so the owning business transaction can roll back.
@@ -58,11 +126,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
+- Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
+- Deferred routine receipts expose stable waiting reasons in API, CLI and Plan, including neutral legacy causes and recovery attention.
+
 ### Added
 
 - Administrative member-access reads include server-computed preset selection provenance. Saved intent remains separate from effective permissions; manual edits cannot forge selections and personal access responses omit this metadata. The new selection fields keep their API names in CLI YAML. OpenAPI reuses the existing grant-provenance shape without changing authority.
 
 ### Changed
+
+- Reduce workspace and entity WebSocket delivery authorization to one current SQL snapshot per frame, retaining immediate account, membership and restricted-profile revocation checks, including the private-page owner or workspace OWNER audience.
 
 - OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.
 
@@ -74,6 +147,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
+- **Admitted runs can create a saved document through `crewship doc create`.** The requesting human owns the populated document, and retrying after a lost confirmation returns the same result. Document support and creation policy must be enabled.
+- **Document creation runs can save confirmed draft checkpoints.** An original drafting request permits guarded edits only to its new document in the same live run. Exact retries preserve saved work; a human edit or replacement run never silently extends the permission.
+
 - Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
 
 - **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
@@ -125,6 +201,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
+
+- Isolate shared issue-search limiter capacity to 256 accounts and 2048 audience buckets per workspace while retaining global bounds. Ordered idle expiry avoids scanning active buckets on capacity refusal and preserves their rate budgets; global saturation can still refuse new buckets.
 - Waitpoint decision confirmations and CLI errors no longer repeat approval capabilities; transport failures retain their existing error type and exit code.
 - **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
 - **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator/requester checks before commit; per-tool, async and legacy paths retain their existing behavior.

@@ -23,8 +23,7 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	if user == nil || workspaceID == "" {
@@ -57,8 +56,7 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	if user == nil || workspaceID == "" {
@@ -125,8 +123,7 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	if user == nil {
@@ -176,8 +173,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	path := r.URL.Query().Get("path")
@@ -251,8 +247,7 @@ type selfTestRequest struct {
 func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canAdministerInstance(ctx) {
-		replyError(w, http.StatusForbidden, "admin role required")
+	if !h.authorizeWorkspaceBackups(w, r) {
 		return
 	}
 	if workspaceID == "" {

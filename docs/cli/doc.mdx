@@ -1,0 +1,198 @@
+---
+title: "Document Commands"
+description: "Create, read and update saved documents with explicit revision checks."
+icon: "file-text"
+stability: experimental
+tag: Experimental
+---
+
+# crewship doc
+
+Work with a native document attached to a human-owned Page in the selected
+workspace. The document service must be enabled on that instance. The service
+rechecks your current credential and document permissions before reading or
+saving. Scoped credentials need `pages:read` for reads and both `pages:read` and
+`pages:write` for editing; `pages:*` covers both. These scopes do not grant access
+to somebody else's document.
+
+A reader refuses unsupported saved document schemas, including initialization
+retries, without returning their content. Use a compatible document service;
+confirmed data stays retained rather than being silently replaced.
+
+## `crewship doc create --file <request.json>`
+
+Create a populated document during a run admitted for one human's creation
+request. This command uses that run's credential and the local sidecar; it does
+not fall back to a saved human profile. Document support and the workspace's
+creation policy must allow the request.
+
+Supply one JSON object of at most 1 MiB with `slug`, `name`, `mutation_id` and a
+`blocks` array. Use `--file -` for stdin. For example:
+
+```json
+{"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team and review feedback."}]}
+```
+
+The result identifies the saved document and its link. An ordinary card click
+opens its current saved content beside the trusted conversation, after checking
+your current read access. Closing the preview preserves your unsent chat message;
+on a phone, use Back to chat. Modified clicks and native links open that saved
+identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
+If confirmation is lost,
+retry the same input with the same mutation ID. Changing that input conflicts;
+a retry never creates another document. Creation keeps the requesting human as
+owner. A one-shot admission grants no later access. If the original human request
+explicitly includes drafting, the same live run may save further guarded drafts
+of that one new document; it receives no access to another Page.
+
+An agent can also call `doc_create` in the Crewship routines MCP tools with the
+same four fields. The tool uses the same run permission and saved result; an
+exact retry can recover that result across the CLI and MCP interfaces.
+
+## `crewship doc draft`
+
+Save progress while fulfilling an admitted creation request. The original human
+request must include drafting permission. These commands use the current run's
+credential and local sidecar, without a saved human profile or a Page selector.
+They apply only to the document created for that request and stop when the run
+ends, its permission expires or is revoked, or a human changes the document.
+A replacement run inherits no drafting permission.
+
+1. Run `crewship doc draft view` to read a bounded view of confirmed headings and
+   paragraphs, their block IDs and hashes, and the document's revision and epoch.
+2. Run `crewship doc draft prepare --file <input.json>` with `view`, `target`,
+   `text` and a stable `mutation_id` of at most 117 ASCII letters, digits, underscores
+   or hyphens. It prepares an immutable edit and checkpoint
+   packet locally; preparation does not save text.
+3. Retain that output and run `crewship doc draft apply --file <packet.json>` to
+   apply the guarded text replacement and checkpoint the confirmed revision.
+
+Use `--file -` for stdin. Keep the original prepared packet after an uncertain
+response. Applying that same packet again recovers its receipts without another
+write. Changing an existing mutation's contents conflicts; rereading does not
+rebase or authorize a replacement edit automatically.
+
+Draft commands return JSON by default and honor `--format json`, `--format yaml`
+and `--format ndjson`. Use JSON output for packets passed to another draft
+command; input files remain JSON. Output formats preserve original integer
+revisions and checkpoint identities.
+
+If the text edit commits but the checkpoint confirmation fails, the edit remains
+saved. The result reports `committed_checkpoint_pending`; retry only its original
+checkpoint with `crewship doc draft checkpoint --file <packet.json>`. Do not
+report committed content as lost or silently generate a new mutation.
+
+The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
+and `doc_draft_checkpoint` use the same permission and immutable requests. They
+do not accept raw Yjs updates or whole-document replacement.
+
+## `crewship doc status`
+
+Read whether document support is configured on the selected instance. This
+command takes no Page argument. A disabled instance returns `enabled: false`.
+
+## `crewship doc initialize <page-slug>`
+
+Populate an empty human-owned Page with its first document. Create the Page with
+`crewship page create --file page.yaml --allow-empty`, then supply a JSON request
+containing an operation `id`, explicit `schema` (2 or 3), and a `body` document
+tree. Schema 3 also requires the original `page_id`. Headings and paragraphs use
+schema 2; initialization does not silently upgrade an existing document.
+
+`--file` is required. Use `--file -` to read stdin. The file must contain one JSON
+object of at most 2 MiB. Keep the same operation ID and contents when retrying
+an operation whose confirmation was lost.
+
+## `crewship doc read <page-slug>`
+
+For a saved Document identity, `crewship doc read @<page-id>` keeps the original
+object bound to the request. A deleted identity returns 404 even if another
+document reuses its former slug. Current workspace and access checks still apply.
+
+Read the currently confirmed document, content tree, block outline and revision.
+Use the returned opaque `epoch`, `rev` and target block hash when preparing an
+edit. Read after initialization to obtain the editing epoch.
+
+## `crewship doc outline <page-slug>`
+
+Print a JSON array of current block IDs, types, text and hashes. This command
+reads the same confirmed document as `read`; it does not mutate it.
+
+## `crewship doc patch <page-slug>`
+
+Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
+Supply one JSON object of at most 2 MiB. A semantic text replacement contains
+`id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
+`ifRev` and `ifHash`. Schema 3 also requires the original `page_id`. The editor's
+binary update form uses `kind: "human"` and a base64 `update` instead.
+
+A changed revision, target hash or epoch refuses the edit. Read the confirmed
+state again and decide on a new edit; the command never rebases it automatically.
+For a lost confirmation, resend the original request with its original ID.
+The receipt identifies the durable revision; a successful exact retry does not
+create another write. Revoked credentials cannot replay saved requests.
+
+## Requesting a document in chat
+
+With Document support and the workspace creation policy enabled, open a private
+agent chat without selecting an existing Page. Select **Create document** in the
+composer, then describe what you want and send the message. For example, write
+“Please draft a garden plan. Include three sections!” or “Napiš mi plán zahrady.”
+The request can use Czech or English, punctuation, and multiple lines.
+
+The selection applies to one sent message. It authorizes creating a new private
+document and saving drafts of that document during the original live run.
+Sending successfully clears the selection; changing users or conversations also
+clears it. A failed local send preserves the selection for retry. The control
+is unavailable while Document support is unconfirmed or an existing Page is
+selected. The server rechecks the original human and private-chat permissions.
+
+The composer carries `document_creation_intent` metadata with a `submission_id`
+and `drafting: true`; it leaves the message text unchanged. The older
+`document_creation` metadata shape remains supported for existing clients.
+Sending both shapes is rejected. Text returned by a model does not grant consent.
+
+The narrow command `vytvoř dokument o plánu uvedení produktu` remains a fallback.
+Its topic must be a single line containing letters, digits, spaces or hyphens;
+quoted, negated or ambiguous text does not grant creation permission. Use the
+composer control for other wording.
+
+A Document created from a private chat has an explicit private audience: its
+human owner and the workspace OWNER. Other roles, including ADMIN, cannot see
+its title, catalog entry or content; direct reads return 404. Opening somebody
+else's private document as OWNER requires a durable audit entry before access.
+Crew membership, folder inheritance and ordinary Page grants do not widen this
+audience. Legacy public Page links cannot publish it. Storage limits continue
+to count the whole workspace. If its owner leaves, removal returns 409 until
+the workspace OWNER explicitly selects an active human successor.
+
+The source conversation keeps that private audience from the original creation
+consent, even if creation fails or the execution permission later expires.
+Its stored tool results and live messages cannot expose the output to an ADMIN;
+OWNER inspection is audited before delivery. Existing transcript-sharing links
+cannot publish this protected conversation. Create new private documents from
+your own private conversation; administrative chat access is not creation consent.
+Deleting a protected source conversation currently returns 409: retained log
+copies still depend on its privacy record. Ordinary chat deletion is unaffected.
+Configured chat retention also keeps protected source conversations and excludes
+them from its deletion preview while those copies depend on their privacy record.
+
+The run creates a populated document and returns its saved link. Reopening a
+result does not grant a later run permission to edit it. Repeating an uncertain
+operation must reuse the original request, rather than issuing a new chat task.
+
+## `crewship doc chat-results <chat-id>`
+
+List saved documents linked to an accessible chat. This command requires your
+current human credential, `pages:read` for scoped CLI tokens, access to the chat
+and access to each document. Unavailable documents are omitted. Results contain
+saved links and provenance, without document contents or transcript text.
+
+A completed or recovered run does not erase its saved result. The command
+rechecks your current access; the original run does not regain permission.
+
+Agent-wide logs and diagnostics can contain copies from several conversations.
+They are available only when the reader may inspect every protected conversation
+represented by that agent; a document author does not gain access to another
+author's private output. Foreign OWNER inspection is audited before copies are
+returned. Unavailable required auditing prevents disclosure.

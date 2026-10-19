@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -234,6 +235,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		if !h.streamAuthorityCurrent(r, workspaceID) {
 			return
 		}
+		if !auth.StreamCredentialCurrent(r.Context()) {
+			return
+		}
 		writeSSEEvent(w, "entry", e)
 		lastSeenTime = ts
 		lastSeenID = e.ID
@@ -306,6 +310,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if !h.streamAuthorityCurrent(r, workspaceID) {
 				return false
 			}
+			if !auth.StreamCredentialCurrent(r.Context()) {
+				return false
+			}
 			writeSSEEvent(w, "entry", e)
 			lastSeenTime = ts
 			lastSeenID = e.ID
@@ -320,6 +327,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-heartbeat.C:
 			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return
+			}
+			if !auth.StreamCredentialCurrent(r.Context()) {
 				return
 			}
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
@@ -996,6 +1006,9 @@ func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
 // The opening middleware authenticates the credential; every emitted batch and
 // entry still needs current account, workspace and account-wide Guest authority.
 func (h *JournalHandler) streamAuthorityCurrent(r *http.Request, workspace string) bool {
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return false
+	}
 	user := UserFromContext(r.Context())
 	if user == nil {
 		return false

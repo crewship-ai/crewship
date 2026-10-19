@@ -1,6 +1,7 @@
 package api
 
 import (
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -15,6 +16,8 @@ import (
 const sharedSearchAccounts = 4096
 const sharedSearchTotalAudiences = 32768
 const sharedSearchAudiences = 257 // 256 valid project rights plus the all-project sentinel.
+const sharedSearchWorkspaceAccounts = 256
+const sharedSearchWorkspaceAudiences = 2048
 const sharedSearchIdle = 5 * time.Minute
 
 type sharedSearchKey [32]byte
@@ -22,22 +25,36 @@ type sharedSearchAudience [33]byte // explicit kind byte plus a fixed-width iden
 type sharedSearchBucket struct {
 	limiter *rate.Limiter
 	used    time.Time
+	key     sharedSearchAudience
+	account *sharedSearchAccount
+	idle    *list.Element
+}
+type sharedSearchWorkspace struct {
+	key                 sharedSearchKey
+	accounts, audiences int
 }
 type sharedSearchAccount struct {
 	aggregate *rate.Limiter
 	audiences map[sharedSearchAudience]*sharedSearchBucket
 	used      time.Time
+	key       sharedSearchKey
+	workspace *sharedSearchWorkspace
+	idle      *list.Element
+	highWater int
 }
 type sharedSearchLimiter struct {
-	mu                        sync.Mutex
-	accounts                  map[sharedSearchKey]*sharedSearchAccount
-	now                       func() time.Time
-	maxAccounts, maxAudiences int
-	maxTotal, total           int
+	mu                                          sync.Mutex
+	accounts                                    map[sharedSearchKey]*sharedSearchAccount
+	workspaces                                  map[sharedSearchKey]*sharedSearchWorkspace
+	accountIdle, audienceIdle                   list.List
+	now                                         func() time.Time
+	maxAccounts, maxAudiences                   int
+	maxTotal, total                             int
+	maxWorkspaceAccounts, maxWorkspaceAudiences int
 }
 
 func newSharedSearchLimiter() *sharedSearchLimiter {
-	return &sharedSearchLimiter{accounts: make(map[sharedSearchKey]*sharedSearchAccount), now: time.Now, maxAccounts: sharedSearchAccounts, maxAudiences: sharedSearchAudiences, maxTotal: sharedSearchTotalAudiences}
+	return &sharedSearchLimiter{accounts: make(map[sharedSearchKey]*sharedSearchAccount), workspaces: make(map[sharedSearchKey]*sharedSearchWorkspace), now: time.Now, maxAccounts: sharedSearchAccounts, maxAudiences: sharedSearchAudiences, maxTotal: sharedSearchTotalAudiences, maxWorkspaceAccounts: sharedSearchWorkspaceAccounts, maxWorkspaceAudiences: sharedSearchWorkspaceAudiences}
 }
 
 // take is called only after authentication, input checks and explicit project List.
@@ -57,37 +74,49 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 		s.removeAccount(key)
 		account = nil
 	}
+	workspaceKey := sharedSearchIdentity("", workspace)
+	owner := s.workspaces[workspaceKey]
 	if account == nil {
-		if len(s.accounts) >= s.maxAccounts || s.total >= s.maxTotal {
+		if s.accountCapacityFull(owner) {
 			s.expire(now, idle)
+			owner = s.workspaces[workspaceKey]
 		}
-		if len(s.accounts) >= s.maxAccounts || s.total >= s.maxTotal {
+		if s.accountCapacityFull(owner) {
 			return false, time.Minute
 		}
-		account = &sharedSearchAccount{aggregate: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchAccount), 15), audiences: make(map[sharedSearchAudience]*sharedSearchBucket)}
+		if owner == nil {
+			owner = &sharedSearchWorkspace{key: workspaceKey}
+			s.workspaces[workspaceKey] = owner
+		}
+		account = &sharedSearchAccount{aggregate: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchAccount), 15), audiences: make(map[sharedSearchAudience]*sharedSearchBucket), key: key, workspace: owner}
 		s.accounts[key] = account
+		owner.accounts++
+		account.idle = s.accountIdle.PushBack(account)
 	}
 	account.used = now
+	s.accountIdle.MoveToBack(account.idle)
 	audienceKey := sharedSearchAudienceKey(project)
 	bucket := account.audiences[audienceKey]
 	if bucket != nil && now.Sub(bucket.used) >= idle {
-		delete(account.audiences, audienceKey)
-		s.total--
-		compactSharedSearchAudiences(account)
+		s.removeAudience(bucket)
 		bucket = nil
 	}
 	if bucket == nil {
-		if len(account.audiences) >= s.maxAudiences || s.total >= s.maxTotal {
+		if s.audienceCapacityFull(account) {
 			s.expire(now, idle)
 		}
-		if len(account.audiences) >= s.maxAudiences || s.total >= s.maxTotal {
+		if s.audienceCapacityFull(account) {
 			return false, time.Minute
 		}
-		bucket = &sharedSearchBucket{limiter: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchProject), 5)}
+		bucket = &sharedSearchBucket{limiter: rate.NewLimiter(searchRate(ratelimitcfg.KeySharedSearchProject), 5), key: audienceKey, account: account}
 		account.audiences[audienceKey] = bucket
+		account.highWater = max(account.highWater, len(account.audiences))
+		bucket.idle = s.audienceIdle.PushBack(bucket)
 		s.total++
+		account.workspace.audiences++
 	}
 	bucket.used = now
+	s.audienceIdle.MoveToBack(bucket.idle)
 	account.aggregate.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchAccount))
 	bucket.limiter.SetLimitAt(now, searchRate(ratelimitcfg.KeySharedSearchProject))
 	aggregate := account.aggregate.ReserveN(now, 1)
@@ -101,37 +130,68 @@ func (s *sharedSearchLimiter) take(ctx context.Context, user, workspace, project
 	return true, 0
 }
 
-// Capacity cleanup never evicts an active entry or grants a premature refill.
+func (s *sharedSearchLimiter) accountCapacityFull(workspace *sharedSearchWorkspace) bool {
+	return len(s.accounts) >= s.maxAccounts || s.total >= s.maxTotal || workspace != nil && (workspace.accounts >= s.maxWorkspaceAccounts || workspace.audiences >= s.maxWorkspaceAudiences)
+}
+func (s *sharedSearchLimiter) audienceCapacityFull(account *sharedSearchAccount) bool {
+	return len(account.audiences) >= s.maxAudiences || s.total >= s.maxTotal || account.workspace.audiences >= s.maxWorkspaceAudiences
+}
+
+// Each live account/audience has exactly one idle-list node. Touches move nodes
+// rather than append history; monotonically ordered uses let capacity cleanup
+// stop at the first active entry, without scanning any remaining active maps.
 func (s *sharedSearchLimiter) expire(now time.Time, idle time.Duration) {
-	for key, account := range s.accounts {
-		if now.Sub(account.used) >= idle {
-			s.removeAccount(key)
-			continue
+	for node := s.accountIdle.Front(); node != nil; node = s.accountIdle.Front() {
+		account := node.Value.(*sharedSearchAccount)
+		if now.Sub(account.used) < idle {
+			break
 		}
-		removed := false
-		for audience, bucket := range account.audiences {
-			if now.Sub(bucket.used) >= idle {
-				delete(account.audiences, audience)
-				s.total--
-				removed = true
-			}
+		s.removeAccount(account.key)
+	}
+	for node := s.audienceIdle.Front(); node != nil; node = s.audienceIdle.Front() {
+		bucket := node.Value.(*sharedSearchBucket)
+		if now.Sub(bucket.used) < idle {
+			break
 		}
-		if removed {
-			compactSharedSearchAudiences(account)
-		}
+		s.removeAudience(bucket)
 	}
 }
 
-// Go maps retain backing storage after deletion; compact only after safe expiry.
+func (s *sharedSearchLimiter) removeAudience(bucket *sharedSearchBucket) {
+	account := bucket.account
+	delete(account.audiences, bucket.key)
+	s.audienceIdle.Remove(bucket.idle)
+	s.total--
+	account.workspace.audiences--
+	compactSharedSearchAudiences(account)
+}
+
+// Shrink only after real expiry halves the high-water mark. The copied live
+// entries are amortized over deletions; a full, active request never copies a
+// map. This also bounds retained Go map storage after repeated audience churn.
 func compactSharedSearchAudiences(account *sharedSearchAccount) {
+	if len(account.audiences)*2 > account.highWater {
+		return
+	}
 	next := make(map[sharedSearchAudience]*sharedSearchBucket, len(account.audiences))
 	for key, bucket := range account.audiences {
 		next[key] = bucket
 	}
 	account.audiences = next
+	account.highWater = len(next)
 }
 func (s *sharedSearchLimiter) removeAccount(key sharedSearchKey) {
-	s.total -= len(s.accounts[key].audiences)
+	account := s.accounts[key]
+	for _, bucket := range account.audiences {
+		s.audienceIdle.Remove(bucket.idle)
+	}
+	s.total -= len(account.audiences)
+	account.workspace.audiences -= len(account.audiences)
+	account.workspace.accounts--
+	if account.workspace.accounts == 0 {
+		delete(s.workspaces, account.workspace.key)
+	}
+	s.accountIdle.Remove(account.idle)
 	delete(s.accounts, key)
 }
 

@@ -441,6 +441,13 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 		replyInternalError(w, h.logger, "load page for grants", err)
 		return nil, false
 	}
+	if rec.PrivateAudience && r.Method != http.MethodGet {
+		replyError(w, 409, "private artifact audience requires explicit publication; ordinary grants cannot widen it")
+		return nil, false
+	}
+	if r.Method == http.MethodGet && !h.auditPrivateOwnerAccess(w, r, rec) {
+		return nil, false
+	}
 	return rec, true
 }
 

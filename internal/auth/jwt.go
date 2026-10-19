@@ -55,15 +55,17 @@ const (
 // so a stolen access token is killable in <= AccessTokenTTL once the
 // user signs out / changes password / an admin force-revokes.
 type Claims struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name,omitempty"`
-	Email              string `json:"email,omitempty"`
-	Sid                string `json:"sid,omitempty"`
-	Kind               string `json:"kind,omitempty"`
-	WSAuthorityVersion int    `json:"ws_authority_version,omitempty"`
-	Exp                int64  `json:"exp"`
-	Iat                int64  `json:"iat"`
-	Jti                string `json:"jti"`
+	ID                  string `json:"id"`
+	Name                string `json:"name,omitempty"`
+	Email               string `json:"email,omitempty"`
+	Sid                 string `json:"sid,omitempty"`
+	CLITokenID          string `json:"cli_token_id,omitempty"`
+	CredentialExpiresAt int64  `json:"credential_expires_at,omitempty"`
+	Kind                string `json:"kind,omitempty"`
+	WSAuthorityVersion  int    `json:"ws_authority_version,omitempty"`
+	Exp                 int64  `json:"exp"`
+	Iat                 int64  `json:"iat"`
+	Jti                 string `json:"jti"`
 }
 
 // JWTValidator issues and decodes Auth.js v5 JWE tokens. Holds three
@@ -158,6 +160,20 @@ func (v *JWTValidator) IssueWSTicket(userID, sessionID, name, email string) (str
 	return v.issue(v.wsKey, KindWS, WSTicketTTL, userID, sessionID, name, email)
 }
 
+// IssueCredentialWSTicket preserves the original credential identity and expiry;
+// the short ticket lifetime is an admission limit, not a new credential lifetime.
+func (v *JWTValidator) IssueCredentialWSTicket(userID, sessionID, tokenID, name, email string, expiresAt time.Time) (string, error) {
+	if (sessionID == "") == (tokenID == "") {
+		return "", errors.New("exactly one stream credential required")
+	}
+	return v.issue(v.wsKey, KindWS, WSTicketTTL, userID, sessionID, name, email, streamTicketOrigin{tokenID, expiresAt})
+}
+
+type streamTicketOrigin struct {
+	tokenID   string
+	expiresAt time.Time
+}
+
 // ValidateAccess decrypts an access token cookie and refuses anything
 // that isn't kind=access (so a refresh-cookie smuggled into the wrong
 // header gets rejected as ErrWrongKind, not silently honored).
@@ -226,7 +242,7 @@ func (v *JWTValidator) validate(key []byte, expectedKind, tokenStr string) (*Cla
 	return &claims, nil
 }
 
-func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID, sessionID, name, email string) (string, error) {
+func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID, sessionID, name, email string, origin ...streamTicketOrigin) (string, error) {
 	if userID == "" {
 		return "", errors.New("user id required")
 	}
@@ -255,6 +271,12 @@ func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID,
 	}
 	if kind == KindWS {
 		claims.WSAuthorityVersion = 1
+		if len(origin) > 0 {
+			claims.CLITokenID = origin[0].tokenID
+			if !origin[0].expiresAt.IsZero() {
+				claims.CredentialExpiresAt = origin[0].expiresAt.Unix()
+			}
+		}
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {

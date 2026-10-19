@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
@@ -15,7 +16,8 @@ import (
 )
 
 // A real CLI process reaches the authenticated Router and migrated SQLite.
-// Synthetic extension rows exercise custody without requiring output delivery.
+// Installed Document snapshots or absent-feature synthetic rows exercise custody
+// without requiring output delivery.
 func TestAcceptance_WorkspacePageOwnership(t *testing.T) {
 	db := testutil.MigratedDB(t).DB
 	const workspace = "ccustodyworkspace001"
@@ -25,11 +27,27 @@ func TestAcceptance_WorkspacePageOwnership(t *testing.T) {
 		`INSERT INTO users(id,email) VALUES('custody-admin','admin@example.invalid'),('custody-old','old@example.invalid'),('custody-reader','reader@example.invalid'),('custody-ungranted','ungranted@example.invalid')`,
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('custody-m1','ccustodyworkspace001','custody-admin','OWNER'),('custody-m2','ccustodyworkspace001','custody-old','MEMBER'),('custody-m3','ccustodyworkspace001','custody-reader','MEMBER'),('custody-m4','ccustodyworkspace001','custody-ungranted','MEMBER')`,
 		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('custody-page','ccustodyworkspace001','private-output','Private output','custody-old','{}')`,
-		`CREATE TABLE documents(page_id TEXT PRIMARY KEY REFERENCES pages(id),private_content TEXT)`,
-		`INSERT INTO documents VALUES('custody-page','NEVER_EXPOSE_THIS')`,
 		`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('custody-page','user','custody-reader','read','custody-old')`,
 	} {
 		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var installed bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='documents')`).Scan(&installed); err != nil {
+		t.Fatal(err)
+	}
+	contentColumn := "private_content"
+	if installed {
+		contentColumn = "snapshot"
+		if _, err := db.Exec(`INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,'custody-page',1,?,?)`, workspace, []byte("NEVER_EXPOSE_THIS"), []byte("[]")); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if _, err := db.Exec(`CREATE TABLE documents(page_id TEXT PRIMARY KEY REFERENCES pages(id),private_content TEXT)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO documents(page_id,private_content) VALUES('custody-page','NEVER_EXPOSE_THIS')`); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,7 +87,7 @@ func TestAcceptance_WorkspacePageOwnership(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &listing); err != nil || len(listing.Pages) != 1 || listing.Pages[0].ID != "custody-page" {
 		t.Fatalf("listing %s %v", output, err)
 	}
-	if strings.Contains(output, "NEVER_EXPOSE_THIS") {
+	if strings.Contains(output, "NEVER_EXPOSE_THIS") || strings.Contains(output, base64.StdEncoding.EncodeToString([]byte("NEVER_EXPOSE_THIS"))) {
 		t.Fatal("CLI exposed content")
 	}
 	eligible := map[string]bool{}
@@ -92,7 +110,7 @@ func TestAcceptance_WorkspacePageOwnership(t *testing.T) {
 		t.Fatalf("stale owner: %v %s", err, output)
 	}
 	var content, issuer string
-	if err := db.QueryRow(`SELECT private_content FROM documents WHERE page_id='custody-page'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
+	if err := db.QueryRow(`SELECT ` + contentColumn + ` FROM documents WHERE page_id='custody-page'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
 		t.Fatalf("retained source %s %v", content, err)
 	}
 	if err := db.QueryRow(`SELECT granted_by_user_id FROM page_grants WHERE page_id='custody-page'`).Scan(&issuer); err != nil || issuer != "custody-old" {

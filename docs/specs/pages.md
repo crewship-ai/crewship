@@ -30,6 +30,9 @@ and empty-folder requirements remain authoritative.
 ## 1. What a Page is
 
 A **Page** is a workspace-scoped, slug-addressable record holding an ordered list of **panels**.
+Native saved-result links can address `@<page-id>` instead of a slug. This explicit
+reference is resolved by immutable ID inside the same workspace and ACL checks;
+it never falls back to a reused slug when the original Page no longer exists.
 A panel declares:
 
 - a **schema** from a closed set of five (§3),
@@ -286,6 +289,24 @@ architecture and reuses two systems that already exist here.
 ---
 
 ## 7. Permission model
+
+Private chat artifacts are an explicit exception to the ordinary Page role and
+grant paths described below. Their persisted private audience permits only the
+human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
+reads return 404 and catalogs omit the name and entry. OWNER opening another
+human's private output writes a content-free audit before metadata or content is
+released; unavailable audit storage refuses that access. Ordinary grants,
+folders and legacy public links cannot silently publish a private artifact.
+Shared Page authorization and workspace-wide storage accounting are unchanged.
+Private read checks require a live account, workspace and membership. Guest
+catalogs omit unauthorized private outputs without failing the whole listing.
+The Page metadata reader checks a live custodian independently of trusted
+mutation authority; the account-wide Guest ceiling disables the OWNER override
+for others' outputs. Public routes retain the Guest allowlist, and the Document
+engine retains its trusted-account gate: this metadata check does not enable
+Document content access for a globally restricted custodian. Private mutation
+checks retain their separate trusted-account requirement.
+
 
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant

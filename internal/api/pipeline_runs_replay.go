@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -36,21 +37,66 @@ type replayRequestBody struct {
 	// version, diffed against the originals. These are real ModeRun
 	// executions with external effects and costs; only HEAD/live stays
 	// unchanged (see RunInput.PinnedVersion in internal/pipeline/executor.go).
-	PinnedVersion *int `json:"pinned_version,omitempty"`
+	PinnedVersion *int            `json:"pinned_version,omitempty"`
+	Inputs        json.RawMessage `json:"inputs,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	Tags          json.RawMessage `json:"tags,omitempty"`
+}
+
+// Raw fields distinguish inheritance (omitted) from clearing ({} or []). Null
+// is refused so clients cannot accidentally turn a missing value into a reset.
+func (b replayRequestBody) overrides() (map[string]any, map[string]any, []string, error) {
+	objects := make([]map[string]any, 2)
+	for i, field := range []struct {
+		name string
+		raw  json.RawMessage
+	}{{"inputs", b.Inputs}, {"metadata", b.Metadata}} {
+		if len(field.raw) == 0 {
+			continue
+		}
+		if err := json.Unmarshal(field.raw, &objects[i]); err != nil || objects[i] == nil {
+			return nil, nil, nil, fmt.Errorf("%s must be a JSON object; omit it to inherit", field.name)
+		}
+	}
+	if objects[1] != nil && len(marshalMetadata(objects[1])) > pipeline.MaxRunMetadataBytes {
+		return nil, nil, nil, fmt.Errorf("metadata exceeds %d bytes", pipeline.MaxRunMetadataBytes)
+	}
+	var tags []string
+	if len(b.Tags) != 0 {
+		var values []any
+		if err := json.Unmarshal(b.Tags, &values); err != nil || values == nil {
+			return nil, nil, nil, errors.New("tags must be an array of strings; omit it to inherit")
+		}
+		if len(values) > pipeline.MaxRunTags {
+			return nil, nil, nil, fmt.Errorf("at most %d tags are allowed", pipeline.MaxRunTags)
+		}
+		tags = make([]string, 0, len(values))
+		for _, value := range values {
+			tag, ok := value.(string)
+			if !ok {
+				return nil, nil, nil, errors.New("tags must be an array of strings")
+			}
+			tags = append(tags, tag)
+		}
+	}
+	return objects[0], objects[1], tags, nil
 }
 
 // replayRun re-invokes the routine behind an existing run with the
 // original inputs, stamping is_replay + replay_of. Shared by the
 // single- and bulk-replay handlers. Returns the new run result.
-// pinnedVersion is nil for the ordinary "re-run against HEAD" replay;
-// bulk-replay always passes nil.
-func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, pinnedVersion *int) (any, int, error) {
+// An omitted pin replays against HEAD; bulk replay inherits all captured fields.
+func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, options replayRequestBody) (any, int, error) {
 	user := UserFromContext(r.Context())
 	if user == nil || user.ID == "" {
 		return nil, http.StatusUnauthorized, errors.New("replay requires an authenticated user")
 	}
 	if h.runStore == nil {
 		return nil, http.StatusServiceUnavailable, errors.New("run store not wired")
+	}
+	inputOverride, metadataOverride, tagOverride, err := options.overrides()
+	if err != nil {
+		return nil, http.StatusBadRequest, err
 	}
 	orig, err := h.runStore.Get(r.Context(), runID)
 	if errors.Is(err, pipeline.ErrRunNotFoundInStore) {
@@ -72,13 +118,47 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 	}
 
 	var inputs map[string]any
-	if orig.InputsJSON != "" {
+	if inputOverride != nil {
+		inputs = inputOverride
+	} else if orig.InputsJSON != "" {
 		if err := json.Unmarshal([]byte(orig.InputsJSON), &inputs); err != nil {
 			return nil, http.StatusConflict, errors.New("historical inputs are unreadable; replay was not started")
 		}
 	}
+	// Validate changed inputs against the selected immutable definition before
+	// any run or external effect. The executor repeats validation at dispatch.
+	if inputOverride != nil {
+		definition := p.DefinitionJSON
+		if options.PinnedVersion != nil {
+			version, err := h.store.GetVersion(r.Context(), p.ID, *options.PinnedVersion)
+			if errors.Is(err, pipeline.ErrNotFound) || (err == nil && version == nil) {
+				return nil, http.StatusConflict, pipeline.ErrPinnedVersionNotFound
+			}
+			if err != nil {
+				return nil, http.StatusInternalServerError, err
+			}
+			definition = version.DefinitionJSON
+		}
+		dsl, err := pipeline.Parse([]byte(definition))
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+		if err := pipeline.ValidateFormInputs(dsl, inputs); err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+	}
 	// Carry the original run's tags so the replay groups with it.
-	tags, _ := h.runStore.TagsFor(r.Context(), runID)
+	tags := tagOverride
+	if tags == nil {
+		tags, err = h.runStore.TagsFor(r.Context(), runID)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+	}
+	metadataJSON := orig.MetadataJSON
+	if metadataOverride != nil {
+		metadataJSON = marshalMetadata(metadataOverride)
+	}
 
 	// Preserve both the historical source and the trusted caller's ceiling.
 	// A single origin column cannot represent two distinct private sources.
@@ -109,10 +189,10 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 		ChatOriginID:        originID,
 		TriggeredByID:       runID,
 		Tags:                tags,
-		MetadataJSON:        orig.MetadataJSON,
+		MetadataJSON:        metadataJSON,
 		IsReplay:            true,
 		ReplayOf:            runID,
-		PinnedVersion:       pinnedVersion,
+		PinnedVersion:       options.PinnedVersion,
 	})
 	if err != nil {
 		if errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) || errors.Is(err, pipeline.ErrInvokingUserNotMember) {
@@ -167,7 +247,7 @@ func (h *PipelineHandler) ReplayRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "pinned_version must be a positive archive version")
 		return
 	}
-	res, code, err := h.replayRun(r, workspaceID, runID, body.PinnedVersion)
+	res, code, err := h.replayRun(r, workspaceID, runID, body)
 	if err != nil {
 		replyError(w, code, err.Error())
 		return
@@ -240,7 +320,7 @@ func (h *PipelineHandler) BulkReplayRuns(w http.ResponseWriter, r *http.Request)
 		replayed int
 	)
 	for _, id := range ids {
-		res, _, err := h.replayRun(r, workspaceID, id, nil)
+		res, _, err := h.replayRun(r, workspaceID, id, replayRequestBody{})
 		if err != nil {
 			results = append(results, replayOutcome{SourceRunID: id, Error: err.Error()})
 			continue

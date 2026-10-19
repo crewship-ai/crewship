@@ -59,7 +59,7 @@ func pageOwnershipRowsAfter(ctx context.Context, q pageAuthQueryer, ws, owner, p
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT p.id,p.slug,p.name,`+kind+`,COALESCE(p.owner_user_id,''),COALESCE(u.full_name,'') FROM pages p LEFT JOIN users u ON u.id=p.owner_user_id WHERE p.workspace_id=? AND (?='' OR p.owner_user_id=?) AND (?='' OR p.id=?) AND `+predicate+` AND (?='' OR p.id>?) ORDER BY p.id LIMIT ?`, ws, owner, owner, page, page, after, after, limit)
+	rows, err := q.QueryContext(ctx, `SELECT p.id,p.slug,p.name,`+kind+`,COALESCE(p.owner_user_id,''),COALESCE(u.full_name,'') FROM pages p LEFT JOIN users u ON u.id=p.owner_user_id WHERE p.workspace_id=? AND (?='' OR p.owner_user_id=?) AND (?='' OR p.id=?) AND `+predicate+` AND (p.private_audience=0 OR EXISTS(SELECT 1 FROM workspace_members am WHERE am.workspace_id=p.workspace_id AND am.user_id=? AND am.role='OWNER')) AND (?='' OR p.id>?) ORDER BY p.id LIMIT ?`, ws, owner, owner, page, page, privateAudienceActorID(ctx), after, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func pageOwnershipRowsAfter(ctx context.Context, q pageAuthQueryer, ws, owner, p
 func (h *WorkspaceHandler) pageOwnershipActor(w http.ResponseWriter, r *http.Request, ph *PageHandler) (*AuthUser, bool) {
 	user := UserFromContext(r.Context())
 	agent, _ := pageGrantCallerIsAgent(r)
-	if user == nil || agent || projectAgentFrom(r.Context()) != nil {
+	if user == nil || agent || projectAgentFrom(r.Context()) != nil || r.Context().Value(artifactRunKey{}) != nil {
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
@@ -145,7 +145,7 @@ func pageOwnershipCandidates(ctx context.Context, ph *PageHandler, ws string, p 
 		if err != nil {
 			return nil, err
 		}
-		if visible {
+		if visible || rec.PrivateAudience {
 			out = append(out, c)
 		}
 	}

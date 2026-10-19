@@ -57,6 +57,9 @@ COPY internal/pages/content_types.json ./internal/pages/
 COPY e2e/ ./e2e/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
+# The browser instantiates this shared closed model with its own pinned Yjs.
+# Copy only the schema source, without the separate Docs service runtime.
+COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION

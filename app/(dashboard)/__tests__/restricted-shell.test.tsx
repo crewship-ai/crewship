@@ -197,12 +197,25 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("offers only the server's surfaces in the sidebar and phone sheet", async () => {
     mount()
     expect(await screen.findByTestId("page")).toBeInTheDocument()
-    for (const name of ["Chat", "Routines", "Pages", "Settings"]) {
+    for (const name of ["Chat", "Routines", "Artifacts", "Settings"]) {
       expect(screen.getAllByRole("link", { name }).length).toBeGreaterThan(0)
+    }
+    for (const link of screen.getAllByRole("link", { name: "Artifacts" })) {
+      expect(link).toHaveAttribute("href", "/pages")
     }
     for (const name of ["Dashboard", "Inbox", "Issues", "Activity", "Crews", "Skills", "Credentials", "Integrations"]) {
       expect(screen.queryByRole("link", { name })).toBeNull()
     }
+  })
+
+  it("requires the server's pages permission for the Artifacts surface", async () => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: SURFACES.filter(surface => surface !== "pages") }]
+    nav.pathname = "/pages"
+    mount()
+    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Artifacts" })).toBeNull()
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(forbidden()).toEqual([])
   })
 
   it("keeps only allowed tabs in the phone tab bar", async () => {

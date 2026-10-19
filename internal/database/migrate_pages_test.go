@@ -174,6 +174,9 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				// is not restored by a rollback or carried by a bundle.
 				{name: "icon"},
 				{name: "color"},
+				// Private chat artifacts have a durable audience independent of
+				// their type, ordinary grants and transient run provenance.
+				{name: "private_audience", notNull: true},
 			},
 		},
 		{
