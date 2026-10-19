@@ -131,9 +131,9 @@ function SidebarSearch() {
  */
 type SidebarModeKey = "pinned" | "hover" | "collapsed"
 const SIDEBAR_MODES: { key: SidebarModeKey; label: string; hint: string; icon: LucideIcon }[] = [
-  { key: "pinned", label: "Pinned open", hint: "Always open with names", icon: PanelLeft },
-  { key: "hover", label: "Rail · expand on hover", hint: "Icons, names under the pointer", icon: PanelLeftDashed },
-  { key: "collapsed", label: "Rail", hint: "Icons only, never opens", icon: PanelLeftClose },
+  { key: "pinned", label: "Expanded", hint: "Always open with names", icon: PanelLeft },
+  { key: "hover", label: "Expand on hover", hint: "Icons, names under the pointer", icon: PanelLeftDashed },
+  { key: "collapsed", label: "Collapsed", hint: "Icons only, never opens", icon: PanelLeftClose },
 ]
 
 /**
