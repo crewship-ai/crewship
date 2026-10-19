@@ -197,6 +197,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     list: routineFolders.folders,
     onCreate: canCreate ? routineFolders.create : undefined,
     onMove: canCreate ? routineFolders.move : undefined,
+    onUpdate: canCreate ? routineFolders.update : undefined,
+    onDelete: canCreate ? routineFolders.remove : undefined,
   }
 
   // The lead's "Open the draft" link: /routines?draft=<slug>&draft_id=…

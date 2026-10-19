@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  ROUTINE_FOLDER_MAX_DEPTH,
   buildRoutinePanelIndex,
+  folderDepth,
+  folderMoveTargets,
   groupRoutines,
   primaryTrigger,
   sortRoutines,
@@ -148,5 +151,64 @@ describe("groupRoutines by folder (ODCH-RT-01)", () => {
   it("has no No-folder section when everything is filed", () => {
     const groups = groupRoutines(rows.slice(0, 3), "folder", index, new Map(), { folders })
     expect(groups.map((g) => g.label)).toEqual(["Engineering", "Market intel"])
+  })
+})
+
+// #3768: subfolders. Folder sections are listed depth first — a folder, then
+// its subfolders — each carrying its depth, so the panel can indent them.
+describe("groupRoutines with subfolders (#3768)", () => {
+  const folders = new Map([
+    ["f_ops", { id: "f_ops", name: "Ops" }],
+    ["f_daily", { id: "f_daily", name: "Daily", parent_id: "f_ops" }],
+    ["f_night", { id: "f_night", name: "Nightly", parent_id: "f_daily" }],
+    ["f_arch", { id: "f_arch", name: "Archive" }],
+    ["f_zz", { id: "f_zz", name: "Zed" }],
+  ])
+  const index = { triggers: new Map(), nextRun: new Map(), spend: new Map() } as unknown as RoutinePanelIndex
+  const rows = [
+    { id: "a", slug: "standup", name: "Standup", folder_id: "f_daily" },
+    { id: "b", slug: "triage", name: "Triage", folder_id: "f_night" },
+    { id: "c", slug: "loose", name: "Loose" },
+    { id: "d", slug: "zed", name: "Zed one", folder_id: "f_zz" },
+  ]
+
+  it("lists a folder's subfolders right under it, with their depth", () => {
+    const groups = groupRoutines(rows, "folder", index, new Map(), { folders, includeEmptyFolders: true })
+    expect(groups.map((g) => [g.label, g.depth ?? 0, g.folderId ?? null])).toEqual([
+      ["Archive", 0, "f_arch"],
+      ["Ops", 0, "f_ops"],
+      ["Daily", 1, "f_daily"],
+      ["Nightly", 2, "f_night"],
+      ["Zed", 0, "f_zz"],
+      ["No folder", 0, null],
+    ])
+  })
+
+  it("keeps the parents of a listed subfolder even when they hold nothing that matches", () => {
+    const groups = groupRoutines(rows.slice(1, 2), "folder", index, new Map(), { folders })
+    expect(groups.map((g) => g.label)).toEqual(["Ops", "Daily", "Nightly"])
+    expect(groups[0].rows).toEqual([])
+  })
+
+  it("counts depth from the top and stops on a broken chain", () => {
+    expect(folderDepth(folders, "f_ops")).toBe(1)
+    expect(folderDepth(folders, "f_night")).toBe(3)
+    const loop = new Map([
+      ["x", { id: "x", name: "X", parent_id: "y" }],
+      ["y", { id: "y", name: "Y", parent_id: "x" }],
+    ])
+    expect(folderDepth(loop, "x")).toBeLessThanOrEqual(ROUTINE_FOLDER_MAX_DEPTH + 1)
+  })
+
+  it("offers as Move targets the top level and every folder that is not itself, under it, or too deep", () => {
+    // Moving Daily (with Nightly under it, two levels): Ops (1) fits, Archive and Zed fit; nothing under Daily.
+    expect(folderMoveTargets(folders, "f_daily").map((t) => [t.id, t.label])).toEqual([
+      [null, "Top level"],
+      ["f_arch", "Archive"],
+      ["f_ops", "Ops"],
+      ["f_zz", "Zed"],
+    ])
+    // Moving Archive (one level): Daily (2) fits, Nightly (3) does not.
+    expect(folderMoveTargets(folders, "f_arch").map((t) => t.label)).toEqual(["Top level", "Ops", "Ops / Daily", "Zed"])
   })
 })

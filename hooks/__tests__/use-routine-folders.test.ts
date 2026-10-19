@@ -46,3 +46,34 @@ it("moves routines in or out, then reloads and tells the list to reload", async 
   expect(JSON.parse(call[1].body)).toEqual({ slugs: ["a", "b"], folder_id: null })
   expect(moved).toHaveBeenCalled()
 })
+
+it("creates a subfolder, updates and deletes a folder, then reloads (#3768)", async () => {
+  fetch.mockResolvedValue(json([]))
+  const view = renderHook(() => useRoutineFolders("ws"))
+  await act(async () => {
+    expect(await view.result.current.create("Daily", "f1")).toBeNull()
+    expect(await view.result.current.update("f2", { icon: "rocket", color: "blue" })).toBeNull()
+    expect(await view.result.current.update("f2", { parent_id: null })).toBeNull()
+  })
+  fetch.mockResolvedValueOnce(new Response(null, { status: 204 }))
+  await act(async () => {
+    expect(await view.result.current.remove("f2")).toBeNull()
+  })
+  const calls = fetch.mock.calls.filter(([, init]) => init?.method)
+  expect(calls.map(([url, init]) => [init.method, url, init.body ? JSON.parse(init.body) : null])).toEqual([
+    ["POST", "/api/v1/workspaces/ws/pipeline-folders", { name: "Daily", parent_id: "f1" }],
+    ["PATCH", "/api/v1/workspaces/ws/pipeline-folders/f2", { icon: "rocket", color: "blue" }],
+    ["PATCH", "/api/v1/workspaces/ws/pipeline-folders/f2", { parent_id: null }],
+    ["DELETE", "/api/v1/workspaces/ws/pipeline-folders/f2", null],
+  ])
+})
+
+it("hands back the server's refusal for an update", async () => {
+  fetch.mockResolvedValueOnce(json([])).mockResolvedValueOnce(json({ error: "a folder cannot go inside itself or one of its subfolders" }, 400))
+  const view = renderHook(() => useRoutineFolders("ws"))
+  let err: string | null = null
+  await act(async () => {
+    err = await view.result.current.update("f1", { parent_id: "f2" })
+  })
+  expect(err).toBe("a folder cannot go inside itself or one of its subfolders")
+})

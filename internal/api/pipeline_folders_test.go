@@ -186,3 +186,150 @@ func TestRoutineFolders_MoveIsAllOrNothingAndWorkspaceScoped(t *testing.T) {
 		t.Fatalf("delete foreign folder: %d", w.Code)
 	}
 }
+
+// #3768: a folder's own menu — Icon, New subfolder, Move to. A folder wears an
+// icon from the crew icon registry (the page folders' vocabulary) and may sit
+// inside another folder, at most maxFolderDepth levels deep, never inside
+// itself or its own subfolder.
+
+func (f *folderRig) createWith(body string) (int, routineFolderResponse) {
+	f.t.Helper()
+	w := f.do("POST", "/pipeline-folders", body, f.h.CreateFolder)
+	var out routineFolderResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+func TestRoutineFolders_CreateIconAndParent(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       func(top, deep string) string
+		wantCode   int
+		wantIcon   string
+		wantParent func(top, deep string) string
+	}{
+		{"icon from the crew registry", func(_, _ string) string { return `{"name":"A","icon":"rocket"}` }, http.StatusCreated, "rocket", nil},
+		{"no icon", func(_, _ string) string { return `{"name":"A"}` }, http.StatusCreated, "", nil},
+		{"unknown icon refused", func(_, _ string) string { return `{"name":"A","icon":"not-an-icon"}` }, http.StatusBadRequest, "", nil},
+		{"subfolder", func(top, _ string) string { return `{"name":"A","parent_id":"` + top + `"}` }, http.StatusCreated, "", func(top, _ string) string { return top }},
+		{"empty parent is top level", func(_, _ string) string { return `{"name":"A","parent_id":""}` }, http.StatusCreated, "", func(_, _ string) string { return "" }},
+		{"unknown parent", func(_, _ string) string { return `{"name":"A","parent_id":"nope"}` }, http.StatusNotFound, "", nil},
+		{"parent of another workspace", func(_, _ string) string { return `{"name":"A","parent_id":"other_f"}` }, http.StatusNotFound, "", nil},
+		{"too deep", func(_, deep string) string { return `{"name":"A","parent_id":"` + deep + `"}` }, http.StatusBadRequest, "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newFolderRig(t)
+			top := rig.create("Top")
+			_, mid := rig.createWith(`{"name":"Mid","parent_id":"` + top.ID + `"}`)
+			_, deep := rig.createWith(`{"name":"Deep","parent_id":"` + mid.ID + `"}`)
+			if deep.ID == "" {
+				t.Fatal("the three-level chain could not be built")
+			}
+			if _, err := rig.h.db.Exec(`INSERT INTO routine_folders(id,workspace_id,name,created_at,updated_at) VALUES('other_f','ws_other','Theirs','t','t')`); err != nil {
+				t.Fatal(err)
+			}
+			code, got := rig.createWith(tc.body(top.ID, deep.ID))
+			if code != tc.wantCode {
+				t.Fatalf("status %d, want %d", code, tc.wantCode)
+			}
+			if code != http.StatusCreated {
+				return
+			}
+			if got.Icon != tc.wantIcon {
+				t.Errorf("icon = %q, want %q", got.Icon, tc.wantIcon)
+			}
+			want := ""
+			if tc.wantParent != nil {
+				want = tc.wantParent(top.ID, deep.ID)
+			}
+			if got.ParentID != want {
+				t.Errorf("parent_id = %q, want %q", got.ParentID, want)
+			}
+		})
+	}
+}
+
+func TestRoutineFolders_UpdateIconAndParent(t *testing.T) {
+	// Tree: A › B › C, and D on its own.
+	type tree struct{ a, b, c, d routineFolderResponse }
+	cases := []struct {
+		name       string
+		target     func(tr tree) string
+		body       func(tr tree) string
+		wantCode   int
+		wantIcon   string
+		wantParent func(tr tree) string
+	}{
+		{"set icon", func(tr tree) string { return tr.d.ID }, func(tree) string { return `{"icon":"briefcase"}` }, http.StatusOK, "briefcase", func(tree) string { return "" }},
+		{"clear icon", func(tr tree) string { return tr.a.ID }, func(tree) string { return `{"icon":""}` }, http.StatusOK, "", func(tree) string { return "" }},
+		{"unknown icon", func(tr tree) string { return tr.d.ID }, func(tree) string { return `{"icon":"nope"}` }, http.StatusBadRequest, "", nil},
+		{"omitted parent is kept", func(tr tree) string { return tr.b.ID }, func(tree) string { return `{"name":"B2"}` }, http.StatusOK, "", func(tr tree) string { return tr.a.ID }},
+		{"move into another folder", func(tr tree) string { return tr.d.ID }, func(tr tree) string { return `{"parent_id":"` + tr.a.ID + `"}` }, http.StatusOK, "", func(tr tree) string { return tr.a.ID }},
+		{"null moves to the top", func(tr tree) string { return tr.b.ID }, func(tree) string { return `{"parent_id":null}` }, http.StatusOK, "", func(tree) string { return "" }},
+		{"empty moves to the top", func(tr tree) string { return tr.c.ID }, func(tree) string { return `{"parent_id":""}` }, http.StatusOK, "", func(tree) string { return "" }},
+		{"into itself", func(tr tree) string { return tr.a.ID }, func(tr tree) string { return `{"parent_id":"` + tr.a.ID + `"}` }, http.StatusBadRequest, "", nil},
+		{"into its own subfolder", func(tr tree) string { return tr.a.ID }, func(tr tree) string { return `{"parent_id":"` + tr.c.ID + `"}` }, http.StatusBadRequest, "", nil},
+		{"subtree would be too deep", func(tr tree) string { return tr.a.ID }, func(tr tree) string { return `{"parent_id":"` + tr.d.ID + `"}` }, http.StatusBadRequest, "", nil},
+		{"unknown parent", func(tr tree) string { return tr.d.ID }, func(tree) string { return `{"parent_id":"nope"}` }, http.StatusNotFound, "", nil},
+		{"parent not a string", func(tr tree) string { return tr.d.ID }, func(tree) string { return `{"parent_id":5}` }, http.StatusBadRequest, "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newFolderRig(t)
+			var tr tree
+			_, tr.a = rig.createWith(`{"name":"A","icon":"rocket"}`)
+			_, tr.b = rig.createWith(`{"name":"B","parent_id":"` + tr.a.ID + `"}`)
+			_, tr.c = rig.createWith(`{"name":"C","parent_id":"` + tr.b.ID + `"}`)
+			tr.d = rig.create("D")
+			if tr.c.ID == "" {
+				t.Fatal("tree could not be built")
+			}
+			id := tc.target(tr)
+			w := rig.do("PATCH", "/pipeline-folders/"+id, tc.body(tr), rig.h.UpdateFolder)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status %d, want %d: %s", w.Code, tc.wantCode, w.Body.String())
+			}
+			if w.Code != http.StatusOK {
+				return
+			}
+			var got routineFolderResponse
+			_ = json.Unmarshal(w.Body.Bytes(), &got)
+			if got.Icon != tc.wantIcon {
+				t.Errorf("icon = %q, want %q", got.Icon, tc.wantIcon)
+			}
+			if want := tc.wantParent(tr); got.ParentID != want {
+				t.Errorf("parent_id = %q, want %q", got.ParentID, want)
+			}
+		})
+	}
+}
+
+// Deleting a folder hands its subfolders to its own parent; its routines are
+// unfiled, the subfolders' routines stay where they are.
+func TestRoutineFolders_DeleteLiftsSubfolders(t *testing.T) {
+	rig := newFolderRig(t)
+	top := rig.create("Top")
+	_, mid := rig.createWith(`{"name":"Mid","parent_id":"` + top.ID + `"}`)
+	_, leaf := rig.createWith(`{"name":"Leaf","parent_id":"` + mid.ID + `"}`)
+	rig.do("POST", "/pipeline-folders/move", `{"slugs":["weekly"],"folder_id":"`+mid.ID+`"}`, rig.h.MoveToFolder)
+	rig.do("POST", "/pipeline-folders/move", `{"slugs":["digest"],"folder_id":"`+leaf.ID+`"}`, rig.h.MoveToFolder)
+
+	if w := rig.do("DELETE", "/pipeline-folders/"+mid.ID, "", rig.h.DeleteFolder); w.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	var list []routineFolderResponse
+	_ = json.Unmarshal(rig.do("GET", "/pipeline-folders", "", rig.h.ListFolders).Body.Bytes(), &list)
+	byName := map[string]routineFolderResponse{}
+	for _, f := range list {
+		byName[f.Name] = f
+	}
+	if len(list) != 2 || byName["Leaf"].ParentID != top.ID || byName["Leaf"].RoutineCount != 1 {
+		t.Fatalf("after delete = %+v", list)
+	}
+	var filed int
+	_ = rig.h.db.QueryRow(`SELECT COUNT(*) FROM routine_folder_members WHERE pipeline_id = (SELECT id FROM pipelines WHERE slug = 'weekly')`).Scan(&filed)
+	if filed != 0 {
+		t.Fatal("the deleted folder's routine must be unfiled")
+	}
+}

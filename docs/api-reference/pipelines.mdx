@@ -37,9 +37,9 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel` | manage | Cancel a run |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-folders` | member | Routine folders with the number of routines in each |
-| POST | `/api/v1/workspaces/{workspaceId}/pipeline-folders` | create | Create a folder (`name` 1–80 characters, unique per workspace ignoring case; optional `color`); `409` on a duplicate |
-| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Rename or recolour (`color: ""` clears) |
-| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Delete a folder; its routines are kept and become unfiled |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-folders` | create | Create a folder (`name` 1–80 characters, unique per workspace ignoring case; optional `color`, `icon` from the crew icon registry, `parent_id` for a subfolder); `409` on a duplicate, `404` for an unknown parent, `400` for an unknown icon or past three levels |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Rename, recolour, change the icon or move (`color: ""` / `icon: ""` clear; `parent_id: null` or `""` moves to the top level; omitted fields are kept). `400` for a folder inside itself or one of its subfolders, or past three levels |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}` | create | Delete a folder; its routines are kept and become unfiled, its subfolders move up to its parent |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-folders/move` | create | `{"slugs":[…],"folder_id":"…"|null}` files up to 200 routines in a folder or takes them out; all-or-nothing, `404` for an unknown routine or folder |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-health` | member | Health table: per routine with a run, its last 20 outcomes (oldest first), success rate over the finished ones, and runs and spend in the last `days` days (default 30, 1–366). Test and dry runs are not counted |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup` | member | The server's checklist for one routine: agents, credentials, cost cap, failures in a row, schedule circuit breaker, untested changes. Each check is `ok`, `warn` or `bad`, worst first |

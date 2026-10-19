@@ -15354,10 +15354,18 @@
           "created_at": {
             "type": "string"
           },
+          "icon": {
+            "description": "A name from the crew icon registry; absent draws the plain folder.",
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "The folder this one sits in; absent at the top level.",
             "type": "string"
           },
           "routine_count": {
@@ -15382,9 +15390,18 @@
             "maxLength": 64,
             "type": "string"
           },
+          "icon": {
+            "description": "A name from the crew icon registry (the page folders' set); 400 for any other.",
+            "type": "string"
+          },
           "name": {
             "maxLength": 80,
             "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "Create inside this folder; null or empty at the top level. 404 for an unknown folder, 400 past three levels.",
+            "nullable": true,
             "type": "string"
           }
         },
@@ -15443,10 +15460,19 @@
             "maxLength": 64,
             "type": "string"
           },
+          "icon": {
+            "description": "Omit to keep the icon; \"\" clears it. A name from the crew icon registry.",
+            "type": "string"
+          },
           "name": {
             "description": "Omit to keep the name.",
             "maxLength": 80,
             "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "Omit to keep the place; null or \"\" moves the folder to the top level. 400 for itself, one of its subfolders or past three levels; 404 for an unknown folder.",
+            "nullable": true,
             "type": "string"
           }
         },

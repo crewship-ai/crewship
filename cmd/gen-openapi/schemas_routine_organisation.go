@@ -25,15 +25,22 @@ func routineOrganisationSchemaCatalog() (map[string]DomainSchema, map[string]any
 	components := map[string]any{
 		"RoutineFolder": object(map[string]any{
 			"id": str(), "name": str(), "color": str(), "routine_count": integer(), "created_at": str(), "updated_at": str(),
+			"icon":      map[string]any{"type": "string", "description": "A name from the crew icon registry; absent draws the plain folder."},
+			"parent_id": map[string]any{"type": "string", "description": "The folder this one sits in; absent at the top level."},
 		}, "id", "name", "routine_count", "created_at", "updated_at"),
 		"RoutineFolderList": array(ref("RoutineFolder")),
 		"RoutineFolderCreateRequest": object(map[string]any{
-			"name":  map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
-			"color": map[string]any{"type": "string", "maxLength": 64},
+			"name":      map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
+			"color":     map[string]any{"type": "string", "maxLength": 64},
+			"icon":      map[string]any{"type": "string", "description": "A name from the crew icon registry (the page folders' set); 400 for any other."},
+			"parent_id": map[string]any{"type": "string", "nullable": true, "description": "Create inside this folder; null or empty at the top level. 404 for an unknown folder, 400 past three levels."},
 		}, "name"),
 		"RoutineFolderUpdateRequest": object(map[string]any{
 			"name":  map[string]any{"type": "string", "minLength": 1, "maxLength": 80, "description": "Omit to keep the name."},
 			"color": map[string]any{"type": "string", "maxLength": 64, "description": "Omit to keep the colour; \"\" clears it."},
+			"icon":  map[string]any{"type": "string", "description": "Omit to keep the icon; \"\" clears it. A name from the crew icon registry."},
+			"parent_id": map[string]any{"type": "string", "nullable": true,
+				"description": "Omit to keep the place; null or \"\" moves the folder to the top level. 400 for itself, one of its subfolders or past three levels; 404 for an unknown folder."},
 		}),
 		"RoutineFolderMoveRequest": object(map[string]any{
 			"slugs":     map[string]any{"type": "array", "items": str(), "minItems": 1, "maxItems": 200},
