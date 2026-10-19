@@ -30,6 +30,8 @@
 #
 # shellcheck source=./lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+# shellcheck source=./automation-loop-wait.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/automation-loop-wait.sh"
 
 preflight
 
@@ -141,8 +143,12 @@ _pass "two automations armed, max_per_hour 10000 so the throttle cannot be what 
 section "The cycle"
 
 cs issue update "$IDENT" --status TODO >/dev/null 2>&1
-info "kicked; settling for ${SETTLE_SECONDS}s"
-sleep "$SETTLE_SECONDS"
+info "kicked; waiting up to ${POLL_TIMEOUT}s for the correlated depth cap and terminal runs"
+CAP_ARGS=("loop-toggle-a-$TAG" "loop-toggle-b-$TAG" "${_CREATED_AUTOMATIONS[0]}" "${_CREATED_AUTOMATIONS[1]}")
+if ! automation_loop_wait_for_cap "${CAP_ARGS[@]}"; then
+  _fail "the composed cycle reaches a terminal depth cap" "bounded wait ended without this cycle's exact cap refusal and terminal run records"
+  finish
+fi
 
 AFTER="$(changes_count "$MISSION_ID")"
 PRODUCED=$(( AFTER - BEFORE ))
@@ -161,11 +167,10 @@ fi
 # above MaxChainDepth+1 is normal and asserting on it fails a healthy system.
 # An earlier revision of this suite did exactly that and reported a defect that
 # was not there.
-sleep 20
-SETTLED="$(changes_count "$MISSION_ID")"
-if (( SETTLED != AFTER )); then
+SETTLED="unavailable"
+if ! automation_loop_quiet "$MISSION_ID" "$AFTER" "${CAP_ARGS[@]}"; then
   _fail "the composed cycle terminates" \
-    "status changes went $AFTER → $SETTLED during a quiet 20s window; the cycle is still running."
+    "status changes went $AFTER → $SETTLED during the quiet 20s window, or current cap/terminal evidence became unavailable."
 else
   _pass "the composed cycle terminated (at $PRODUCED status changes)"
 fi
