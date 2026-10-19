@@ -2,6 +2,7 @@
 # Deterministic regression only: no server, credentials or live harness runs.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/automation-loop-wait.sh"
+budget_cli="$(declare -f automation_loop_cli 2>/dev/null || true)"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 POLL_TIMEOUT=5 POLL_INTERVAL=1 MAX_CHAIN_DEPTH=8
@@ -15,12 +16,13 @@ changes_count() {
   else echo 9; fi
 }
 cs() {
+  if [[ "$SCENARIO" == slow-success ]]; then automation_loop_sleep 2; fi
   [[ "$SCENARIO" != error ]] || return 1
   if [[ "$SCENARIO" == malformed ]]; then echo 'not JSON'; return; fi
   python3 - "$SCENARIO" "$(automation_loop_now)" "$@" <<'PY'
 import json,sys
 scenario,tick=sys.argv[1],int(sys.argv[2]); args=sys.argv[3:]
-late=tick<3 or scenario=='timeout'
+late=(tick<3 or scenario=='timeout') and scenario!='slow-success'
 if args[:2]==['routine','records']:
     first=args[2]=='routine-a'
     row={'id':'run-a' if first else 'run-b','pipeline_slug':args[2],'status':'completed','chain_depth':8 if first else 7,'chain_origin':'root'}
@@ -40,6 +42,11 @@ PY
 }
 reset() { SCENARIO="$1"; echo 0 > "$WORKDIR/clock"; }
 args=(routine-a routine-b auto-a auto-b)
+# For deterministic reads, preserve fake CLI/clock injection after the bounded
+# production subprocess wrapper is introduced. Its real budget is tested below.
+automation_loop_cli() { shift; cs "$@"; }
+reset slow-success
+if automation_loop_wait_for_cap "${args[@]}"; then echo 'accepted successful poll after deadline' >&2; exit 1; fi
 reset late
 [[ "$(changes_count mission)" == 8 ]]
 automation_loop_wait_for_cap "${args[@]}"
@@ -57,4 +64,18 @@ for scenario in changing late-active; do
   automation_loop_wait_for_cap "${args[@]}"
   if automation_loop_quiet mission 9 "${args[@]}"; then echo "quiet accepted $scenario" >&2; exit 1; fi
 done
+# A real stalled executable must be stopped by the INNER remaining budget;
+# reaching the outer watchdog without writing a result is a regression.
+[[ -n "$budget_cli" ]] || { echo 'missing bounded CLI wrapper' >&2; exit 1; }
+printf '#!/usr/bin/env bash\nexec sleep 10\n' > "$WORKDIR/stalled-cli"
+chmod +x "$WORKDIR/stalled-cli"
+export CREWSHIP="$WORKDIR/stalled-cli" SERVER='http://fixture.invalid' WORKDIR
+{
+  printf '%s\n' "$budget_cli"
+  printf 'automation_loop_now() { date +%%s; }\n_CS_ARGS=()\n'
+  printf 'automation_loop_cli "$(( $(date +%%s) + 1 ))" routine records fixture\n'
+  printf 'printf "inner-status=%%s\\n" "$?" > "$WORKDIR/budget-result"\n'
+} > "$WORKDIR/budget-probe.sh"
+timeout 3 bash "$WORKDIR/budget-probe.sh" || true
+grep -Eq '^inner-status=(124|137)$' "$WORKDIR/budget-result"
 echo 'PASS: late final transition, correlated terminal cap, bounded failures and quiet recheck'
