@@ -2426,3 +2426,43 @@ return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
 
 Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+## Read a private empty Board
+
+`GET /api/v1/pages/{slug}/board`
+
+**Auth:** Current human credential with `pages:read`, workspace membership and
+private custody, or the workspace OWNER override with audit before disclosure.
+Requires `CREWSHIP_BOARD_ENABLED=true`; the default is disabled.
+
+**Request:** The path accepts a slug or immutable `@PageID`; no request body.
+
+**Response:** JSON with `page_id`, pinned `format`
+`crewship-board-excalidraw-0.18.1-v1`, `seq: 0`, empty `records`, `placements`
+and `placement_tombstones`, `can_write: false`, `write_scope: unavailable`.
+Responses are not cached. Drawing and agent editing are unavailable.
+
+**Statuses:** 200 confirmed empty snapshot; 401 missing authentication;
+403 middleware scope/membership denial; 404 unavailable route, missing Board
+or private audience denial; 409 unsupported profile/sequence; 500 read or audit failure.
+
+## Initialize a private empty Board
+
+`POST /api/v1/pages/{slug}/board`
+
+**Auth:** Current human custodian with `pages:write` and live workspace membership.
+Requires `CREWSHIP_BOARD_ENABLED=true`. OWNER read override does not grant writes.
+
+**Request:** The original immutable `@PageID` path is mandatory. JSON body is
+exactly `{"mutation_id":"caller-stable-id"}`; ID is 1–128 characters without
+surrounding whitespace. Keep both IDs for lost-confirmation retries. The Page
+must already be empty, private and human-owned; this operation does not create it.
+
+**Response:** 200 with the same eight-field confirmed empty snapshot as the read
+operation above. Attachment and retry receipt commit atomically. A retry never
+follows a deleted Page’s replacement slug. Private notifications omit identity.
+
+**Statuses:** 400 invalid body or slug initialization; 401 missing authentication;
+403 middleware scope/membership denial; 404 missing target, disabled route or
+private audience denial; 409 conflicting content/receipt/profile; 413 body over
+1024 bytes; 500 persistence failure. No drawing write authority is issued.
