@@ -5,6 +5,31 @@ import { test, expect } from "@playwright/test"
 // use the suite's stored session (global-setup.ts). Written before deploy:
 // run them against dev1 after `crew deploy`.
 
+// Round 63 (#3784): the workspace mark, search, every app, the sail and the
+// avatar share one axis, 28 px from the sidebar's left edge, open or folded;
+// icons are 18 px and the three identities 28 px.
+async function expectOnAxis(page: import("@playwright/test").Page) {
+  const r = await page.evaluate(() => {
+    const sb = document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect()
+    const centre = (el: Element | null) => { if (!el) return null; const q = el.getBoundingClientRect(); return { c: q.left - sb.left + q.width / 2, w: q.width } }
+    const glyph = (sel: string) => centre(document.querySelector(sel)?.querySelector("svg") ?? null)
+    return {
+      ws: centre(document.querySelector(".rail-ws")),
+      search: glyph(".rail-search .rail-tile"),
+      inbox: glyph('a[href="/inbox"] [data-slot=rail-tile]'),
+      settings: glyph('a[href="/settings"] [data-slot=rail-tile]'),
+      brand: centre(document.querySelector(".rail-brand")),
+      avatar: centre(document.querySelector(".rail-user [data-slot=presence-dot]")?.parentElement ?? null),
+    }
+  })
+  for (const [k, v] of Object.entries(r)) {
+    expect(v, k).not.toBeNull()
+    expect(Math.abs(v!.c - 28), `${k} centre ${v!.c}`).toBeLessThanOrEqual(1)
+  }
+  for (const k of ["ws", "brand", "avatar"] as const) expect(Math.round(r[k]!.w), k).toBe(28)
+  expect(Math.round(r.inbox!.w)).toBe(18)
+}
+
 test.describe("desktop 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 } })
   // v67 draws the sidebar pinned; the product default is the hover rail, which
@@ -16,14 +41,9 @@ test.describe("desktop 1440", () => {
     })
   })
 
-  test("sidebar rows start 8 px from the sidebar edge (PAR-003)", async ({ page }) => {
+  test("every rail tile is centred on x = 28 (PAR-003, round 63)", async ({ page }) => {
     await page.goto("/")
-    const sb = await page.locator("[data-slot=sidebar-container]").boundingBox()
-    const icon = await page.locator("[data-slot=rail-tile]").first().boundingBox()
-    expect(sb).not.toBeNull()
-    // v67: icon at x=18 (8 inset + 10 row padding)
-    expect(Math.round(icon!.x - sb!.x)).toBeLessThanOrEqual(19)
-    expect(Math.round(icon!.x - sb!.x)).toBeGreaterThanOrEqual(17)
+    await expectOnAxis(page)
   })
 
   test("sidebar search placeholder is 12.5 px (PAR-004)", async ({ page }) => {
@@ -123,5 +143,23 @@ test.describe("phone 390", () => {
   test("Calendar has a single header row (PAR-136)", async ({ page }) => {
     await page.goto("/calendar")
     await expect(page.locator("[data-slot=sub-bar-row]")).toHaveCount(0)
+  })
+})
+
+test.describe("rail 1024", () => {
+  test.use({ viewport: { width: 1024, height: 900 } })
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("crewship_sidebar_mode", "collapsed")
+      localStorage.setItem("crewship-appearance-sync", "0")
+    })
+  })
+
+  test("the folded rail keeps every tile on the same axis (round 63)", async ({ page }) => {
+    await page.goto("/")
+    await expectOnAxis(page)
+    // Nothing beside the workspace mark in the rail: no chevron to push it off.
+    const chevron = await page.locator(".rail-ws ~ svg.lucide-chevrons-up-down").boundingBox()
+    expect(chevron === null || chevron.width === 0).toBe(true)
   })
 })

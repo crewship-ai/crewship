@@ -68,17 +68,20 @@ describe("Crewship brand in the rail", () => {
   })
 })
 
-// Owner, 19 Oct: the workspace is the main divide of the rail, so its mark is
-// as large as the person's avatar at the foot (size-7), folded or open.
-describe("workspace mark size", () => {
-  it("matches the account avatar in the rail", () => {
+// Round 63 (#3784): the rail's three identities — workspace, sail, you — are
+// one 28 px size on the same axis, folded or open.
+describe("identity sizes", () => {
+  it("the workspace mark, the sail and the avatar are all 28 px", () => {
     const ws = readFileSync(path.resolve(__dirname, "../workspace-switcher.tsx"), "utf8")
     const me = readFileSync(path.resolve(__dirname, "../user-menu.tsx"), "utf8")
-    expect(me).toMatch(/UserAvatar[^\n]*className="size-7"/)
+    expect(me).toMatch(/UserAvatar[^\n]*className="size-\[28px\]"/)
     const marks = ws.match(/className="rail-tile rail-ws[^"]*"/g) ?? []
     expect(marks.length).toBe(2)
-    for (const m of marks) expect(m).toMatch(/\bsize-7\b/)
+    // The size comes from .rail-tile, not a per-mark utility that follows --spacing.
+    for (const m of marks) expect(m).not.toMatch(/\bsize-/)
     const css = readFileSync(path.resolve(__dirname, "../../../app/globals.css"), "utf8")
-    expect(css).toMatch(/\.rail-tile\.rail-ws\s*\{[^}]*width:\s*calc\(var\(--spacing\) \* 7\)[^}]*height:\s*calc\(var\(--spacing\) \* 7\)/)
+    expect(css).toMatch(/\.rail-tile \{[^}]*width: 28px;[^}]*height: 28px;/)
+    const brand = css.slice(css.indexOf(".rail-brand {"), css.indexOf("}", css.indexOf(".rail-brand {")))
+    expect(brand).not.toMatch(/width|height/)
   })
 })

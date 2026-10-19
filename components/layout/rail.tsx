@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+import { ChevronDown } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 import { accentFor } from "@/lib/concept-accents"
 
@@ -75,15 +77,77 @@ export function RailLabel({ children, className }: { children: React.ReactNode; 
 }
 
 /**
- * A group's heading (Work, Build). Open, its name in small grey; in the rail,
- * a short hairline on the icon axis. The ungrouped first block has none.
+ * A group's heading (Work, Build). Open, its name in small grey, and a button
+ * that folds the group when `onToggle` is given; in the rail, a short hairline
+ * on the icon axis. The ungrouped first block has none.
  */
-export function RailGroupHead({ label }: { label: string }) {
+export function RailGroupHead({ label, open = true, onToggle, controls }: {
+  label: string
+  open?: boolean
+  onToggle?: () => void
+  /** The id of the list the toggle folds. */
+  controls?: string
+}) {
   if (!label) return null
   return (
     <div className="rail-group-head" data-slot="rail-group-head">
       <span className="rail-group-rule" aria-hidden><i /></span>
-      <span className="rail-label rail-group-name">{label}</span>
+      {onToggle ? (
+        <button type="button" className="rail-label rail-group-toggle" aria-expanded={open} aria-controls={controls} onClick={onToggle}>
+          <span className="rail-group-name">{label}</span>
+          <ChevronDown aria-hidden />
+        </button>
+      ) : (
+        <span className="rail-label rail-group-name">{label}</span>
+      )}
     </div>
   )
+}
+
+const FOLDED_KEY = "crewship.rail.folded-groups"
+
+/** Which groups the open sidebar has folded, remembered on this device. */
+export function useFoldedRailGroups() {
+  const [folded, setFolded] = React.useState<string[]>([])
+  React.useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]")
+      if (Array.isArray(raw)) setFolded(raw.filter((x): x is string => typeof x === "string"))
+    } catch { /* Nothing remembered: every group open. */ }
+  }, [])
+  const toggle = React.useCallback((label: string) => {
+    setFolded((cur) => (cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]))
+  }, [])
+  // Written after a change, never on mount: the first render's [] is not a choice.
+  const touched = React.useRef(false)
+  React.useEffect(() => {
+    if (!touched.current) { touched.current = true; return }
+    try { localStorage.setItem(FOLDED_KEY, JSON.stringify(folded)) } catch { /* Kept for this visit only. */ }
+  }, [folded])
+  return { folded, toggle }
+}
+
+/**
+ * Marks a scrolling band with `data-more-above` / `data-more-below` so the
+ * CSS can fade the edge that has more behind it (`.rail-band`).
+ */
+export function useRailBandEdges<T extends HTMLElement>() {
+  const ref = React.useRef<T>(null)
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => {
+      const above = el.scrollTop > 1
+      const below = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+      el.toggleAttribute("data-more-above", above)
+      el.toggleAttribute("data-more-below", below)
+    }
+    update()
+    el.addEventListener("scroll", update, { passive: true })
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
+    ro?.observe(el)
+    if (el.firstElementChild) ro?.observe(el.firstElementChild)
+    return () => { el.removeEventListener("scroll", update); ro?.disconnect() }
+  }, [])
+  return ref
 }

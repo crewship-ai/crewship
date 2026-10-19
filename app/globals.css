@@ -1118,18 +1118,20 @@ body {
      2rem tile column at a fixed inset — half the difference between the
      rail and the tile — and a label that only fades. The panel widening is
      the whole animation. */
-  /* Harbor 2 sidebar (#3350). One grid in both states: an 8 px inset, rows
-     40 px wide in the 56 px rail and 224 px open, the icon column never moves.
-     Sizes are px: the rail must not grow with the user's text size. */
+  /* Harbor 2 sidebar (#3350; round 63, #3784). One axis in both states: an
+     8 px inset, rows 40 × 36 in the 56 px rail and full width open, each with
+     a 28 px lead slot 6 px in, so every icon, the workspace mark, the sail and
+     the avatar are centred on x = 28 whether the rail is open or not. Sizes
+     are px: the rail must not grow with the user's text size. */
   .rail-inset {
     /* The sidebar's own p-2 is the 8 px inset (v67 rail padding 8, icon at
        x = 18); a second 8 px here pushed everything 7 px right. */
     padding-inline: 0 !important;
   }
   .rail-row {
-    height: 30px !important;
-    padding: 0 10px !important;
-    gap: 10px !important;
+    height: 36px !important;
+    padding: 0 6px !important;
+    gap: 8px !important;
     border-radius: var(--radius-row) !important;
     justify-content: flex-start !important;
     overflow: visible !important;
@@ -1138,9 +1140,11 @@ body {
   }
   [data-collapsible="icon"] .rail-row {
     width: 40px !important;
-    height: 30px !important;
-    padding: 0 12px !important;
+    height: 36px !important;
+    padding: 0 6px !important;
   }
+  /* The workspace and the user rows carry a second line when open. */
+  .rail-row[data-size="lg"] { height: 40px !important; }
   .rail-row:hover {
     background: var(--row-hover-bg) !important;
     color: var(--foreground) !important;
@@ -1156,30 +1160,28 @@ body {
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 16px;
-    height: 16px;
+    width: 28px;
+    height: 28px;
     color: var(--muted-foreground-soft);
   }
-  .rail-tile > svg { width: 16px; height: 16px; }
+  .rail-tile > svg { width: 18px; height: 18px; }
   .rail-row:hover .rail-tile,
   .rail-row[data-active="true"] .rail-tile { color: var(--foreground); }
-  /* The workspace mark at the top of the rail is as large as the account
-     avatar at its foot (size-7): the workspace is the rail's main divide. */
-  .rail-tile.rail-ws { width: calc(var(--spacing) * 7); height: calc(var(--spacing) * 7); }
-  .rail-tile.rail-ws > img { width: 100%; height: 100%; }
+  /* The workspace mark, the sail and the avatar are the rail's three
+     identities: all 28 px. Workspace and sail are rounded squares, a person
+     is a circle. The workspace wears the style's colour; the sail does not. */
+  .rail-tile.rail-ws { border-radius: 8px; }
+  .rail-tile.rail-ws > img { width: 100%; height: 100%; border-radius: inherit; }
   /* The Crewship sail at the foot of the rail (owner, 19 Oct): the brand's
      own blue tile, lit, the same in every style, theme and accent. */
   .rail-tile.rail-brand,
   .rail-row:hover .rail-tile.rail-brand {
-    width: 20px;
-    height: 20px;
-    margin-inline: -2px;
-    border-radius: 6px;
+    border-radius: 8px;
     background: linear-gradient(180deg, #1B75FE, #2B90FF);
     color: #fff;
     box-shadow: 0 0 0 1px rgb(43 144 255 / 0.45), 0 0 12px 1px rgb(27 117 254 / 0.5);
   }
-  .rail-tile.rail-brand > svg { width: 12px; height: auto; }
+  .rail-tile.rail-brand > svg { width: 16px; height: auto; }
   /* A count: an accent pill at the end of the open row; in the rail, the same
      pill on the icon's corner. */
   .rail-count {
@@ -1195,8 +1197,8 @@ body {
   .rail-badge {
     display: none;
     position: absolute;
-    top: -7px;
-    right: -9px;
+    top: -2px;
+    right: -5px;
     min-width: 16px;
     padding: 0 4px;
     border-radius: 999px;
@@ -1237,30 +1239,54 @@ body {
   /* In the rail a group is a short hairline on the icon axis. */
   .rail-group-rule { display: none; }
   [data-collapsible="icon"] .rail-group-rule { display: flex; justify-content: center; width: 40px; }
-  [data-collapsible="icon"] .rail-group-rule > i { display: block; width: 16px; height: 1px; background: var(--border); }
+  [data-collapsible="icon"] .rail-group-rule > i { display: block; width: 20px; height: 1px; background: var(--border); }
+  /* Open, a group's head folds the group (remembered); the rail ignores it. */
+  .rail-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    border-radius: 6px;
+    text-align: left;
+  }
+  .rail-group-toggle > svg { width: 12px; height: 12px; color: var(--muted-foreground-soft); transition: transform 160ms ease; }
+  .rail-group-toggle[aria-expanded="false"] > svg { transform: rotate(-90deg); }
+  .rail-group-toggle:hover .rail-group-name { color: var(--muted-foreground); }
+  [data-collapsible="icon"] .rail-group-toggle { pointer-events: none; }
   [data-collapsible="icon"] .rail-group-head { padding: 10px 0 4px; }
-  /* The search field under the workspace switcher: opens the ⌘K palette. */
+  /* Search under the workspace switcher: opens the ⌘K palette. Open, a
+     filled field with no border; in the rail, an icon like any other row. */
   .rail-search {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
-    height: 30px;
-    padding: 0 9px;
+    height: 32px;
+    padding: 0 6px;
     border-radius: var(--radius-row);
-    border: 1px solid var(--border);
-    background: var(--card);
+    background: var(--row-hover-bg);
     color: var(--muted-foreground-soft);
     font-size: 12.5px;
   }
-  .rail-search:hover { border-color: var(--line-strong); color: var(--muted-foreground); }
-  .rail-search > svg { width: 14px; height: 14px; flex-shrink: 0; }
-  [data-collapsible="icon"] .rail-search { width: 40px; padding: 0 12px; }
+  .rail-search:hover { color: var(--muted-foreground); background: var(--nav-selected); }
+  .rail-search > .rail-tile { width: 28px; height: 20px; }
+  .rail-search > .rail-tile > svg { width: 16px; height: 16px; }
+  [data-collapsible="icon"] .rail-search { width: 40px; height: 36px; background: transparent; }
+  [data-collapsible="icon"] .rail-search > .rail-tile { height: 28px; }
+  [data-collapsible="icon"] .rail-search > .rail-tile > svg { width: 18px; height: 18px; }
+  [data-collapsible="icon"] .rail-search:hover { background: var(--row-hover-bg); }
+  /* The app band between the fixed top (workspace, search) and the fixed foot
+     (sail, settings, you) scrolls; a fade marks more above or below. */
+  .rail-band { scrollbar-width: none; }
+  .rail-band::-webkit-scrollbar { display: none; }
+  .rail-band[data-more-above] { mask-image: linear-gradient(transparent, #000 20px); }
+  .rail-band[data-more-below] { mask-image: linear-gradient(#000 calc(100% - 20px), transparent); }
+  .rail-band[data-more-above][data-more-below] { mask-image: linear-gradient(transparent, #000 20px, #000 calc(100% - 20px), transparent); }
   /* The signed-in person, last row of the footer. */
   .rail-user {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 8px;
     width: 100%;
     padding: 6px;
     border-radius: 9px;
@@ -1539,7 +1565,7 @@ body {
     border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
   }
   .area-tile > svg { width: 13px; height: 13px; }
-  [data-collapsible="icon"] .rail-user { width: 40px; padding: 6px 8px; }
+  [data-collapsible="icon"] .rail-user { width: 40px; padding: 6px; }
   @media (prefers-reduced-motion: reduce) {
     .rail-label { transition: none; }
   }
