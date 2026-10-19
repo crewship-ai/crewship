@@ -55,9 +55,21 @@ func newNotifyingSessionStore(inner sessions.Store, notifiers ...SessionRevocati
 }
 
 func (s *notifyingSessionStore) Revoke(ctx context.Context, id, reason string) error {
-	err := s.Store.Revoke(ctx, id, reason)
+	changed := true
+	var err error
+	if store, ok := s.Store.(interface {
+		RevokeWithChange(context.Context, string, string) (bool, error)
+	}); ok {
+		changed, err = store.RevokeWithChange(ctx, id, reason)
+	} else {
+		// Custom stores retain their existing success notification contract.
+		err = s.Store.Revoke(ctx, id, reason)
+	}
 	if err != nil {
 		return err
+	}
+	if !changed {
+		return nil
 	}
 	for _, n := range s.notifiers {
 		n.NotifySessionRevoked(id)
@@ -69,6 +81,9 @@ func (s *notifyingSessionStore) RevokeAllForUser(ctx context.Context, userID, re
 	count, err := s.Store.RevokeAllForUser(ctx, userID, reason)
 	if err != nil {
 		return count, err
+	}
+	if count == 0 {
+		return 0, nil
 	}
 	for _, n := range s.notifiers {
 		n.NotifyUserRevoked(userID)
