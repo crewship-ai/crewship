@@ -103,8 +103,8 @@ func NewProviderLoginHandler(db *sql.DB, logger *slog.Logger, creds *CredentialH
 	}
 }
 
-// Stop ends every poller and waits for them. A row left pending is resumed
-// by the next process.
+// Stop cancels and joins startup recovery and every poller. A row left
+// pending is resumed by the next process.
 func (h *ProviderLoginHandler) Stop() {
 	h.cancel()
 	h.wg.Wait()
