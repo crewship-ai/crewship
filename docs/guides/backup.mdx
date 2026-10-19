@@ -34,6 +34,16 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
 
+Artifact-era chat bundles must retain their source conversation classification.
+If an older bundle lacks it, restore refuses the ambiguous chats before changing
+data or fencing existing services; upgrade the source and create a fresh bundle.
+This also applies to dry-run validation. Instance recovery must complete the
+privacy backfill with the original vault key before discarding runtime consents.
+Retaining this classification never restores permission to execute a run.
+Crew bundles without the classification also require source migration evidence
+that they predate Document creation; missing evidence is refused, not inferred
+from omitted tables. Protected bundles require a migrated target schema.
+
 ## Key concepts
 
 | Term | What it means here |

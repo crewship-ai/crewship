@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/access"
-	"github.com/crewship-ai/crewship/internal/chataudience"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // RestrictedTextExecutor is host-owned; public requests cannot install builders,
@@ -66,6 +68,9 @@ func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request,
 	controller := http.NewResponseController(w)
 	started := false
 	send := func(kind, text string) error {
+		if !auth.StreamCredentialCurrent(req.Context()) {
+			return context.Canceled
+		}
 		if !started {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-store")
@@ -106,7 +111,7 @@ func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request,
 	err := execute(req.Context(), user.ID, workspace, req.PathValue("chatId"), body.Content, send)
 	if err != nil {
 		// No error frame after revocation: it would itself be output delivery.
-		if !started {
+		if !started && auth.StreamCredentialCurrent(req.Context()) {
 			replyError(w, http.StatusForbidden, "restricted text run denied or unavailable")
 		}
 		return

@@ -60,6 +60,7 @@ chat_origin_id TEXT,
 // openScheduleTestDBWithRunStore below, #2283.
 const pipelineRunsTestSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+ start_phase TEXT,
 invocation_source_run_id TEXT,
 chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,

@@ -152,7 +152,7 @@ export function RoutineOnceSchedule({
                 <span className="text-sm font-semibold">{formatRoutineTime(p.fire_at)}</span>
                 <StatusPill tone={pendingStartPresentation(p).tone} label={pendingStartPresentation(p).label} />
               </div>
-              {pendingStartStatus(p) === "pending" && (p.dispatch_attempts ?? 0) > 0 && (
+              {pendingStartStatus(p) === "pending" && (
                 <p className="text-xs text-muted-foreground" data-testid={`pending-state-${p.id}`}>
                   {pendingStartPresentation(p).detail}
                 </p>

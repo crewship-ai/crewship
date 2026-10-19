@@ -9,16 +9,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. PTY input/output, control replies and restricted text frames retain per-delivery checks without per-frame database queries.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
 ### Fixed
 
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+- Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
+
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
 - Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
+- Isolate stream admission revocation epochs by credential and user, so another user's logout cannot reject valid requests; repeated signout of an already revoked session no longer sends another revocation notification.
 
 - Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
 - Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
@@ -29,6 +35,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
 ### Added
+
+- **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
@@ -99,6 +107,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
 - Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
+- Deferred routine receipts expose stable waiting reasons in API, CLI and Plan, including neutral legacy causes and recovery attention.
 
 ### Added
 

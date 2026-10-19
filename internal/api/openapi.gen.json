@@ -18016,8 +18016,24 @@
       },
       "WorkflowReplayRequest": {
         "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "pinned_version": {
+            "minimum": 1,
             "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
           }
         },
         "type": "object"
@@ -19492,6 +19508,9 @@
           "priority": {
             "type": "integer"
           },
+          "reason_code": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -19519,7 +19538,8 @@
           "run_id",
           "dispatch_attempts",
           "last_error",
-          "can_cancel"
+          "can_cancel",
+          "reason_code"
         ],
         "type": "object"
       },
@@ -19567,6 +19587,9 @@
             "priority": {
               "type": "integer"
             },
+            "reason_code": {
+              "type": "string"
+            },
             "run_id": {
               "type": "string"
             },
@@ -19594,7 +19617,8 @@
             "run_id",
             "dispatch_attempts",
             "last_error",
-            "can_cancel"
+            "can_cancel",
+            "reason_code"
           ],
           "type": "object"
         },

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestAcceptance_RoutinePendingReceipt_RealDispatchFailure(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
 		t.Fatalf("decode: %v %s", err, out)
 	}
-	if receipt.Status != "failed" || receipt.LastError == "" || receipt.DispatchAttempts != 1 || receipt.CanCancel {
+	if receipt.ReasonCode != "dispatch_failed" || receipt.Status != "failed" || receipt.LastError == "" || receipt.DispatchAttempts != 1 || receipt.CanCancel {
 		t.Fatalf("lost error receipt: %+v", receipt)
 	}
 	if receipt.LastError == "private executor detail must not reach the receipt" {
@@ -101,7 +102,7 @@ func TestAcceptance_RoutinePendingReceipt_RealDispatchFailure(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != "fired" || receipt.RunID != "" || receipt.LastError != "" {
+	if receipt.ReasonCode != "unknown" || receipt.Status != "fired" || receipt.RunID != "" || receipt.LastError != "" {
 		t.Fatalf("in-flight receipt falsely failed: %+v", receipt)
 	}
 	out, err = runRoutineTriggerCLI(t, cfg, "routine", "pending", "list", "--status", "failed", "-f", "json")
@@ -109,8 +110,14 @@ func TestAcceptance_RoutinePendingReceipt_RealDispatchFailure(t *testing.T) {
 		t.Fatalf("list: %v %s", err, out)
 	}
 	var rows []pendingTriggerRow
-	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 1 || rows[0].ID != "dispatch-failed" {
+	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 1 || rows[0].ID != "dispatch-failed" || rows[0].ReasonCode != "dispatch_failed" {
 		t.Fatalf("failure list: %v %s", err, out)
+	}
+	for _, args := range [][]string{{"routine", "pending", "list", "--status", "failed"}, {"routine", "pending", "get", "dispatch-failed"}} {
+		text, err := runRoutineTriggerCLI(t, cfg, args...)
+		if err != nil || !strings.Contains(text, "dispatch_failed") || (args[2] == "list" && !strings.Contains(text, "REASON")) {
+			t.Fatalf("reason omitted: %v %s", err, text)
+		}
 	}
 	if out, err = runRoutineTriggerCLI(t, cfg, "routine", "pending", "get", "missing", "-f", "json"); err == nil {
 		t.Fatalf("missing receipt accepted: %s", out)
