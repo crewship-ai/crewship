@@ -763,7 +763,7 @@ var pipelineRunCmd = &cobra.Command{
 			Output         string            `json:"output" yaml:"output"`
 			StepOutputs    map[string]string `json:"step_outputs" yaml:"step_outputs"`
 			DurationMs     int64             `json:"duration_ms" yaml:"duration_ms"`
-			CostUSD        float64           `json:"cost_usd" yaml:"cost_usd"`
+			CostUSD        *float64          `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 			FailedAtStep   string            `json:"failed_at_step" yaml:"failed_at_step"`
 			ErrorMessage   string            `json:"error_message" yaml:"error_message"`
 			WaitpointToken string            `json:"waitpoint_token" yaml:"waitpoint_token"`
@@ -845,7 +845,7 @@ var pipelineRunCmd = &cobra.Command{
 			}
 			return nil
 		}
-		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
+		fmt.Printf("Run %s: %s (%dms, %s)\n", result.RunID, result.Status, result.DurationMs, usdOrDash("$%.4f", result.CostUSD))
 		if result.Status == "FAILED" {
 			fmt.Printf("  failed at step: %s\n  error: %s\n", result.FailedAtStep, result.ErrorMessage)
 			return fmt.Errorf("routine run failed")
@@ -969,8 +969,8 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		return nil
 	}
 
-	fmt.Printf("Run %s: %s (%dms, $%.4f)\n",
-		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, detail.CostUSD)
+	fmt.Printf("Run %s: %s (%dms, %s)\n",
+		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, usdOrDash("$%.4f", detail.CostUSD))
 	switch strings.ToLower(detail.Status) {
 	case "failed", "interrupted":
 		// Parity with agent runs (cmd_run.go): ping the operator who
@@ -1041,7 +1041,7 @@ var pipelineDryRunCmd = &cobra.Command{
 		// and "would this prompt do the right thing" is not a question you can
 		// answer from the first 300 characters.
 		return resolvedFormatter(cmd).AutoHuman(result, func() {
-			fmt.Printf("Dry run: %s (estimated %dms, $%.4f total)\n\n", result.Status, result.DurationMs, result.CostUSD)
+			fmt.Printf("Dry run: %s (estimated %dms, %s total)\n\n", result.Status, result.DurationMs, usdOrDash("$%.4f", result.CostUSD))
 			for i, s := range result.WouldExecute {
 				fmt.Printf("Step %d [%s] (%s):\n", i+1, s.StepID, s.StepType)
 				if s.WouldCallAgent != "" {
@@ -1091,7 +1091,7 @@ type dryRunStep struct {
 type dryRunResult struct {
 	Status       string       `json:"status" yaml:"status"`
 	DurationMs   int64        `json:"duration_ms" yaml:"duration_ms"`
-	CostUSD      float64      `json:"cost_usd" yaml:"cost_usd"`
+	CostUSD      *float64     `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 	WouldExecute []dryRunStep `json:"would_execute" yaml:"would_execute"`
 }
 

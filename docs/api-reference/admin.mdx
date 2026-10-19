@@ -4197,7 +4197,7 @@ The handler imposes a 4 s upper bound on top of the update package's 5 s interna
 
 Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucket sequences so the client never has to patch visual gaps. Reads `workspace_id` from the request context, never from a query param.
 
-**Auth:** required + workspace context.
+**Auth:** required + workspace context. `metric=cost_usd` additionally requires `OWNER` or `ADMIN` and answers `403` ("Spend requires OWNER or ADMIN") to every other role; the other metrics are open to every member. See [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
 
 #### Query parameters
 

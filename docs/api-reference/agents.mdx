@@ -9,6 +9,10 @@ tag: Experimental
 An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
 <Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
+<Note>
   All `/api/v1/agents/*` endpoints require authentication and workspace context. Workspace context may be supplied as `workspace_id`, a `{workspaceId}` path value, or the `X-Workspace-ID` header; the chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no workspace context parameter.
 </Note>
 

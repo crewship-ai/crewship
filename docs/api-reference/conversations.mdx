@@ -16,6 +16,10 @@ mid-turn steering, file attachments uploaded for an agent, and the
 that live on `/api/v1/conversations`. See the
 [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
 
+<Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
 Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
 
 <Note>

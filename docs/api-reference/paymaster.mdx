@@ -10,7 +10,7 @@ tag: Stable
 Paymaster exposes read-only cost rollups across crew, agent, and mission scopes, plus a leaderboard of top spenders and a flat-rate subscription usage view. Every spend figure comes from the `cost_ledger`, which is written exclusively by the internal cost-record path — there are no public write endpoints. See the [Paymaster guide](/guides/paymaster) for the cost ledger and budget model, and the [Sidecar coverage section](/guides/paymaster#sidecar-coverage-of-agent-cli-calls) for the known limitation around agent CLI bypass.
 
 <Note>
-  **Cost figures are `OWNER` / `ADMIN` only.** The four spend endpoints (`spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders`) answer `403` to every other role (`MANAGER`, `MEMBER`, `VIEWER`, `GUEST`); the Spend views in the web app are hidden for them and ask nothing. `subscriptions` is `OWNER` / `ADMIN` as well. An empty window returns `"rows": []`, never `null`.
+  **Cost figures are `OWNER` / `ADMIN` only, on every endpoint.** The four spend endpoints here (`spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders`) answer `403` to every other role (`MANAGER`, `MEMBER`, `VIEWER`, `GUEST`); `subscriptions` is `OWNER` / `ADMIN` as well. An empty window returns `"rows": []`, never `null`. Other endpoints that carry a cost next to data everyone may read leave the cost out — see [Who sees cost figures](#who-sees-cost-figures).
 </Note>
 
 <Note>
@@ -284,6 +284,32 @@ POST /api/v1/internal/cost/record
 </Note>
 
 See [Internal IPC API](/api-reference/internal#cost-record) for the full request/response schema and the surrounding security model.
+
+## Who sees cost figures
+
+One rule for the whole API (#3590): workspace `OWNER` and `ADMIN` read money amounts; `MANAGER`, `MEMBER`, `VIEWER` and `GUEST` do not.
+
+- **Cost-only endpoints answer `403`** ("Spend requires OWNER or ADMIN"): the spend endpoints on this page, [`GET /api/v1/journal/spend`](/api-reference/journal#spend-rollup) and `GET /api/v1/metrics/timeseries?metric=cost_usd`. The other metrics (`issues_closed`, `runs_count`, `active_missions`) stay open to members.
+- **Mixed endpoints answer as usual with the cost fields omitted.** The field is absent from the JSON, not `0` and not `null`, so a client cannot read "hidden" as "free". Formatted amounts inside journal `summary` text are removed too (`"$0.0040 spent on p/m"` becomes `"Spend recorded on p/m"`).
+
+| Endpoint | Fields left out below `ADMIN` |
+|---|---|
+| `GET /workspaces/{ws}/pipeline-runs`, `…/pipeline-runs/{runId}`, `…/pipeline-runs/{runId}/tree`, `…/pipelines/{slug}/run-records` | `cost_usd` (and `estimated_cost_usd` in the embedded definition) |
+| `GET /workspaces/{ws}/pipelines/{slug}/runs` (journal rows) | `cost_usd`, `total_cost_usd` in `payload` |
+| `POST …/pipelines/{slug}/run` (sync result), `…/pipelines/{slug}/dry_run`, `…/pipelines/test_run`, `…/pipelines/{slug}/step_run`, `…/pipelines/runs/{runId}/replay` | `cost_usd`, `estimated_cost_usd` |
+| `GET /workspaces/{ws}/pipelines/{slug}/budget`, `…/pipelines/budget-summary` | `monthly_budget_usd`, `spent_usd`, `pct_used`, `total_budget_usd`, `total_spent_usd` — **`has_budget` and `over_budget` stay** |
+| `GET /api/v1/journal`, `GET /api/v1/journal/{id}`, `GET /api/v1/journal/stream` (SSE) | cost keys in `payload` (`cost_usd`, `total_cost_usd`, `spent_usd`, `limit_usd`, `util_pct`, …) and amounts in `summary` |
+| `GET /api/v1/runs`, `GET /api/v1/runs/{id}`, `GET /api/v1/agents/{agentId}/runs` | `metadata.total_cost_usd`, `metadata.model_usage.*.costUSD` |
+| `GET /api/v1/chats/{chatId}/messages`, `GET /api/v1/chats/{chatId}/stream` (NDJSON) | `metadata.total_cost_usd`, `metadata.model_usage.*.costUSD` |
+| `GET /api/v1/chats/{chatId}/run-preflight` | `budgets[].limit_usd`, `spent_usd`, `remaining_usd`, `estimate_usd` — `budgets[].state` stays |
+| `GET /api/v1/agents/{agentId}/inbox` | `cost_usd_this_month` |
+| `GET /api/v1/missions`, `GET /api/v1/crews/{crewId}/missions[/{missionId}]`, task create/update responses | `total_estimated_cost`, `tasks[].estimated_cost` |
+| `GET /api/v1/mission-metrics` | `total_cost_24h` |
+| `GET /workspaces/{ws}/work-items`, `…/work-items/{id}` | `cost_usd`, `attempts[].cost_usd` |
+| `GET /api/v1/eval/runs`, `GET /api/v1/eval/runs/{id}` | `total_cost_usd` |
+| WebSocket frames (all channels) | the same keys, per recipient: `OWNER` / `ADMIN` of the channel's workspace get the frame unchanged |
+
+Not covered by the rule, on purpose: token counts (not money), a routine definition's authored per-run cap `max_cost_usd` (configuration), model list prices, and the instance admin console (`/api/v1/admin/*`, already `OWNER` / `ADMIN` / instance admin). The field list lives in `internal/costvis`; the role check is `canReadCosts` in `internal/api/cost_visibility.go`.
 
 ## Related
 

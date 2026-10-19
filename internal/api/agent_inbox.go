@@ -207,5 +207,5 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		resp.TokensUsedThisMonth = tokenTotal.Int64
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	writeCostAwareJSON(w, r, http.StatusOK, resp)
 }

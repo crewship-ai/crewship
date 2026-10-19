@@ -133,7 +133,7 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 		replyError(w, 404, "Chat not found")
 		return
 	}
-	writeJSON(w, 200, out)
+	writeCostAwareJSON(w, req, 200, out)
 }
 
 func safeChatRunPayer(payer agentModelCredential) chatRunPayer {
