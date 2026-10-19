@@ -247,6 +247,59 @@ export const inboxKeys = {
   completeList: (ws: string, state: StateFilter) => ["inbox", ws, "complete-list", { state }] as const,
   detail: (ws: string, id: string) => ["inbox", ws, "detail", id] as const,
   count: (ws: string) => ["inbox", ws, "count"] as const,
+  counts: (ws: string) => ["inbox", ws, "counts"] as const,
+}
+
+/** Items per Inbox space; the keys are the page's view ids. */
+export interface InboxSpaceCounts {
+  action: number
+  updates: number
+  history: number
+}
+
+/**
+ * GET /api/v1/inbox/counts: what the caller can see, per space and per kind,
+ * with the list's own visibility. Inbox items only — approvals-queue rows and
+ * issue tasks that the page merges in are not in it.
+ */
+export interface InboxCounts {
+  total: number
+  unread: number
+  spaces: InboxSpaceCounts
+  by_kind: Record<string, InboxSpaceCounts>
+}
+
+function isSpaceCounts(v: unknown): v is InboxSpaceCounts {
+  const c = v as Partial<InboxSpaceCounts> | null
+  return typeof c?.action === "number" && typeof c.updates === "number" && typeof c.history === "number"
+}
+
+/**
+ * Server counts, or null when the server cannot give them (an older server
+ * without the route, or any failure). Null is the signal to keep counting
+ * from the rows the client walked itself — never to show zeros.
+ */
+export async function fetchInboxCounts(workspaceId: string, signal?: AbortSignal): Promise<InboxCounts | null> {
+  try {
+    const res = await apiFetch(`/api/v1/inbox/counts?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+    if (!res.ok) return null
+    const body = (await res.json()) as Partial<InboxCounts> | null
+    if (!body || typeof body.total !== "number" || typeof body.unread !== "number" || !isSpaceCounts(body.spaces)) return null
+    return { total: body.total, unread: body.unread, spaces: body.spaces, by_kind: body.by_kind ?? {} }
+  } catch (err) {
+    if (signal?.aborted) throw err
+    return null
+  }
+}
+
+/** Server-side inbox counts; `data` is null on a server without them. */
+export function useInboxCounts(workspaceId: string | null | undefined) {
+  return useQuery<InboxCounts | null>({
+    queryKey: inboxKeys.counts(workspaceId ?? ""),
+    queryFn: ({ signal }) => fetchInboxCounts(workspaceId!, signal),
+    enabled: Boolean(workspaceId),
+    retry: false,
+  })
 }
 
 /** Shared WS → cache invalidation. Any inbox state change emits
@@ -297,13 +350,13 @@ export function useInbox(
     queryKey: listKey,
     queryFn: async ({ signal }) => {
       backfill.current?.abort()
-      const fetchPage = async (offset: number, limit: number, sig: AbortSignal) => {
+      const fetchPage = async (offset: number, limit: number, sig: AbortSignal, state: StateFilter = stateParam) => {
         const params = new URLSearchParams({ workspace_id: workspaceId! })
         if (loadAll) {
           params.set("limit", String(limit))
           params.set("offset", String(offset))
         }
-        if (stateParam !== "all") params.set("state", stateParam)
+        if (state !== "all") params.set("state", state)
         const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal: sig })
         if (!res.ok) throw new Error(`inbox: ${res.status}`)
         return (await res.json()) as InboxListResponse
@@ -331,14 +384,32 @@ export function useInbox(
         let offset = startOffset
         setLoadingMore(true)
         try {
+          // The complete "all" list is mostly resolved history, which the page
+          // only needs as a number. When the server can count it, walk the
+          // active items alone (the to-handle and updates lists need every
+          // one) and leave older history to the count; a server without the
+          // route is walked in full, as before.
+          let walkState: StateFilter = stateParam
+          if (stateParam === "all") {
+            const counts = await qc
+              .fetchQuery({ queryKey: inboxKeys.counts(workspaceId!), queryFn: () => fetchInboxCounts(workspaceId!, sig), staleTime: 0 })
+              .catch(() => null)
+            if (sig.aborted) return
+            if (counts) {
+              walkState = "active"
+              offset = 0
+            }
+          }
           while (!sig.aborted) {
-            const page = await fetchPage(offset, INBOX_PAGE_SIZE, sig)
+            const page = await fetchPage(offset, INBOX_PAGE_SIZE, sig, walkState)
             if (sig.aborted) return
             const rows = page.rows ?? []
             const fresh = rows.filter((row) => !seen.has(row.id))
             // The server says there is more, but the offset cannot advance or
             // the page taught us nothing new: stop rather than loop forever.
-            const stalled = Boolean(page.has_more) && (rows.length === 0 || fresh.length === 0)
+            // (The active walk starts over the rows the first page already
+            // holds, so a page of only-known rows is not a stall there.)
+            const stalled = Boolean(page.has_more) && (rows.length === 0 || (walkState === stateParam && fresh.length === 0))
             for (const row of fresh) seen.add(row.id)
             offset += rows.length
             const done = !page.has_more || stalled

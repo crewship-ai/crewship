@@ -41,6 +41,7 @@ vi.mock("@/hooks/use-inbox", () => ({
     refresh: vi.fn(async () => {}), patch: vi.fn(async () => {}), actOnInboxItem: vi.fn(async () => {}),
   }),
   useInboxItem: () => ({ data: undefined, isFetching: false }),
+  useInboxCounts: () => ({ data: null }),
 }))
 vi.mock("@/hooks/use-approvals", () => ({
   useApprovals: () => ({ rows: m.approvals, loading: false, error: null, notConfigured: false, refresh: vi.fn(async () => {}), patchRow: vi.fn() }),

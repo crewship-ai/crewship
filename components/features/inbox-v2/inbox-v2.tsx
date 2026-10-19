@@ -17,7 +17,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { SubBar } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
-import { useInbox, useInboxItem } from "@/hooks/use-inbox"
+import { useInbox, useInboxCounts, useInboxItem } from "@/hooks/use-inbox"
 import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
@@ -197,6 +197,17 @@ export function InboxV2() {
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
+  // Resolved history is the bulk of the inbox and is no longer walked in full
+  // when the server can count it: the number comes from the server (plus the
+  // approvals the page merges in) and the list holds the newest part. A server
+  // without counts gives null here and the loaded rows are the count, as before.
+  const serverCounts = useInboxCounts(workspaceId).data ?? null
+  const historyCount = serverCounts
+    ? Math.max(feeds.history.length, serverCounts.spaces.history + (feeds.history.length - resolved.items.length))
+    : feeds.history.length
+  const historyNote = serverCounts && feeds.history.length < historyCount
+    ? `Showing the latest ${feeds.history.length} of ${historyCount} in history`
+    : null
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
   const currentEntries = useMemo(
@@ -601,7 +612,8 @@ export function InboxV2() {
           <InboxV2Explorer
             view={view}
             onView={showView}
-            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
+            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: historyCount }}
+            historyNote={historyNote}
             entries={currentEntries}
             visible={visible}
             attention={attention}

@@ -65,6 +65,21 @@ describe("inbox v2 explorer", () => {
     expect(onOverview).toHaveBeenCalledOnce()
   })
 
+  it("says how much of a server-counted history is loaded, in History only", () => {
+    const { unmount } = render(
+      <InboxV2Explorer
+        view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+        historyNote="Showing the latest 3 of 40 in history"
+        entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+        selectedKey={null} onOpen={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("inbox-history-note")).toHaveTextContent("Showing the latest 3 of 40 in history")
+    unmount()
+    renderExplorer({ view: "updates", historyNote: "Showing the latest 3 of 40 in history" })
+    expect(screen.queryByTestId("inbox-history-note")).toBeNull()
+  })
+
   it("keeps the current space selected while the Overview is in the pane", () => {
     renderExplorer({ view: "updates", onOverview: vi.fn(), overviewSelected: true })
     const spaces = screen.getByRole("tablist", { name: "Inbox spaces" })
