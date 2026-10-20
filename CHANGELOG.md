@@ -18,8 +18,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 - Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
 - **Native Slides can be initialized and read with `crewship slides` when `CREWSHIP_SLIDES_ENABLED` is enabled.** Current custodians can save a schema-1 deck on an empty private Page; exact retries retain the original receipt. Reads check live private access and audit another workspace OWNER before releasing content. Private Pages remain indistinguishable from missing Pages even for malformed requests. The adapter remains disabled by default.
+- Prepare a client-side mirror of the strict native Slides operation contract (hashes, validation, atomic batch apply and diff-to-patch) with a flagged save client contract; no editor or save route is exposed yet.
+- Prepare a static App preview boundary with scripts, navigation and external resources disabled, pinned revisions and immediate removal on access loss; it is not mounted in app routes and stays behind `NEXT_PUBLIC_STATIC_APP_PREVIEW` until a Page endpoint serves publication HTML.
 
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
+- **Filter My space.** The private Document catalog can be narrowed by type, scope, owner and state; groups that cannot vary on the list are hidden. Counts only reflect items the server returned.
+- Move to a working folder (who gains content and history, same ID, a result per item) and Duplicate are built behind `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` and stay hidden until the server routes exist.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
