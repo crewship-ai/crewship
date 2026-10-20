@@ -23,7 +23,11 @@ function supported(publication: StaticAppPublication) {
 
 /** Static HTML only. Existing interactive Pages Apps keep their own profile.
  * Mount a new component (new key) for a different Page and after every authority change,
- * including revoke then regrant; no identity follows a reused slug. */
+ * including revoke then regrant; no identity follows a reused slug.
+ * Not mounted. Any future mount needs a principal/authority epoch fence: when the
+ * user, workspace or permission changes, a preview loaded under the old identity
+ * must be discarded (unmounted, late preparation ignored) and remounted only under
+ * the new epoch, e.g. by keying this component on it. */
 export function StaticAppPreview({ publication }: { publication: StaticAppPublication | null }) {
   const original = useRef(publication)
   const [opened, setOpened] = useState(publication)

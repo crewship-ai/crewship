@@ -1,6 +1,13 @@
 // Component boundary qualification only; no Page persistence/ACL API claim.
 // Missing browser binaries are failures, never skips; STATIC_APP_ENGINES=chromium narrows the run explicitly.
-// crewship-heavy node e2e/static-app-preview.browser.mjs
+// An empty or unknown STATIC_APP_ENGINES, or a run that executes 0 browsers, fails.
+// crewship-heavy env STATIC_APP_ENGINES=chromium node e2e/static-app-preview.browser.mjs
+// (crewship-heavy drops the caller's environment; pass variables through `env`.)
+//
+// Integration limit: this component is NOT mounted. Any future mount needs a
+// principal/authority epoch fence: when the user, workspace or permission
+// changes, a preview loaded under the old identity is discarded (unmounted,
+// late preparation results ignored) and remounted only under the new epoch.
 import { build } from "esbuild"
 import { chromium, firefox, webkit } from "@playwright/test"
 import assert from "node:assert/strict"
@@ -8,6 +15,7 @@ import { createServer } from "node:http"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { requireBrowserRuns, selectEngines } from "./static-app-engines.mjs"
 
 
 // One entry per sanitizer rule. Every vector points at /escape/* so a leaked
@@ -27,6 +35,8 @@ const vectors = {
   "forms": [`<form action="/escape/form" method=post><input name=a><button formaction="/escape/fa">go</button><textarea>t</textarea><select><option>o</option></select></form><button type=submit formaction="/escape/b">b</button><input type=image src="/escape/inp">`, "form,input,button,textarea,select,option,[action],[formaction]"],
   "data-*, ping, template, noscript": [`<div data-x="1" data-onload="${post}">d</div><a ping="/escape/ping" download target="_blank">a</a><template><img src=x onerror="${post}"></template><noscript><p title="</noscript><img src=x onerror=${post}>"></noscript>`, "[data-x],[data-onload],[ping],[download],[target],template,noscript,img"],
 }
+const engines = [chromium, firefox, webkit]
+const selected = selectEngines(process.env.STATIC_APP_ENGINES, engines.map(engine => engine.name()))
 const output = await mkdtemp(join(tmpdir(), "crewship-static-app-"))
 let server
 try {
@@ -39,8 +49,8 @@ try {
   })
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
   const failures = []
-  const only = process.env.STATIC_APP_ENGINES?.split(",")
-  for (const engine of [chromium, firefox, webkit].filter(candidate => !only || only.includes(candidate.name()))) {
+  let passed = 0
+  for (const engine of engines.filter(candidate => selected.includes(candidate.name()))) {
     let browser
     try {
       browser = await engine.launch({ headless: true })
@@ -97,12 +107,14 @@ try {
       assert.equal(requests.filter(value => value.includes("/escape")).length, 0)
       assert.deepEqual(escaped, [])
       assert.deepEqual(errors, [])
+      passed++
       console.log(`${engine.name()}: T-AX-05 static execution/network/navigation and T-AX-04 pinned revision/access removal PASS, ${Object.keys(vectors).length} sanitizer vector groups PASS`)
     } catch (error) {
       failures.push(error)
       console.error(`${engine.name()}: FAIL ${error.message}`)
     } finally { await browser?.close() }
   }
+  requireBrowserRuns(passed + failures.length)
   if (failures.length) throw new AggregateError(failures, "Static App browser qualification failed")
 } finally {
   await new Promise(resolve => server ? server.close(resolve) : resolve())

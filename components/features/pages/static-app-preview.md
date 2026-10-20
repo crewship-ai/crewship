@@ -35,6 +35,11 @@ Provenance: `lib/pages/artifact-static.ts`, `artifact-raster.ts` and their
 existing unit fixtures were extracted unchanged from the human static HTML
 flow in commit `22022bbfb1b4199cb1f56fec050e6e3932edf6cf` (PR #3267).
 
+Future mount requirement: bind the frame to a verified principal/authority
+epoch. When the user, workspace or permission changes, discard a preview loaded
+under the old identity (unmount, ignore late preparation results) and remount only
+under the new epoch. Nothing is mounted today.
+
 Status: not mounted. No endpoint returns publication HTML today (Page content
 descriptors report `html`/`static-html-v1` only), so nothing in `app/` renders
 this component and it stays dark behind `NEXT_PUBLIC_STATIC_APP_PREVIEW=true`

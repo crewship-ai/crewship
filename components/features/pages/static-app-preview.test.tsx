@@ -70,3 +70,16 @@ it("shows no frame when the preparation fails", async () => {
   expect(screen.queryByTitle("App static preview")).toBeNull()
   expect(screen.getByRole("alert")).toBeTruthy()
 })
+
+it("discards a preparation that resolves after revocation, even if access is regranted under a new key", async () => {
+  let release: (document: string) => void = () => {}
+  prepare.mockImplementationOnce(() => new Promise<string>(resolve => { release = resolve }))
+  const { rerender } = render(<StaticAppPreview key="old" publication={publication} />)
+  rerender(<StaticAppPreview key="old" publication={null} />)
+  release("<h1>Old identity</h1>")
+  await Promise.resolve()
+  expect(screen.queryByTitle("App static preview")).toBeNull()
+  rerender(<StaticAppPreview key="new" publication={{ ...publication, revision: 2, html: "<h1>Regranted</h1>" }} />)
+  await waitFor(() => expect(screen.getByTitle("App static preview").getAttribute("srcdoc")).toContain("Regranted"))
+  expect(screen.getByTitle("App static preview").getAttribute("srcdoc")).not.toContain("Old identity")
+})
