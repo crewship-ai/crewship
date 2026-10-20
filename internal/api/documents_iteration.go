@@ -176,7 +176,7 @@ func (h *PageHandler) documentIterationScope(ctx context.Context, a *artifactRun
 	var version, policy, currentPolicy int64
 	var expiry string
 	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT i.submission_id,i.page_id,i.schema_version,i.document_generation,i.draft_rev,i.pages_version,i.policy_version,p.version,i.expires_at FROM document_iteration_intents i JOIN workspace_artifact_creation_policy p ON p.workspace_id=i.workspace_id AND p.enabled=1 JOIN artifact_run_principals a ON a.run_id=i.run_id AND a.member_id=i.member_id AND a.member_revision=i.member_revision AND a.chat_generation=i.chat_generation AND a.chat_revision=i.chat_revision JOIN conversation_messages m ON m.id=i.message_id AND m.session_id=i.chat_id AND m.author_user_id=i.human_user_id AND m.agent_id=a.agent_id AND m.role='user' JOIN chats c ON c.id=i.chat_id AND c.created_by=i.human_user_id AND c.visibility='private' AND c.private_artifact_author_user_id=i.human_user_id WHERE i.run_id=? AND i.message_id=? AND i.workspace_id=? AND i.human_user_id=? AND i.chat_id=? AND i.revoked_at IS NULL`, a.RunID, a.MessageID, a.WorkspaceID, a.HumanUserID, a.ChatID).Scan(&intent.SubmissionID, &intent.PageID, &intent.Schema, &intent.Generation, &intent.Rev, &version, &policy, &currentPolicy, &expiry)
-	deadline, parseErr := time.Parse(time.RFC3339Nano, expiry)
+	deadline, parseErr := time.Parse(time.RFC3339, expiry)
 	if err != nil || parseErr != nil || !time.Now().Before(deadline) || policy != currentPolicy || (page != "" && page != intent.PageID) {
 		return scope, errDocumentAccess
 	}

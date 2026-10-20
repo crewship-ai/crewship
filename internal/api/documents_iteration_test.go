@@ -6,14 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
-func iterationFixture(t *testing.T) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
+func iterationFixture(t *testing.T, expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
 	t.Helper()
 	f, authority, _, created := newDocumentDraftFixture(t, true)
 	f.a.RunID = "iteration-run"
@@ -31,6 +33,9 @@ func iterationFixture(t *testing.T) (*artifactPrincipalFixture, *documentAuthori
 	}
 	mustExec(t, f.rig.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('iteration-start',?,'principal-crew','principal-agent','run.started','system','test',?)`, f.a.WorkspaceID, f.a.RunID)
 	intent := documents.IterationIntent{SubmissionID: "followup", PageID: created.PageID, Schema: 3}
+	if len(expiry) != 0 {
+		mustExec(t, f.rig.db, `UPDATE artifact_run_principals SET expires_at=? WHERE run_id=?`, expiry[0], f.a.RunID)
+	}
 	if err := f.pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err != nil {
 		t.Fatalf("persist iteration: %v", err)
 	}
@@ -252,4 +257,27 @@ func TestDocumentIterationRetainsPrivateCopiedContextAfterGrantEnds(t *testing.T
 			t.Fatalf("copied private context widened after grant end=%v: %+v %v", remove, context, err)
 		}
 	}
+}
+
+func TestDocumentIterationExpiryFormats(t *testing.T) {
+	base := time.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05")
+	for digits := 0; digits <= 9; digits++ {
+		t.Run(strconv.Itoa(digits)+" fractional digits", func(t *testing.T) {
+			expiry := base
+			if digits > 0 {
+				expiry += "." + "123456780"[:digits]
+			}
+			f, _, _, intent := iterationFixture(t, expiry+"Z")
+			if scope, err := f.pages.documentDraftScope(t.Context(), &f.a, intent.PageID); err != nil || scope.PageID != intent.PageID {
+				t.Fatalf("valid retained expiry rejected: scope=%+v err=%v", scope, err)
+			}
+		})
+	}
+	t.Run("malformed expiry", func(t *testing.T) {
+		f, _, _, intent := iterationFixture(t)
+		mustExec(t, f.rig.db, `UPDATE artifact_run_principals SET expires_at='not-a-timestamp' WHERE run_id=?`, f.a.RunID)
+		if _, err := f.pages.documentDraftScope(t.Context(), &f.a, intent.PageID); err == nil {
+			t.Fatal("malformed expiry retained draft authority")
+		}
+	})
 }
