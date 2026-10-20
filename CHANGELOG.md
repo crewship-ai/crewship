@@ -171,6 +171,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Revoke every matching Page grant when a reference identifies both a current subject and a departed stored ID, without changing unrelated grants. ⚠️ References matching multiple live subjects now return 400 instead of selecting one arbitrarily. Creation and reissue also verify that other subjects' grants remain unchanged. Losing issuer authority during the audit commit returns 403 and rolls back the change; database failures remain server errors.
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
 - **Harbor 2: Spend respects the role.** The dashboard no longer asks for the cost ledger or draws the Spend tile below ADMIN, and Activity › Spend shows "Spend is unavailable: only workspace owners and admins can see costs." instead of failed-load cards if the server answers 403 (#3662 on the new layout).
 ### Fixed
@@ -203,6 +204,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
 - Keep private Page grant administration and production limited to the custodian and workspace OWNER, including when legacy grants exist.
+
+- Commit Page grant creation, reissue and revocation with their chained audit records; failed audits leave permissions unchanged and publish no change notification.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.

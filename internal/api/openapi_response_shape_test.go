@@ -47,6 +47,7 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
 	{name: "RoutineFolder", pointer: "/components/schemas/RoutineFolder", value: routineFolderResponse{}},
 	{name: "RoutineFolderMoveResult", pointer: "/components/schemas/RoutineFolderMoveResult", value: routineFolderMoveResult{}},
