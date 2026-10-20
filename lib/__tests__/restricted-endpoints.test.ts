@@ -8,6 +8,31 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
     expect([...RESTRICTED_FE_ENDPOINTS].sort()).toEqual(goRestrictedAllowlist())
   })
 
+  it("ignores route literals outside the map and inside comments or nested values", () => {
+    const source = [
+      'const denied = "POST /api/v1/workspaces"',
+      'var restrictedRoutes = map[string]restrictedRule{',
+      '\t"GET /api/v1/workspaces": restrictedPass,',
+      '\t// "DELETE /api/v1/commented": restrictedPass,',
+      '\t"GET /api/v1/agents/{agentId}": {',
+      '\t\tcheck: func(_ *AuthMiddleware, _ access.Store, _ *http.Request, _ string) error {',
+      '\t\t\tlabels := map[string]string{',
+      '\t\t\t\t"POST /api/v1/nested-value": "not a route",',
+      '\t\t\t}',
+      '\t\t\t_ = labels',
+      '\t\t\treturn nil',
+      '\t\t},',
+      '\t},',
+      '}',
+      'func deny() { if r.Pattern == "POST /api/v1/workspaces" { reply403() } }',
+    ].join("\n")
+    expect(goRestrictedAllowlist(source)).toEqual(["GET /api/v1/agents/{agentId}", "GET /api/v1/workspaces"])
+  })
+
+  it("fails closed if the declared map cannot be found", () => {
+    expect(() => goRestrictedAllowlist('const denied = "POST /api/v1/workspaces"')).toThrow("restrictedRoutes map not found")
+  })
+
   it.each([
     ["GET", "/api/v1/workspaces"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routines"],
