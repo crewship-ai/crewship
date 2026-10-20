@@ -13,6 +13,7 @@ import { z } from "zod"
 import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
+import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -148,6 +149,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (result.kind === "settled") {
         if (gen !== refreshGen.current) return
         purgeOtherE2Recovery(result.session?.user.id ?? null)
+        void purgeOtherDocumentDrafts(result.session?.user.id ?? null)
         setSession(result.session)
         setStatus(result.session ? "authenticated" : "unauthenticated")
         return
@@ -189,6 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (redirected) return
       redirected = true
       purgeOtherE2Recovery(null)
+      void purgeOtherDocumentDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
       const params = new URLSearchParams({ reason: "expired" })
@@ -206,6 +209,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (redirected) return
       redirected = true
       purgeOtherE2Recovery(null)
+      void purgeOtherDocumentDrafts(null)
       window.location.replace("/login")
     }
 
@@ -290,6 +294,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return
     }
     purgeOtherE2Recovery(null)
+    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
+    await purgeOtherDocumentDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.

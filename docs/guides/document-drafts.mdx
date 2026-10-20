@@ -1,0 +1,26 @@
+---
+title: "Document save state"
+description: "What the Document editor's save status means while work is not yet confirmed by the server."
+icon: "file-text"
+stability: experimental
+tag: Experimental
+---
+
+The Document header shows one status line with two parts.
+
+| Status | Meaning |
+|---|---|
+| Saved · Confirmed by server | The server has stored every change. Other people see it. |
+| Saving to this browser… | Your edits are not confirmed yet and the browser has not finished keeping a copy. |
+| Saved locally in this browser · not yet confirmed by server | The browser kept a copy of your unsent edits; nobody else sees them yet. |
+| Not stored in this browser or on the server | The browser refused to keep a copy (private window, full storage). Keep the tab open. |
+| An earlier unsent draft is held in this browser and was not restored | A draft from an earlier session was found. Download or discard it from the recovery panel. |
+
+Only a server confirmation turns the line to **Confirmed by server**.
+
+## When the browser copy is deleted
+
+The browser copy holds private text, so it is deleted rather than kept for later:
+
+- **Access lost.** When the server answers 401, 403 or 404 for the document, the copy of that document (for you, in that workspace) is deleted from the browser together with what is on screen. Download an unsent draft before closing the tab if you still need it; after this point it cannot be recovered.
+- **Sign-out, session expiry or a different user signing in.** Copies of other users are deleted, and every copy is deleted on sign-out or when the session ends. Unsent edits that were only stored in this browser are lost, so confirm that the status line says **Confirmed by server** before you sign out on a shared computer.
