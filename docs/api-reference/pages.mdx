@@ -2367,6 +2367,39 @@ selector in this release. Statuses: 200 document; 400 unsupported selector;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
 
+## List saved document checkpoints
+
+`GET /api/v1/pages/{slug}/document/checkpoints`
+
+Authentication: a current human credential with current Page and document read
+access; scoped CLI credentials need `pages:read`. Agent run credentials are
+refused. Request: the Page slug or immutable `@PageID` and current workspace;
+no request body. Response: `checkpoints`, an array of at most 1000 entries with
+`id`, `rev`, `schema`, `actor` and `created_at`. This does not create a checkpoint.
+Statuses: 200 list; 400 invalid selector; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page or document;
+409 incompatible state; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoints <page-slug>`.
+
+## Read one saved document checkpoint
+
+`GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}`
+
+Authentication: the same current human read access, checked again on each read.
+A historical checkpoint never restores earlier permissions. Request: a Page
+selector and checkpoint ID of 1–128 ASCII letters, digits, underscores or hyphens;
+no request body. Response: exactly `page_id`, `id`, `rev`, `schema` and the
+retained document `content`. No editing epoch, binary snapshot or write
+capability is returned. Unsupported schemas return 409 without content.
+Statuses: 200 checkpoint; 400 invalid identity; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page, document or checkpoint;
+409 incompatible schema; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoint <page-slug> <checkpoint-id>`.
+
 ## Initialize a native document
 
 `POST /api/v1/pages/{slug}/document/initialize`
@@ -2426,3 +2459,16 @@ return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
 
 Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+
+## Personal Documents view
+
+When Documents are enabled, **My space** in Artifacts shows the current user's private Documents within the existing workspace. It does not create another workspace. Custody access to another user's private output belongs to the workspace OWNER and remains a separate audited access path.
+
+Authorized Page index rows include the read-only boolean `private_audience`. A personal view requires both `private_audience: true` and the current user's `owner` reference; an unfiled Page or an ownership reference alone does not establish privacy. Existing `crewship page list --format json` output exposes this classification. Missing audience information is unknown, rather than permission to infer that a Page is public.
+
+The index accepts `audience=personal` for explicitly private Pages owned by the current human, or `audience=all` for the existing authorized catalog. OWNER custody of other people’s private Pages is excluded from the personal view. Unknown audience values return 400. `X-Total-Count` counts only authorized rows matching the audience. Catalog responses use `Cache-Control: no-store`; foreign private metadata requires the existing OWNER audit before its release, and an unavailable audit refuses the response.
+
+Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
+
+The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.

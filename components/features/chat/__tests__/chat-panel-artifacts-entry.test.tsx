@@ -8,7 +8,7 @@ vi.mock("../virtual-conversation", () => ({ virtualChatEnabled: () => documentSu
 const chatStub = vi.hoisted(() => ({
   turns: [] as unknown[], sendMessage: vi.fn(), stopGeneration: vi.fn(),
   regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(),
-  markHistoryUnavailable: vi.fn(), resubscribeSession: vi.fn(),
+  markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(),
   isStreaming: false, connectionStatus: "connected",
 }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chatStub }))

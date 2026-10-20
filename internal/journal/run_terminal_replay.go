@@ -13,9 +13,9 @@ type ReplaySyncEmitter interface {
 }
 
 // RunTerminalReplay provides one immutable representation to both the live API
-// and retained-output recovery. StartedAt is the original run.started timestamp
-// (or the captured admission time when no start was journaled).
-func RunTerminalReplay(runID, workspaceID, agentID string, startedAt time.Time, kind EntryType, workOwned bool, exitCode *int, message *string, metadata map[string]any) Entry {
+// and retained-output recovery. eventAt is the captured completion time, or
+// the deterministic legacy fallback when historical capture has no such time.
+func RunTerminalReplay(runID, workspaceID, agentID string, eventAt time.Time, kind EntryType, workOwned bool, exitCode *int, message *string, metadata map[string]any) Entry {
 	id := "run-terminal:" + runID
 	if workOwned {
 		id = "work-terminal:" + runID
@@ -38,7 +38,20 @@ func RunTerminalReplay(runID, workspaceID, agentID string, startedAt time.Time, 
 	if len(short) > 8 {
 		short = short[:8]
 	}
-	return Entry{ID: id, WorkspaceID: workspaceID, AgentID: agentID, TS: startedAt, Type: kind,
+	return Entry{ID: id, WorkspaceID: workspaceID, AgentID: agentID, TS: eventAt, Type: kind,
 		Severity: severity, ActorType: ActorSidecar, Summary: fmt.Sprintf("run %s %s", short, string(kind)[len("run."):]),
 		Payload: payload, TraceID: runID, SpanID: id}
+}
+
+// RunTerminalEventTime selects durable captured time. Legacy absence retains
+// the old deterministic timestamp; it is not proof of when execution finished.
+func RunTerminalEventTime(startedAt time.Time, captured string) (time.Time, error) {
+	if captured == "" {
+		return startedAt, nil
+	}
+	completedAt, err := time.Parse(time.RFC3339Nano, captured)
+	if err != nil || completedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("invalid captured run completion time")
+	}
+	return completedAt, nil
 }

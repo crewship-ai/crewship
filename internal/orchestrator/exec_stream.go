@@ -355,6 +355,34 @@ type contentBlock struct {
 	ToolUseID string       `json:"tool_use_id,omitempty"`
 	IsError   bool         `json:"is_error,omitempty"`
 	Source    *imageSource `json:"source,omitempty"`
+	// Tool results use content (a string or typed text blocks), while older
+	// adapters used text. Keep the union raw so an unknown result shape cannot
+	// discard correlation or error metadata for the surrounding message.
+	Content json.RawMessage `json:"content,omitempty"`
+}
+
+func (block contentBlock) toolResultText() string {
+	if len(block.Content) == 0 {
+		return block.Text
+	}
+	var text string
+	if json.Unmarshal(block.Content, &text) == nil {
+		return text
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(block.Content, &blocks) != nil {
+		return ""
+	}
+	var texts []string
+	for _, child := range blocks {
+		if child.Type == "text" {
+			texts = append(texts, child.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 type imageSource struct {
@@ -648,7 +676,7 @@ func emitToolResultBlock(block contentBlock, parentID string, handler EventHandl
 	}
 	handler(scanToolResultEvent(AgentEvent{
 		Type:      "tool_result",
-		Content:   block.Text,
+		Content:   block.toolResultText(),
 		Metadata:  meta,
 		Timestamp: time.Now(),
 	}))

@@ -685,3 +685,57 @@ test('authoring adapter bytes change the copied service build identity', async (
     try {if(service)await service.close()} finally {try {if(f)await f.close()} finally {await rm(dir,{recursive:true})}}
   }
 });
+
+// T-OPS-01: a busy dependency cannot retain a document scheduler tail forever.
+test('authority deadline bounds a continuously arriving response and frees the document queue', { timeout: 5000 }, async () => {
+  const model = authorityModel(); let slow = true;
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'state' && slow) {
+      slow = false;
+      res.writeHead(200);
+      res.write(' ');
+      const drip = setInterval(() => res.write(' '), 10);
+      const finish = setTimeout(() => { clearInterval(drip); res.end(JSON.stringify(model.state)); }, 500);
+      res.once('close', () => { clearInterval(drip); clearTimeout(finish); });
+      await new Promise(resolve => res.once('close', resolve));
+      return;
+    }
+    return model.handle(op, data, req, res);
+  }, { timeoutMs: 100 });
+  try {
+    await f.start();
+    const response = await read(f);
+    assert.equal(response.status, 503, 'ongoing response bytes must not extend the authority deadline');
+    const recovered = await read(f);
+    assert.equal(recovered.status, 200, 'timed-out call retained the document scheduler tail');
+    assert.equal(model.commits, 0);
+  } finally { await f.close(); }
+});
+
+test('authority deadline after durable commit permits exact receipt retry without a second mutation', { timeout: 5000 }, async () => {
+  const model = authorityModel(); let delayReceipt = true;
+  const f = await fixture(async (op, data, req, res) => {
+    const value = await model.handle(op, data, req, res);
+    if (op === 'commit' && delayReceipt) {
+      delayReceipt = false;
+      res.writeHead(200); res.write(' ');
+      const drip = setInterval(() => res.write(' '), 10);
+      const finish = setTimeout(() => { clearInterval(drip); res.end(JSON.stringify(value)); }, 500);
+      res.once('close', () => { clearInterval(drip); clearTimeout(finish); });
+      await new Promise(resolve => res.once('close', resolve));
+      return;
+    }
+    return value;
+  }, { timeoutMs: 100 });
+  try {
+    await f.start();
+    const state = (await read(f)).body;
+    const target = state.outline.find(block => block.id === 'intro');
+    const request = {id:'deadline-edit',schema:2,epoch:state.epoch,ifRev:state.rev,target:target.id,ifHash:target.hash,text:'Deadline-safe edit'};
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).status, 503);
+    assert.equal(model.commits, 1, 'fixture must commit before the confirmation deadline');
+    const retry = await call(f.socket, '/v1/documents/p/patch', request);
+    assert.equal(retry.status, 200); assert.equal(retry.body.duplicate, true);
+    assert.equal(model.commits, 1, 'uncertain confirmation executed the original mutation again');
+  } finally { await f.close(); }
+});
