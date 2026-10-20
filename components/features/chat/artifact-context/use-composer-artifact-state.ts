@@ -1,7 +1,7 @@
 "use client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { fetchArtifactPreview } from "./client"
-import { BLOCK_TEXT, addAttachment, attachmentId, buildSubmission, detachAttachment, newSubmissionId, sendBlock, type AttachedArtifact, type ComposerArtifactContext, type EditMode } from "./composer/composer-context-model"
+import { BLOCK_TEXT, addAttachment, attachmentId, buildIterationIntent, detachAttachment, newSubmissionId, sendBlock, type AttachedArtifact, type ComposerArtifactContext, type EditMode } from "./composer/composer-context-model"
 import type { LinkedViewerTarget } from "./linked-viewer-targets"
 import { useArtifactContextEnabled } from "./use-artifact-context-enabled"
 
@@ -55,10 +55,10 @@ export function useComposerArtifactState({ workspaceId, chatId, executor, online
     const block = sendBlock(current)
     if (block) return { ok: false, message: BLOCK_TEXT[block] }
     submissionId.current ??= newSubmissionId()
-    const submission = buildSubmission(current, submissionId.current)
-    return { ok: true, metadata: submission ? { ...metadata, artifact_submission: submission } : metadata }
+    const intent = buildIterationIntent(current, submissionId.current)
+    return { ok: true, metadata: intent ? { ...metadata, document_iteration_intent: intent } : metadata }
   }, [enabled])
-  /** Called once a message with a submission went out; the next send is a new intent. */
+  /** Called once a message with an intent went out; the next send is a new intent. */
   const sent = useCallback(() => { if (contextRef.current.attachments.length || contextRef.current.mode) { submissionId.current = null; setDraft(EMPTY) } }, [])
 
   return { enabled, context, attach, detach, setMode, setUpdateTarget, prepareSend, sent }

@@ -58,7 +58,7 @@ async function mockContract(page: Page, options: Partial<Mock> = {}): Promise<Mo
     if (path.endsWith("/artifact-context/preview")) {
       if (mock.previewStatus !== 200) return json(route, { error: "not found" }, mock.previewStatus)
       return json(route, { create: { audience: { kind: "personal" }, result_type: "Document" },
-        update: { audience: { kind: "folder", name: "Finance", people: 4 }, result_type: "Document", expected: { schema: 2, rev: 7, generation: 3 } } })
+        update: { audience: { kind: "personal" }, result_type: "Document", expected: { schema: 3, rev: 7, generation: 3 } } })
     }
     if (path.includes("/document/checkpoints/cp-2")) {
       if (mock.checkpointStatus !== 200) return json(route, { error: "not found" }, mock.checkpointStatus)
@@ -149,17 +149,17 @@ for (const width of [1280, 390]) {
       if (width < 600) await expect(page.getByRole("region", { name: "Document preview" })).toHaveCount(0)
       await expect(strip.getByText("Choose what the agent should do")).toBeVisible()
       await strip.getByLabel("Update attached").check()
-      await expect(strip).toContainText("Saved to Finance. 4 people can see it.", { timeout: TIMEOUT })
+      await expect(strip).toContainText("Saved to My space. Only you can see it.", { timeout: TIMEOUT })
       await expect(strip).toContainText("Executor")
 
-      // 5. The send carries the target and the expected revision, once, with a stable submission id.
+      // 5. The send carries the intent.
       await composer(page).fill("Add a risks section")
       await composer(page).press("Enter")
       await expect.poll(() => sent.length, { timeout: TIMEOUT }).toBe(1)
       expect(sent[0].content).toBe("Add a risks section")
-      const submission = sent[0].metadata?.artifact_submission as { submission_id: string; edit_mode: string; update_page_id: string; context: { page_id: string; expected: unknown }[] }
-      expect(submission).toMatchObject({ edit_mode: "update", update_page_id: "page-b", context: [{ page_id: "page-b", expected: { schema: 2, rev: 7, generation: 3 } }] })
-      expect(submission.submission_id).toMatch(/^[0-9a-f-]{36}$/)
+      // Exactly the backend's five flat fields; no mode, principal or title travels with it.
+      expect(sent[0].metadata?.document_iteration_intent).toEqual({ submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/), page_id: "page-b", schema: 3, rev: 7, generation: 3 })
+      expect(Object.keys(sent[0].metadata ?? {})).not.toContain("artifact_submission")
       await expect(page.getByRole("region", { name: "Artifact context" })).toHaveCount(0)
 
       // 6. The library lists what is linked, a restricted link without a name.
@@ -203,7 +203,7 @@ for (const width of [1280, 390]) {
       await composer(page).fill("Never mind")
       await composer(page).press("Enter")
       await expect.poll(() => sent.length, { timeout: TIMEOUT }).toBe(1)
-      expect(sent[0].metadata?.artifact_submission).toBeUndefined()
+      expect(sent[0].metadata?.document_iteration_intent).toBeUndefined()
     })
 
     test("a restricted card shows no name, type or executor", async ({ page }) => {
@@ -228,7 +228,7 @@ for (const width of [1280, 390]) {
       await composer(page).fill("Hello")
       await composer(page).press("Enter")
       await expect.poll(() => sent.length, { timeout: TIMEOUT }).toBe(1)
-      expect(sent[0].metadata?.artifact_submission).toBeUndefined()
+      expect(sent[0].metadata?.document_iteration_intent).toBeUndefined()
       expect(await noOverflow(page)).toBe(true)
     })
   })

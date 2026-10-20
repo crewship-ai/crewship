@@ -164,7 +164,8 @@ function parseAudience(value: unknown): Audience {
   return { kind: "unknown" }
 }
 function parseExpected(value: unknown): ExpectedState | null {
-  return object(value) && Number.isSafeInteger(value.schema) && Number.isSafeInteger(value.rev) && Number.isSafeInteger(value.generation)
+  // The backend contract carries schema 3 only; anything else cannot become a targeted edit.
+  return object(value) && value.schema === 3 && Number.isSafeInteger(value.rev) && Number.isSafeInteger(value.generation)
     ? { schema: value.schema as number, rev: value.rev as number, generation: value.generation as number } : null
 }
 

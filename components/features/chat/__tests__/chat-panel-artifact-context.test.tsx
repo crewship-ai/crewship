@@ -40,7 +40,7 @@ const SERVED: Route = path => {
     { link_id: "l2", kind: "artifact", page_id: "page-a", name: "Quarterly plan", accessible: true },
   ] })
   if (path.includes("/library")) return json({ items: [{ link_id: "l1", kind: "artifact", page_id: "page-a", name: "Quarterly plan", revision: 2, checkpoint_id: "cp-2" }, { link_id: "l9", restricted: true }] })
-  if (path.includes("/artifact-context/preview")) return json({ create: { audience: { kind: "personal" }, result_type: "Document" }, update: { audience: { kind: "folder", name: "Finance", people: 4 }, result_type: "Document", expected: { schema: 2, rev: 5, generation: 1 } } })
+  if (path.includes("/artifact-context/preview")) return json({ create: { audience: { kind: "personal" }, result_type: "Document" }, update: { audience: { kind: "personal" }, result_type: "Document", expected: { schema: 3, rev: 5, generation: 1 } } })
   if (path.startsWith("/api/v1/pages/%40page-a/document/checkpoints/cp-2")) return json({ page_id: "page-a", id: "cp-2", rev: 2, schema: 2, content: doc("Body at revision two") })
   if (path.startsWith("/api/v1/pages/%40page-a/document?")) return json({ page_id: "page-a", schema: 2, rev: 5, content: doc("Body at latest") })
   if (path.startsWith("/api/v1/pages/%40page-a?")) return json({ id: "page-a", name: "Quarterly plan", has_document: true })
@@ -90,7 +90,7 @@ it("flag off: no artifact surface and no request, whatever the endpoints serve",
   expect(settled(missing.container)).toBe(settled(off.container, served))
 })
 
-it("flag off: a send carries no artifact submission", async () => {
+it("flag off: a send carries no document iteration intent", async () => {
   mount()
   fireEvent.click(await screen.findByRole("button", { name: "Send message" }))
   expect(chat.sendMessage).toHaveBeenCalledWith("Please update it")
@@ -121,13 +121,13 @@ it("flag on: result card opens the exact revision through the checkpoint reader 
   expect(chat.sendMessage).not.toHaveBeenCalled()
   expect(toast.error).toHaveBeenCalledWith("Choose what the agent should do with the attached item.")
   fireEvent.click(screen.getByLabelText("Update attached"))
-  await waitFor(() => expect(strip).toHaveTextContent("Saved to Finance. 4 people can see it."))
+  await waitFor(() => expect(strip).toHaveTextContent("Saved to My space. Only you can see it."))
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
   expect(chat.sendMessage).toHaveBeenCalledTimes(1)
   const [text, metadata] = chat.sendMessage.mock.calls[0]
   expect(text).toBe("Please update it")
-  expect(metadata.artifact_submission).toMatchObject({ edit_mode: "update", update_page_id: "page-a", context: [{ page_id: "page-a", expected: { schema: 2, rev: 5, generation: 1 } }] })
-  expect(typeof metadata.artifact_submission.submission_id).toBe("string")
+  expect(metadata.document_iteration_intent).toEqual({ submission_id: expect.any(String), page_id: "page-a", schema: 3, rev: 5, generation: 1 })
+  expect(typeof metadata.document_iteration_intent.submission_id).toBe("string")
   // Sent: the context is consumed, the next message is a new intent.
   await waitFor(() => expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull())
 })
@@ -173,21 +173,21 @@ it("flag on: an item the server answers 404 for is dropped from the composer", a
   expect(screen.queryByText("Quarterly plan", { selector: "li *" })).toBeNull()
 })
 
-it("flag on: a suggestion chip is not the composer's send; it spends no submission and keeps the draft", async () => {
+it("flag on: a suggestion chip is not the composer's send; it spends no intent and keeps the draft", async () => {
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
   mount()
   fireEvent.click(await screen.findByRole("button", { name: "Open" }))
   fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
   const strip = await screen.findByRole("region", { name: "Artifact context" })
   fireEvent.click(screen.getByLabelText("Update attached"))
-  await waitFor(() => expect(strip).toHaveTextContent("Saved to Finance"))
+  await waitFor(() => expect(strip).toHaveTextContent("Saved to My space"))
   fireEvent.click(await screen.findByRole("button", { name: "Tell me more" }))
   await waitFor(() => expect(chat.sendMessage).toHaveBeenCalled())
   expect(chat.sendMessage.mock.calls[0]).toEqual(["Tell me more"])
-  expect(screen.getByRole("region", { name: "Artifact context" })).toHaveTextContent("Saved to Finance")
+  expect(screen.getByRole("region", { name: "Artifact context" })).toHaveTextContent("Saved to My space")
   // The composer's own send still carries it, once.
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
-  expect(chat.sendMessage.mock.calls[1][1].artifact_submission.edit_mode).toBe("update")
+  expect(chat.sendMessage.mock.calls[1][1].document_iteration_intent.page_id).toBe("page-a")
 })
 
 it("flag on: a denied or missing pinned revision shows neither the title nor the saved revision, and cannot be attached", async () => {
@@ -200,4 +200,19 @@ it("flag on: a denied or missing pinned revision shows neither the title nor the
   expect(viewer).not.toHaveTextContent("Quarterly plan")
   expect(viewer).not.toHaveTextContent("Saved revision")
   expect(screen.queryByRole("button", { name: "Use in message" })).toBeNull()
+})
+
+it("flag on: an item in a shared folder cannot be edited and nothing is sent", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  overrides = [path => path.includes("/artifact-context/preview") ? json({ create: { audience: { kind: "personal" }, result_type: "Document" }, update: { audience: { kind: "folder", name: "Finance", people: 4 }, result_type: "Document", expected: { schema: 3, rev: 5, generation: 1 } } }) : undefined]
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
+  const strip = await screen.findByRole("region", { name: "Artifact context" })
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled())
+  expect(strip).toHaveTextContent("needs a proposal, which is not available yet")
+  fireEvent.click(screen.getByLabelText("Reply only"))
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  // Reply-only is a plain message: no mandate.
+  expect(chat.sendMessage.mock.calls[0]).toEqual(["Please update it"])
 })
