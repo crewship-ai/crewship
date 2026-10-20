@@ -164,7 +164,8 @@ describe("elements, selection and keyboard", () => {
   it("is a read-only preview at phone width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
     render(<Editor />)
-    expect(screen.getByText(/read-only preview/)).toBeTruthy()
+    expect(screen.getByText("Read-only preview; editing is available on a larger screen.")).toBeTruthy()
+    expect(screen.queryByText(/not saved|local draft/i)).toBeNull()
     expect(screen.getByRole("img", { name: "Slide 1" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "text 1" })).toBeNull()
     expect(screen.getByRole("button", { name: "Add text" }).hasAttribute("disabled")).toBe(true)
@@ -294,6 +295,6 @@ describe("workspace states", () => {
     render(<SlidesWorkspace pageId="fixture_page" client={createFixtureSaveClient(snapshot())} saveEnabled={false} />)
     await screen.findByLabelText("Speaker notes")
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
-    expect(screen.getByRole("status").textContent).toContain("Saving is not available yet")
+    expect(screen.getByText(/Saving is not available yet.*lost on reload/)).toBeTruthy()
   })
 })

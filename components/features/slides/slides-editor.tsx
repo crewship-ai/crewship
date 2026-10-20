@@ -23,18 +23,20 @@ export interface SlidesEditorProps {
   /** Requests persistence only; the caller owns authority and acknowledgement. */
   onSave?: (candidate: SlideDeck) => void
   persistenceStatus?: string
+  /** A standing warning shown beside the status; it does not change, so it is not a live region. */
+  persistenceNote?: string
 }
 
-export function SlidesEditor({ deck, onChange, readOnly, disabled, saveDisabled, onSave, persistenceStatus }: SlidesEditorProps) {
+export function SlidesEditor({ deck, onChange, readOnly, disabled, saveDisabled, onSave, persistenceStatus, persistenceNote }: SlidesEditorProps) {
   if (!isNativeSlideDeck(deck)) return <p role="alert">This Slides format is unavailable. Its content cannot be edited.</p>
-  return <NativeEditor deck={deck} onChange={onChange} readOnly={Boolean(readOnly || disabled || !onChange)} onSave={onSave} saveDisabled={saveDisabled} persistenceStatus={persistenceStatus} />
+  return <NativeEditor deck={deck} onChange={onChange} readOnly={Boolean(readOnly || disabled || !onChange)} onSave={onSave} saveDisabled={saveDisabled} persistenceStatus={persistenceStatus} persistenceNote={persistenceNote} />
 }
 
 const layers: { layer: Layer; label: string }[] = [{ layer: "front", label: "Bring to front" }, { layer: "forward", label: "Bring forward" }, { layer: "backward", label: "Send backward" }, { layer: "back", label: "Send to back" }]
 const typing = (target: EventTarget) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
 const HISTORY_LIMIT = 100
 
-function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDisabled, persistenceStatus }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
+function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDisabled, persistenceStatus, persistenceNote }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const phone = useIsMobile()
   // Read-only until mounted so a phone never gets one editable frame before the width is known.
   const [mounted, setMounted] = React.useState(false)
@@ -108,7 +110,11 @@ function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDi
   const resize = (id: string, rect: Rect) => { changed(resizeElement(deck, slideId, id, rect)) }
   const position = deck.slide_order.indexOf(slideId)
   return <section ref={section} tabIndex={-1} aria-label="Slides editor" className="space-y-3 outline-none" onKeyDown={onKeyDown}>
-    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} Images and comments are not available.{phone && " Editing is available on a larger screen; this is a read-only preview."}</p>
+    {phone ? <p className="text-sm text-muted-foreground">Read-only preview; editing is available on a larger screen.</p> : <>
+      <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."}</p>
+      {persistenceNote && <p className="text-sm font-medium text-foreground">{persistenceNote}</p>}
+      <p className="text-sm text-muted-foreground">Images and comments are not available.</p>
+    </>}
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-2" aria-label="Slide actions">
       {onSave && <button className={control} disabled={readOnly || saveDisabled} onClick={() => { if (!readOnly && !saveDisabled) onSave(deck) }}>Save changes</button>}

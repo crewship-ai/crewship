@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import fixture from "@/testdata/slides-schema-v1.json"
 import capture from "./real-server-capture.json"
 import type { SlideDeck } from "../model"
-import type { PatchRequest } from "../operations"
+import { deckHash, type PatchRequest } from "../operations"
 import type { SlidesInitializeRequest } from "../save-client"
 
 const request = vi.hoisted(() => vi.fn())
@@ -18,7 +18,8 @@ const body = (extra: Record<string, unknown> = {}) => ({ schema_version: 1, revi
 const without = (key: string) => { const copy: Record<string, unknown> = body(); delete copy[key]; return copy }
 const patch = (): PatchRequest => ({ page_id: PAGE, schema_version: 1, base_rev: 3, mutation_id: "m_1", operations: [] })
 const init = (): SlidesInitializeRequest => ({ page_id: PAGE, schema_version: 1, base_rev: 0, mutation_id: "m_init", deck: deck() })
-const receipt = (extra: Record<string, unknown> = {}) => ({ mutation_id: "m_init", revision: 1, order_version: 1, content_hash: HASH, duplicate: false, ...extra })
+const SENT_HASH = deckHash(deck())
+const receipt = (extra: Record<string, unknown> = {}) => ({ mutation_id: "m_init", revision: 1, order_version: 1, content_hash: SENT_HASH, duplicate: false, ...extra })
 const text404 = () => new Response("404 page not found\n", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } })
 const jsonError = (status: number, error = "x") => Response.json({ error }, { status })
 const refused = { status: "error", retryable: false }
@@ -39,8 +40,15 @@ describe("slides read (GET /pages/@id/slides)", () => {
     request.mockResolvedValueOnce(Response.json(without(key)))
     expect(await client.load(PAGE)).toMatchObject(refused)
   })
-  it.each([["page_id", PAGE], ["rev", 3], ["other", true]])("refuses a body with the extra field %s", async (key, value) => {
+  // The server's answer may grow additive fields; the five required keys and the deck stay strict.
+  it.each([["page_id", PAGE], ["rev", 3], ["other", true]])("ignores the unknown envelope key %s", async (key, value) => {
     request.mockResolvedValueOnce(Response.json(body({ [key]: value })))
+    expect(await client.load(PAGE)).toMatchObject({ rev: 3, orderVersion: 1 })
+  })
+  it("keeps the deck strict: an unknown key inside the deck is refused", async () => {
+    request.mockResolvedValueOnce(Response.json(body({ deck: { ...deck(), future_field: 1 } })))
+    expect(await client.load(PAGE)).toMatchObject(refused)
+    request.mockResolvedValueOnce(Response.json(body({ deck: { ...deck(), slides: deck().slides.map((slide, index) => index ? slide : { ...slide, extra: true }) } })))
     expect(await client.load(PAGE)).toMatchObject(refused)
   })
   it.each([
@@ -55,7 +63,7 @@ describe("slides read (GET /pages/@id/slides)", () => {
     request.mockResolvedValue(Response.json(body({ deck: { schema_version: 1 } })))
     expect(await client.load(PAGE)).toMatchObject(refused)
   })
-  it("reports a missing route (flag off: Go's plain 404, or 405/501) as not implemented, and a JSON 404 as not found", async () => {
+  it("reports a missing route (flag off: the routes are not installed and Go's mux answers a plain-text 404, or 405/501) as not implemented, and a JSON 404 as not found", async () => {
     request.mockResolvedValueOnce(text404())
     expect(await client.load(PAGE)).toEqual({ status: "unavailable", reason: "not_implemented" })
     request.mockResolvedValueOnce(new Response("", { status: 405 }))
@@ -65,7 +73,13 @@ describe("slides read (GET /pages/@id/slides)", () => {
     request.mockResolvedValueOnce(jsonError(404, "Slides not found"))
     expect(await client.load(PAGE)).toEqual({ status: "unavailable", reason: "not_found" })
   })
-  it("maps 401 and 403, 400, 409 (unsupported schema) and 5xx", async () => {
+  it("maps a 400 (bad revision) and a 429 on load to non-retryable errors", async () => {
+    request.mockResolvedValueOnce(jsonError(400, "positive revision required"))
+    expect(await client.load(PAGE)).toMatchObject(refused)
+    request.mockResolvedValueOnce(jsonError(429))
+    expect(await client.load(PAGE)).toMatchObject(refused)
+  })
+  it("maps 401 and 403, 409 (unsupported schema) and 5xx", async () => {
     request.mockResolvedValueOnce(jsonError(401))
     expect(await client.load(PAGE)).toEqual({ status: "unavailable", reason: "signed_out" })
     request.mockResolvedValueOnce(jsonError(403))
@@ -83,12 +97,16 @@ describe("slides initialize (POST /pages/@id/slides/initialize)", () => {
   const client = createHttpSlidesClient("ws1")
   it("posts exactly the five contract fields and maps the receipt", async () => {
     request.mockResolvedValue(Response.json(receipt()))
-    expect(await client.initialize(init())).toEqual({ status: "initialized", receipt: { mutationId: "m_init", revision: 1, orderVersion: 1, contentHash: HASH, duplicate: false } })
+    expect(await client.initialize(init())).toEqual({ status: "initialized", receipt: { mutationId: "m_init", revision: 1, orderVersion: 1, contentHash: SENT_HASH, duplicate: false } })
     const [url, options] = request.mock.calls[0]
     expect(url).toBe("/api/v1/pages/%40fixture_page/slides/initialize?workspace_id=ws1")
     expect(options.method).toBe("POST")
     expect(Object.keys(JSON.parse(options.body)).sort()).toEqual(["base_rev", "deck", "mutation_id", "page_id", "schema_version"])
     expect(JSON.parse(options.body)).toMatchObject({ page_id: PAGE, schema_version: 1, base_rev: 0, mutation_id: "m_init" })
+  })
+  it("ignores unknown keys on a receipt but still requires the five", async () => {
+    request.mockResolvedValueOnce(Response.json(receipt({ future: 1 })))
+    expect(await client.initialize(init())).toMatchObject({ status: "initialized", receipt: { revision: 1 } })
   })
   it("maps a duplicate receipt", async () => {
     request.mockResolvedValue(Response.json(receipt({ duplicate: true, revision: 4 })))
@@ -103,13 +121,13 @@ describe("slides initialize (POST /pages/@id/slides/initialize)", () => {
     for (const value of bad) expect(await client.initialize(value as SlidesInitializeRequest)).toMatchObject(refused)
     expect(request).not.toHaveBeenCalled()
   })
-  it.each(["mutation_id", "revision", "order_version", "content_hash", "duplicate"])("refuses a receipt without %s", async key => {
+  it.each(["mutation_id", "revision", "order_version", "content_hash", "duplicate"])("fails closed on a receipt without %s", async key => {
     const copy: Record<string, unknown> = receipt(); delete copy[key]
     request.mockResolvedValueOnce(Response.json(copy))
     expect(await client.initialize(init())).toMatchObject({ status: "error", retryable: true })
   })
   it.each([
-    ["an extra field", { revision: 1, page_id: PAGE }], ["another mutation_id", { mutation_id: "other" }], ["revision 0", { revision: 0 }],
+    ["a content_hash that is not the hash of the deck that was sent", { content_hash: "a".repeat(64) }], ["another mutation_id", { mutation_id: "other" }], ["revision 0", { revision: 0 }],
     ["a short hash", { content_hash: "x" }], ["duplicate as a string", { duplicate: "false" }], ["order_version 0", { order_version: 0 }],
   ])("never reports initialized for a receipt with %s", async (_name, extra) => {
     request.mockResolvedValueOnce(Response.json(receipt(extra)))

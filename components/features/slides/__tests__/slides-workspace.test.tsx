@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import fixture from "@/testdata/slides-schema-v1.json"
 import type { SlideDeck } from "@/lib/slides/model"
@@ -15,20 +15,38 @@ describe("SlidesWorkspace without a save route", () => {
   it("labels edits as a local draft and offers no Save button", async () => {
     const client = createFixtureSaveClient(head())
     render(<SlidesWorkspace pageId={PAGE} client={client} />)
-    expect(await screen.findByText(/Revision 3\. Saving is not available yet/)).toBeTruthy()
+    await screen.findByLabelText("Speaker notes")
+    expect(screen.getByRole("status").textContent).toContain("Revision 3.")
+    // The unchanging warning is visible but not a live region; only the changing part is.
+    const warning = screen.getByText(/Saving is not available yet.*lost on reload/)
+    expect(warning.closest("[role=status]")).toBeNull()
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
     typeNotes("only here")
-    expect(screen.getByText(/Local draft, not saved\..*Revision 3 on the server is unchanged/)).toBeTruthy()
+    expect(screen.getByRole("status").textContent).toContain("Local draft, not saved. Revision 3 is the version you opened.")
+    expect(screen.getByRole("status").textContent).not.toContain("lost on reload")
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
     expect(client.head().rev).toBe(3)
   })
   it("asks the browser to confirm leaving only while a local draft exists", async () => {
     render(<SlidesWorkspace pageId={PAGE} client={createFixtureSaveClient(head())} />)
     await screen.findByLabelText("Speaker notes")
-    const leave = () => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented }
+    const leave = () => { const event = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent; window.dispatchEvent(event); return event.defaultPrevented && event.returnValue === "" }
     expect(leave()).toBe(false)
     typeNotes("draft")
     expect(leave()).toBe(true)
+  })
+  it("reports a dirty draft to the host and clears it on unmount", async () => {
+    const dirty = vi.fn()
+    const view = render(<SlidesWorkspace pageId={PAGE} client={createFixtureSaveClient(head())} onDirtyChange={dirty} />)
+    const original = (await screen.findByLabelText("Speaker notes") as HTMLTextAreaElement).value
+    expect(dirty).not.toHaveBeenLastCalledWith(true)
+    typeNotes("draft")
+    expect(dirty).toHaveBeenLastCalledWith(true)
+    typeNotes(original)
+    expect(dirty).toHaveBeenLastCalledWith(false)
+    typeNotes("again")
+    view.unmount()
+    expect(dirty).toHaveBeenLastCalledWith(false)
   })
   it("shows an error state, not a deck, when the deck belongs to another Page", async () => {
     const client: SlidesSaveClient = { load: async () => ({ status: "error", retryable: false, message: "The presentation does not belong to this Page." }), patch: async () => ({ status: "unavailable", reason: "not_implemented" }) }
