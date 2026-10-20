@@ -267,6 +267,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "invitation.revoked": UserMinus,
   "invitation.accepted": UserCheck,
   "member.access_changed": ShieldCheck,
+  "member.owner_created": ShieldCheck,
   "member.capabilities_changed": ShieldCheck,
   "member.added": ShieldCheck,
   "crew.member_changed": ShieldCheck,

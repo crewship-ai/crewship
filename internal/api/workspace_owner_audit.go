@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -68,7 +69,7 @@ func appendWorkspaceOwnerAudit(ctx context.Context, tx *sql.Tx, emitter journal.
 		"subject_user_id": user, "member_id": member,
 		"old_membership": nil, "new_membership": snapshot,
 	}
-	entry := journal.Entry{ID: generateCUID(), WorkspaceID: workspace, Type: journal.EntryMemberAccessChanged,
+	entry := journal.Entry{ID: generateCUID(), WorkspaceID: workspace, Type: journal.EntryMemberOwnerCreated,
 		ActorType: journal.ActorUser, ActorID: user, Summary: "Initial workspace owner created", Payload: payload}
 	notify, err := appendAuthorizationAudit(ctx, tx, emitter, entry)
 	if err != nil {
@@ -78,28 +79,29 @@ func appendWorkspaceOwnerAudit(ctx context.Context, tx *sql.Tx, emitter journal.
 	if err != nil {
 		return nil, err
 	}
-	var persisted int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM journal_entries WHERE id=? AND workspace_id=?
- AND entry_type=? AND actor_type='user' AND actor_id=? AND summary=? AND payload=?`,
-		entry.ID, workspace, entry.Type, user, entry.Summary, string(expected)).Scan(&persisted); err != nil {
+	var persisted string
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM journal_entries WHERE id=? AND workspace_id=?
+ AND entry_type=? AND actor_type='user' AND actor_id=? AND summary=?`,
+		entry.ID, workspace, entry.Type, user, entry.Summary).Scan(&persisted); err != nil {
 		return nil, err
 	}
-	if persisted != 1 {
+	// The transactional writer verifies its signed native INSERT. This business
+	// ACK compares the decoded snapshot, independent of JSON object key order.
+	var want, actual map[string]any
+	if err := json.Unmarshal(expected, &want); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(persisted), &actual); err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(actual, want) {
 		return nil, errors.New("initial owner audit was not acknowledged")
 	}
 	current, err := readInitialOwnerIn(ctx, tx, workspace, member, user)
 	if err != nil {
 		return nil, err
 	}
-	before, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	after, err := json.Marshal(current)
-	if err != nil {
-		return nil, err
-	}
-	if string(before) != string(after) {
+	if !reflect.DeepEqual(snapshot, current) {
 		return nil, errors.New("initial owner changed during audit")
 	}
 	return notify, nil

@@ -18,8 +18,8 @@ func PublicAuthorizationAudit(e Entry) Entry {
 			}
 		}
 		e.Payload = public
-	case EntryMemberAccessChanged:
-		if e.Payload["action"] == "owner_created" {
+	case EntryMemberOwnerCreated, EntryMemberAccessChanged:
+		if e.Type == EntryMemberOwnerCreated || e.Payload["action"] == "owner_created" {
 			payload := map[string]any{}
 			for _, key := range []string{"member_id", "subject_user_id", "action", "creation_path"} {
 				if value, ok := e.Payload[key]; ok {

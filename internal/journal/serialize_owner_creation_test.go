@@ -21,7 +21,8 @@ func TestSerializeEntryOwnerCreationWhitelist(t *testing.T) {
 		kind         EntryType
 		redact       bool
 	}{
-		{"owner_creation", "owner_created", EntryMemberAccessChanged, true},
+		{"owner_creation", "owner_created", EntryMemberOwnerCreated, true},
+		{"historical_owner_creation", "owner_created", EntryMemberAccessChanged, true},
 		{"other_action", "resource_access_changed", EntryMemberAccessChanged, false},
 		{"other_type", "owner_created", EntryAuditEntityCreated, false},
 	} {

@@ -46,7 +46,7 @@ func newOwnerCreationFixture(t *testing.T, door string) *ownerCreationFixture {
 	}
 	writer.AddCommitObserver(func(entries []journal.Entry) {
 		for _, e := range entries {
-			if e.Type == journal.EntryMemberAccessChanged && e.Payload["action"] == "owner_created" {
+			if e.Type == journal.EntryMemberOwnerCreated && e.Payload["action"] == "owner_created" {
 				f.published.Add(1)
 			}
 		}
@@ -144,14 +144,14 @@ func TestOwnerCreationCanonicalAudit(t *testing.T) {
 			}
 			t.Logf("CALIBRATED: %s committed initial OWNER via actual router, HTTP %d", door, rr.Code)
 			var count int
-			if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND entry_type='member.access_changed' AND json_extract(payload,'$.action')='owner_created'`, workspace).Scan(&count); err != nil {
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND entry_type='member.owner_created' AND json_extract(payload,'$.action')='owner_created'`, workspace).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if count != 1 {
 				t.Fatalf("missing canonical owner audit after committed %s: count=%d", door, count)
 			}
 			var actor, payload string
-			if err := f.db.QueryRow(`SELECT actor_id,payload FROM journal_entries WHERE workspace_id=? AND entry_type='member.access_changed'`, workspace).Scan(&actor, &payload); err != nil {
+			if err := f.db.QueryRow(`SELECT actor_id,payload FROM journal_entries WHERE workspace_id=? AND entry_type='member.owner_created'`, workspace).Scan(&actor, &payload); err != nil {
 				t.Fatal(err)
 			}
 			var value map[string]any
@@ -192,7 +192,7 @@ func TestOwnerCreationAuditFailureRollsBack(t *testing.T) {
 				if fault == "ABORT" {
 					statement = "RAISE(ABORT,'owner audit unavailable')"
 				}
-				if _, err := f.db.Exec(`CREATE TRIGGER reject_owner_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='member.access_changed' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN SELECT ` + statement + `; END`); err != nil {
+				if _, err := f.db.Exec(`CREATE TRIGGER reject_owner_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='member.owner_created' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN SELECT ` + statement + `; END`); err != nil {
 					t.Fatal(err)
 				}
 				rr := f.mutate()
@@ -217,8 +217,8 @@ func TestOwnerCreationFinalWriteFences(t *testing.T) {
 				}
 				query := map[string]string{
 					"membership_ignore": `CREATE TRIGGER ignore_owner BEFORE INSERT ON workspace_members BEGIN SELECT RAISE(IGNORE); END`,
-					"audit_delete":      `CREATE TRIGGER undo_owner_audit AFTER INSERT ON journal_entries WHEN NEW.entry_type='member.access_changed' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN DELETE FROM journal_entries WHERE id=NEW.id; END`,
-					"owner_undo":        `CREATE TRIGGER undo_owner_membership AFTER INSERT ON journal_entries WHEN NEW.entry_type='member.access_changed' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN UPDATE workspace_members SET role='MEMBER' WHERE id=json_extract(NEW.payload,'$.member_id'); END`,
+					"audit_delete":      `CREATE TRIGGER undo_owner_audit AFTER INSERT ON journal_entries WHEN NEW.entry_type='member.owner_created' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN DELETE FROM journal_entries WHERE id=NEW.id; END`,
+					"owner_undo":        `CREATE TRIGGER undo_owner_membership AFTER INSERT ON journal_entries WHEN NEW.entry_type='member.owner_created' AND json_extract(NEW.payload,'$.action')='owner_created' BEGIN UPDATE workspace_members SET role='MEMBER' WHERE id=json_extract(NEW.payload,'$.member_id'); END`,
 					"deferred_commit":   `CREATE TABLE owner_commit_parent(id TEXT PRIMARY KEY); CREATE TABLE owner_commit_child(id TEXT REFERENCES owner_commit_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER owner_commit_failure AFTER INSERT ON workspace_members BEGIN INSERT INTO owner_commit_child(id) VALUES('missing-parent'); END`,
 				}[fault]
 				if _, err := f.db.Exec(query); err != nil {
@@ -265,7 +265,7 @@ func TestOwnerCreationRelatedContracts(t *testing.T) {
 		if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type='invitation.accepted' AND workspace_id=?`, workspace).Scan(&invitations); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type='member.access_changed' AND json_extract(payload,'$.action')='owner_created'`).Scan(&owners); err != nil {
+		if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type='member.owner_created' AND json_extract(payload,'$.action')='owner_created'`).Scan(&owners); err != nil {
 			t.Fatal(err)
 		}
 		if err := f.db.QueryRow(`SELECT COUNT(*) FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE u.email='owner-target@example.invalid' AND m.workspace_id=? AND m.role='MANAGER'`, workspace).Scan(&roleRows); err != nil {

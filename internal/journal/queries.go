@@ -241,7 +241,7 @@ func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 		if q.WorkspaceID != "" {
 			workspace = "j.workspace_id=? AND "
 		}
-		const protected = "?,?,?,?,?,?"
+		const protected = "?,?,?,?,?,?,?"
 		conds = append(conds, `journal_entries.rowid IN (
  SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
  WHERE `+workspace+`j.entry_type IN (`+protected+`) AND journal_entries_fts.summary MATCH ?
@@ -253,7 +253,7 @@ func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 				args = append(args, q.WorkspaceID)
 			}
 			args = append(args, string(EntryMemberCapabilitiesChanged), string(EntryPageGrantAdded),
-				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded), string(EntryMemberAccessChanged), match)
+				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded), string(EntryMemberAccessChanged), string(EntryMemberOwnerCreated), match)
 		}
 	}
 	return conds, args, from

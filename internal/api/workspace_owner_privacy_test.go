@@ -38,7 +38,7 @@ func TestOwnerCreationCanonicalPrivacyConsumers(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT workspace_id,id,user_id FROM workspace_members WHERE role='OWNER'`).Scan(&workspace, &member, &owner); err != nil {
 		t.Fatal(err)
 	}
-	entries, _, err := journal.List(t.Context(), f.db, journal.Query{WorkspaceID: workspace, Types: []journal.EntryType{journal.EntryMemberAccessChanged}})
+	entries, _, err := journal.List(t.Context(), f.db, journal.Query{WorkspaceID: workspace, Types: []journal.EntryType{journal.EntryMemberOwnerCreated}})
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("SETUP: actual canonical event count=%d err=%v", len(entries), err)
 	}
@@ -90,7 +90,7 @@ func TestOwnerCreationCanonicalPrivacyConsumers(t *testing.T) {
 		t.Fatalf("SETUP: MANAGER administrative read status=%d", rr.Code)
 	}
 	t.Run("Preview", func(t *testing.T) {
-		rr := request("POST", "/api/v1/automations/preview", `{"event_type":"member.access_changed","matcher":{}}`)
+		rr := request("POST", "/api/v1/automations/preview", `{"event_type":"member.owner_created","matcher":{}}`)
 		if rr.Code != 200 {
 			t.Fatalf("SETUP: native Preview status=%d", rr.Code)
 		}
@@ -109,7 +109,7 @@ func TestOwnerCreationCanonicalPrivacyConsumers(t *testing.T) {
 				t.Errorf("Preview exposed canonical-only owner field %s", key)
 			}
 		}
-		body, err := json.Marshal(map[string]any{"event_type": "member.access_changed", "matcher": automation.Matcher{PayloadEquals: map[string]any{"new_membership": next}}})
+		body, err := json.Marshal(map[string]any{"event_type": "member.owner_created", "matcher": automation.Matcher{PayloadEquals: map[string]any{"new_membership": next}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,7 +163,7 @@ func TestOwnerCreationCanonicalPrivacyConsumers(t *testing.T) {
 			query string
 			want  int
 		}{{"Initial workspace owner created", 1}, {"new_membership", 0}, {"effective_capabilities", 0}, {"payload:effective_capabilities", 0}} {
-			query := url.Values{"entry_type": {"member.access_changed"}, "q": {tc.query}}.Encode()
+			query := url.Values{"entry_type": {"member.owner_created"}, "q": {tc.query}}.Encode()
 			for _, endpoint := range []string{"/api/v1/journal", "/api/v1/journal/count"} {
 				rr := request("GET", endpoint+"?"+query, "")
 				if rr.Code != 200 {

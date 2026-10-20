@@ -23,7 +23,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- Record the first workspace OWNER atomically with workspace creation, personal signup and bootstrap; failed audit writes roll back creation, while public feeds and automation previews, predicates and templates omit the stored membership snapshot. ⚠️ **Behaviour change:** All `member.access_changed` events now search summary only, including historical rows and formerly public payload fields; canonical audit payloads remain unchanged.
+- Record the first workspace OWNER as the dedicated `member.owner_created` event atomically with workspace creation, personal signup and bootstrap; failed audit writes roll back creation, while public feeds and automation previews, predicates and templates omit the stored membership snapshot. ⚠️ **Behaviour change:** Guest `POST /api/v1/workspaces` returns 403 without creating a workspace. All `member.owner_created` and `member.access_changed` events now search summary only, including historical rows and formerly public payload fields; canonical audit payloads remain unchanged.
 
 - Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
 
@@ -66,6 +66,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
+- Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
