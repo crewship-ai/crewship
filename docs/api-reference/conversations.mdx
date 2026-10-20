@@ -33,6 +33,7 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | GET | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#list-reactions) | List aggregated reactions on a message |
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
+| GET | [`/api/v1/chats/{chatId}/artifact-context/preview`](#personal-document-context-preview) | Inspect your personal Document audience and confirmed revision without starting an edit |
 | GET | [`/api/v1/chats/{chatId}/participants`](#list-participants) | List the humans in a group chat |
 | POST | [`/api/v1/chats/{chatId}/participants`](#add-participant) | Add a participant (promotes the chat to a group) |
 | DELETE | [`/api/v1/chats/{chatId}/participants/{userId}`](#remove-participant) | Remove a participant |
@@ -938,3 +939,73 @@ a fresh launch-specific check; paid-provider admission still checks the current
 budget after a human wait. The default evaluator does not match ordinary
 `agent_run` calls, so configured sync mode alone does not promise a blocking gate.
 See [the run gate](/guides/harbormaster#where-the-run-level-mode-comes-from).
+
+## Personal Document context preview
+
+### `GET /api/v1/chats/{chatId}/artifact-context/preview`
+
+Read the current audience and confirmed revision of your personal Document
+alongside your own private agent chat. This preparation read sends no message,
+starts no run and grants no permission to update the Document.
+
+Use a current human session or human CLI credential with `pages:read` in the
+selected workspace. You must be the chat's creator and the Document's owner.
+The target must be a private native schema-3 Document outside any working
+folder, application or project, with no additional panels. Agent, internal and
+restricted credentials cannot use this operation; an operator role alone does
+not satisfy the ownership requirements.
+
+| Query parameter | Required | Meaning |
+| --- | --- | --- |
+| `page_id` | Yes | One immutable Page ID, 1–128 ASCII letters, digits, `_` or `-`. Slugs are not resolved. Repeated values are rejected. |
+
+```text
+GET /api/v1/chats/chat-id/artifact-context/preview?page_id=document-id
+```
+
+```json
+{
+  "chat": {
+    "id": "chat-id",
+    "visibility": "private",
+    "audience": "author_and_workspace_operators"
+  },
+  "target": {
+    "page_id": "document-id",
+    "type": "document",
+    "audience": "author_and_workspace_owners",
+    "expected": { "schema": 3, "rev": 2, "generation": 1 }
+  },
+  "can_update": false,
+  "reason": "targeted_iteration_unavailable"
+}
+```
+
+The chat's audience is either `author_and_workspace_operators` (its author plus
+workspace owners and admins) or `author_and_workspace_owners` (its author plus
+workspace owners). The Document's audience is always
+`author_and_workspace_owners`. Reading or attaching the chat does not expand
+that Document audience. The response contains no title, slug or document text.
+`expected` describes the saved metadata at the time of this read; it is not a
+write token. `can_update` remains `false`: this endpoint does not enable editing
+an attached Document from chat.
+
+The read uses saved metadata without calling the Docs engine. Responses have
+`Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. The existing
+`CREWSHIP_DOCUMENTS_ENABLED` setting remains off by default. An authenticated,
+authorized chat request receives `503` if Documents is unavailable; the feature
+availability check does not precede chat authorization.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Current read-only preview. |
+| `400` | Missing, repeated or malformed `page_id`, after chat authorization and the availability check. |
+| `401` | A current supported human credential is required. |
+| `403` | Required credential scope or workspace access is missing. |
+| `404` | Chat or Document is absent, inaccessible or outside the supported personal scope. |
+| `500` | The metadata snapshot could not be completed. |
+| `503` | Documents is unavailable after chat authorization. |
+
+Errors use the surrounding `{"error":"…"}` JSON envelope. A failure is not an
+invitation to use a broader audience or a different Page. CLI:
+[`crewship chat artifact-preview`](/cli/chat#crewship-chat-artifact-preview).

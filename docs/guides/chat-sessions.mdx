@@ -812,3 +812,20 @@ opening a row) apply immediately.
 Mentions, Threads, Saved, Drafts, Waiting for you and Review are previews on
 sample data, enabled for development only with
 `NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS=true`.
+
+## Inspect a personal Document before a future chat update
+
+`crewship chat artifact-preview <chat-id> --page-id <immutable-page-id> --format json`
+reads the actual chat and Document audiences and the saved Document revision.
+This is available only to the current human owner of a private chat and a
+personal schema-3 Document outside a working folder, when Documents is enabled.
+It returns no title or document text.
+
+Check the two audiences separately: a private chat may be readable by workspace
+owners and admins, while the personal Document remains limited to its author
+and workspace owners. This read does not share either resource. The response
+currently says `can_update: false`; targeted editing from this preview remains
+unavailable, and the command sends no message or agent run. See the
+[CLI reference](/cli/chat#crewship-chat-artifact-preview) for usage and the
+[API contract](/api-reference/conversations#personal-document-context-preview)
+for supported credentials and failure states.

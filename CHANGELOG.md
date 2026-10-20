@@ -8,6 +8,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
+- Inspect your own private chat and personal Document audiences and confirmed revision with `crewship chat artifact-preview` or the read-only context preview API. The response contains no document title or content and leaves targeted chat editing unavailable. Documents remains disabled by default.
 - **Harbor 2: the rail on one axis.** Every icon, the workspace mark, Search, the Crewship sail and your avatar are centred on the same line in the folded and the open rail; icons are 18 px, and the workspace, the sail and you are all 28 px. Search is an icon like any other row in the folded rail and a borderless field in the open one. The open workspace card shows your role under the name. The app list scrolls between a fixed top and foot with a fade at the edge, and groups (Work, Build) fold in the open rail and stay folded on this device. The sail stays Crewship blue in every style.
 - **The Crewship sail is always in the rail.** It ends the rail, just above the footer's rule, in its own lit blue tile, and stays when the rail folds to icons; the top of the rail is the workspace switcher and Search. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
 

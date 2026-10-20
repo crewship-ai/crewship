@@ -34,6 +34,7 @@ The version 1 envelope identifies the workspace, source kind, source ID and orig
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--search`/`-q` matches titles, `--chat`/`--routine` pin one chat or one routine's chats, `--with-source` attaches the work source to each row; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
+| `chat artifact-preview <chat-id> --page-id <id>` | Read your private chat and personal Document audiences and confirmed revision; sends no message or edit. |
 | `chat refs <chat-id>` | Read one authorized page of durable Issue cards, with an opaque continuation cursor. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
@@ -800,3 +801,28 @@ the original accepted outcome and Issue IDs.
 TEXT information requests. Use the reviewed source version and preserve the
 operation key across uncertain retries. These commands share the authoritative
 source with Inbox and cannot approve workflows, credentials or entire runs.
+
+## crewship chat artifact-preview
+
+```bash
+crewship chat artifact-preview <chat-id> --page-id <immutable-page-id> --format json
+```
+
+Read the audiences of your own private chat and personal Document, together with
+the Document's confirmed schema, revision and generation. `--page-id` is required;
+slugs are not resolved. Use your current human login and selected workspace with
+`pages:read`. You must own both resources. Restricted and agent credentials,
+shared chats and Documents in working folders are unsupported.
+
+The JSON keeps the chat audience separate from the Document audience. A chat
+may remain readable by workspace owners and admins, while the Document is
+private to its author and workspace owners. No title or content is returned.
+`can_update: false` and `reason: targeted_iteration_unavailable` mean this command
+only reads preparation metadata; it sends no prompt, grants no access and starts
+no edit. It makes one request and refuses redirects.
+
+The existing Documents setting is off by default. A `503` after chat
+authorization means Documents is unavailable; it does not mean access was
+revoked. An absent, inaccessible or unsupported target returns `404`.
+See the [API contract](/api-reference/conversations#personal-document-context-preview)
+for the complete response and error meanings.

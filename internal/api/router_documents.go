@@ -25,6 +25,8 @@ func (r *Router) registerDocumentRoutes() {
 	}))))
 	// openapi: responses 200,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
+	// openapi: responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-context/preview", authed(wsCtx(http.HandlerFunc(p.PreviewChatDocumentContext))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503

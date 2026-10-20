@@ -316,6 +316,7 @@ func buildDocument(routes []route) map[string]any {
 	_, chatProposalComponents := chatProposalSchemaCatalog()
 	_, chatRunPreflightComponents := chatRunPreflightSchemaCatalog()
 	_, chatDecisionComponents := chatDecisionSchemaCatalog()
+	_, chatArtifactPreviewComponents := chatArtifactPreviewSchemaCatalog()
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
 	_, accessPresetComponents := accessPresetSchemaCatalog()
@@ -323,7 +324,7 @@ func buildDocument(routes []route) map[string]any {
 		memberAccessSchemaComponents(), presetSelectionSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
 		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
-		chatSourceSchemaComponents(),
+		chatSourceSchemaComponents(), chatArtifactPreviewComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -728,6 +729,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	chatRunPreflightRoutes, _ := chatRunPreflightSchemaCatalog()
 	for key, schema := range chatRunPreflightRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatArtifactPreviewRoutes, _ := chatArtifactPreviewSchemaCatalog()
+	for key, schema := range chatArtifactPreviewRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	chatDecisionRoutes, _ := chatDecisionSchemaCatalog()
