@@ -1,6 +1,6 @@
 """Preservation and stale-plan boundaries for the explicit policy updater."""
 from copy import deepcopy
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import importlib.util
@@ -27,7 +27,7 @@ def fixture():
                     'allowed_merge_methods': ['merge', 'squash'], 'require_code_owner_review': True}},
                 {'type': 'required_status_checks', 'parameters': {
                     'strict_required_status_checks_policy': True, 'do_not_enforce_on_create': False,
-                    'required_status_checks': [{'context': name, 'integration_id': 15368} for name in sorted(m.CHECKS)]}},
+                    'required_status_checks': [{'context': name, 'integration_id': 15368} for name in sorted(m.CHECKS | {'CI Inventory Guard'})]}},
                 {'type': 'commit_message_pattern', 'parameters': {'pattern': 'future', 'operator': 'contains'}}]}
 
 
@@ -36,6 +36,70 @@ def comparison(endpoint, status='ahead'):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_queue_cli_requires_one_inventory_check_from_actions_before_any_put(self):
+        for variant in ('missing', 'wrong app', 'duplicate'):
+            for action in ('plan', 'apply'):
+                with self.subTest(variant=variant, action=action), TemporaryDirectory() as directory:
+                    before = fixture()
+                    checks = before['rules'][3]['parameters']['required_status_checks']
+                    guard = next(check for check in checks if check['context'] == 'CI Inventory Guard')
+                    if variant == 'missing': checks.remove(guard)
+                    elif variant == 'wrong app': guard['integration_id'] = 42
+                    else: checks.append(deepcopy(guard))
+                    # Model a saved plan made by the previous three-check helper.
+                    # Its fingerprint and transformation are otherwise unchanged.
+                    plan = m.make_plan(fixture(), 'test/repo', 7, True)
+                    for policy in (plan['before'], plan['proposed']):
+                        policy['rules'][3]['parameters']['required_status_checks'] = deepcopy(checks)
+                    plan['expected_sha256'] = m.digest(plan['before'])
+                    path = Path(directory) / 'plan.json'
+                    path.write_text(json.dumps(plan))
+                    calls = []
+                    def gh(command, input=None, **kwargs):
+                        self.assertEqual(command[:2], ['gh', 'api'])
+                        endpoint = command[2]
+                        payload = None if input is None else json.loads(input)
+                        calls.append((endpoint, payload))
+                        if '/compare/' in endpoint: result = comparison(endpoint)
+                        elif endpoint.endswith('/rulesets/7'): result = before if payload is None else {**before, **payload}
+                        else: result = {'default_branch': 'main', 'allow_auto_merge': True}
+                        return json.dumps(result).encode()
+                    argv = ['repository-policy.py', '--repo', 'test/repo', '--ruleset-id', '7']
+                    if action == 'apply':
+                        argv += ['--apply', '--plan', str(path), '--analysis-commit', 'a' * 40,
+                                 '--documentation-commit', 'd' * 40]
+                    error = None
+                    with patch('sys.argv', argv), patch.object(m.subprocess, 'check_output', side_effect=gh), redirect_stdout(io.StringIO()):
+                        try:
+                            m.main()
+                        except ValueError as caught:
+                            error = caught
+                    self.assertEqual([payload for _, payload in calls if payload is not None], [],
+                                     'queue activation wrote policy before validating CI Inventory Guard')
+                    self.assertIsNotNone(error, 'queue CLI accepted an invalid CI Inventory Guard')
+                    self.assertIn('CI Inventory Guard', str(error))
+
+    def test_security_only_keeps_three_checks_and_does_not_change_existing_queue(self):
+        for has_queue in (False, True):
+            with self.subTest(has_queue=has_queue):
+                before = fixture()
+                checks = before['rules'][3]['parameters']['required_status_checks']
+                checks[:] = [check for check in checks if check['context'] != 'CI Inventory Guard']
+                self.assertEqual({check['context'] for check in checks}, m.CHECKS)
+                if has_queue:
+                    before['rules'].append({'type': 'merge_queue', 'parameters': {'future': 'preserve'}})
+                original = deepcopy(before)
+                plan = m.make_plan(before, 'test/repo', 7, False, code_scanning_only=True)
+                calls = []
+                def api(endpoint, payload=None):
+                    calls.append((endpoint, payload))
+                    if '/compare/' in endpoint: return comparison(endpoint)
+                    return before if payload is None else {**before, **payload}
+                self.assertTrue(m.apply_plan(plan, None, 'a' * 40, api)['changed'])
+                self.assertEqual(plan['proposed']['rules'][:-1], original['rules'])
+                self.assertEqual(before, original)
+                self.assertEqual(calls[-1][1]['rules'][3], original['rules'][3])
+
     def test_preserves_all_existing_policy_and_input(self):
         before = fixture()
         original = deepcopy(before)
