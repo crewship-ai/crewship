@@ -216,13 +216,14 @@ export const PromptInputSubmit = memo(({
   return (
     <InputGroupButton
       aria-label={isGenerating ? (stopping ? "Stopping…" : "Stop") : "Submit"}
-      aria-disabled={isGenerating && stopping ? true : undefined}
       className={cn(className)}
       onClick={handleClick}
       size={size}
       type={isGenerating && onStop ? "button" : "submit"}
       variant={variant}
       {...props}
+      // A blocked send describes Submit, never Stop: Stop is unavailable only while one is pending.
+      {...(isGenerating && onStop ? { "aria-disabled": stopping ? true : undefined, "aria-describedby": undefined } : {})}
     >
       {children ?? Icon}
     </InputGroupButton>

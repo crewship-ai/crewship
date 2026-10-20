@@ -211,6 +211,10 @@ describe("AssistantTurn dispatch", () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "Half" })], { turnState })} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.getByRole("status")).toHaveTextContent(text)
   })
+  it("does not call a reply partial when the turn ended before any output", () => {
+    render(<AssistantTurn turn={turn([], { turnState: "cancelled" })} onCopy={onCopy} onFileClick={onFileClick} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped before any reply.")
+  })
   it("adds no note to a completed turn", () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "Done" })], { turnState: "completed" })} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.queryByRole("status")).toBeNull()

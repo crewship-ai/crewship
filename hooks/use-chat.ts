@@ -424,6 +424,11 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // unsolicited stream events (multi-tab observation, history replay)
   // still flow through.
   const cancelledRef = useRef(false)
+  // Stop sent on the canonical stream and no terminal turn state confirmed
+  // yet. Kept apart from the turns: a stop can precede the first event of its
+  // turn, and a history reload replaces the turns while the stop is pending.
+  const [stopPending, setStopPending] = useState(false)
+  const stopPendingRef = useRef(false)
 
   // --- Resumable-stream reassembly ---------------------------------------
   // Streamed chat events carry a per-session monotonic seq (see internal/ws).
@@ -482,6 +487,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
+    stopPendingRef.current = false
+    setStopPending(false)
     pendingTextRef.current = ""
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current)
@@ -1333,10 +1340,11 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
           parts = old ? parts.map(value => value.id === part.id ? part : value) : [...parts, part]
         }
         if (terminal) parts = parts.map(part => ({ ...part, isStreaming: false }))
-        const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal }
+        const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal, ...(stopPendingRef.current && !terminal ? { cancelRequested: true } : {}) }
         return at < 0 ? [...previous, turn] : previous.map((value, index) => index === at ? turn : value)
       })
       setIsStreaming(!terminalTurn(cursor.state))
+      if (terminalTurn(cursor.state)) { stopPendingRef.current = false; setStopPending(false) }
     }
     if (cursor.resetThrough !== undefined && cursor.through >= cursor.resetThrough) cursor.resetThrough = undefined
     const incomplete = cursor.pending.size > 0 || cursor.resetThrough !== undefined
@@ -1612,6 +1620,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         isStreamingRef.current = true
         textBufferRef.current = ""
         cancelledRef.current = false
+        stopPendingRef.current = false
+        setStopPending(false)
         replyHasTextRef.current = false
         void (async () => {
           let done = false
@@ -1677,6 +1687,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
       cancelledRef.current = false
+      stopPendingRef.current = false
+      setStopPending(false)
     replyHasTextRef.current = false
 
       return true
@@ -1684,15 +1696,10 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority],
   )
 
-  // Stop sent, terminal state not yet confirmed by the server. One cancel per
-  // stop: pressing Stop again while it is pending sends nothing.
-  const stopping = isStreaming && turns.some(turn => turn.isStreaming && turn.cancelRequested)
-  const stoppingRef = useRef(false)
-  useEffect(() => { stoppingRef.current = stopping }, [stopping])
-
   const stopGeneration = useCallback(() => {
     if (!isCurrentAuthority()) return
-    if (stoppingRef.current) return
+    // One cancel per stop on the canonical stream: a press while one is pending sends nothing.
+    if (canonicalActiveRef.current && stopPendingRef.current) return
     restrictedAbortRef.current?.abort()
     restrictedAbortRef.current = null
     send({
@@ -1700,7 +1707,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       payload: JSON.stringify({ session_id: sessionId }),
     })
     if (canonicalActiveRef.current) {
-      stoppingRef.current = true
+      stopPendingRef.current = true
+      setStopPending(true)
       setTurns(previous => previous.map(turn => turn.isStreaming ? { ...turn, cancelRequested: true } : turn))
       return // A Stop request is not a server terminal acknowledgement.
     }
@@ -1803,6 +1811,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
+    stopPendingRef.current = false
+    setStopPending(false)
     replyHasTextRef.current = false
 
   }, [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage, isCurrentAuthority])
@@ -1850,6 +1860,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
       cancelledRef.current = false
+      stopPendingRef.current = false
+      setStopPending(false)
     replyHasTextRef.current = false
 
       send({
@@ -1972,7 +1984,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     sendMessage,
     stopGeneration,
     /** Stop was requested and the server has not confirmed a terminal state yet. */
-    stopping,
+    stopping: isStreaming && stopPending,
     regenerateLastTurn,
     editAndResend,
     loadHistory,

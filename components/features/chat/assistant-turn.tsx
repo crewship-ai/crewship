@@ -611,15 +611,16 @@ function ThinkingBlock({ part }: { part: TurnPart }) {
   )
 }
 
-const TURN_END: Partial<Record<NonNullable<ChatTurn["turnState"]>, string>> = {
-  cancelled: "Stopped. The reply above is partial.",
-  interrupted: "Interrupted. The reply above is partial.",
-  failed: "The run failed. The reply above may be incomplete.",
+const TURN_END: Partial<Record<NonNullable<ChatTurn["turnState"]>, [partial: string, empty: string]>> = {
+  cancelled: ["Stopped. The reply above is partial.", "Stopped before any reply."],
+  interrupted: ["Interrupted. The reply above is partial.", "Interrupted before any reply."],
+  failed: ["The run failed. The reply above may be incomplete.", "The run failed before any reply."],
 }
 
 /** Says how a turn ended when it did not complete, and that Stop is pending until the server confirms it. */
-function TurnEndNote({ turn }: { turn: ChatTurn }) {
-  const text = turn.isStreaming ? (turn.cancelRequested ? "Stopping…" : undefined) : turn.turnState && TURN_END[turn.turnState]
+function TurnEndNote({ turn, empty }: { turn: ChatTurn; empty: boolean }) {
+  const ended = !turn.isStreaming && turn.turnState ? TURN_END[turn.turnState] : undefined
+  const text = turn.isStreaming ? (turn.cancelRequested ? "Stopping…" : undefined) : ended?.[empty ? 1 : 0]
   if (!text) return null
   return <p role="status" className="text-label text-muted-foreground">{text}</p>
 }
@@ -725,7 +726,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
         }
       })}
 
-      <TurnEndNote turn={turn} />
+      <TurnEndNote turn={turn} empty={visibleParts.length === 0} />
 
       {agentId && workspaceId && chatId && turn.runId && !turn.isStreaming && <InlineRunImages agentId={agentId} workspaceId={workspaceId} chatId={chatId} runId={turn.runId} />}
 

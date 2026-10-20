@@ -18,4 +18,13 @@ describe("PromptInputSubmit stop states", () => {
     fireEvent.click(button)
     expect(onStop).not.toHaveBeenCalled()
   })
+  it("a blocked send does not mark Stop unavailable", () => {
+    const onStop = vi.fn()
+    render(<PromptInputSubmit status="streaming" aria-disabled aria-describedby="why" onStop={onStop} />)
+    const button = screen.getByRole("button", { name: "Stop" })
+    expect(button).not.toHaveAttribute("aria-disabled")
+    expect(button).not.toHaveAttribute("aria-describedby")
+    fireEvent.click(button)
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
 })
