@@ -218,12 +218,20 @@ env:
   # gate gets read as dead code and deleted. Listed here, with its real owner
   # named, instead.
   # Credential reveal and provider pools have their own blocking PR configs.
+  # Artifacts + Chat flows (2026-10-20): chat-artifact-context and
+  # slides-editor answer proposed endpoints with page.route and need their
+  # NEXT_PUBLIC_* flag in the UI build; document-history-compare needs a
+  # throwaway server with --documents (playwright.documents.config.ts). The
+  # nightly UI is built with flags off, so here they would only skip.
   EXCLUDED_SPECS: >-
     e2e/credential-reveal.spec.ts
     e2e/provider-pools.spec.ts
     e2e/visual.spec.ts
     e2e/onboarding-wizard.spec.ts
     e2e/pr-contract.spec.ts
+    e2e/chat-artifact-context.spec.ts
+    e2e/document-history-compare.spec.ts
+    e2e/slides-editor.spec.ts
   # HARBOR2: the Harbor 2 redesign's acceptance specs (#3350 / #3366). Hard
   # gate in their own job, `e2e-harbor2`, because they were written against
   # the RBAC demo seed rather than this workflow's demo-only one: they sign
