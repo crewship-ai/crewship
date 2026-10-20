@@ -104,7 +104,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
     {(sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your local draft is retained in this tab. Download it before reopening the current document.</p><Button onClick={() => download(`${slug}-recovery.json`, JSON.stringify(editor?.getJSON(), null, 2))}>Download unsaved draft</Button><Button variant="outline" onClick={() => window.location.reload()}>Reopen saved document</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
-      review={reviewEnabled ? { currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() } : undefined}
+      review={{ currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: reviewEnabled && sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() }}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}
       onRefused={denied => { if (denied) sync.deny(); setRestoring(false) }}

@@ -15,6 +15,8 @@ const extraDevOrigins = (process.env.CREWSHIP_DEV_ORIGINS ?? "")
 const nextConfig: NextConfig = {
   ...(isDev ? {} : { output: "export" }),
   allowedDevOrigins: extraDevOrigins,
+  // Dev only: lets a test run a second dev server beside the first (own build dir).
+  ...(isDev && /^\.next-[0-9]{4,5}$/.test(process.env.NEXT_DIST_DIR ?? "") ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   images: {
     unoptimized: true,
   },

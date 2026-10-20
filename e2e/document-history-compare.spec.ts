@@ -53,8 +53,10 @@ const editorOf = (page: Page) => page.getByLabel("Document editor", { exact: tru
 const saved = (page: Page) => page.getByRole("status").filter({ hasText: /^Saved$/ })
 const para = (id: string, text: string) => ({ type: "paragraph", attrs: { id }, content: [{ type: "text", text }] })
 
-async function openDocument(page: Page) {
-  await page.goto(docUrl)
+/** The same Document on the frontend with the review flag on (revert and proposals). */
+const flagged = (url: string) => { const u = new URL(url); u.port = String(Number(u.port) + 1); return u.toString() }
+async function openDocument(page: Page, withFlag = false) {
+  await page.goto(withFlag ? flagged(docUrl) : docUrl)
   await editorOf(page).waitFor()
   await saved(page).waitFor()
 }
@@ -146,24 +148,19 @@ test.afterAll(async () => {
 })
 
 test.describe("compare on the real backend", () => {
-  test("a retained revision is compared with the current document, and Restore and Revert are separate buttons", async () => {
+  test("with the review flag off, a retained revision is compared with the current document", async () => {
     const page = await context.newPage()
+    const flaggedCalls: string[] = []
+    page.on("request", request => { if (/\/document\/(proposals|revert)/.test(request.url())) flaggedCalls.push(request.url()) })
     await openDocument(page)
     await openHistory(page)
     await page.getByRole("button", { name: new RegExp(`^Revision ${pinRev}\\b`) }).click()
     await expect(page.getByLabel(`Confirmed revision ${pinRev}`)).toContainText("Beta plan")
 
-    // Two different actions with different names and different confirmations.
-    const restore = page.getByRole("button", { name: "Restore selected checkpoint" })
-    const revert = page.getByRole("button", { name: "Revert this change", exact: true })
-    await expect(restore).toBeVisible()
-    await expect(revert).toBeVisible()
-    await restore.click()
-    await expect(page.getByRole("alertdialog", { name: "Confirm checkpoint restore" })).toContainText(`Restore revision ${pinRev} as a new confirmed revision`)
-    await page.getByRole("button", { name: "Cancel restore" }).click()
-    await revert.click()
-    await expect(page.getByRole("group", { name: "Confirm revert" })).toContainText("Undo only the change recorded at this checkpoint")
-    await page.getByRole("button", { name: "Cancel", exact: true }).click()
+    // Flag off: compare and restore are there, revert and proposals are not.
+    await expect(page.getByRole("button", { name: "Restore selected checkpoint" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Revert this change", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("region", { name: "Document proposals" })).toHaveCount(0)
 
     await page.getByRole("button", { name: "Compare with current" }).click()
     const compare = page.getByRole("region", { name: new RegExp(`^Compare revision ${pinRev} with the current document`) })
@@ -189,6 +186,7 @@ test.describe("compare on the real backend", () => {
     await page.getByRole("button", { name: new RegExp(`^Revision ${pinRev}\\b`) }).click()
     await page.getByRole("button", { name: "Compare with current" }).click()
     await expect(page.getByRole("region", { name: /^Compare revision/ }).getByRole("status")).toContainText("1 added, 1 removed, 1 changed, 0 moved")
+    expect(flaggedCalls, "no proposals or revert request with the flag off").toEqual([])
     await page.close()
   })
 
@@ -209,6 +207,25 @@ test.describe("compare on the real backend", () => {
     expect(box!.x + box!.width).toBeLessThanOrEqual(391)
     await page.close()
   })
+})
+
+test("with the flag on, Restore and Revert are separate buttons with separate confirmations", async () => {
+  const page = await context.newPage()
+  await openDocument(page, true)
+  await openHistory(page)
+  await page.getByRole("button", { name: new RegExp(`^Revision ${pinRev}\\b`) }).click()
+  await expect(page.getByLabel(`Confirmed revision ${pinRev}`)).toContainText("Beta plan")
+  const restore = page.getByRole("button", { name: "Restore selected checkpoint" })
+  const revert = page.getByRole("button", { name: "Revert this change", exact: true })
+  await expect(restore).toBeVisible()
+  await expect(revert).toBeVisible()
+  await restore.click()
+  await expect(page.getByRole("alertdialog", { name: "Confirm checkpoint restore" })).toContainText(`Restore revision ${pinRev} as a new confirmed revision`)
+  await page.getByRole("button", { name: "Cancel restore" }).click()
+  await revert.click()
+  await expect(page.getByRole("group", { name: "Confirm revert" })).toContainText("Undo only the change recorded at this checkpoint")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.close()
 })
 
 interface Seen { url: string; body: Record<string, unknown>; key: string | undefined }
@@ -232,7 +249,7 @@ async function selectPin(page: Page) {
 test.describe("revert a change (mocked endpoint, FE-REQ-F3-2)", () => {
   test("is disabled while unsent edits exist, then sends the reviewed head with one request ID", async () => {
     const page = await context.newPage()
-    await openDocument(page)
+    await openDocument(page, true)
     // Hold the next save so the edit stays unsent.
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
@@ -267,7 +284,7 @@ test.describe("revert a change (mocked endpoint, FE-REQ-F3-2)", () => {
 
   test("a 409 conflict changes nothing and says so", async () => {
     const page = await context.newPage()
-    await openDocument(page)
+    await openDocument(page, true)
     const before = await headRev(page)
     const text = await editorOf(page).innerText()
     const calls = revertRoute(page, () => ({ status: 409, body: { conflicts: ["block-1", "block-2"] } }))
@@ -310,7 +327,7 @@ test.describe("proposals (mocked endpoints, FE-REQ-F3-4)", () => {
   test("accept is sent against the head the reviewer saw, and the proposal is not in the document before", async () => {
     const page = await context.newPage()
     const accepts = proposalRoutes(page, () => ({ status: 200, body: { rev: 120 } }))
-    await openDocument(page)
+    await openDocument(page, true)
     await openProposal(page)
     const review = page.getByRole("region", { name: "Proposal from Research agent" })
     await expect(review.locator('li[data-kind="changed"]')).toContainText("Alpha plan, agent edit")
@@ -328,7 +345,7 @@ test.describe("proposals (mocked endpoints, FE-REQ-F3-4)", () => {
   test("a 409 conflict refuses the whole proposal and the document stays as it was", async () => {
     const page = await context.newPage()
     const accepts = proposalRoutes(page, () => ({ status: 409, body: { status: "conflict" } }))
-    await openDocument(page)
+    await openDocument(page, true)
     const text = await editorOf(page).innerText(), head = await headRev(page)
     await openProposal(page)
     const review = page.getByRole("region", { name: "Proposal from Research agent" })
@@ -350,7 +367,7 @@ test.describe("proposals (mocked endpoints, FE-REQ-F3-4)", () => {
       const response = await route.fetch()
       await route.fulfill({ response, json: { ...(await response.json()), can_write: false } })
     })
-    await page.goto(docUrl)
+    await page.goto(flagged(docUrl))
     await editorOf(page).waitFor()
     await expect(page.getByRole("status").filter({ hasText: /^Read only$/ })).toBeVisible()
     await openProposal(page)
@@ -372,7 +389,7 @@ test.describe("proposals (mocked endpoints, FE-REQ-F3-4)", () => {
     const page = await context.newPage()
     await page.setViewportSize({ width: 390, height: 844 })
     proposalRoutes(page, () => ({ status: 200, body: { rev: 1 } }))
-    await openDocument(page)
+    await openDocument(page, true)
     await openProposal(page)
     await expect(page.getByRole("button", { name: "Accept proposal" })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
