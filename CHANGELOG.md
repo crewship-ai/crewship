@@ -39,6 +39,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
 
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
+- Keep private Page grant administration and production limited to the custodian and workspace OWNER, including when legacy grants exist.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
@@ -65,10 +66,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
 - Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
+- Browse retained Document checkpoints in a separate read-only history view without replacing the live draft or editor. Every API and CLI history read rechecks current human access.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
 - Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
+- Read retained Document checkpoint lists and exact saved bodies through the API and `doc checkpoints` / `doc checkpoint`, without restoring or changing the current draft.
 
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 

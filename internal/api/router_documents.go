@@ -27,6 +27,10 @@ func (r *Router) registerDocumentRoutes() {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
+	// openapi: responses 200,400,401,403,404,409,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/checkpoints", authed(wsCtx(http.HandlerFunc(p.ListDocumentCheckpoints))))
+	// openapi: responses 200,400,401,403,404,409,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}", authed(wsCtx(http.HandlerFunc(p.ReadDocumentCheckpoint))))
 	// The private authority retains the ownership gate; inline also records
 	// the CLI resource scope without adding a workspace role floor.
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
