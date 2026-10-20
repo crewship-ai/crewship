@@ -38,9 +38,7 @@ describe("parseChatSearchQuery", () => {
 describe("applyClientFilters", () => {
   const hits = [hit(), hit({ id: "m2", role: "user", agent_id: "a2", agent_slug: "bob", agent_name: "Bob Agent", content: "see https://x.dev", ts: "2026-09-01T00:00:00Z" }), hit({ id: "m3", tool_summary: "Read file", content: "" })]
   it("filters from, has and date locally", () => {
-    expect(applyClientFilters(hits, { from: "user" }).map((h) => h.id)).toEqual(["m2"])
     expect(applyClientFilters(hits, { from: "ada" }).map((h) => h.id)).toEqual(["m1", "m3"])
-    expect(applyClientFilters(hits, { from: "me" }).map((h) => h.id)).toEqual(["m2"])
     expect(applyClientFilters(hits, { from: "agent" }).map((h) => h.id)).toEqual(["m1", "m3"])
     expect(applyClientFilters(hits, { has: ["link"] }).map((h) => h.id)).toEqual(["m2"])
     expect(applyClientFilters(hits, { has: ["tool"] }).map((h) => h.id)).toEqual(["m3"])
@@ -55,7 +53,6 @@ describe("from: matches the message author, not the conversation", () => {
     const reply = hit({ id: "a1", role: "assistant" })
     expect(applyClientFilters([mine, reply], { from: "ada" }).map((h) => h.id)).toEqual(["a1"])
     expect(applyClientFilters([mine, reply], { from: "Ada" }).map((h) => h.id)).toEqual(["a1"])
-    expect(applyClientFilters([mine, reply], { from: "me" }).map((h) => h.id)).toEqual(["u1"])
   })
   it("an unknown from: value is an explicit unsupported hint and sends no request", async () => {
     const r = await runChatSearch({ raw: "deploy from:nobody", scope: "all", workspaceId: "ws", roster })
@@ -63,13 +60,26 @@ describe("from: matches the message author, not the conversation", () => {
     expect(r.note).toMatch(/from:nobody.*not supported/i)
     expect(fetchMock).not.toHaveBeenCalled()
   })
-  it("accepts me, agent and a roster agent name", async () => {
+  it("from:me/user/you are not supported: group chats return other people's messages and the hit has no author id", async () => {
+    for (const f of ["me", "user", "you"]) {
+      const r = await runChatSearch({ raw: `deploy from:${f}`, scope: "all", workspaceId: "ws", roster })
+      expect(r.status).toBe("error")
+      expect(r.note).toMatch(new RegExp(`from:${f} is not supported.*needs message author from the server`, "i"))
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it("accepts agent and a roster agent name", async () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ hits: [hit({ id: "u1", role: "user" }), hit()] })))
-    for (const f of ["me", "agent", "ada"]) {
+    for (const f of ["agent", "ada"]) {
       const r = await runChatSearch({ raw: `deploy from:${f}`, scope: "all", workspaceId: "ws", roster })
       expect(r.status).toBe("complete")
-      expect(r.hits.map((h) => h.id)).toEqual(f === "me" ? ["u1"] : ["m1"])
+      expect(r.hits.map((h) => h.id)).toEqual(["m1"])
     }
+  })
+  it("a roster agent named Agent or User wins over the keyword", () => {
+    const named = [{ id: "a9", slug: "user", name: "User" }]
+    const hits = [hit({ id: "x", agent_slug: "user", agent_name: "User" }), hit({ id: "y" })]
+    expect(applyClientFilters(hits, { from: "user" }, named).map((h) => h.id)).toEqual(["x"])
   })
 })
 

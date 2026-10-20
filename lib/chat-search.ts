@@ -58,6 +58,7 @@ export function parseChatSearchQuery(raw: string): ParsedChatSearch {
 }
 
 const FROM_ME = ["me", "user", "you"]
+const FROM_ME_REASON = "needs message author from the server"
 const FROM_AGENT = ["agent", "assistant"]
 const isAgentRole = (role: string) => FROM_AGENT.includes(role.toLowerCase())
 
@@ -67,25 +68,27 @@ function hasLink(h: ConversationHit) { return /https?:\/\/\S+/i.test(h.content) 
 function hasCode(h: ConversationHit) { return h.content.includes("```") }
 
 /**
- * The hit carries only a role, not an author id, so `from:` is limited to what
- * the role proves: me/user/you (role user), agent/assistant (role assistant) and
- * an agent's name or slug, which matches only that agent's own replies. The
- * conversation's agent is never taken as the author of a user message.
+ * The hit carries only a role, not an author id, and group agent chats return
+ * other people's messages too, so "mine" cannot be told apart: from:me/user/you
+ * are unsupported. Supported: agent/assistant (role assistant; the backend joins
+ * chats on agent_id, so those hits belong to the chat's agent) and an agent's
+ * name or slug (that agent's own replies). The roster is resolved first, so an
+ * agent named "Agent" or "User" is selectable.
  */
-function matchesFrom(h: ConversationHit, from: string) {
-  const role = h.role.toLowerCase()
-  if (FROM_ME.includes(from)) return role === "user"
-  if (FROM_AGENT.includes(from)) return isAgentRole(role)
-  return isAgentRole(role) && (norm(h.agent_slug) === from || norm(h.agent_name) === from)
+function matchesFrom(h: ConversationHit, from: string, roster: ChatSearchRoster) {
+  if (!isAgentRole(h.role)) return false
+  const named = roster.some((a) => norm(a.slug) === from || norm(a.name) === from)
+  if (!named && FROM_AGENT.includes(from)) return true
+  return norm(h.agent_slug) === from || norm(h.agent_name) === from
 }
 
 /** The filters the endpoint cannot do. Pure; input is not mutated. */
-export function applyClientFilters(hits: ConversationHit[], f: ChatSearchFilters): ConversationHit[] {
+export function applyClientFilters(hits: ConversationHit[], f: ChatSearchFilters, roster: ChatSearchRoster = []): ConversationHit[] {
   const from = norm(f.from)
   const after = f.after ? Date.parse(`${f.after}T00:00:00Z`) : null
   const before = f.before ? Date.parse(`${f.before}T00:00:00Z`) : null
   return hits.filter((h) => {
-    if (from && !matchesFrom(h, from)) return false
+    if (from && !matchesFrom(h, from, roster)) return false
     for (const has of f.has ?? []) {
       if (has === "link" && !hasLink(h)) return false
       if (has === "code" && !hasCode(h)) return false
@@ -118,8 +121,10 @@ export async function runChatSearch(opts: {
   if (parsed.text.length < CONVERSATION_SEARCH_MIN_QUERY || !opts.workspaceId) return { status: "idle", hits: [] }
 
   const from = norm(parsed.filters.from)
-  if (from && ![...FROM_ME, ...FROM_AGENT].includes(from) && !opts.roster.some((a) => norm(a.slug) === from || norm(a.name) === from)) {
-    return { status: "error", hits: [], note: `from:${parsed.filters.from} is not supported. Use from:me, from:agent or an agent's name.` }
+  if (from) {
+    const named = opts.roster.some((a) => norm(a.slug) === from || norm(a.name) === from)
+    if (!named && FROM_ME.includes(from)) return { status: "error", hits: [], note: `from:${parsed.filters.from} is not supported (${FROM_ME_REASON}). Use from:agent or an agent's name.` }
+    if (!named && !FROM_AGENT.includes(from)) return { status: "error", hits: [], note: `from:${parsed.filters.from} is not supported. Use from:agent or an agent's name.` }
   }
 
   let agentId: string | undefined
@@ -148,7 +153,7 @@ export async function runChatSearch(opts: {
     let hits = page
     if (opts.scope === "this") hits = hits.filter((h) => h.session_id === opts.current!.sessionId)
     const before = hits.length
-    hits = applyClientFilters(hits, parsed.filters)
+    hits = applyClientFilters(hits, parsed.filters, opts.roster)
     const narrowedLocally = opts.scope === "this" || before !== hits.length || Object.keys(parsed.filters).some((k) => k !== "in")
     const fullPage = page.length >= CHAT_SEARCH_PAGE
     if (fullPage && narrowedLocally) {
