@@ -368,7 +368,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     }, () => soundScopeRef.current === soundIdentity)
   }, [soundScope, soundIdentity, sessionId, sessionKind])
 
+  // The server's echo of our own message is what spends a targeted-edit intent (set once the artifact composer state exists).
+  const artifactEchoRef = useRef<(content: string, metadata?: Record<string, unknown>) => void>(() => {})
   const handleOwnMessageSaved = useCallback((content: string, metadata?: Record<string, unknown>) => {
+    artifactEchoRef.current(content, metadata)
     const page = metadata?.page_context
     const savedSlug = page && typeof page === "object" && "slug" in page ? page.slug : undefined
     const pending = pendingPageSendRef.current
@@ -467,9 +470,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setProjectInputSelection({ scope: projectInputScope, ids })
   }, [projectInputScope])
   useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
-  // Artifact context (flag off: inert). The strip's choices ride with the next send as one stable submission.
-  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected" })
-  const { prepareSend: prepareArtifactSend, sent: artifactSubmissionSent } = artifactComposer
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
     if (!canChat) return false
     if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
@@ -492,15 +492,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       return sent
     }
   }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
-  // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
-  const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
-    const prepared = prepareArtifactSend(metadata)
-    if (!prepared.ok) { toast.error(prepared.message); return false }
-    const carriesArtifact = Boolean(prepared.metadata && "document_iteration_intent" in prepared.metadata)
-    const sent = sendMessageWithPage(text, prepared.metadata)
-    if (sent !== false && carriesArtifact) artifactSubmissionSent()
-    return sent
-  }, [prepareArtifactSend, artifactSubmissionSent, sendMessageWithPage])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -648,6 +639,18 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // for a private 1:1 chat (the endpoint returns no participants), so the
   // resolver yields null and messages render exactly as before.
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
+  // Artifact context (flag off: inert). The strip's choices ride with the next send as one stable submission.
+  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", privateChat: sessionKind === "direct" && Object.keys(participantNames).length <= 1 && !sharedRestrictedChat })
+  const { prepareSend: prepareArtifactSend, markSent: artifactMarkSent, confirmEcho: artifactConfirmEcho } = artifactComposer
+  artifactEchoRef.current = artifactConfirmEcho
+  // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
+  const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    const prepared = prepareArtifactSend(text, metadata)
+    if (!prepared.ok) { toast.error(prepared.message); return false }
+    const sent = sendMessageWithPage(text, prepared.metadata)
+    if (sent !== false) artifactMarkSent(text)
+    return sent
+  }, [prepareArtifactSend, artifactMarkSent, sendMessageWithPage])
   useEffect(() => {
     if (!sessionId || !workspaceId) return
     const sessionSegment = encodeApiPathSegment(sessionId)
