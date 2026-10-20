@@ -7,11 +7,13 @@ import { CONVERSATION_SEARCH_MIN_QUERY, conversationHitHref, type ConversationHi
  * uncursored page. Everything richer (From / Has / Date, This chat) is applied
  * to that page on the client, and because a client filter over a full page can
  * hide matches that the server never sent, such a result is reported as
- * "partial" and never as an empty list. See coord FE-REQ-F6-1.
+ * "partial" and never as an empty list. A full page with nothing narrowed
+ * locally is "truncated": there is no cursor, so more matches may exist.
+ * See coord FE-REQ-F6-1.
  */
 
 export type ChatSearchScope = "this" | "all" | "files"
-export type ChatSearchStatus = "idle" | "complete" | "partial" | "unavailable" | "error"
+export type ChatSearchStatus = "idle" | "complete" | "partial" | "truncated" | "unavailable" | "error"
 export type ChatSearchHas = "link" | "code" | "tool"
 
 export interface ChatSearchFilters {
@@ -55,10 +57,27 @@ export function parseChatSearchQuery(raw: string): ParsedChatSearch {
   return { text: words.join(" ").slice(0, MAX_TEXT), filters, invalid }
 }
 
+const FROM_ME = ["me", "user", "you"]
+const FROM_AGENT = ["agent", "assistant"]
+const isAgentRole = (role: string) => FROM_AGENT.includes(role.toLowerCase())
+
 const norm = (value: string | undefined) => (value ?? "").trim().toLowerCase()
 
 function hasLink(h: ConversationHit) { return /https?:\/\/\S+/i.test(h.content) }
 function hasCode(h: ConversationHit) { return h.content.includes("```") }
+
+/**
+ * The hit carries only a role, not an author id, so `from:` is limited to what
+ * the role proves: me/user/you (role user), agent/assistant (role assistant) and
+ * an agent's name or slug, which matches only that agent's own replies. The
+ * conversation's agent is never taken as the author of a user message.
+ */
+function matchesFrom(h: ConversationHit, from: string) {
+  const role = h.role.toLowerCase()
+  if (FROM_ME.includes(from)) return role === "user"
+  if (FROM_AGENT.includes(from)) return isAgentRole(role)
+  return isAgentRole(role) && (norm(h.agent_slug) === from || norm(h.agent_name) === from)
+}
 
 /** The filters the endpoint cannot do. Pure; input is not mutated. */
 export function applyClientFilters(hits: ConversationHit[], f: ChatSearchFilters): ConversationHit[] {
@@ -66,7 +85,7 @@ export function applyClientFilters(hits: ConversationHit[], f: ChatSearchFilters
   const after = f.after ? Date.parse(`${f.after}T00:00:00Z`) : null
   const before = f.before ? Date.parse(`${f.before}T00:00:00Z`) : null
   return hits.filter((h) => {
-    if (from && !(h.role.toLowerCase() === from || norm(h.agent_slug) === from || norm(h.agent_name) === from)) return false
+    if (from && !matchesFrom(h, from)) return false
     for (const has of f.has ?? []) {
       if (has === "link" && !hasLink(h)) return false
       if (has === "code" && !hasCode(h)) return false
@@ -82,7 +101,7 @@ export function applyClientFilters(hits: ConversationHit[], f: ChatSearchFilters
 export interface ChatSearchResult {
   status: ChatSearchStatus
   hits: ConversationHit[]
-  /** Human-readable reason shown next to partial / unavailable / error. */
+  /** Human-readable reason shown next to partial / truncated / unavailable / error. */
   note?: string
 }
 
@@ -97,6 +116,11 @@ export async function runChatSearch(opts: {
   const parsed = parseChatSearchQuery(opts.raw)
   if (parsed.invalid.length) return { status: "error", hits: [], note: `Unsupported filter: ${parsed.invalid.join(", ")}` }
   if (parsed.text.length < CONVERSATION_SEARCH_MIN_QUERY || !opts.workspaceId) return { status: "idle", hits: [] }
+
+  const from = norm(parsed.filters.from)
+  if (from && ![...FROM_ME, ...FROM_AGENT].includes(from) && !opts.roster.some((a) => norm(a.slug) === from || norm(a.name) === from)) {
+    return { status: "error", hits: [], note: `from:${parsed.filters.from} is not supported. Use from:me, from:agent or an agent's name.` }
+  }
 
   let agentId: string | undefined
   if (opts.scope === "this" && parsed.filters.in) return { status: "error", hits: [], note: "in: cannot be combined with This chat. Switch to All chats to search one agent." }
@@ -130,6 +154,7 @@ export async function runChatSearch(opts: {
     if (fullPage && narrowedLocally) {
       return { status: "partial", hits, note: `Filters were applied to the ${CHAT_SEARCH_PAGE} best matches only. More matches may exist.` }
     }
+    if (fullPage) return { status: "truncated", hits, note: `First ${CHAT_SEARCH_PAGE} results, more may exist.` }
     return { status: "complete", hits }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return { status: "idle", hits: [] }

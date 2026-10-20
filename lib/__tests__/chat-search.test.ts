@@ -40,6 +40,8 @@ describe("applyClientFilters", () => {
   it("filters from, has and date locally", () => {
     expect(applyClientFilters(hits, { from: "user" }).map((h) => h.id)).toEqual(["m2"])
     expect(applyClientFilters(hits, { from: "ada" }).map((h) => h.id)).toEqual(["m1", "m3"])
+    expect(applyClientFilters(hits, { from: "me" }).map((h) => h.id)).toEqual(["m2"])
+    expect(applyClientFilters(hits, { from: "agent" }).map((h) => h.id)).toEqual(["m1", "m3"])
     expect(applyClientFilters(hits, { has: ["link"] }).map((h) => h.id)).toEqual(["m2"])
     expect(applyClientFilters(hits, { has: ["tool"] }).map((h) => h.id)).toEqual(["m3"])
     expect(applyClientFilters(hits, { after: "2026-10-01" }).map((h) => h.id)).toEqual(["m1", "m3"])
@@ -47,7 +49,42 @@ describe("applyClientFilters", () => {
   })
 })
 
+describe("from: matches the message author, not the conversation", () => {
+  it("from:ada does not return a user message in Ada's conversation", () => {
+    const mine = hit({ id: "u1", role: "user" })
+    const reply = hit({ id: "a1", role: "assistant" })
+    expect(applyClientFilters([mine, reply], { from: "ada" }).map((h) => h.id)).toEqual(["a1"])
+    expect(applyClientFilters([mine, reply], { from: "Ada" }).map((h) => h.id)).toEqual(["a1"])
+    expect(applyClientFilters([mine, reply], { from: "me" }).map((h) => h.id)).toEqual(["u1"])
+  })
+  it("an unknown from: value is an explicit unsupported hint and sends no request", async () => {
+    const r = await runChatSearch({ raw: "deploy from:nobody", scope: "all", workspaceId: "ws", roster })
+    expect(r.status).toBe("error")
+    expect(r.note).toMatch(/from:nobody.*not supported/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it("accepts me, agent and a roster agent name", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ hits: [hit({ id: "u1", role: "user" }), hit()] })))
+    for (const f of ["me", "agent", "ada"]) {
+      const r = await runChatSearch({ raw: `deploy from:${f}`, scope: "all", workspaceId: "ws", roster })
+      expect(r.status).toBe("complete")
+      expect(r.hits.map((h) => h.id)).toEqual(f === "me" ? ["u1"] : ["m1"])
+    }
+  })
+})
+
 describe("runChatSearch", () => {
+  it("49 hits are complete, 50 are truncated (no pagination to prove more do not exist)", async () => {
+    const page = (n: number) => Array.from({ length: n }, (_, i) => hit({ id: `m${i}` }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ hits: page(49) })))
+    expect((await runChatSearch({ raw: "deploy", scope: "all", workspaceId: "ws", roster })).status).toBe("complete")
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ hits: page(50) })))
+    const r = await runChatSearch({ raw: "deploy", scope: "all", workspaceId: "ws", roster })
+    expect(r.status).toBe("truncated")
+    expect(r.hits).toHaveLength(50)
+    expect(r.note).toBe("First 50 results, more may exist.")
+  })
+
   it("sends agent_id for In and reports complete when below the limit", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ hits: [hit()] })))
     const r = await runChatSearch({ raw: "deploy in:ada", scope: "all", workspaceId: "ws", roster })

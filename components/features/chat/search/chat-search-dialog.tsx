@@ -86,7 +86,7 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
     setScope(next.id)
     document.getElementById(tabId(next.id))?.focus()
   }
-  const note = status === "partial" || status === "unavailable" || status === "error"
+  const note = status === "partial" || status === "truncated" || status === "unavailable" || status === "error"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
