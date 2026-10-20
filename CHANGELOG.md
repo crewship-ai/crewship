@@ -84,6 +84,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
+- Audit OWNER reads of another human’s private Page export, version history and access report atomically before disclosure; ignored or removed audit rows withhold the response. Ordinary Page reads retain a read-only snapshot without taking the SQLite writer lock.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
 - Rate-limited shared issue searches no longer fill workspace capacity with unused project buckets or refresh their idle lifetime.
 - Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
