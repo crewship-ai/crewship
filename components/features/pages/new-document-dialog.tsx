@@ -66,10 +66,14 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
   // and the header close all go through onOpenChange, which a pending create
   // refuses so the original intent is not lost mid-request.
   return <CreateSurface open size="sm" onOpenChange={open=>{if(!open && !create.isPending)onClose()}} onSubmit={submit} className="touch-form">
-    <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title="New Doc" description="Create a private document owned by you." onClose={create.isPending ? undefined : onClose} />
+    <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title="New Doc" description="Create a document owned by you." onClose={create.isPending ? undefined : onClose} />
     <CreateSurfaceBody className="flex flex-col gap-3">
       <CreateSurfaceField label="Name" htmlFor="document-name"><Input id="document-name" className={CREATE_SURFACE_INPUT} autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></CreateSurfaceField>
       <CreateSurfaceField label="Page address" htmlFor="document-slug" hint="Lowercase letters, numbers and hyphens."><Input id="document-slug" className={CREATE_SURFACE_INPUT} required pattern="[a-z0-9]+(-[a-z0-9]+)*" disabled={frozen || create.isPending} value={slug} onChange={event=>setSlug(event.target.value)} /></CreateSurfaceField>
+      {/* The real audience of a Page created here (pageReach): its owner and every
+          workspace OWNER/ADMIN, plus live grants and folders added later. It is
+          not a private-audience Document; "My space" lists only those. */}
+      <div className="text-sm"><p className="font-medium">Who can open it</p><p className="text-muted-foreground">You, and workspace owners and admins. Others only after you share it.</p></div>
       {availability.data!==true && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={create.error ? create.error.message : null} />
