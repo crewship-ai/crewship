@@ -89,3 +89,12 @@ it("closes on Escape", () => {
   fireEvent.keyDown(screen.getByLabelText("Search query"), { key: "Escape" })
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
+
+it("labels a user-role hit neutrally, never as the viewer", async () => {
+  api.mockResolvedValue(Response.json({ hits: [{ ...hit, id: "u1", role: "user", content: "deploy from a colleague" }] }))
+  setup()
+  type("deploy")
+  const option = await screen.findByRole("option")
+  expect(option).toHaveTextContent("User")
+  expect(option).not.toHaveTextContent("You")
+})

@@ -137,7 +137,7 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
                     onClick={() => openRow(i)} onMouseMove={() => setActive(i)}
                     className={cn("kit-tap min-h-11 cursor-pointer px-3 py-1.5 text-xs", i === active && "bg-accent")}>
                     <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span className="truncate">{hit.role === "user" ? "You" : hit.agent_name || hit.agent_slug}</span>
+                      <span className="truncate">{hit.role === "user" ? "User" : hit.agent_name || hit.agent_slug}</span>
                       <time dateTime={hit.ts}>{new Date(hit.ts).toLocaleDateString()}</time>
                     </span>
                     <span className="line-clamp-2 break-words">
