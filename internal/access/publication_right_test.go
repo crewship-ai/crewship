@@ -7,9 +7,7 @@ import (
 
 func TestPublicationRightRequiresExplicitEditWithoutImplyingViewOrRun(t *testing.T) {
 	s := fixture(t)
-	if _, err := s.DB.Exec(`INSERT INTO pipelines(id,workspace_id,name,slug,definition_json,definition_hash,status) VALUES('publication','w','Publication','publication','{}','hash','active')`); err != nil {
-		t.Fatal(err)
-	}
+	publicationExec(t, s, `INSERT INTO pipelines(id,workspace_id,name,slug,definition_json,definition_hash,status) VALUES('publication','w','Publication','publication','{}','hash','active')`)
 	publish := Right{Kind: "routine", ID: "publication", Operation: "publish"}
 	edit := Right{Kind: "routine", ID: "publication", Operation: "edit"}
 	view := Right{Kind: "routine", ID: "publication", Operation: "view"}
@@ -64,9 +62,7 @@ func TestPublicationRightRechecksCurrentDependencies(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := fixture(t)
-			if _, err := s.DB.Exec(`INSERT INTO pipelines(id,workspace_id,name,slug,definition_json,definition_hash,status) VALUES('publication','w','Publication','publication','{}','hash','active')`); err != nil {
-				t.Fatal(err)
-			}
+			publicationExec(t, s, `INSERT INTO pipelines(id,workspace_id,name,slug,definition_json,definition_hash,status) VALUES('publication','w','Publication','publication','{}','hash','active')`)
 			right := Right{"routine", "publication", "publish"}
 			policy(t, s, "h1", Right{"routine", "publication", "view"}, Right{"routine", "publication", "edit"}, right)
 			if err := s.Check(t.Context(), "h1", "w", right); err != nil {

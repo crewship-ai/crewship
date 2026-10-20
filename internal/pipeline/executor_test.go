@@ -88,10 +88,10 @@ func (c *captureEmitter) typesEmitted() []journal.EntryType {
 // fakePipeline returns a saved-pipeline shaped struct with the given
 // DSL pre-marshalled and the test_run gate already passing. Used by
 // tests that exercise the Run (not RunDefinition) code path.
-func fakePipeline(t *testing.T, slug, definitionJSON, authorCrew, authorAgent string) *Pipeline {
+func fakePipeline(t *testing.T, slug, definitionJSON, authorCrew, authorAgent string, stores ...*Store) *Pipeline {
 	t.Helper()
 	now := time.Now()
-	return &Pipeline{
+	p := &Pipeline{
 		ID:                "pln_test_" + slug,
 		WorkspaceID:       "ws_test",
 		Slug:              slug,
@@ -108,6 +108,30 @@ func fakePipeline(t *testing.T, slug, definitionJSON, authorCrew, authorAgent st
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
+	if len(stores) > 0 {
+		persistPipelineFixture(t, stores[0], p)
+	}
+	return p
+}
+
+// Real-run nested targets are selected from storage, including their authority.
+// Preserve the existing parser/status/preflight fixtures rather than bypassing it.
+func persistPipelineFixture(t *testing.T, store *Store, p *Pipeline) {
+	t.Helper()
+	status := p.Status
+	if status == "" {
+		status = "active"
+	}
+
+	_, err := store.db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,author_agent_id,status) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, p.ID, p.WorkspaceID, p.Slug, p.Name, p.DefinitionJSON, p.DefinitionHash, p.AuthorCrewID, p.AuthorAgentID, status)
+	if err != nil {
+		t.Fatal("persist nested fixture", err)
+	}
+	_, err = store.db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id) VALUES(?,?,1,?,?,'agent',?) ON CONFLICT(id) DO NOTHING`, p.ID+"-v1", p.ID, p.DefinitionJSON, p.DefinitionHash, p.AuthorAgentID)
+	if err != nil {
+		t.Fatal("persist nested fixture archive", err)
+	}
+
 }
 
 func openExecutorTestDB(t *testing.T) (*Store, *Resolver, func()) {
@@ -450,7 +474,7 @@ func TestExecutor_CallPipeline_Composition(t *testing.T) {
 	em := &captureEmitter{}
 
 	innerJSON := `{"name":"inner","steps":[{"id":"x","type":"agent_run","agent_slug":"agent_lead","prompt":"do x"}]}`
-	innerPipe := fakePipeline(t, "inner", innerJSON, "crew_a", "agent_lead")
+	innerPipe := fakePipeline(t, "inner", innerJSON, "crew_a", "agent_lead", store)
 
 	pipes := pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "inner" {

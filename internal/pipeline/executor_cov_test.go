@@ -683,7 +683,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 	ctx := context.Background()
 
 	// Target with unparseable DSL.
-	badTarget := fakePipeline(t, "bad-child", "not json", "crew_a", "agent_lead")
+	badTarget := fakePipeline(t, "bad-child", "not json", "crew_a", "agent_lead", store)
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "bad-child" {
 			return badTarget, nil
@@ -691,7 +691,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 		if slug == "good-child" {
 			return fakePipeline(t, "good-child",
 				`{"dsl_version":"1.0","name":"good-child","inputs":[{"name":"a"},{"name":"b"}],"steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"a={{ inputs.a }}"}]}`,
-				"crew_a", "agent_lead"), nil
+				"crew_a", "agent_lead", store), nil
 		}
 		return nil, errors.New("backend exploded")
 	}))

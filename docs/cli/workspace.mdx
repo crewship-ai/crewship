@@ -606,8 +606,7 @@ replacement. Use `--format json` for machine-readable responses.
 
 ### Routine Publish dependency
 
-When submitting a member access policy or invitation/provisioning rights,
-include `edit` for the same routine whenever `publish` is present. The server
-returns 422 for Publish without Edit. Add `view` separately for effective
-publication access; `run` remains separate. Preset preview and apply reject
-a resulting policy that retains Publish after removing Edit.
+Member access policies and invitation/provisioning rights require `edit` for
+any routine with `publish`; otherwise the server returns 422. Add `view`
+separately for effective publication access. Run remains separate. Preset
+preview/apply reject a policy that retains Publish after removing Edit.

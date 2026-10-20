@@ -56,7 +56,7 @@ func TestExecutor_CallPipeline_RefusedByPreflight(t *testing.T) {
 	child := fakePipeline(t, "gated-child",
 		`{"dsl_version":"1.0","name":"gated-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
-		"crew_child", "agent_lead")
+		"crew_child", "agent_lead", store)
 
 	gate := &stubPreflight{err: fmt.Errorf("%w: routine requires credential of type \"api_key\" not present in the vault", ErrRunPreflightBlocked)}
 	exec := NewExecutor(store, resolver, runner, nil).WithRunPreflight(gate)
@@ -114,7 +114,7 @@ func TestExecutor_CallPipeline_AllowedByPreflight(t *testing.T) {
 	child := fakePipeline(t, "open-child",
 		`{"dsl_version":"1.0","name":"open-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
-		"crew_child", "agent_lead")
+		"crew_child", "agent_lead", store)
 
 	gate := &stubPreflight{}
 	exec := NewExecutor(store, resolver, runner, nil).WithRunPreflight(gate)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -60,13 +61,13 @@ func TestPublicationGrantWritesRequireEdit(t *testing.T) {
 				return result
 			}
 			initial := counts()
-			raw, err := json.Marshal(body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := func(raw []byte) *httptest.ResponseRecorder {
+			request := func(body any) *httptest.ResponseRecorder {
 				t.Helper()
-				req := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
+				var input io.Reader
+				if body != nil {
+					input = mustJSON(t, body)
+				}
+				req := httptest.NewRequest(method, path, input)
 				req.Header.Set("Authorization", "Bearer "+credential)
 				req.Header.Set("X-Workspace-ID", f.workspace)
 				req.Header.Set("Content-Type", "application/json")
@@ -74,7 +75,7 @@ func TestPublicationGrantWritesRequireEdit(t *testing.T) {
 				router.ServeHTTP(rr, req)
 				return rr
 			}
-			rr := request(raw)
+			rr := request(body)
 			if rr.Code != 422 {
 				t.Errorf("%s Publish without Edit: HTTP%d, want422", door, rr.Code)
 			}
@@ -84,11 +85,7 @@ func TestPublicationGrantWritesRequireEdit(t *testing.T) {
 			}
 			valid := append(append([]access.Right{}, legacy...), invalid...)
 			body.(map[string]any)["rights"] = valid
-			raw, err = json.Marshal(body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rr = request(raw)
+			rr = request(body)
 			want := 201
 			if door == "policy" {
 				want = 200
@@ -176,11 +173,7 @@ func TestPublicationPresetPreviewAndApplyKeepDependency(t *testing.T) {
 	if err == nil {
 		t.Error("preview offered Publish without Edit")
 	}
-	raw, err := json.Marshal(f.request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := withWorkspaceUser(httptest.NewRequest("POST", "/", strings.NewReader(string(raw))), f.owner, f.workspace, "OWNER")
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/", mustJSON(t, f.request)), f.owner, f.workspace, "OWNER")
 	req.SetPathValue("workspaceId", f.workspace)
 	req.SetPathValue("memberId", m.ID)
 	response := httptest.NewRecorder()
