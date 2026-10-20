@@ -21,6 +21,7 @@ const vectors = {
   "srcdoc nesting": [`<iframe srcdoc="<script>${post}</script><iframe srcdoc='&lt;script&gt;${post}&lt;/script&gt;'></iframe>"></iframe><object data="/escape/obj"></object><embed src="/escape/embed"><frameset><frame src="/escape/frame"></frameset>`, "iframe,object,embed,frame,frameset,[srcdoc]"],
   "meta refresh": [`<meta http-equiv="refresh" content="0;url=/escape/meta"><meta http-equiv="Set-Cookie" content="a=b"><p>hi</p>`, "meta[http-equiv='refresh'],meta[http-equiv='Set-Cookie']"],
   "base href": [`<base href="/escape/base/"><link rel="stylesheet" href="/escape/link.css"><link rel="prefetch" href="/escape/prefetch"><a href="/escape/a">x</a><area href="/escape/area"><a href="  jav&#x09;ascript:${post}">y</a>`, "base,link,[href]"],
+  "css attr(type(<url>))": [`<p data-x="/escape/attr" style="background:attr(data-x type(<url>))">a</p><style>p{background-image:attr(title type(<url>))}</style><p title="/escape/attr2">b</p>`, "p[style]"],
   "css url/expression": [`<p style="background:url(/escape/p1)">a</p><p style="background-image:image-set('/escape/p2' 1x)">b</p><p style="width:expression(${post})">c</p><p style="background:\\75rl(/escape/p3)">d</p><style>@import url(/escape/imp);p{background:url(/escape/p4)}</style><style>@font-face{font-family:x;src:url(/escape/font)}</style>`, "p[style]"],
   "data: and script URLs": [`<img src="javascript:${post}"><img src="data:text/html;base64,PHNjcmlwdD5wYXJlbnQucG9zdE1lc3NhZ2UoJ2F1dGhvci1leGVjdXRlZCcsJyonKTwvc2NyaXB0Pg=="><img src="data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9InBhcmVudC5wb3N0TWVzc2FnZSgnYXV0aG9yLWV4ZWN1dGVkJywnKicpIj48L3N2Zz4="><img src="/escape/img"><img srcset="/escape/set 2x"><video poster="/escape/poster"></video><div background="/escape/bg"></div>`, "[src],[srcset],[poster],[background],video"],
   "forms": [`<form action="/escape/form" method=post><input name=a><button formaction="/escape/fa">go</button><textarea>t</textarea><select><option>o</option></select></form><button type=submit formaction="/escape/b">b</button><input type=image src="/escape/inp">`, "form,input,button,textarea,select,option,[action],[formaction]"],
@@ -85,7 +86,7 @@ try {
         const prepared = await page.evaluate(source => window.prepareStatic(source), html)
         const survivors = await page.evaluate(([document, selector]) => new DOMParser().parseFromString(document, "text/html").querySelectorAll(selector).length, [prepared, banned])
         assert.equal(survivors, 0, `${name}: banned markup survived sanitizing`)
-        assert.doesNotMatch(prepared, /url\s*\(|@import|@font-face|expression\s*\(|image-set/i, `${name}: loading CSS survived`)
+        assert.doesNotMatch(prepared, /url\s*\(|@import|@font-face|expression\s*\(|image-set|attr\s*\(/i, `${name}: loading CSS survived`)
         const metas = await page.evaluate(document => [...new DOMParser().parseFromString(document, "text/html").querySelectorAll("meta[http-equiv]")].map(node => node.getAttribute("http-equiv")), prepared)
         assert.deepEqual(metas, ["Content-Security-Policy"], `${name}: only the CSP meta may remain`)
         await page.evaluate(document => { const frame = window.document.createElement("iframe"); frame.title = "vector"; frame.setAttribute("sandbox", ""); frame.srcdoc = document; window.document.body.append(frame) }, prepared)

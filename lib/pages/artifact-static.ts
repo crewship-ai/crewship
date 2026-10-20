@@ -6,17 +6,18 @@ export async function staticArtifactDocument(html: string, signal?: AbortSignal)
   if (signal?.aborted) throw new DOMException("Preview replaced", "AbortError")
   let body: string
   if (html.length > STATIC_RASTER_LIMITS.sourceBytes || new TextEncoder().encode(html).length > STATIC_RASTER_LIMITS.sourceBytes) {
-    body = '<p>Static preview exceeds the 10 MiB source limit. Download the original source to inspect it.</p>'
+    body = '<p>Static preview exceeds the 2 MiB source limit and is not shown.</p>'
   } else if (!DOMPurify.isSupported) {
     // DOMPurify returns input unchanged in unsupported DOMs. Fail closed.
     body = `<p>Static rendering is unavailable in this browser. Source is shown as text.</p><pre>${html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}</pre>`
   } else {
     // Per-call purifier: image budgets and hooks never leak to other sanitizers.
     const purifier = DOMPurify(window)
-    let bytes = 0, pixels = 0, images = 0
+    let bytes = 0, pixels = 0, images = 0, attempts = 0
     purifier.addHook('uponSanitizeAttribute', (node, attribute) => {
       if (attribute.attrName === 'src') {
-        const image = node.nodeName === 'IMG' ? staticRaster(attribute.attrValue) : null
+        // Invalid candidates count too, so a flood of bad images stays bounded.
+        const image = node.nodeName === 'IMG' && attempts++ < STATIC_RASTER_LIMITS.imageAttempts ? staticRaster(attribute.attrValue) : null
         if (!image || images >= STATIC_RASTER_LIMITS.images || bytes + image.bytes > STATIC_RASTER_LIMITS.totalBytes || pixels + image.width * image.height > STATIC_RASTER_LIMITS.totalPixels) attribute.keepAttr = false
         else { images++; bytes += image.bytes; pixels += image.width * image.height }
       }
@@ -52,7 +53,8 @@ export async function staticArtifactDocument(html: string, signal?: AbortSignal)
       } finally { bitmap?.close() }
     }
     if (signal?.aborted) throw new DOMException('Preview replaced', 'AbortError')
-    const holder = document.createElement('div')
+    // Serialize inside an inert document; the fragment never touches the live one.
+    const holder = document.implementation.createHTMLDocument('').createElement('div')
     holder.append(fragment)
     body = holder.innerHTML
   }

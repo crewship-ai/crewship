@@ -22,19 +22,20 @@ function supported(publication: StaticAppPublication) {
 }
 
 /** Static HTML only. Existing interactive Pages Apps keep their own profile.
- * Mount a new component for a different Page; no identity follows a reused slug. */
+ * Mount a new component (new key) for a different Page and after every authority change,
+ * including revoke then regrant; no identity follows a reused slug. */
 export function StaticAppPreview({ publication }: { publication: StaticAppPublication | null }) {
   const original = useRef(publication)
   const [opened, setOpened] = useState(publication)
   const [rendered, setRendered] = useState<{ publication: StaticAppPublication; document: string }>()
   const [failed, setFailed] = useState<StaticAppPublication>()
-  const verified = publication && original.current && samePage(original.current, publication) && supported(publication)
+  const enabled = staticAppPreview()
+  const verified = enabled && publication && original.current && samePage(original.current, publication) && supported(publication)
   const active = verified && opened && samePage(opened, publication) && supported(opened) ? opened : null
-  useEffect(() => {
-    // A later regrant must remount with a newly authorized publication.
-    // Cached content from the former authority cannot resurrect itself.
-    if (!verified) setOpened(null)
-  }, [verified])
+  // Clear during render, not in an effect, so no frame is committed for lost authority.
+  // A revoke and regrant batched into one render is invisible here: the caller
+  // must remount (key) after any authority change.
+  if (!verified && opened) setOpened(null)
   useEffect(() => {
     if (!active) return
     const controller = new AbortController()
@@ -46,7 +47,7 @@ export function StaticAppPreview({ publication }: { publication: StaticAppPublic
     return () => controller.abort()
   }, [active])
 
-  if (!staticAppPreview()) return null
+  if (!enabled) return null
   if (!publication) return <p role="status">Static App preview unavailable. Verify access before reopening.</p>
   if (!verified || !active) return <p role="alert">Static App preview unavailable for this Page or execution profile. Reopen the Page.</p>
   const ready = rendered?.publication === active
@@ -58,7 +59,7 @@ export function StaticAppPreview({ publication }: { publication: StaticAppPublic
     </div>}
     {failed === active ? <p role="alert">Static preview could not be prepared. Reopen the Page to retry.</p> : <>
       {!ready && <p role="status">Preparing static preview…</p>}
-      <iframe key={`${active.workspaceId}:${active.pageId}:${active.revision}`} title="App static preview" sandbox="" referrerPolicy="no-referrer" srcDoc={ready ? rendered.document : ""} className="min-h-80 w-full flex-1 border bg-white" />
+      <iframe key={`${active.workspaceId}:${active.pageId}:${active.revision}`} title="App static preview" sandbox="" allow="" referrerPolicy="no-referrer" srcDoc={ready ? rendered.document : ""} className="min-h-80 w-full flex-1 border bg-white" />
     </>}
   </section>
 }

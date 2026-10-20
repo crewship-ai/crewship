@@ -1,7 +1,9 @@
 /** The static preview accepts local, canonical base64 PNG/JPEG containers only.
  * It never resolves a URL. Bounded native decoding follows before any preview frame receives the source. */
 export const STATIC_RASTER_LIMITS = {
-  sourceBytes: 10 * 1024 * 1024,
+  sourceBytes: 2 * 1024 * 1024,
+  cssChars: 64 * 1024,
+  imageAttempts: 64,
   imageBytes: 1024 * 1024,
   totalBytes: 4 * 1024 * 1024,
   dimension: 2048,
@@ -113,9 +115,24 @@ export function staticRaster(src: string): StaticRaster | null {
  * loading functions and every other at-rule, including nested imports.
  * CSP independently remains the external network boundary. */
 export function staticCSS(css: string): boolean {
-  const text = css.replace(/\/\*[\s\S]*?\*\//g, '')
-  if (/\\/.test(text) || /(?:url|image|image-set|cross-fade|paint|src|expression)\s*\(/i.test(text) || /javascript\s*:|vbscript\s*:|-moz-binding|behavior\s*:/i.test(text)) return false
+  if (css.length > STATIC_RASTER_LIMITS.cssChars) return false
+  const text = stripComments(css)
+  if (text === null) return false
+  if (/\\/.test(text) || /(?:url|image|image-set|cross-fade|paint|src|expression|attr)\s*\(/i.test(text) || /javascript\s*:|vbscript\s*:|-moz-binding|behavior\s*:/i.test(text)) return false
   const rules = text.match(/@[a-z-]+/gi) ?? []
   if (text.replace(/@[a-z-]+/gi, '').includes('@')) return false
   return rules.every(rule => ['@media', '@supports', '@layer', '@keyframes', '@-webkit-keyframes'].includes(rule.toLowerCase()))
+}
+
+/** Single linear pass. An unterminated comment is refused, not guessed at. */
+function stripComments(css: string): string | null {
+  let out = '', pos = 0
+  for (;;) {
+    const start = css.indexOf('/*', pos)
+    if (start < 0) return out + css.slice(pos)
+    const end = css.indexOf('*/', start + 2)
+    if (end < 0) return null
+    out += css.slice(pos, start)
+    pos = end + 2
+  }
 }

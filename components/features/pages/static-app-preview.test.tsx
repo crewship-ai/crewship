@@ -3,9 +3,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
 import { StaticAppPreview } from "./static-app-preview"
 
-vi.mock("@/lib/pages/artifact-static", () => ({ staticArtifactDocument: async (html: string) => html }))
+const prepare = vi.hoisted(() => vi.fn(async (html: string) => html))
+vi.mock("@/lib/pages/artifact-static", () => ({ staticArtifactDocument: prepare }))
 beforeEach(() => vi.stubEnv("NEXT_PUBLIC_STATIC_APP_PREVIEW", "true"))
-afterEach(() => { cleanup(); vi.unstubAllEnvs() })
+afterEach(() => { prepare.mockClear(); cleanup(); vi.unstubAllEnvs() })
 const publication = { workspaceId: "workspace", pageId: "page-a", revision: 1, profile: "static-html-v1", html: "<h1>Version one</h1>" }
 
 it("T-AX-05: grants no iframe execution, origin, navigation or referrer capability", async () => {
@@ -41,6 +42,27 @@ it("renders nothing while the flag is off", () => {
   vi.stubEnv("NEXT_PUBLIC_STATIC_APP_PREVIEW", "")
   const { container } = render(<StaticAppPreview publication={publication} />)
   expect(container.innerHTML).toBe("")
+  expect(prepare).not.toHaveBeenCalled()
+})
+
+it("allows the frame no browser features", async () => {
+  render(<StaticAppPreview publication={publication} />)
+  expect((await screen.findByTitle("App static preview")).getAttribute("allow")).toBe("")
+})
+
+it("a revoke and regrant batched into one render needs the caller's key to drop the old HTML", async () => {
+  const { rerender } = render(<StaticAppPreview key="a" publication={publication} />)
+  await waitFor(() => expect(screen.getByTitle("App static preview").getAttribute("srcdoc")).toContain("Version one"))
+  rerender(<StaticAppPreview key="b" publication={{ ...publication, revision: 2, html: "<h1>Regranted</h1>" }} />)
+  expect(screen.getByTitle("App static preview").getAttribute("srcdoc")).not.toContain("Version one")
+  await waitFor(() => expect(screen.getByTitle("App static preview").getAttribute("srcdoc")).toContain("Regranted"))
+})
+
+it("shows a failure and no frame content when preparation rejects", async () => {
+  prepare.mockRejectedValueOnce(new Error("boom"))
+  render(<StaticAppPreview publication={publication} />)
+  expect((await screen.findByRole("alert")).textContent).toContain("could not be prepared")
+  expect(screen.queryByTitle("App static preview")).toBeNull()
 })
 
 it("shows no frame when the preparation fails", async () => {

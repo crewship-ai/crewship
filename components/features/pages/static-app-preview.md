@@ -18,6 +18,11 @@ preview state is discarded. Null authority, identity mismatch or an unsupported
 profile removes the old frame synchronously. Revoked content cannot reappear
 from the component's retained publication after a regrant.
 
+Limits: 2 MiB source, 64 KiB per style, 64 image candidates (invalid ones count);
+CSS comments are stripped in one linear pass and an unterminated comment is refused.
+A revoke followed by a regrant inside one batched render is not observable by the
+component; the caller must remount it with a new key after any authority change.
+
 Original HTML is never inserted into the host DOM. A per-call DOMPurify instance
 removes active elements, navigation and external resource attributes. CSS is
 restricted; only bounded canonical PNG/JPEG data images pass container and native
