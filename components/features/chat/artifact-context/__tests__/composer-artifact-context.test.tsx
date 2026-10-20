@@ -9,7 +9,7 @@ const item = (pageId: string, revision?: number, patch: Partial<AttachedArtifact
   const target = revision === undefined ? { workspaceId: "w", pageId, mode: "latest" as const } : { workspaceId: "w", pageId, mode: "revision" as const, revision, checkpointId: `cp-${pageId}-${revision}` }
   return { id: attachmentId(target), target, title: pageId.toUpperCase(), access: "readable", resultType: "Document", audience: { kind: "personal" }, expected: { schema: 3, rev: revision ?? 5, generation: 2 }, ...patch }
 }
-const ctx = (patch: Partial<ComposerArtifactContext> = {}): ComposerArtifactContext => ({ attachments: [item("a", 3)], mode: null, updateTargetId: null, executor: "Ada", privateChat: true, createAudience: { kind: "personal" }, createResultType: "Document", online: true, ...patch })
+const ctx = (patch: Partial<ComposerArtifactContext> = {}): ComposerArtifactContext => ({ attachments: [item("a", 3)], mode: null, updateTargetId: null, executor: "Ada", chatPrivacy: "private", unconfirmed: false, createAudience: { kind: "personal" }, createResultType: "Document", online: true, ...patch })
 const noop = () => {}
 const strip = (c: ComposerArtifactContext, h: Partial<Parameters<typeof ComposerArtifactContextStrip>[0]> = {}) =>
   render(<ComposerArtifactContextStrip context={c} onModeChange={noop} onUpdateTargetChange={noop} onDetach={noop} {...h} />)
@@ -131,13 +131,28 @@ it("the same id gives the same intent when sending again", () => {
 })
 
 it("an update needs a private chat and an instruction", () => {
-  expect(sendBlock(ctx({ mode: "update", privateChat: false }))).toBe("chat_not_private")
-  expect(buildIterationIntent(ctx({ mode: "update", privateChat: false }), "s")).toBeNull()
+  expect(sendBlock(ctx({ mode: "update", chatPrivacy: "not_private" }))).toBe("chat_not_private")
+  expect(buildIterationIntent(ctx({ mode: "update", chatPrivacy: "not_private" }), "s")).toBeNull()
   expect(sendBlock(ctx({ mode: "update" }), "   ")).toBe("need_instruction")
   expect(sendBlock(ctx({ mode: "update" }), "Shorten it")).toBeNull()
   // Other modes do not depend on either.
-  expect(sendBlock(ctx({ mode: "reply_only", privateChat: false }), "")).toBeNull()
-  strip(ctx({ privateChat: false }))
+  expect(sendBlock(ctx({ mode: "reply_only", chatPrivacy: "not_private" }), "")).toBeNull()
+  strip(ctx({ chatPrivacy: "not_private" }))
   expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
   expect(screen.getByText(/needs a private chat/)).toBeTruthy()
+})
+
+it("says why editing is not offered while chat visibility is unknown", () => {
+  expect(sendBlock(ctx({ mode: "update", chatPrivacy: "checking" }))).toBe("chat_checking")
+  expect(sendBlock(ctx({ mode: "update", chatPrivacy: "unverified" }))).toBe("chat_unverified")
+  const view = strip(ctx({ chatPrivacy: "checking" }))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+  expect(screen.getByText("Checking chat visibility…")).toBeTruthy()
+  view.unmount()
+  strip(ctx({ chatPrivacy: "unverified" }))
+  expect(screen.getByText("Could not verify this chat is private.")).toBeTruthy()
+})
+it("tells the sender when a send is not confirmed", () => {
+  strip(ctx({ mode: "update", unconfirmed: true }))
+  expect(screen.getByRole("status").textContent).toMatch(/not confirmed.*same request/i)
 })

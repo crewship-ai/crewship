@@ -1,3 +1,4 @@
+import type { ChatPrivacy } from "../chat-privacy"
 import { targetKey, type LinkedViewerTarget } from "../linked-viewer-targets"
 
 export type EditMode = "create" | "update" | "reply_only"
@@ -34,11 +35,13 @@ export interface ComposerArtifactContext {
   createAudience: Audience
   createResultType: string
   online: boolean
-  /** Targeted edits are accepted only in a private chat. Derived by the host; false when unsure. */
-  privateChat: boolean
+  /** Targeted edits are accepted only in a private chat. Anything not positively verified is not private. */
+  chatPrivacy: ChatPrivacy
+  /** A send was handed to the socket and the server has not confirmed it; sending again retries the same request. */
+  unconfirmed: boolean
 }
 
-export type SendBlock = "chat_not_private" | "need_instruction" | "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
+export type SendBlock = "chat_checking" | "chat_unverified" | "chat_not_private" | "need_instruction" | "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
 
 export const attachmentId = (target: LinkedViewerTarget) => targetKey(target)
 
@@ -64,7 +67,9 @@ export function sendBlock(ctx: ComposerArtifactContext, instruction?: string): S
   if (ctx.mode === null) return "choose_mode"
   if (ctx.mode === "reply_only") return null
   if (ctx.mode === "update") {
-    if (!ctx.privateChat) return "chat_not_private"
+    if (ctx.chatPrivacy === "checking") return "chat_checking"
+    if (ctx.chatPrivacy === "unverified") return "chat_unverified"
+    if (ctx.chatPrivacy !== "private") return "chat_not_private"
     if (ctx.attachments.length === 0) return "need_attachment"
     const target = updateTarget(ctx)
     if (!target) return "choose_target"
@@ -81,6 +86,8 @@ export function sendBlock(ctx: ComposerArtifactContext, instruction?: string): S
 }
 
 export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
+  chat_checking: "Checking chat visibility…",
+  chat_unverified: "Could not verify this chat is private.",
   chat_not_private: "Editing an item needs a private chat, and this conversation is not one.",
   need_instruction: "Write what should change before sending an update.",
   shared_folder: "This item is in a shared folder. Editing it needs a proposal, which is not available yet, so nothing was sent.",
