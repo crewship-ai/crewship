@@ -497,6 +497,59 @@ describe("attachment job lifecycle", () => {
       expect(send().getAttribute("aria-disabled")).toBeNull()
     })
 
+    it("a failed file with no caption keeps Send focusable (aria-disabled) with the reason linked", async () => {
+      useComposerStore.setState({
+        attachments: { [`user-a::ws-1::${SID}`]: [
+          { id: "f", name: "bad.txt", size: 5, type: "text/plain", status: "error", file: file("bad.txt"), failureLabel: "server refused" },
+        ] },
+      })
+      render(tree("desktop"))
+      expect(send().disabled).toBe(false) // not a native disabled: it can take focus
+      expect(send().getAttribute("aria-disabled")).toBe("true")
+      expect(document.getElementById(send().getAttribute("aria-describedby")!)?.textContent).toMatch(/bad\.txt/)
+      send().focus()
+      expect(document.activeElement).toBe(send())
+      fireEvent.click(send())
+      await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toMatch(/bad\.txt/))
+      expect(base.sendMessage).not.toHaveBeenCalled()
+    })
+
+    it("a workspace switch says it is loading, in neutral copy, not a sign-in error", async () => {
+      const { rerender } = render(tree("desktop"))
+      workspaceId = null // person known, workspace changing
+      rerender(tree("desktop"))
+      const note = screen.getByRole("note")
+      expect(note.textContent).toMatch(/Loading this chat/)
+      expect(note.textContent).not.toMatch(/sign-in/i)
+      expect(note.className).not.toMatch(/text-destructive/)
+    })
+
+    it("an unknown person says waiting for sign-in", async () => {
+      const { rerender } = render(tree("desktop"))
+      unknown()
+      rerender(tree("desktop"))
+      expect(screen.getByRole("note").textContent).toMatch(/Waiting for sign-in/)
+    })
+
+    it("a brief blink is not announced; a lasting wait is announced once", async () => {
+      const { rerender } = render(tree("desktop"))
+      const live = () => screen.getByRole("status").textContent
+      workspaceId = null
+      rerender(tree("desktop"))
+      workspaceId = "ws-1"
+      rerender(tree("desktop")) // gone again before anything was announced
+      await tick(1100)
+      expect(live()).toBe("")
+      workspaceId = null
+      rerender(tree("desktop"))
+      expect(live()).toBe("") // not on the first frame
+      await tick(1100)
+      expect(live()).toMatch(/Loading this chat/)
+      workspaceId = "ws-1"
+      rerender(tree("desktop"))
+      expect(live()).toBe("") // cleared when the wait ends
+    })
+
     it("a request in flight when identity goes unknown is aborted when a different user is confirmed", async () => {
       const g = gatedFetch()
       vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)

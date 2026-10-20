@@ -25,6 +25,8 @@ interface Gate {
   release(name: string): void
   /** Answer requests for `name` with a 500 instead of continuing them. */
   failing: Set<string>
+  /** Status to answer a failing request with (default 500). */
+  failStatus: Map<string, number>
 }
 
 function fileNameOf(body: Buffer | null): string {
@@ -40,6 +42,7 @@ async function gateUploads(page: Page): Promise<Gate> {
     chatId: "",
     seen: [],
     failing: new Set(),
+    failStatus: new Map(),
     hold(name) {
       held.set(name, new Promise<void>((res) => releasers.set(name, res)))
     },
@@ -56,9 +59,9 @@ async function gateUploads(page: Page): Promise<Gate> {
     await held.get(name)
     if (gate.failing.has(name)) {
       return route.fulfill({
-        status: 500,
+        status: gate.failStatus.get(name) ?? 500,
         contentType: "application/json",
-        body: JSON.stringify({ error: "forced failure (e2e)" }),
+        body: JSON.stringify({ error: "forced failure (e2e) /srv/secret/path" }),
       })
     }
     return route.continue()
@@ -141,6 +144,11 @@ async function failRetrySendReload(page: Page, tag: string) {
   await expect(sendButton(page)).toHaveAttribute("aria-disabled", "true")
   await expect(notice(page)).toBeVisible()
   await expect(notice(page)).toContainText(`${bad} is not attached`)
+  // The reason class is visible on the chip and in the notice; the server's own
+  // words (which the forced failure fills with a path) are nowhere on the page.
+  await expect(chip(page, bad)).toContainText("(server refused)")
+  await expect(notice(page)).toContainText(`${bad}: server refused`)
+  await expect(page.getByText("/srv/secret/path")).toHaveCount(0)
   await noHorizontalScroll(page)
   // aria-disabled, not disabled: the button is still clickable, and refuses.
   await sendButton(page).click({ force: true })
@@ -301,6 +309,31 @@ test.describe("chat attachment queue (real backend)", () => {
     await expect(sendButton(page)).not.toHaveAttribute("aria-disabled", "true")
     await expect(notice(page)).toHaveCount(0)
     await noHorizontalScroll(page)
+  })
+
+  test("phone: the longest failure label wraps inside the chip row, nothing overflows", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openChat(page, slugs[2])
+    const tag = `l${Date.now().toString(36)}`
+    const name = `${tag}-a-rather-long-file-name-for-a-narrow-screen.txt`
+    const gate = await gateUploads(page)
+    gate.failing.add(name)
+    gate.failStatus.set(name, 302) // not ok, not a known class: "could not be completed"
+    await pick(page, [file(name)])
+    await expect(chip(page, name)).toHaveAttribute("data-status", "error", { timeout: TIMEOUT })
+    await expect(chip(page, name)).toContainText("(could not be completed)")
+    await noHorizontalScroll(page)
+    const vp = page.viewportSize()!
+    for (const locator of [
+      chip(page, name),
+      page.getByRole("button", { name: `Retry ${name}` }),
+      page.getByRole("button", { name: `Remove ${name}` }),
+    ]) {
+      await expect(locator).toBeVisible()
+      const box = (await locator.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.width)
+    }
   })
 })
 

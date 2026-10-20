@@ -25,9 +25,9 @@ export type Attachment = {
   /** `validating` = accepted and waiting in the single upload queue;
    *  `cancelled` = stopped by the user, kept so it can be retried. */
   status?: "validating" | "uploading" | "ready" | "error" | "cancelled";
-  /** Why the upload was refused. Shown on the chip as its tooltip; the chip
-   *  states the failure in words regardless, because a tooltip is not
-   *  reachable on a phone and not announced by a screen reader. */
+  /** The server's own words for a refusal. Kept in the store for debugging
+   *  only: it can name a path or echo a driver error, so it is NEVER rendered
+   *  (no text, no title, no aria-*). The chip shows `failureLabel` instead. */
   error?: string;
   /** Short sanitized reason class ("too large", "network problem", ...), shown
    *  as visible text on a failed chip. Never the server's own words. */
@@ -114,9 +114,9 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       exit={{ opacity: 0, scale: 0.85, x: -8 }}
       transition={spring.snappy}
       data-status={attachment.status ?? "ready"}
-      title={failed ? attachment.error : undefined}
+      title={failed ? attachment.failureLabel : undefined}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
+        "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
         inFlight && "opacity-70",
         cancelled && "border-dashed text-muted-foreground",
         failed && "border-destructive bg-destructive/10 text-destructive",
@@ -129,7 +129,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       {failed ? (
         // Not a colour, not an icon: the sentence. This is the one thing on
         // screen that stops a refused upload from reading as an attachment.
-        <span className="text-[10px] font-medium">
+        <span className="min-w-0 break-words text-[10px] font-medium">
           Upload failed — not attached
           {attachment.failureLabel ? ` (${attachment.failureLabel})` : ""}
         </span>
@@ -148,7 +148,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onCancel(attachment.id)}
-          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-muted"
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-muted coarse:min-h-11 coarse:min-w-11"
           aria-label={`Cancel ${attachment.name}`}
         >
           Cancel
@@ -158,7 +158,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onRetry(attachment.id)}
-          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-destructive/15"
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-destructive/15 coarse:min-h-11 coarse:min-w-11"
           aria-label={`Retry ${attachment.name}`}
         >
           Retry
@@ -168,7 +168,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onRemove(attachment.id)}
-          className="ml-0.5 rounded-full p-0.5 hover:bg-muted"
+          className="ml-0.5 rounded-full p-0.5 hover:bg-muted coarse:min-h-11 coarse:min-w-11 coarse:inline-flex coarse:items-center coarse:justify-center"
           aria-label={`Remove ${attachment.name}`}
         >
           <X className="h-3 w-3" />

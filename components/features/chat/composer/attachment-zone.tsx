@@ -52,8 +52,9 @@ type UploadFailureReason =
  *
  * The two are deliberately different things and only one of them is recorded:
  * `message` is the server's own words and can name a path or echo a driver
- * error, which is why the composer already keeps it out of the DOM. `reason`
- * is a closed set, and it is what telemetry gets.
+ * error; it is stored for debugging and never rendered (no text, title or
+ * aria-*). `reason` is a closed set: telemetry gets it, and the chip and notice
+ * show its sanitized label (uploadFailureLabel).
  */
 class UploadFailure extends Error {
   constructor(

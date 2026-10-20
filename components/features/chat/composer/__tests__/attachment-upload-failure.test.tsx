@@ -178,10 +178,15 @@ describe("a rejected upload never reads as an attached file", () => {
       // disk and re-picking it is three screens on a phone.
       expect(within(c1).getByRole("button", { name: /retry invoice\.pdf/i })).toBeInTheDocument()
 
-      // No toast (it would sit over the chip row and cover Retry). The reason
-      // is the chip's tooltip, and the inline notice names the file and the way out.
+      // No toast (it would sit over the chip row and cover Retry), and the
+      // server's own words appear in no attribute (title, aria-*) of the chip
+      // or its buttons: they reach the accessible description otherwise.
       expect(toastError).not.toHaveBeenCalled()
-      expect(c1.getAttribute("title") ?? "").toMatch(c.reason)
+      const attrs = [c1, ...Array.from(c1.querySelectorAll("*"))].flatMap((el) =>
+        Array.from(el.attributes).map((a) => `${a.name}=${a.value}`),
+      )
+      for (const a of attrs) expect(a).not.toMatch(c.reason)
+      expect(c1.textContent ?? "").not.toMatch(c.reason)
       const note = screen.getByRole("note").textContent ?? ""
       expect(note).toContain("invoice.pdf")
       expect(note).toMatch(/Retry or Remove/)
@@ -267,7 +272,8 @@ describe("a rejected upload never reads as an attached file", () => {
 
     // With no text, a failed attachment is not content: Send used to look
     // available and then do nothing at all when pressed.
-    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled()
+    // aria-disabled (focusable, reason linked), not native disabled.
+    expect(screen.getByRole("button", { name: "Submit" })).toHaveAttribute("aria-disabled", "true")
 
     submitForm()
 

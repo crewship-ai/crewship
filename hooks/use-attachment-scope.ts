@@ -111,10 +111,14 @@ export function useAttachmentScope(chatId: string): {
   /** Identity is unknown right now but a person is on record: files are held
    *  (masked), nothing may send, and the composer says it is waiting. */
   waitingForSignIn: boolean
+  /** Why: "person" = nobody is confirmed (sign-in copy); "workspace" = the
+   *  person is known and the workspace or chat is loading (neutral copy). */
+  waitingReason: "person" | "workspace" | null
 } {
   const prefix = useAttachmentScopePrefix()
   const { workspaceId } = useWorkspace()
   const input = useIdentityInput(workspaceId)
   const waitingForSignIn = !isConfirmed(input) && input.status !== "unauthenticated" && currentIdentity().prefix !== ""
-  return { prefix, key: prefix + chatId, ready: prefix !== "", waitingForSignIn }
+  const waitingReason = !waitingForSignIn ? null : input.userId ? "workspace" : "person"
+  return { prefix, key: prefix + chatId, ready: prefix !== "", waitingForSignIn, waitingReason }
 }

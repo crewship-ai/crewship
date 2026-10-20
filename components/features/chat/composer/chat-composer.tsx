@@ -127,6 +127,9 @@ function summarizeNames(names: string[]): string {
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`
 }
 
+/** How long a wait must last before it is announced (a blink is not). */
+const WAIT_ANNOUNCE_DELAY_MS = 800
+
 const COMPOSER_SHELL = [
   "[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
   "[&_[data-slot=input-group]]:transition-[border-color,box-shadow]",
@@ -219,7 +222,7 @@ export function ChatComposer({
   // also see them — attaching a file must enable Send on an empty draft.
   // Falls back to a shared constant so an empty list keeps a stable identity
   // and does not re-create the submit callback on every render.
-  const { key: attachmentKey, waitingForSignIn } = useAttachmentScope(sessionId)
+  const { key: attachmentKey, waitingForSignIn, waitingReason } = useAttachmentScope(sessionId)
   const sessionAttachments = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -250,7 +253,9 @@ export function ChatComposer({
   const blockReasonText = !sendBlocked
     ? ""
     : waitingForSignIn
-      ? "Waiting for sign-in… Send is off until your session is confirmed."
+      ? waitingReason === "workspace"
+        ? "Loading this chat… Send is off until it is ready."
+        : "Waiting for sign-in… Send is off until your session is confirmed."
       : `Send is off: ${summarizeNames(unattached.map((a) => a.name))} ${
           unattached.length === 1 ? "is" : "are"
         } not attached${reasons.length ? ` (${reasons.join("; ")})` : ""}. Use Retry or Remove on ${
@@ -280,13 +285,25 @@ export function ChatComposer({
   // opening a conversation stays quiet. The region is cleared when it ends.
   const wasBlocked = useRef(sendBlocked)
   useEffect(() => {
-    if (sendBlocked && !wasBlocked.current) setAnnouncement(blockReasonText)
+    // A wait for sign-in or a workspace load is announced from its own effect
+    // below, after a delay, so a blink is not announced at all.
+    if (sendBlocked && !wasBlocked.current && !waitingForSignIn) setAnnouncement(blockReasonText)
     if (!sendBlocked) {
       cancelAnnounce()
       setAnnouncement("")
     }
     wasBlocked.current = sendBlocked
-  }, [sendBlocked, blockReasonText, cancelAnnounce])
+  }, [sendBlocked, blockReasonText, cancelAnnounce, waitingForSignIn])
+  // Announce a wait once, and only if it lasts: ~1s of continuous waiting.
+  const waitText = waitingForSignIn ? blockReasonText : ""
+  useEffect(() => {
+    if (!waitText) return
+    const t = setTimeout(() => setAnnouncement(waitText), WAIT_ANNOUNCE_DELAY_MS)
+    return () => {
+      clearTimeout(t)
+      setAnnouncement("")
+    }
+  }, [waitText])
   useEffect(() => cancelAnnounce, [cancelAnnounce])
 
   // Only fires when the message actually went out — a size-guard rejection
@@ -458,11 +475,13 @@ export function ChatComposer({
   // While waiting for sign-in the button is aria-disabled, not disabled, so it
   // stays focusable and can say why (the text box is empty for an unknown
   // identity, which would otherwise disable it silently).
-  const submitDisabled = !isStreaming && !waitingForSignIn && (!hasContent || !canSend)
+  // Same when the only content is a failed or cancelled chip with no caption:
+  // `sendBlocked` keeps the button aria-disabled and focusable, with the reason.
+  const submitDisabled = !isStreaming && !sendBlocked && (!hasContent || !canSend)
   const blockReason = (
     <>
       {sendBlocked && (
-        <Alert id={blockReasonId} role="note" variant="destructive" className="mt-2 py-2">
+        <Alert id={blockReasonId} role="note" variant={waitingForSignIn ? "default" : "destructive"} className="mt-2 py-2">
           <AlertTriangle aria-hidden="true" />
           <AlertDescription>
             <p>{blockReasonText}</p>
