@@ -13,15 +13,42 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
 
+- **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
+### Upgrade and recovery notes
+
+- Before downgrading across the durable routine-start migration, stop incoming triggers and drain queued and in-flight starts. Otherwise use a forward fix; downgrading with outstanding work and upgrading again can repeat accepted work.
+- Resuming a routine body provides at-least-once execution: an interrupted step can repeat external effects. This is not an exactly-once guarantee. An uncertain interrupted setup hook remains visible as interrupted rather than being automatically repeated.
+- If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
+
 ### Fixed
+
+- Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
+
+- Workspace member addition and account provisioning now commit their chained audit atomically, recheck live administrator authority, and keep initial rights and setup material out of public journal frames.
+- Crew member additions, removals and role override changes now commit with their old/new membership audit or roll back, with notifications only after commit.
+- Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
+- Dispatch due manual backups reliably across fractional-second timestamp boundaries, while keeping future busy retries queued until their exact deadline.
+
+- Wait for provider sign-in recovery to release its database connection before server shutdown finishes.
+
+- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
+
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+- Keep private Document output private in its source conversation, live delivery and agent diagnostics; audit foreign OWNER inspection before returning copied data.
+- Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
+
+- Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+- Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
+- Isolate stream admission revocation epochs by credential and user, so another user's logout cannot reject valid requests; repeated signout of an already revoked session no longer sends another revocation notification.
 
 - Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
 - Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
@@ -31,12 +58,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
+- Scheduled routines retain at most one waiting occurrence per schedule when capacity is full. Later capacity-blocked occurrences are recorded as skipped/missed, without failure alerts or circuit-breaker trips.
+
 ### Added
+
+- **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
+- Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
@@ -102,6 +134,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
 - Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
+- Deferred routine receipts expose stable waiting reasons in API, CLI and Plan, including neutral legacy causes and recovery attention.
 
 ### Added
 

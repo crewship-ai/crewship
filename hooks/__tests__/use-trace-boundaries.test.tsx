@@ -85,6 +85,28 @@ it.each(["running", "queued", "paused", "waiting"])("polls a %s run and stops at
   expect(fetch).toHaveBeenCalledTimes(2)
 })
 
+it("polls a durable QUEUED identity into its actual run without inventing start evidence", async () => {
+  vi.useFakeTimers()
+  fetch.mockResolvedValueOnce(reply({
+    id: "accepted-run", workspace_id: "ws", pipeline_id: "routine-id", pipeline_slug: "routine",
+    status: "QUEUED", pending_id: "pending-start", reason_code: "routine_capacity",
+  })).mockResolvedValueOnce(reply({
+    id: "accepted-run", status: "completed", started_at: "2026-10-19T10:00:00Z",
+    definition: { steps: [{ id: "actual-step", type: "transform" }] },
+  }))
+  const { result } = renderHook(() => useTrace("ws", "accepted-run"))
+  await act(async () => {})
+  expect(result.current.run).toMatchObject({ id: "accepted-run", status: "queued", pending_id: "pending-start", reason_code: "routine_capacity" })
+  expect(result.current.run?.started_at).toBeUndefined()
+  expect(result.current.dsl).toBeNull()
+  await act(async () => vi.advanceTimersByTimeAsync(3000))
+  expect(result.current.run).toMatchObject({ id: "accepted-run", status: "completed", started_at: "2026-10-19T10:00:00Z" })
+  expect(result.current.dsl?.steps?.[0]?.id).toBe("actual-step")
+  await act(async () => vi.advanceTimersByTimeAsync(9000))
+  expect(fetch).toHaveBeenCalledTimes(2)
+  for (const call of fetch.mock.calls) expect(call[0]).toBe("/api/v1/workspaces/ws/pipeline-runs/accepted-run")
+})
+
 it("refreshes only events identifying this run, including the legacy identifier", async () => {
   fetch.mockImplementation(async () => reply({ id: "run", status: "completed" }))
   const { result, unmount } = renderHook(() => useTrace("ws", "run"))

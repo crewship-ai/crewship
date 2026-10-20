@@ -24,7 +24,7 @@ afterEach(cleanup)
 describe("<RoutineOnceSchedule>", () => {
   it("keeps a start that waits for capacity in the planned list and says why", () => {
     h.starts = [
-      { id: "wait", pipeline_slug: "invoice", fire_at: soon(-2), status: "pending", dispatch_attempts: 2, next_attempt_at: soon(1), can_cancel: true },
+      { id: "wait", pipeline_slug: "invoice", fire_at: soon(-2), status: "pending", reason_code: "routine_capacity", dispatch_attempts: 2, next_attempt_at: soon(1), can_cancel: true },
       { id: "plan", pipeline_slug: "invoice", fire_at: soon(90), status: "pending", dispatch_attempts: 0, can_cancel: true },
       { id: "elsewhere", pipeline_slug: "other", fire_at: soon(30), status: "pending" },
     ]
@@ -50,7 +50,7 @@ describe("<RoutineOnceSchedule>", () => {
     expect(within(screen.getByTestId("settled-start-linked")).getByRole("link", { name: "Open run" })).toHaveAttribute("href", "/routines?slug=invoice&run=run_7")
     // A fired start without its run link may still be executing.
     const running = screen.getByTestId("settled-start-running")
-    expect(running).toHaveTextContent("Started")
+    expect(running).toHaveTextContent("Dispatching")
     expect(running).not.toHaveTextContent("Did not run")
     expect(within(running).queryByRole("link")).toBeNull()
   })

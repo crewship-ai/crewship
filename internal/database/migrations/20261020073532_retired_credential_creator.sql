@@ -3,6 +3,8 @@
 -- Keep the nullable creator FK and its original NO ACTION semantics.
 CREATE TEMP TABLE credential_creator_expected(id TEXT PRIMARY KEY,old_creator TEXT);
 INSERT INTO credential_creator_expected SELECT id,created_by FROM credentials;
+-- The replacement creator column stays at the end of the table after DROP/RENAME.
+-- Restore/import addresses columns by name; native tests pin this order and FK/index.
 ALTER TABLE credentials ADD COLUMN erasure_created_by TEXT REFERENCES users(id) ON DELETE NO ACTION;
 UPDATE credentials SET erasure_created_by=created_by;
 -- Never drop the old column unless every exact parent and creator survived
