@@ -12,6 +12,32 @@ import (
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
+type chatArtifactPreviewResponse struct {
+	Chat      chatArtifactPreviewChat   `json:"chat"`
+	Target    chatArtifactPreviewTarget `json:"target"`
+	CanUpdate bool                      `json:"can_update"`
+	Reason    string                    `json:"reason"`
+}
+
+type chatArtifactPreviewChat struct {
+	ID         string `json:"id"`
+	Visibility string `json:"visibility"`
+	Audience   string `json:"audience"`
+}
+
+type chatArtifactPreviewTarget struct {
+	PageID   string                      `json:"page_id"`
+	Type     string                      `json:"type"`
+	Audience string                      `json:"audience"`
+	Expected chatArtifactPreviewExpected `json:"expected"`
+}
+
+type chatArtifactPreviewExpected struct {
+	Schema     int   `json:"schema"`
+	Rev        int64 `json:"rev"`
+	Generation int64 `json:"generation"`
+}
+
 // PreviewChatDocumentContext reads a narrow preparation snapshot. It never
 // retains a send intent, seals a chat, or grants authority to edit the target.
 func (h *PageHandler) PreviewChatDocumentContext(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +83,21 @@ func (h *PageHandler) PreviewChatDocumentContext(w http.ResponseWriter, r *http.
 	} else if err != nil {
 		replyInternalError(w, h.logger, "read Document context audience", err)
 		return
+	}
+	sealed := protected.Valid && protected.String != ""
+	if !sealed {
+		// Bearer links add readers outside the workspace audience below. Keep
+		// this preparation flow unavailable until those links are revoked;
+		// do not guess whether an expired or currently unusable link is safe.
+		var shared bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_read_shares WHERE workspace_id=? AND chat_id=? AND revoked_at IS NULL)`, workspace, chat).Scan(&shared); err != nil {
+			replyInternalError(w, h.logger, "read Document context sharing", err)
+			return
+		}
+		if shared {
+			notFound()
+			return
+		}
 	}
 	if h.documentCall == nil {
 		replyError(w, http.StatusServiceUnavailable, "Documents is unavailable")
@@ -110,14 +151,14 @@ func (h *PageHandler) PreviewChatDocumentContext(w http.ResponseWriter, r *http.
 		return
 	}
 	audience := "author_and_workspace_operators"
-	if protected.Valid && protected.String != "" {
+	if sealed {
 		audience = "author_and_workspace_owners"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"chat": map[string]any{"id": chat, "visibility": "private", "audience": audience},
-		"target": map[string]any{"page_id": page, "type": "document", "audience": "author_and_workspace_owners",
-			"expected": map[string]any{"schema": intent.Schema, "rev": intent.Rev, "generation": intent.Generation}},
-		"can_update": false, "reason": "targeted_iteration_unavailable",
+	writeJSON(w, http.StatusOK, chatArtifactPreviewResponse{
+		Chat: chatArtifactPreviewChat{ID: chat, Visibility: "private", Audience: audience},
+		Target: chatArtifactPreviewTarget{PageID: page, Type: "document", Audience: "author_and_workspace_owners",
+			Expected: chatArtifactPreviewExpected{Schema: intent.Schema, Rev: intent.Rev, Generation: intent.Generation}},
+		CanUpdate: false, Reason: "targeted_iteration_unavailable",
 	})
 }
 

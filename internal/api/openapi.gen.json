@@ -1502,6 +1502,121 @@
         },
         "type": "object"
       },
+      "ChatArtifactPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "can_update": {
+            "enum": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "chat": {
+            "$ref": "#/components/schemas/ChatArtifactPreviewChat"
+          },
+          "reason": {
+            "enum": [
+              "targeted_iteration_unavailable"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ChatArtifactPreviewTarget"
+          }
+        },
+        "required": [
+          "chat",
+          "target",
+          "can_update",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ChatArtifactPreviewChat": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "enum": [
+              "author_and_workspace_operators",
+              "author_and_workspace_owners"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "private"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "visibility",
+          "audience"
+        ],
+        "type": "object"
+      },
+      "ChatArtifactPreviewExpected": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rev": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "enum": [
+              3
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema",
+          "rev",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "ChatArtifactPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "enum": [
+              "author_and_workspace_owners"
+            ],
+            "type": "string"
+          },
+          "expected": {
+            "$ref": "#/components/schemas/ChatArtifactPreviewExpected"
+          },
+          "page_id": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "document"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "type",
+          "audience",
+          "expected"
+        ],
+        "type": "object"
+      },
       "ChatDecisionAnswer": {
         "additionalProperties": false,
         "properties": {
@@ -60355,6 +60470,195 @@
         "summary": "Get chain",
         "tags": [
           "chains"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/chats/{chatId}/artifact-context/preview": {
+      "get": {
+        "description": "Get chat artifact context preview (GET /api/v1/chats/{chatId}/artifact-context/preview).",
+        "operationId": "get_api_v1_chats_chatId_artifact-context_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exactly one immutable Page ID; slugs are not resolved.",
+            "in": "query",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatArtifactPreview"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "enum": [
+                    "nosniff"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get chat artifact context preview",
+        "tags": [
+          "chats"
         ],
         "x-crewship-read-only": true
       }

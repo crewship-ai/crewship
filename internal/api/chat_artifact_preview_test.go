@@ -10,6 +10,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/chatshare"
 )
 
 // These regressions exercise the public handler with real credential, membership,
@@ -236,5 +239,56 @@ func TestChatArtifactPreviewPersistenceFailureIsNotDenial(t *testing.T) {
 		if strings.Contains(response.Body.String(), private) {
 			t.Fatalf("server failure disclosed %q: %s", private, response.Body.String())
 		}
+	}
+}
+
+// An ordinary private chat can have a separate bearer-share audience. Until
+// that scope has its own preview contract, do not describe it as author and
+// workspace operators only. Use the real supported share lifecycle here.
+func TestChatArtifactPreviewRejectsBearerSharedChatUntilRevoked(t *testing.T) {
+	h, workspace, owner, saved := documentResultsFixture(t)
+	const chat = "preview-bearer-chat"
+	mustExec(t, h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,mode,origin) VALUES(?,?,'principal-agent',?,'private','CHAT','UI')`, chat, workspace, owner)
+	shares := chatshare.NewStore(h.db)
+	grant, token, err := shares.Create(t.Context(), workspace, "principal-agent", chat, owner, time.Hour)
+	if err != nil || grant.ID == "" || token == "" {
+		t.Fatalf("supported ordinary-chat sharing fixture: %v", err)
+	}
+	request := func() *http.Request { return previewDocumentRequest(t, h, workspace, owner, chat, saved.PageID) }
+	r := request()
+	before := documentPreviewAuthoritySnapshot(t, h)
+	response := callDocumentPreview(h, r)
+	creationExpect(t, response, http.StatusNotFound)
+	var actual map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &actual); err != nil || !reflect.DeepEqual(actual, map[string]any{"error": "Document context not found"}) {
+		t.Fatalf("unsupported sharing needs the common metadata-free denial: %s (%v)", response.Body.String(), err)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("shared-chat denial cached")
+	}
+	for _, private := range []string{saved.PageID, saved.Title, saved.Slug, token, grant.ID, `"target"`, `"audience"`} {
+		if strings.Contains(response.Body.String(), private) {
+			t.Fatalf("denial disclosed %q: %s", private, response.Body.String())
+		}
+	}
+	if after := documentPreviewAuthoritySnapshot(t, h); !reflect.DeepEqual(before, after) {
+		t.Fatalf("preview changed authority: before=%v after=%v", before, after)
+	}
+	if err := shares.Revoke(t.Context(), workspace, "principal-agent", chat, grant.ID, owner); err != nil {
+		t.Fatal(err)
+	}
+	response = callDocumentPreview(h, request())
+	creationExpect(t, response, http.StatusOK)
+	var restored struct {
+		Chat struct {
+			Audience string `json:"audience"`
+		} `json:"chat"`
+		CanUpdate bool `json:"can_update"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil || restored.Chat.Audience != "author_and_workspace_operators" || restored.CanUpdate {
+		t.Fatalf("revocation restores a truthful read-only private audience: %s (%v)", response.Body.String(), err)
+	}
+	if after := documentPreviewAuthoritySnapshot(t, h); !reflect.DeepEqual(before, after) {
+		t.Fatalf("post-revoke preview changed authority: before=%v after=%v", before, after)
 	}
 }

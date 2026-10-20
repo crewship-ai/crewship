@@ -955,6 +955,11 @@ folder, application or project, with no additional panels. Agent, internal and
 restricted credentials cannot use this operation; an operator role alone does
 not satisfy the ownership requirements.
 
+An ordinary private chat with an unrevoked bearer share link is outside this
+preview's supported scope, even if the link has expired. Revoke the link before
+using this preparation read; otherwise it returns the same metadata-free `404`.
+This prevents the workspace audience label from omitting link holders.
+
 | Query parameter | Required | Meaning |
 | --- | --- | --- |
 | `page_id` | Yes | One immutable Page ID, 1–128 ASCII letters, digits, `_` or `-`. Slugs are not resolved. Repeated values are rejected. |
