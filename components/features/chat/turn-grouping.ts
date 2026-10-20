@@ -1,4 +1,5 @@
 import type { TurnPart } from "@/hooks/use-chat"
+import { needsAttention, parentToolIdOf, toolIdOf } from "@/lib/chat-activity"
 
 /** A tool invocation: the call plus its matching result (result is absent while
  *  the tool is still running). */
@@ -67,8 +68,9 @@ export function groupTurnParts(rawParts: TurnPart[]): RenderNode[] {
     }
   }
 
-  const toolId = (p: TurnPart): string | undefined =>
-    p.tool_call_id ?? (typeof p.metadata?.tool_id === "string" ? p.metadata.tool_id : undefined)
+  // tool_call_id, tool_id or tool_use_id: live results carry the last one, and
+  // parallel calls (A, B, result A, result B) only pair correctly by id.
+  const toolId = toolIdOf
   const results = new Map<string, TurnPart>()
   const consumed = new Set<TurnPart>()
   const calls = new Map<string, ToolNode>()
@@ -81,7 +83,7 @@ export function groupTurnParts(rawParts: TurnPart[]): RenderNode[] {
     const p = parts[i]
     if (consumed.has(p)) continue
 
-    if ((p.type === "tool_call" || p.type === "activity") && (SPECIAL_TOOLS.has(toolNameOf(p)) || p.activity?.state === "awaiting_approval")) {
+    if ((p.type === "tool_call" || p.type === "activity") && (SPECIAL_TOOLS.has(toolNameOf(p)) || needsAttention(p))) {
       // Special interactive tool — keep it out of the activity group.
       flush()
       nodes.push({ kind: "part", part: p })
@@ -97,7 +99,7 @@ export function groupTurnParts(rawParts: TurnPart[]): RenderNode[] {
         calls.set(id, node)
       }
       const next = parts[i + 1]
-      if (!node.result && next && next.type === "tool_result") {
+      if (!node.result && next && next.type === "tool_result" && !consumed.has(next)) {
         const cid = toolId(p)
         const rid = toolId(next)
         // Pair when ids match, or when either id is absent (adjacency fallback).
@@ -125,14 +127,15 @@ export function groupTurnParts(rawParts: TurnPart[]): RenderNode[] {
   // Link only server-correlated ancestry, never a positional guess. Interactive
   // tools were left outside calls and therefore cannot disappear in a parent.
   for (const node of calls.values()) {
-    const parentId = node.call.parent_tool_call_id
+    const parentId = parentToolIdOf(node.call)
     const parent = parentId ? calls.get(parentId) : undefined
     if (!parent || parent === node) continue
     const visited = new Set([node])
     let ancestor: ToolNode | undefined = parent
     while (ancestor && !visited.has(ancestor)) {
       visited.add(ancestor)
-      ancestor = ancestor.call.parent_tool_call_id ? calls.get(ancestor.call.parent_tool_call_id) : undefined
+      const next = parentToolIdOf(ancestor.call)
+      ancestor = next ? calls.get(next) : undefined
     }
     if (ancestor) continue // Invalid ancestry cycle stays visible, unnested.
     parent.children = [...(parent.children ?? []), node]

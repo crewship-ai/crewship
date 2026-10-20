@@ -52,7 +52,7 @@ vi.mock("@/hooks/use-smooth-text", () => ({
 vi.mock("@/components/ai-elements/tool", () => ({
   Tool: ({ children }: { children: React.ReactNode }) => <div data-testid="tool">{children}</div>,
   ToolContent: ({ children }: { children: React.ReactNode }) => <div data-testid="tool-content">{children}</div>,
-  ToolHeader: ({ children, title, state }: { children: React.ReactNode; title?: string; state?: string }) => <div data-testid="tool-header" data-state={state} title={title}>{children}</div>,
+  ToolHeader: ({ children, title, state, statusLabel }: { children: React.ReactNode; title?: string; state?: string; statusLabel?: string }) => <div data-testid="tool-header" data-state={state} data-label={statusLabel ?? ""} title={title}>{children}</div>,
 }))
 
 vi.mock("@/components/ai-elements/code-block", () => ({
@@ -419,7 +419,7 @@ describe("honest activity completion", () => {
       part({ id: "a", type: "activity", tool_call_id: "a", activity: { kind: "read", state: "unknown" } }),
       part({ id: "b", type: "activity", tool_call_id: "b", activity: { kind: "read", state: "succeeded" } }),
     ])} onCopy={() => {}} onFileClick={() => {}} />)
-    expect(screen.getAllByText("Outcome unknown").length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
     expect(screen.queryByText("Working")).toBeNull()
     expect(view.container.querySelector(".animate-spin")).toBeNull()
   })

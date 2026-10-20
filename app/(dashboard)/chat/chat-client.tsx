@@ -1,5 +1,7 @@
 "use client"
 
+import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
+import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
@@ -126,7 +128,18 @@ const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquar
  * rebuilds the dashboard chrome to look at a different name, and the reader
  * feels every one of those.
  */
+/** One wrapper above both layouts, so the lifecycle owner is the same instance
+ *  across a breakpoint crossing and unmounts only when the person leaves /chat. */
 export function ChatClient() {
+  return (
+    <>
+      <AttachmentLifecycle />
+      <ChatClientBody />
+    </>
+  )
+}
+
+function ChatClientBody() {
   const searchParams = useSearchParams()
   const unified = useUnifiedConversations()
   const humanConversationId = unified ? unified.selectedId : searchParams.get("conversation")
@@ -483,6 +496,7 @@ export function ChatClient() {
    * two PATCHes. It makes "once" a property of the page rather than a race.
    */
   const autoTitledRef = useRef<Set<string>>(new Set())
+  const attachmentPrefix = useAttachmentScopePrefix()
   const autoTitleSession = useCallback(
     (sid: string, text: string) => {
       if (!agent || !workspaceId || !sid) return
@@ -493,7 +507,7 @@ export function ChatClient() {
       // in the store at onSend time — the composer clears them one step later,
       // on onSent. Only consulted when the text says nothing usable, which is
       // the "here, look at this" message whose whole content is a file name.
-      const attachmentNames = (useComposerStore.getState().attachments[sid] ?? []).map((a) => a.name)
+      const attachmentNames = (useComposerStore.getState().attachments[attachmentPrefix + sid] ?? []).map((a) => a.name)
       const title = deriveSessionTitle({ text, attachmentNames })
       // An untitled session reads worse than a good name and better than "…".
       if (!title) return
@@ -522,7 +536,7 @@ export function ChatClient() {
         }
       })()
     },
-    [agent, workspaceId, tree],
+    [agent, workspaceId, tree, attachmentPrefix],
   )
 
   const handleSend = useCallback(

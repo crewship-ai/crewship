@@ -17,6 +17,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Retain original human authority for targeted Document runs and refuse missing or superseded intent bindings; the chat update entry point remains disabled.
 
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
+
+- **Chat shows the model the chat is configured to use.** The composer's model control read a path the server never served and always offered a built-in list, silently treating its first entry as selected. It now shows the model the chat run preview reports, lists the provider's models from the server labelled as live or curated, says plainly when the list cannot be loaded, and states that a listed model is not proof of access or of what a run will use. Choosing a model from the list is not offered yet.
+
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 - Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
 - **Native Slides can be initialized and read with `crewship slides` when `CREWSHIP_SLIDES_ENABLED` is enabled.** Current custodians can save a schema-1 deck on an empty private Page; exact retries retain the original receipt. Reads check live private access and audit another workspace OWNER before releasing content. Private Pages remain indistinguishable from missing Pages even for malformed requests. The adapter remains disabled by default.
@@ -36,9 +39,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Move to a working folder (who gains content and history, same ID, a result per item) and Duplicate are built behind `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` and stay hidden until the server routes exist.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
+- **Tool activity in chat no longer shows failures as success.** A group of tool steps says "Worked" only when every step succeeded; a failed step is labelled, opens the group and is never green, and parallel tool calls are matched to their own results. A finished reply with steps that have no recorded result reads "Finished" rather than success. A reasoning block shows its approved safe summary line next to the recorded time.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
+
+- **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back. A failed or cancelled file keeps Send off with a visible reason and Retry/Remove on the chip; uploads are kept per person and workspace, continue while you switch to another chat, and stop when you leave the chat page.
 
 ### Upgrade and recovery notes
 

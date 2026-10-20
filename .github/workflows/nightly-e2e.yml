@@ -198,6 +198,13 @@ env:
     e2e/manual-crews-walkthrough.spec.ts
     e2e/mobile-crews.spec.ts
     e2e/smoke.spec.ts
+  # Real-backend chat suites that require a verified disposable manifest and
+  # direct access to that instance's data. Each gets a fresh seed so chats
+  # created by another suite cannot change its initial draft state.
+  THROWAWAY_SPECS: >-
+    e2e/chat-attachment-queue.spec.ts
+    e2e/chat-search.spec.ts
+    e2e/chat-model-picker.spec.ts
   # EXCLUDED: deliberately run by nobody here — see the header for each.
   #
   # pr-contract.spec.ts was in DRIFT and did not belong there. It is the PR
@@ -262,21 +269,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Assert GATE + DRIFT + EXCLUDED covers e2e/*.spec.ts
+      - name: Assert GATE + DRIFT + THROWAWAY + EXCLUDED covers e2e/*.spec.ts
         # Without this, adding e2e/new-thing.spec.ts means it runs in the PR
         # suite and in neither nightly bucket — i.e. it silently loses its
         # nightly coverage, which is the failure mode this whole workflow
         # exists to end. Fails loudly and names the offenders.
         run: |
           set -euo pipefail
-          declared=$(printf '%s\n%s\n%s\n' "$GATE_SPECS" "$DRIFT_SPECS" "$EXCLUDED_SPECS" \
+          declared=$(printf '%s\n%s\n%s\n%s\n' "$GATE_SPECS" "$DRIFT_SPECS" "$THROWAWAY_SPECS" "$EXCLUDED_SPECS" \
             | tr ' ' '\n' | sed 's/[[:space:]]//g' | grep -v '^$' | sort -u)
           actual=$(find e2e -maxdepth 1 -name '*.spec.ts' | sort -u)
           missing=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
           phantom=$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
           rc=0
           if [ -n "$missing" ]; then
-            echo "::error::spec(s) in no nightly bucket — add to GATE_SPECS or DRIFT_SPECS (or EXCLUDED_SPECS with a reason in the header):"
+            echo "::error::spec(s) in no nightly bucket — add to GATE_SPECS, DRIFT_SPECS or THROWAWAY_SPECS (or EXCLUDED_SPECS with a reason in the header):"
             printf '%s\n' "$missing" | sed 's/^/  /'
             rc=1
           fi
@@ -397,6 +404,42 @@ jobs:
           set -euo pipefail
           # shellcheck disable=SC2086 # word-splitting the spec list is intended
           pnpm exec playwright test --config=playwright.nightly.config.ts $GATE_SPECS
+
+      - name: Run isolated chat specs
+        timeout-minutes: 12
+        env:
+          E2E_EMAIL: demo@crewship.ai
+          E2E_PASSWORD: password123
+          CREWSHIP_INSTANCE_ID: nightly-chat-throwaway
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/gate
+          cp playwright-nightly-report.json test-results/gate/report.json
+          index=0
+          for spec in $THROWAWAY_SPECS; do
+            index=$((index + 1))
+            # shellcheck disable=SC2016 # The child shell expands its own manifest and server.
+            scripts/throwaway-server.sh run "nightly-chat-$index" --binary "$PWD/crewship" \
+              --env CREWSHIP_SKIP_SIDECAR=1 -- bash -euo pipefail -c '
+                export E2E_CREWSHIP_DATA_DIR=$(jq -er .data_dir "$CREWSHIP_THROWAWAY_MANIFEST")
+                export PLAYWRIGHT_BASE_URL="$CREWSHIP_SERVER"
+                for attempt in 1 2 3; do
+                  if ./crewship seed --offline-demo; then break; fi
+                  test "$attempt" -lt 3
+                  sleep 5
+                done
+                ws=$(./crewship whoami --format json | jq -er .workspace.id)
+                CREWSHIP_WORKSPACE="$ws" ./crewship admin ratelimits set http.api_per_min 1000
+                status=0
+                pnpm exec playwright test --config=playwright.nightly.config.ts "$1" \
+                  --workers=1 --retries=0 --output="test-results/throwaway-$2" || status=$?
+                jq -e " .stats.expected > 0 and .stats.skipped == 0 and .stats.unexpected == 0 and .stats.flaky == 0 " \
+                  playwright-nightly-report.json >/dev/null || status=1
+                mkdir -p "test-results/throwaway-$2"
+                cp playwright-nightly-report.json "test-results/throwaway-$2/report.json"
+                exit "$status"
+              ' bash "$spec" "$index"
+          done
 
       - name: Upload Playwright artifacts
         # if: always() — a nightly nobody watched is undiagnosable without the
