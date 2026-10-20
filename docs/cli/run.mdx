@@ -74,6 +74,7 @@ The same provenance is recorded twice more: as a `run.session_init` journal entr
 | `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
 | `--project-file-version <version-id>` | (unset) | Explicit immutable project input for a restricted native run; repeat up to 16 times. Trusted runs reject this selection. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
+| `--document-target <intent.json>` | (unset) | Select one existing private Document for this instruction; requires explicit `--chat`. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
 | `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`, for scripts that want one consistent "block until done" flag across commands. |
 | `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, `50` interactive). |
@@ -120,6 +121,23 @@ crewship run daniel --chat c_abc123 "follow-up: now write the integration test"
 ```
 
 `--chat` skips the `POST /api/v1/agents/{id}/chats` step and sends the prompt straight to the existing session over `agent:{agentId}` WS.
+
+### Update one existing Document
+
+```bash
+crewship run daniel --chat c_abc123 --document-target intent.json "Shorten the introduction."
+crewship run daniel --chat c_abc123 --document-target intent.json --wait "Shorten the introduction."
+```
+
+The file contains exactly five fields and is at most 1024 bytes:
+
+```json
+{"submission_id":"edit-introduction-1","page_id":"document-id","schema":3,"rev":7,"generation":2}
+```
+
+Use the Document's current identity, schema, revision and generation, with a stable submission ID for this instruction. Keep the original file when confirmation is uncertain; do not generate a new submission ID or replace its baseline to bypass a conflict. The server checks current access and the original baseline. A stale baseline or revoked permission refuses the update.
+
+This selects one human-owned Document in your personal space for this run. Shared-folder proposals are unavailable. Interactive mode, restricted native runs and `--project-file-version` cannot use this flag. Ordinary chat text does not grant access, and a later run does not inherit the selection. A saved chat message does not mean the Document edit committed: only a confirmed edit is Saved. A dropped connection provides no promise of automatic retry or exactly-once delivery.
 
 ### Stdin as context
 

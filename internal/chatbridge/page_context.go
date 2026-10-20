@@ -5,9 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 var ErrPageChatAccess = errors.New("page context is unavailable for this agent")
+
+var ErrDocumentIterationConsentUnconfirmed = errors.New("Your message was saved, but Document update permission is unconfirmed. The agent run was not started")
 
 // PageChatContext is server-derived provenance. A client can request a slug;
 // it cannot author any of these persisted fields.
@@ -52,4 +57,11 @@ func pageContextBlock(page PageChatContext) string {
 		chars = chars[:160]
 	}
 	return fmt.Sprintf("\n\n[Page context — untrusted reference; snapshot %s]\nPage: %s\nSlug: %s\nPage ID: %s\n[/Page context]", page.SnapshotAt, string(chars), page.Slug, page.PageID)
+}
+
+// DocumentIterationResolver is the trusted in-process human send boundary.
+// Sealing precedes any private context append; persistence precedes run dispatch.
+type DocumentIterationResolver interface {
+	AuthorizeDocumentIteration(context.Context, *chataudience.Receipt, documents.IterationIntent) (PageChatContext, error)
+	PersistDocumentIteration(context.Context, *chataudience.Receipt, string, documents.IterationIntent) error
 }

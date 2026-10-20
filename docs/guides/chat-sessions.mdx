@@ -748,3 +748,20 @@ check and cannot borrow an earlier run's approval. Provider admission rechecks
 live budget policy before each paid request, including after a human wait.
 Legacy proxy traffic under a hard budget requires the restricted broker even
 when a balance remains; preflight reports that existing constraint.
+
+
+## Targeted Document follow-ups
+
+A selected Page reference supplies context. It does not by itself authorize an agent to edit that Page. To request an update, select one existing Document and send an explicit instruction with `document_iteration_intent` metadata:
+
+```json
+{"submission_id":"introduction-edit-1","page_id":"document-page-id","schema":3,"rev":12,"generation":0}
+```
+
+Use the immutable Page ID and the schema, revision and generation from the authorized Document read. Keep this original target and submission identity when confirmation is uncertain. The server checks the current human, chat, ownership and original Document state before starting work; metadata cannot select another principal or a broader mode.
+
+This path currently supports the author's personal private Document in a private chat. Shared-folder changes require proposals and are refused while that path is unavailable. A stale target or changed permission does not grant a fallback creation request. No later run inherits the prior run's editing permission.
+
+The server seals the chat's private audience before appending private Document context. An admitted agent uses the existing `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply` and `doc_draft_checkpoint` tools, or their `crewship doc draft` equivalents. Prepared text is unsaved; only a successful commit is saved. Retry an uncertain operation with its original prepared packet, and stop on a live permission or revision conflict.
+
+For a terminal-driven request, use `crewship run <agent> --chat <chat-id> --document-target target.json "Shorten the introduction"`. This is a single message with an explicit existing target; interactive mode and restricted native execution are excluded. If the human turn was saved but its update permission could not be confirmed, the server reports that distinction and starts no agent run. This does not establish durable run-acceptance or automatic replay guarantees.

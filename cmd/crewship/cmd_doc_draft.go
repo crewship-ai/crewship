@@ -24,7 +24,7 @@ func newDocDraftCommand() *cobra.Command { return newDocDraftCommandWithTranspor
 
 // Transport injection is available to Go tests only, never command flags.
 func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command {
-	root := &cobra.Command{Use: "draft", Short: "Checkpoint this live run's explicitly admitted new Document draft", Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. No existing Page or human-profile fallback.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+	root := &cobra.Command{Use: "draft", Short: "Checkpoint the Document explicitly admitted for this live run", Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Creation drafting admits its new Document; an explicit targeted follow-up admits its existing Document. Neither permits another Page or human-profile fallback.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, key := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(key) || cmd.InheritedFlags().Changed(key) {
 				return errors.New("protected Docs drafting does not accept config/server/profile/workspace overrides")

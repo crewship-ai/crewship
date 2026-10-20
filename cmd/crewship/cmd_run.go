@@ -37,6 +37,10 @@ Examples:
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		estimate, _ := cmd.Flags().GetBool("estimate")
 		offline := dryRun || estimate
+		documentMetadata, err := runDocumentTarget(cmd)
+		if err != nil {
+			return err
+		}
 
 		// Auth/workspace + agent resolution are skipped for offline modes
 		// (--dry-run / --estimate) so users can preview prompts and token
@@ -127,7 +131,7 @@ Examples:
 		existingChat, _ := cmd.Flags().GetString("chat")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 
-		if !interactive && prompt == "" {
+		if !interactive && strings.TrimSpace(prompt) == "" {
 			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
 		}
 
@@ -190,6 +194,9 @@ Examples:
 			return err
 		}
 		if restricted {
+			if documentMetadata != nil {
+				return fmt.Errorf("--document-target requires a trusted chat; restricted native runs are unsupported")
+			}
 			if interactive {
 				return fmt.Errorf("restricted text interactive mode is not yet supported")
 			}
@@ -239,10 +246,10 @@ Examples:
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile, maxTurns)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile, maxTurns, documentMetadata)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns, documentMetadata)
 	},
 }
 
@@ -284,7 +291,7 @@ func openSaveFile(cmd *cobra.Command) (*cli.AtomicFile, error) {
 	return f, nil
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int, metadata ...map[string]any) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -311,14 +318,14 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 	}()
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
+	if err := ws.SendMessageWithMetadata(agentChannel, chatID, prompt, firstRunMetadata(metadata), maxTurns); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
 	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int, metadata ...map[string]any) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -331,7 +338,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	}
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
+	if err := ws.SendMessageWithMetadata(agentChannel, chatID, prompt, firstRunMetadata(metadata), maxTurns); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
@@ -1178,6 +1185,7 @@ func init() {
 	runCmd.Flags().Bool("stdin", false, "Append piped stdin as context after the prompt (stdin is only read implicitly when no prompt is given)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
+	runCmd.Flags().String("document-target", "", "Edit one existing Document using a closed intent JSON file; requires --chat")
 	runCmd.Flags().StringArray("project-file-version", nil, "Select an immutable project file version for a restricted native run; repeat up to 16 times")
 	runCmd.Flags().Bool("estimate", false, "Print token count + cost estimate for the prompt and exit (no run)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")

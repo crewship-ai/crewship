@@ -11,8 +11,128 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
+
+func preappendIterationFixture(t *testing.T) (*artifactPrincipalFixture, *chataudience.Receipt, documents.IterationIntent) {
+	t.Helper()
+	f, _, _, created := newDocumentDraftFixture(t, true)
+	chat := "iteration-preappend"
+	mustExec(t, f.rig.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, chat, f.a.WorkspaceID, f.a.AgentID, f.a.HumanUserID)
+	receipt, err := chataudience.CaptureTrusted(t.Context(), f.rig.db, chat, f.a.HumanUserID, nil)
+	if err != nil || receipt == nil {
+		t.Fatalf("capture preappend human: %v", err)
+	}
+	return f, receipt, documents.IterationIntent{SubmissionID: "preappend-message", PageID: created.PageID, Schema: 3}
+}
+
+func TestDocumentIterationPreappendSealsBeforeReturningPrivateContext(t *testing.T) {
+	f, receipt, intent := preappendIterationFixture(t)
+	page, err := f.pages.AuthorizeDocumentIteration(t.Context(), receipt, intent)
+	if err != nil {
+		t.Fatalf("current author cannot admit targeted message before append: %v", err)
+	}
+	var author, slug, name string
+	if err := f.rig.db.QueryRow(`SELECT private_artifact_author_user_id FROM chats WHERE id=?`, receipt.ChatID).Scan(&author); err != nil || author != receipt.UserID {
+		t.Fatalf("private context returned before durable audience seal: author=%q err=%v", author, err)
+	}
+	if err := f.rig.db.QueryRow(`SELECT slug,name FROM pages WHERE id=?`, intent.PageID).Scan(&slug, &name); err != nil {
+		t.Fatal(err)
+	}
+	if page.PageID != intent.PageID || page.WorkspaceID != receipt.WorkspaceID || page.Name != name || page.Slug != slug || page.SnapshotAt == "" {
+		t.Fatalf("context does not describe the original target: %+v", page)
+	}
+	var messages int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM conversation_messages WHERE session_id=?`, receipt.ChatID).Scan(&messages); err != nil || messages != 0 {
+		t.Fatalf("preappend admission required or wrote a message: count=%d err=%v", messages, err)
+	}
+	if again, err := f.pages.AuthorizeDocumentIteration(t.Context(), receipt, intent); err != nil || again.PageID != page.PageID {
+		t.Fatalf("identical preappend check failed: context=%+v err=%v", again, err)
+	}
+}
+
+func TestDocumentIterationPreappendSealFailureReturnsNoPrivateContext(t *testing.T) {
+	f, receipt, intent := preappendIterationFixture(t)
+	mustExec(t, f.rig.db, `CREATE TRIGGER refuse_iteration_seal BEFORE UPDATE OF private_artifact_author_user_id ON chats WHEN NEW.id='iteration-preappend' BEGIN SELECT RAISE(ABORT,'seal unavailable'); END`)
+	page, err := f.pages.AuthorizeDocumentIteration(t.Context(), receipt, intent)
+	if err == nil || page != (chatbridge.PageChatContext{}) {
+		t.Fatalf("failed seal exposed context: %+v err=%v", page, err)
+	}
+}
+
+func TestDocumentIterationPreappendRejectsChangedLiveAuthority(t *testing.T) {
+	for _, scenario := range []string{"missing receipt", "different receipt", "member revision", "chat generation", "chat author", "shared chat", "retired agent", "policy", "owner", "audience", "folder", "schema", "revision", "generation", "foreign Page", "internal caller"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, receipt, intent := preappendIterationFixture(t)
+			ctx := t.Context()
+			switch scenario {
+			case "missing receipt":
+				receipt = nil
+			case "different receipt":
+				copy := *receipt
+				copy.WorkspaceID = "foreign-workspace"
+				receipt = &copy
+			case "member revision":
+				mustExec(t, f.rig.db, `UPDATE workspace_members SET access_revision=access_revision+1 WHERE id=?`, receipt.MemberID)
+			case "chat generation":
+				mustExec(t, f.rig.db, `UPDATE chats SET authority_generation='replacement' WHERE id=?`, receipt.ChatID)
+			case "chat author":
+				mustExec(t, f.rig.db, `UPDATE chats SET created_by=? WHERE id=?`, f.rig.adminID, receipt.ChatID)
+			case "shared chat":
+				mustExec(t, f.rig.db, `UPDATE chats SET visibility='workspace' WHERE id=?`, receipt.ChatID)
+			case "retired agent":
+				mustExec(t, f.rig.db, `UPDATE agents SET expired_at='2026-10-19T00:00:00Z' WHERE id=?`, receipt.AgentID)
+			case "policy":
+				mustExec(t, f.rig.db, `UPDATE workspace_artifact_creation_policy SET enabled=0 WHERE workspace_id=?`, receipt.WorkspaceID)
+			case "owner":
+				mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id=?`, f.rig.adminID, intent.PageID)
+			case "audience":
+				mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
+			case "folder":
+				mustExec(t, f.rig.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('iteration-folder',?,'iteration-folder','Shared',?,'2026-10-19','2026-10-19')`, receipt.WorkspaceID, f.a.CrewID)
+				mustExec(t, f.rig.db, `UPDATE pages SET folder_id='iteration-folder' WHERE id=?`, intent.PageID)
+			case "schema":
+				intent.Schema = 2
+			case "revision":
+				intent.Rev++
+			case "generation":
+				intent.Generation++
+			case "foreign Page":
+				intent.PageID = "foreign-page"
+			case "internal caller":
+				ctx = context.WithValue(ctx, ctxInternalTokenWS, f.a.WorkspaceID)
+			}
+			page, err := f.pages.AuthorizeDocumentIteration(ctx, receipt, intent)
+			if err == nil || page != (chatbridge.PageChatContext{}) {
+				t.Fatalf("changed authority exposed target: %+v err=%v", page, err)
+			}
+			if scenario == "audience" && !errors.Is(err, errDocumentIterationProposalUnavailable) {
+				t.Fatalf("shared target did not refuse proposal-only delivery: %v", err)
+			}
+			var sealed bool
+			if err := f.rig.db.QueryRow(`SELECT private_artifact_author_user_id IS NOT NULL FROM chats WHERE id='iteration-preappend'`).Scan(&sealed); err != nil || sealed {
+				t.Fatalf("refused admission left a seal: sealed=%t err=%v", sealed, err)
+			}
+		})
+	}
+}
+
+func TestDocumentIterationPreappendFinalLiveCheckRollsBackSeal(t *testing.T) {
+	f, receipt, intent := preappendIterationFixture(t)
+	mustExec(t, f.rig.db, `CREATE TRIGGER change_iteration_policy AFTER UPDATE OF private_artifact_author_user_id ON chats WHEN NEW.id='iteration-preappend' BEGIN UPDATE workspace_artifact_creation_policy SET enabled=0 WHERE workspace_id=NEW.workspace_id; END`)
+	page, err := f.pages.AuthorizeDocumentIteration(t.Context(), receipt, intent)
+	if err == nil || page != (chatbridge.PageChatContext{}) {
+		t.Fatalf("authority changed during sealing but context escaped: %+v err=%v", page, err)
+	}
+	var sealed, enabled bool
+	if err := f.rig.db.QueryRow(`SELECT private_artifact_author_user_id IS NOT NULL FROM chats WHERE id=?`, receipt.ChatID).Scan(&sealed); err != nil || sealed {
+		t.Fatalf("failed final check committed seal: %t %v", sealed, err)
+	}
+	if err := f.rig.db.QueryRow(`SELECT enabled FROM workspace_artifact_creation_policy WHERE workspace_id=?`, receipt.WorkspaceID).Scan(&enabled); err != nil || !enabled {
+		t.Fatalf("failed final check did not roll back transaction: %t %v", enabled, err)
+	}
+}
 
 func iterationFixture(t *testing.T) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
 	t.Helper()

@@ -104,9 +104,18 @@ func (c *WSClient) Subscribe(channel string) error {
 // loop for this run — the CLI surface of the `--max-turns` flag. Kept variadic
 // so existing callers stay source-compatible.
 func (c *WSClient) SendMessage(channel, chatID, content string, maxTurns ...int) error {
+	return c.SendMessageWithMetadata(channel, chatID, content, nil, maxTurns...)
+}
+
+// SendMessageWithMetadata adds an explicitly selected per-message envelope.
+// Callers validate its domain shape before sending; nil preserves the old wire.
+func (c *WSClient) SendMessageWithMetadata(channel, chatID, content string, metadata map[string]any, maxTurns ...int) error {
 	payload := map[string]any{
 		"session_id": chatID,
 		"content":    content,
+	}
+	if metadata != nil {
+		payload["metadata"] = metadata
 	}
 	if len(maxTurns) > 0 && maxTurns[0] > 0 {
 		payload["max_turns"] = maxTurns[0]

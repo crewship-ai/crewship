@@ -3,36 +3,85 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 var errDocumentIterationProposalUnavailable = errors.New("shared Document changes require proposals; proposal delivery is unavailable")
 
-func decodeDocumentIterationIntent(raw []byte) (documents.IterationIntent, error) {
-	var intent documents.IterationIntent
-	if len(raw) > 1024 {
-		return intent, errors.New("bounded Document target intent required")
+// AuthorizeDocumentIteration seals the original human's private chat before
+// returning any target context to the trusted preappend send boundary.
+func (h *PageHandler) AuthorizeDocumentIteration(ctx context.Context, receipt *chataudience.Receipt, intent documents.IterationIntent) (chatbridge.PageChatContext, error) {
+	var empty chatbridge.PageChatContext
+	if receipt == nil || intent.Validate() != nil || InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return empty, errDocumentAccess
 	}
-	fields, err := documentDraftObject(raw)
-	if err != nil || len(fields) != 5 {
-		return intent, errors.New("closed Document target intent required")
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return empty, err
 	}
-	for _, name := range []string{"submission_id", "page_id", "schema", "rev", "generation"} {
-		if fields[name] == nil {
-			return intent, errors.New("original Document target field missing")
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
+		return empty, err
+	}
+	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
+	check := func() (int64, error) {
+		current, err := chataudience.CaptureTrustedQuery(ctx, tx, receipt.ChatID, receipt.UserID, receipt)
+		if err != nil || current == nil || *current != *receipt {
+			return 0, errDocumentAccess
 		}
+		var crew string
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(a.crew_id,'') FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL AND a.expired_at IS NULL WHERE c.id=? AND c.workspace_id=? AND c.agent_id=? AND c.created_by=? AND c.visibility='private'`, receipt.ChatID, receipt.WorkspaceID, receipt.AgentID, receipt.UserID).Scan(&crew)
+		if err != nil || !h.artifactAgentPolicyAllows(ctx, receipt.WorkspaceID, crew) {
+			return 0, errDocumentAccess
+		}
+		_, version, err := h.documentIterationPage(ctx, receipt.WorkspaceID, receipt.UserID, intent)
+		return version, err
 	}
-	if err = json.Unmarshal(raw, &intent); err != nil {
-		return intent, err
+	version, err := check()
+	if err != nil {
+		return empty, err
 	}
-	return intent, intent.Validate()
+	if err = sealDocumentIterationChat(ctx, tx, receipt); err != nil {
+		return empty, err
+	}
+	// Recheck after the seal too; no target metadata may escape a rejected tx.
+	if final, err := check(); err != nil {
+		return empty, err
+	} else if final != version {
+		return empty, errDocumentAccess
+	}
+	page := chatbridge.PageChatContext{WorkspaceID: receipt.WorkspaceID, PageID: intent.PageID}
+	if err = tx.QueryRowContext(ctx, `SELECT slug,name FROM pages WHERE workspace_id=? AND id=?`, receipt.WorkspaceID, intent.PageID).Scan(&page.Slug, &page.Name); err != nil {
+		return empty, err
+	}
+	if err = tx.Commit(); err != nil {
+		return empty, err
+	}
+	page.SnapshotAt = time.Now().UTC().Format(time.RFC3339)
+	return page, nil
+}
+
+func decodeDocumentIterationIntent(raw []byte) (documents.IterationIntent, error) {
+	return documents.DecodeIterationIntent(raw)
+}
+
+func sealDocumentIterationChat(ctx context.Context, tx *sql.Tx, receipt *chataudience.Receipt) error {
+	sealed, err := tx.ExecContext(ctx, `UPDATE chats SET private_artifact_author_user_id=? WHERE id=? AND workspace_id=? AND agent_id=? AND created_by=? AND visibility='private' AND (private_artifact_author_user_id IS NULL OR private_artifact_author_user_id=?)`, receipt.UserID, receipt.ChatID, receipt.WorkspaceID, receipt.AgentID, receipt.UserID, receipt.UserID)
+	if err != nil {
+		return err
+	}
+	count, err := sealed.RowsAffected()
+	if err != nil || count != 1 {
+		return errDocumentAccess
+	}
+	return nil
 }
 
 // Only personal, human-owned private Documents have DIRECT in this delivery.
@@ -115,13 +164,8 @@ func (h *PageHandler) persistDocumentIterationIntent(r *http.Request, receipt *c
 	}
 	// Seal copied prompt/results before any run can read this private Page.
 	// The existing retained marker also protects diagnostics after this grant ends.
-	sealed, err := tx.ExecContext(ctx, `UPDATE chats SET private_artifact_author_user_id=? WHERE id=? AND workspace_id=? AND created_by=? AND visibility='private' AND (private_artifact_author_user_id IS NULL OR private_artifact_author_user_id=?)`, receipt.UserID, receipt.ChatID, receipt.WorkspaceID, receipt.UserID, receipt.UserID)
-	if err != nil {
+	if err = sealDocumentIterationChat(ctx, tx, receipt); err != nil {
 		return err
-	}
-	count, err := sealed.RowsAffected()
-	if err != nil || count != 1 {
-		return errDocumentAccess
 	}
 	var policy int64
 	if err = tx.QueryRowContext(ctx, `SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1`, receipt.WorkspaceID).Scan(&policy); err != nil {

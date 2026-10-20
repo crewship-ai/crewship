@@ -550,15 +550,38 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
 		triggerMessageID = msgOpt.OriginalTriggerMessageID
 	}
-	documentCreation, err := documentCreationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content, hasPage, triggerMessageID)
+	originalHumanContent := content
+	documentIteration, err := documentIterationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content)
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
+		return err
+	}
+	documentCreation, err := documentCreationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content, hasPage || documentIteration != nil, triggerMessageID)
 	if err != nil {
 		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
 		return err
 	}
 	msgOpt.OriginalTriggerMessageID = triggerMessageID
 	msgOpt.DocumentCreationIntent = documentCreation
+	msgOpt.DocumentIterationIntent = documentIteration
 	var pageContext *PageChatContext
-	if hasPage {
+	var iterationResolver DocumentIterationResolver
+	if documentIteration != nil {
+		var ok bool
+		iterationResolver, ok = b.pageContextResolver.(DocumentIterationResolver)
+		if !ok {
+			return ErrPageChatAccess
+		}
+		page, err := iterationResolver.AuthorizeDocumentIteration(ctx, info.HumanAuthority, *documentIteration)
+		if err != nil {
+			streamFn(ws.ChatEvent{Type: "error", Content: "The selected Document is unavailable for this update"})
+			return fmt.Errorf("authorize Document iteration: %w", err)
+		}
+		if hasPage && pageSlug != page.Slug && pageSlug != "@"+page.PageID {
+			return ErrPageChatAccess
+		}
+		pageContext = &page
+	} else if hasPage {
 		if b.pageContextResolver == nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "Page context is unavailable"})
 			return ErrPageChatAccess
@@ -569,7 +592,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			return fmt.Errorf("resolve Page chat context: %w", err)
 		}
 		pageContext = &page
-		block := pageContextBlock(page)
+	}
+	if pageContext != nil {
+		block := pageContextBlock(*pageContext)
 		if len(content)+len(block) > 64*1024 {
 			streamFn(ws.ChatEvent{Type: "error", Content: "Message with Page context is too long"})
 			return fmt.Errorf("Page chat message exceeds 64 KiB limit")
@@ -630,6 +655,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
 	}
 
+	if documentIteration != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)[documents.IterationMetadataKey] = documentIteration
+	}
+
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
@@ -649,7 +681,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
-		return b.convStore.SyncSession(ctx, chatID)
+		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
+			return err
+		}
+		if documentIteration != nil {
+			if err := iterationResolver.PersistDocumentIteration(ctx, info.HumanAuthority, triggerMessageID, *documentIteration); err != nil {
+				return fmt.Errorf("%w: %v", ErrDocumentIterationConsentUnconfirmed, err)
+			}
+		}
+		return nil
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
@@ -828,10 +868,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// is happening, and it's only reachable if the job vanished between
 		// the enqueue call above and here.
 		if b.provisioning != nil {
+			pendingContent := content
+			if documentIteration != nil {
+				// Resume reauthorizes and derives one fresh context block; never
+				// enqueue an already augmented copy of the original instruction.
+				pendingContent = originalHumanContent
+			}
 			if !b.provisioning.AttachPendingMessage(info.CrewID, PendingChatMessage{
 				UserID:  userID,
 				ChatID:  chatID,
-				Content: content,
+				Content: pendingContent,
 				Opts:    msgOpt,
 			}) {
 				b.logger.Warn("could not attach deferred message to provisioning job",
@@ -916,6 +962,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
+		if errors.Is(err, ErrDocumentIterationConsentUnconfirmed) {
+			streamFn(ws.ChatEvent{Type: "error", Content: ErrDocumentIterationConsentUnconfirmed.Error()})
+			return err
+		}
 		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
 			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
 			return err
@@ -1200,6 +1250,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if documentCreation != nil {
 		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
 	}
+	if documentIteration != nil {
+		req.UserMessage = documentIterationRunPrompt(content, documentIteration)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1210,6 +1263,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if documentCreation != nil {
 		runMeta["document_creation_intent"] = documentCreation
+	}
+	if documentIteration != nil {
+		runMeta[documents.IterationMetadataKey] = documentIteration
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
