@@ -84,11 +84,10 @@ it("tab B sees tab A's unconfirmed batch as recovery only after tab A closes", a
     a.unmount()
     vi.setSystemTime(Date.now() + 6000)
     await waitFor(() => expect(b.result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
-    expect(b.result.current.canDiscardRecovered).toBe(true)
   } finally { b.unmount(); server.destroy() }
 })
 
-it("offers no Discard for recovered rows when no lock could be taken", async () => {
+it("without a lock the page stays editable in memory; earlier rows are download-only until an explicit discard", async () => {
   vi.stubGlobal("navigator", {})
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
@@ -99,10 +98,17 @@ it("offers no Discard for recovered rows when no lock could be taken", async () 
   a.unmount()
   const b = renderHook(() => usePageDocument("w", "slug", "page"), { wrapper: Fragment })
   try {
-    await waitFor(() => expect(b.result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
-    expect(b.result.current.canDiscardRecovered).toBe(false)
-    await act(async () => { await b.result.current.discardRecoveredDrafts() })
-    expect(b.result.current.recoveredDrafts).toHaveLength(1)
+    await waitFor(() => expect(b.result.current.unverifiedDrafts).toHaveLength(1), { timeout: 4000 })
+    expect(b.result.current.editable).toBe(true)
+    expect(b.result.current.recovery).toBe(false)
+    expect(b.result.current.recoveredDrafts).toHaveLength(0)
+    expect(b.result.current.storageUnavailable).toBe(true)
     expect(rows.size).toBe(1)
+    act(() => text(b.result.current.doc).insert(4, " b"))
+    await waitFor(() => expect(b.result.current.durability).toBe("unsaved"))
+    expect(rows.size).toBe(1) // nothing of this mount is written next to rows of unknown owner
+    await act(async () => { await b.result.current.discardUnverifiedDrafts() })
+    expect(b.result.current.unverifiedDrafts).toHaveLength(0)
+    expect(rows.size).toBe(0)
   } finally { b.unmount(); server.destroy() }
 })

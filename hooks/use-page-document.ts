@@ -55,19 +55,22 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   // read still works, edits are held in memory only and reported as unsaved.
   const [storageOff, setStorageOff] = useState(false)
   const [storageBusy, setStorageBusy] = useState(false)
-  const [canDiscard, setCanDiscard] = useState(true)
+  // Rows found in a journal this tab could not lock: owner unknown, so download-only until explicitly discarded.
+  const [unverified, setUnverified] = useState<DocumentDraft[]>([])
   const [journalWrites, setJournalWrites] = useState(0)
   const [journalFailed, setJournalFailed] = useState(false)
   const [recoveredDrafts, setRecoveredDrafts] = useState<DocumentDraft[]>([])
   const discardRecovery = useRef<() => Promise<void>>(async () => {})
   const discardRecoveredDrafts = useCallback(() => discardRecovery.current(), [])
+  const discardUnverified = useRef<() => Promise<void>>(async () => {})
+  const discardUnverifiedDrafts = useCallback(() => discardUnverified.current(), [])
   const authorizationLost=useRef(false)
-  const deny=useCallback(()=>{authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
+  const deny=useCallback(()=>{authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
-    setStorageReady(false); setStorageOff(false); setStorageBusy(false); setCanDiscard(true); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
-    discardRecovery.current = async () => {}
+    setStorageReady(false); setStorageOff(false); setStorageBusy(false); setUnverified([]); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
+    discardRecovery.current = async () => {}; discardUnverified.current = async () => {}
     authorizationLost.current=false
     setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
     if (!human) return () => { doc.destroy() }
@@ -152,7 +155,19 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         try { rows = await opened.load() } catch (cause) { opened.close(); throw cause }
         // Access may have been revoked while the store was opening.
         if (!active || authorizationLost.current) { opened.close(); return }
-        storage = opened; restored = rows
+        storage = opened
+        if (!opened.exclusive && rows.length) {
+          // Rows may belong to a live tab: keep them for download, keep editing in memory.
+          discardUnverified.current = async () => {
+            if (!active || authorizationLost.current) return
+            await flushing?.catch(() => {})
+            for (const draft of rows) await opened.remove(draft.id)
+            if (active) setUnverified([])
+          }
+          setUnverified(rows); restored = []; durableOff = true; setStorageOff(true); setStorageBusy(false)
+          return
+        }
+        restored = rows
         if (durableOff) {
           durableOff = false; setStorageOff(false); setStorageBusy(false)
           // Edits made while storage was away join the journal next to any held draft.
@@ -188,7 +203,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           setRecoveredDrafts(drafts);setPending(total())
           discardRecovery.current = async () => {
             // Without the Page's lock these rows may belong to a live tab: never delete them.
-            if (!active || authorizationLost.current || !storage?.exclusive) return
+            if (!active || authorizationLost.current || !storage) return
             await flushing?.catch(() => {})
             for (const draft of drafts) { dirty.delete(draft.id); await storage.remove(draft.id) }
             if (!active) return
@@ -198,7 +213,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
             if (!blockedOther) { setRecovery(false);setStorageReady(true) }
             void poll()
           }
-          blocked = true;setRecovery(true);setCanDiscard(Boolean(storage?.exclusive));setStatus("Unsaved document draft found · recover before reopening")
+          blocked = true;setRecovery(true);setStatus("Unsaved document draft found · recover before reopening")
           return
         }
         if (!durableOff) setStorageReady(true)
@@ -270,5 +285,5 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   let durability: DocumentDurability = "confirmed"
   if (recoveredDrafts.length) durability = "held"
   else if (pending > 0) durability = journalFailed || !storageReady ? (journalWrites > 0 && !journalFailed ? "writing" : "unsaved") : journalWrites > 0 ? "writing" : "local"
-  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, canDiscardRecovered: current && canDiscard, storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
+  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, unverifiedDrafts: current ? unverified : [], discardUnverifiedDrafts, storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
 }
