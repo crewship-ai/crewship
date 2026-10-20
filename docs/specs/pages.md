@@ -296,7 +296,7 @@ human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
 reads return 404 and catalogs omit the name and entry. OWNER opening another
 human's private output writes a content-free audit before metadata or content is
 released; unavailable audit storage refuses that access. Ordinary grants,
-folders and legacy public links cannot silently publish a private artifact.
+folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.
@@ -420,7 +420,7 @@ one fact and reanchors its issuer. Revoking every level records each removed row
 including grants whose subject has departed; a missing grant remains 404 without
 a change event. When a reference matches both a resolved subject and a departed
 stored ID, revoke checks and removes every matching stored row, preserves other
-subjects and unselected levels, and records each removal in the same transaction.
+subjects and unselected levels, and records each removal in the same transaction. References matching multiple live subjects return 400 without mutation; PUT also verifies that every other subject grant remains unchanged before commit.
 Loss of issuer authority at the final commit check returns 403 and rolls back
 the grant and audit; operational database errors remain 500. Folder ACL mutations and broader permission-audit coverage are
 separate work.

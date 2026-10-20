@@ -68,7 +68,7 @@ describe("messagesToTurns with structured parts", () => {
       },
     ])
     expect(turns[0].parts.map((p) => p.type)).toEqual(["thinking", "text"])
-    expect(turns[0].parts[0].content).toBe("let me think")
+    expect(turns[0].parts[0].content).toBe("")
   })
 
   it("falls back to a single text part for legacy messages without parts", () => {

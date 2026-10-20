@@ -378,6 +378,7 @@ export function ChatComposer({
     hasPendingUploads(sessionAttachments)
   const submitDisabled = !isStreaming && (!hasContent || !canSend)
   const creationControl = canCreateDocument ? (
+    <>
     <Button
       type="button"
       variant={createDocument ? "secondary" : "ghost"}
@@ -395,6 +396,8 @@ export function ChatComposer({
       <FilePlus2 className="size-4" aria-hidden="true" />
       Create document
     </Button>
+    {createDocument && <span role="status" className="text-xs text-muted-foreground">My space · You and workspace OWNER (audited access)</span>}
+    </>
   ) : null
 
   if (variant === "mobile") {

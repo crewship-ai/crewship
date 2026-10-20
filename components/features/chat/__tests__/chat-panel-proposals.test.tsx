@@ -11,7 +11,7 @@ const chat = vi.hoisted(() => ({
   turns: [{ id: "trigger-message", role: "user", parts: [{ type: "text", content: "Plan the work" }], timestamp: new Date(), isStreaming: false },
     { id: "reply", role: "assistant", runId: "entity-run", parts: [{ type: "text", content: "A proposal" }], timestamp: new Date(), isStreaming: false }],
   sendMessage: vi.fn(), stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(),
-  loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected",
+  loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected",
 }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chat }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "viewer" } } }), useSession: () => ({ data: { user: { id: "viewer" } } }) }))

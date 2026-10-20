@@ -251,7 +251,7 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 
-	before, err := readPageGrantSubject(r.Context(), tx, rec.ID, req.SubjectType, subjectID)
+	before, err := readPageGrantSubject(r.Context(), tx, rec.ID, "", "")
 	if err != nil {
 		replyInternalError(w, h.logger, "read previous page grant", err)
 		return
@@ -276,7 +276,7 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	var previous *pageGrantSnapshot
 	expected := append([]pageGrantSnapshot{}, before...)
 	for i := range expected {
-		if expected[i].Level == req.Level {
+		if expected[i].SubjectType == req.SubjectType && expected[i].SubjectID == subjectID && expected[i].Level == req.Level {
 			old := expected[i]
 			previous = &old
 			expected = append(expected[:i], expected[i+1:]...)
@@ -285,7 +285,7 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	expected = append(expected, after)
 	entry := pageGrantChangeEntry(journal.EntryPageGrantAdded, wsID, user, rec, req.SubjectType, subjectID, subjectRef, req.Level, panels)
-	if err := h.commitPageGrantMutation(r.Context(), tx, rec, user.ID, req.SubjectType, subjectID, expected, []pageGrantChange{{entry, previous, &after}}); err != nil {
+	if err := h.commitPageGrantMutation(r.Context(), tx, rec, user.ID, "", "", expected, []pageGrantChange{{entry, previous, &after}}); err != nil {
 		if errors.Is(err, errPageGrantIssuerNotCurrent) {
 			replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
 		} else {
@@ -386,6 +386,9 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(resolveErr, sql.ErrNoRows):
 		subjectID, subjectRef = "", subject
+	case errors.Is(resolveErr, errPageGrantSubjectAmbiguous):
+		replyError(w, http.StatusBadRequest, errPageGrantSubjectAmbiguous.Error())
+		return
 	case resolveErr != nil:
 		replyInternalError(w, h.logger, "resolve grant subject for revoke", resolveErr)
 		return
@@ -514,6 +517,9 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 // (pages_grants_authz.go) — the same standing, asked twice, once when the
 // grant is written and once every time it is read.
 func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
+	if rec.PrivateAudience {
+		return privatePageViewer(rec, &pageViewer{UserID: userID, Role: role})
+	}
 	if canRole(role, "manage") {
 		return true
 	}
@@ -539,6 +545,8 @@ func (h *PageHandler) pagePanelIDs(ctx context.Context, wsID string, rec *pageRe
 	return out, rows.Err()
 }
 
+var errPageGrantSubjectAmbiguous = errors.New("grant subject reference matches more than one live subject; use an unambiguous ID or reference")
+
 // resolveGrantSubject turns a typed reference into a stored id and the label
 // to show it under.
 //
@@ -552,6 +560,7 @@ func (h *PageHandler) pagePanelIDs(ctx context.Context, wsID string, rec *pageRe
 // believes worked.
 func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request, wsID, subjectType, ref string) (id, label string, ok bool) {
 	var err error
+	var matches int
 	switch subjectType {
 	case pageSubjectWorkspace:
 		// Everyone in this workspace: no row to resolve, an empty id by
@@ -559,10 +568,10 @@ func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request
 		return "", pageSubjectWorkspace, true
 	case pageSubjectUser:
 		err = h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `
-			SELECT u.id, u.email
+			SELECT u.id, u.email, COUNT(*) OVER ()
 			FROM users u
 			JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
-			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label)
+			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label, &matches)
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusBadRequest, fmt.Sprintf(
 				"no member of this workspace matches user %q", ref))
@@ -570,8 +579,8 @@ func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request
 		}
 	case pageSubjectCrew:
 		err = h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `
-			SELECT id, slug FROM crews
-			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+			SELECT id, slug, COUNT(*) OVER () FROM crews
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label, &matches)
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusBadRequest, fmt.Sprintf(
 				"crew/%s does not exist in this workspace", ref))
@@ -579,8 +588,8 @@ func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request
 		}
 	case pageSubjectAgent:
 		err = h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `
-			SELECT id, slug FROM agents
-			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+			SELECT id, slug, COUNT(*) OVER () FROM agents
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label, &matches)
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusBadRequest, fmt.Sprintf(
 				"agent/%s does not exist in this workspace", ref))
@@ -588,6 +597,10 @@ func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request
 		}
 	default:
 		replyError(w, http.StatusBadRequest, `subject_type must be "user", "crew", "agent" or "workspace"`)
+		return "", "", false
+	}
+	if err == nil && matches != 1 {
+		replyError(w, http.StatusBadRequest, errPageGrantSubjectAmbiguous.Error())
 		return "", "", false
 	}
 	if err != nil {
@@ -690,6 +703,7 @@ func pageGrantChangeEntry(entryType journal.EntryType,
 // unresolvable subject means. Issuing a grant needs the refusal;
 // revoking one needs the fallback.
 func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subjectType, ref string) (id, label string, err error) {
+	var matches int
 	switch subjectType {
 	case pageSubjectWorkspace:
 		return "", pageSubjectWorkspace, nil
@@ -699,17 +713,17 @@ func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subj
 		// could not be revoked with that same string — the asymmetry between
 		// issue and revoke being the very failure this function exists to end.
 		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
-			SELECT u.id, u.email FROM users u
+			SELECT u.id, u.email, COUNT(*) OVER () FROM users u
 			JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
-			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label)
+			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label, &matches)
 	case pageSubjectCrew:
 		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
-			SELECT id, slug FROM crews
-			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+			SELECT id, slug, COUNT(*) OVER () FROM crews
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label, &matches)
 	case pageSubjectAgent:
 		err = h.pageAuthReader(ctx).QueryRowContext(ctx, `
-			SELECT id, slug FROM agents
-			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+			SELECT id, slug, COUNT(*) OVER () FROM agents
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label, &matches)
 	default:
 		return "", "", sql.ErrNoRows
 	}
@@ -718,6 +732,9 @@ func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subj
 	// Any OTHER error is a failure to look, not an answer: collapsing the two
 	// turns a transient database fault into a confident 404 telling an owner
 	// they hold no grant for somebody they can see in the list.
+	if err == nil && matches != 1 {
+		return "", "", errPageGrantSubjectAmbiguous
+	}
 	return id, label, err
 }
 

@@ -4,11 +4,19 @@ import type { PageView } from "@/hooks/use-pages"
 import { Button } from "@/components/ui/button"
 
 /** Page metadata only: this catalog never guesses a Document revision or author. */
-export function DocumentCatalog({pages,onSelect}:{pages:PageView[];onSelect:(slug:string)=>void}) {
-  const documents = pages.filter(page=>page.hasDocument === true)
+export function DocumentCatalog({ pages, onSelect, immutableTargets = false }: {
+  pages: PageView[]
+  onSelect: (reference: string) => void
+  immutableTargets?: boolean
+}) {
+  const documents = pages.filter(page => page.hasDocument === true)
   if (!documents.length) return null
   return <section aria-label="Documents" className="space-y-3 border-b p-6">
     <h2 className="text-lg font-semibold">Documents</h2>
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{documents.map(page=><Button key={page.id} variant="outline" className="h-auto min-h-24 items-start justify-start whitespace-normal p-4 text-left" onClick={()=>onSelect(page.slug)}><span><span className="block font-medium">{page.name}</span>{page.description && <span className="mt-1 block text-sm font-normal text-muted-foreground">{page.description}</span>}<span className="mt-2 block text-xs font-normal text-muted-foreground">Doc</span></span></Button>)}</div>
+    {immutableTargets && documents.some(page => !page.immutablePageId) && <p role="status" className="text-sm text-muted-foreground">A Document is unavailable. Refresh the list and try again.</p>}
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{documents.map(page => {
+      const target = immutableTargets ? (page.immutablePageId ? `@${page.immutablePageId}` : undefined) : page.slug
+      return <Button key={page.id} variant="outline" className="h-auto min-h-24 items-start justify-start whitespace-normal p-4 text-left" disabled={!target} onClick={() => { if (target) onSelect(target) }}><span><span className="block font-medium">{page.name}</span>{page.description && <span className="mt-1 block text-sm font-normal text-muted-foreground">{page.description}</span>}<span className="mt-2 block text-xs font-normal text-muted-foreground">Doc</span></span></Button>
+    })}</div>
   </section>
 }

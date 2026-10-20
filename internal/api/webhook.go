@@ -1019,6 +1019,8 @@ func (h *WebhookHandler) runWebhookAgent(
 		}
 
 		startedAt := time.Now()
+		var capturedCompletedAt string
+		req.CapturedExit = func(at string) { capturedCompletedAt = at }
 		// Guard against running while a backup holds the workspace
 		// lock — otherwise this run's state would be written behind
 		// the in-flight dump and miss from the bundle.
@@ -1107,7 +1109,7 @@ func (h *WebhookHandler) runWebhookAgent(
 				if detached {
 					exitCodePtr = nil
 				}
-				if storeErr := recorder.RecordResult(settleCtx, work.RunResult{ExitCode: exitCodePtr, ErrorMessage: errMsg, Metadata: completedMeta}); storeErr != nil {
+				if storeErr := recorder.RecordResult(settleCtx, work.RunResult{ExitCode: exitCodePtr, ErrorMessage: errMsg, Metadata: completedMeta, CompletedAt: capturedCompletedAt}); storeErr != nil {
 					return fmt.Errorf("webhook: preserve result for settlement: %w: %w", work.ErrRunResultUnstored, storeErr)
 				}
 				return err
@@ -1116,7 +1118,15 @@ func (h *WebhookHandler) runWebhookAgent(
 		if detached {
 			return err
 		}
-		if updateErr := h.resolver.UpdateRun(settleCtx, runID, status, exitCodePtr, errMsg, completedMeta); updateErr != nil {
+		var updateErr error
+		if capturedCompletedAt == "" {
+			updateErr = h.resolver.UpdateRun(settleCtx, runID, status, exitCodePtr, errMsg, completedMeta)
+		} else if updater, ok := h.resolver.(chatbridge.CompletionTimeUpdater); ok {
+			updateErr = updater.UpdateRunWithCompletion(settleCtx, runID, status, exitCodePtr, errMsg, completedMeta, capturedCompletedAt)
+		} else {
+			updateErr = errors.New("resolver cannot retain captured completion time")
+		}
+		if updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}
 		return err

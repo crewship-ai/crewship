@@ -44,7 +44,13 @@ busy keys are never evicted. Idle reads therefore do not impose a lifetime
 Idle keys unload after 30 seconds. Every operation reloads the Go snapshot and
 update log into an isolated Y.Doc, validates it and destroys it afterward.
 Bodies are capped at 2 MiB, authority replies at 4 MiB; each authority call has
-a 10-second timeout. No content, bearer or service secret is logged.
+a 10-second total deadline covering connection, headers and response body.
+Continuous response bytes do not extend it; expiry aborts the owned request,
+and completion or failure clears the timer. A timeout does not establish whether
+a mutation committed: retry the original request unchanged so Go can verify its
+retained receipt. This bounds blocked authority calls in the document scheduler
+(T-OPS-01); it is not a live worker-replacement acceptance result (T-OPS-03).
+No content, bearer or service secret is logged.
 
 The Go listener checks socket inode custody during cleanup. Node removes its
 configured socket path when it closes, so do not replace or unlink that path
