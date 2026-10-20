@@ -1,20 +1,35 @@
 import { cleanup, render } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
-import { MESSAGE_ANCHOR_EVENT, MessageAnchorRelease } from "../message-anchor-release"
+import { MESSAGE_ANCHOR_EVENT } from "@/hooks/use-message-anchor"
+import { MessageAnchorRelease } from "../message-anchor-release"
 
-const stopScroll = vi.hoisted(() => vi.fn())
-vi.mock("use-stick-to-bottom", () => ({ useStickToBottomContext: () => ({ stopScroll }) }))
-afterEach(() => { cleanup(); stopScroll.mockReset() })
+const ctx = vi.hoisted(() => ({ stopScroll: vi.fn(), scrollToBottom: vi.fn() }))
+vi.mock("use-stick-to-bottom", () => ({ useStickToBottomContext: () => ctx }))
+afterEach(() => { cleanup(); ctx.stopScroll.mockReset(); ctx.scrollToBottom.mockReset() })
 
-it("lets go of the stick-to-bottom lock (and its running scroll) when a message is revealed", () => {
-  render(<MessageAnchorRelease />)
-  window.dispatchEvent(new Event(MESSAGE_ANCHOR_EVENT))
-  expect(stopScroll).toHaveBeenCalledTimes(1)
+const anchor = (sessionId: string) => window.dispatchEvent(new CustomEvent(MESSAGE_ANCHOR_EVENT, { detail: { sessionId } }))
+
+it("lets go of the stick-to-bottom lock when a message of this session is revealed", () => {
+  render(<MessageAnchorRelease sessionId="s1" sendNonce={0} />)
+  anchor("s1")
+  expect(ctx.stopScroll).toHaveBeenCalledTimes(1)
 })
 
-it("stops listening when unmounted", () => {
-  const { unmount } = render(<MessageAnchorRelease />)
+it("ignores an anchor for another session and stops listening when unmounted", () => {
+  const { unmount } = render(<MessageAnchorRelease sessionId="s1" sendNonce={0} />)
+  anchor("other")
+  expect(ctx.stopScroll).not.toHaveBeenCalled()
   unmount()
-  window.dispatchEvent(new Event(MESSAGE_ANCHOR_EVENT))
-  expect(stopScroll).not.toHaveBeenCalled()
+  anchor("s1")
+  expect(ctx.stopScroll).not.toHaveBeenCalled()
+})
+
+it("release, then the reader sends: the lock is re-armed so the reply is followed", () => {
+  const { rerender } = render(<MessageAnchorRelease sessionId="s1" sendNonce={3} />)
+  expect(ctx.scrollToBottom).not.toHaveBeenCalled()
+  anchor("s1")
+  rerender(<MessageAnchorRelease sessionId="s1" sendNonce={4} />)
+  expect(ctx.scrollToBottom).toHaveBeenCalledTimes(1)
+  rerender(<MessageAnchorRelease sessionId="s1" sendNonce={4} />)
+  expect(ctx.scrollToBottom).toHaveBeenCalledTimes(1)
 })

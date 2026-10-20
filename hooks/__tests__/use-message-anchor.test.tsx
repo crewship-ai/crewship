@@ -1,7 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { MESSAGE_ANCHOR_EVENT } from "@/components/features/chat/message-anchor-release"
-import { useMessageAnchor } from "../use-message-anchor"
+import { MESSAGE_ANCHOR_EVENT, useMessageAnchor } from "../use-message-anchor"
 
 const params = vi.hoisted(() => ({ current: new URLSearchParams() }))
 const toast = vi.hoisted(() => vi.fn())
@@ -67,12 +66,39 @@ it("keeps a pending target when the page strips the param before the turn render
   expect(el.scrollIntoView).toHaveBeenCalled()
 })
 
-it("tells the transcript to release its stick-to-bottom lock after scrolling, so the load does not jump back to the bottom", () => {
+it("tells the transcript (scoped to its session) to release the bottom lock after scrolling", () => {
   const order: string[] = []
   const el = turn("m1")
   el.scrollIntoView = vi.fn(() => { order.push("scroll") })
-  window.addEventListener(MESSAGE_ANCHOR_EVENT, () => order.push("release"), { once: true })
+  const on = (e: Event) => order.push(`release:${(e as CustomEvent).detail.sessionId}`)
+  window.addEventListener(MESSAGE_ANCHOR_EVENT, on)
   params.current = new URLSearchParams("message=m1")
   renderHook(() => useMessageAnchor("s1"))
-  expect(order).toEqual(["scroll", "release"])
+  window.removeEventListener(MESSAGE_ANCHOR_EVENT, on)
+  expect(order.slice(0, 2)).toEqual(["scroll", "release:s1"])
+})
+
+it("keeps the hit in view while rows above settle, then stops after the window", () => {
+  const el = turn("m1")
+  params.current = new URLSearchParams("message=m1")
+  renderHook(() => useMessageAnchor("s1"))
+  const first = vi.mocked(el.scrollIntoView).mock.calls.length
+  act(() => { vi.advanceTimersByTime(500) })
+  const mid = vi.mocked(el.scrollIntoView).mock.calls.length
+  expect(mid).toBeGreaterThan(first + 5)
+  act(() => { vi.advanceTimersByTime(1500) })
+  const end = vi.mocked(el.scrollIntoView).mock.calls.length
+  act(() => { vi.advanceTimersByTime(1000) })
+  expect(vi.mocked(el.scrollIntoView).mock.calls.length).toBe(end)
+})
+
+it("stops re-applying as soon as the reader scrolls or interacts", () => {
+  const el = turn("m1")
+  params.current = new URLSearchParams("message=m1")
+  renderHook(() => useMessageAnchor("s1"))
+  act(() => { vi.advanceTimersByTime(200) })
+  window.dispatchEvent(new Event("wheel"))
+  const n = vi.mocked(el.scrollIntoView).mock.calls.length
+  act(() => { vi.advanceTimersByTime(500) })
+  expect(vi.mocked(el.scrollIntoView).mock.calls.length).toBe(n)
 })

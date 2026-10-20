@@ -1256,7 +1256,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     />
   ) : (
     <Conversation>
-      <MessageAnchorRelease />
+      <MessageAnchorRelease sessionId={sessionId} sendNonce={pinNonce} />
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
           agentMeta && canChat ? (

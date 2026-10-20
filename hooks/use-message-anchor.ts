@@ -3,10 +3,17 @@
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { MESSAGE_ANCHOR_EVENT } from "@/components/features/chat/message-anchor-release"
 
 const WAIT_MS = 8000
 const MARK_MS = 2500
+const SETTLE_MS = 1000
+const USER_INPUT = ["wheel", "touchstart", "pointerdown", "keydown"] as const
+
+/**
+ * Fired (with `{ sessionId }`) each time a search hit is scrolled into view, so
+ * the transcript can release its follow-the-bottom lock (MessageAnchorRelease).
+ */
+export const MESSAGE_ANCHOR_EVENT = "crewship:message-anchor"
 
 /**
  * Scrolls to the message named by `?message=<id>` (search results deep-link
@@ -31,15 +38,34 @@ export function useMessageAnchor(sessionId: string | null) {
     if (message) setTarget({ id: message })
   }
   const handled = useRef<{ id: string } | null>(null)
+  const settle = useRef<(() => void) | null>(null)
+  useEffect(() => () => settle.current?.(), [])
 
   useEffect(() => {
     if (!sessionId || !target || handled.current === target) return
     const find = () => document.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(target.id)}"]`)
     const reveal = (el: HTMLElement) => {
       handled.current = target
-      el.scrollIntoView({ block: "center" })
-      // The transcript must not scroll back to its bottom (see MessageAnchorRelease).
-      window.dispatchEvent(new Event(MESSAGE_ANCHOR_EVENT))
+      const place = () => {
+        el.scrollIntoView({ block: "center" })
+        // The transcript must not scroll back to its bottom (see MessageAnchorRelease).
+        window.dispatchEvent(new CustomEvent(MESSAGE_ANCHOR_EVENT, { detail: { sessionId } }))
+      }
+      place()
+      // Rows above the hit are still being measured (and Safari has no scroll anchoring), so keep the
+      // hit centred for a short settle window, until the reader scrolls or interacts.
+      settle.current?.()
+      let frame = 0
+      const until = Date.now() + SETTLE_MS
+      const stop = () => { cancelAnimationFrame(frame); USER_INPUT.forEach((t) => window.removeEventListener(t, stop)); settle.current = null }
+      const tick = () => {
+        if (!el.isConnected || Date.now() >= until) { stop(); return }
+        place()
+        frame = requestAnimationFrame(tick)
+      }
+      USER_INPUT.forEach((t) => window.addEventListener(t, stop, { passive: true }))
+      settle.current = stop
+      frame = requestAnimationFrame(tick)
       el.setAttribute("data-search-target", "true")
       setTimeout(() => el.removeAttribute("data-search-target"), MARK_MS)
       setTarget(null)
