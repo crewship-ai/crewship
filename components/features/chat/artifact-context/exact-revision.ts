@@ -23,7 +23,7 @@ export interface CheckpointFetcher {
 export const checkpointPath = (target: Pinned) =>
   `/api/v1/pages/${encodeURIComponent("@" + target.pageId)}/document/checkpoints/${encodeURIComponent(target.checkpointId)}?${new URLSearchParams({ workspace_id: target.workspaceId })}`
 
-/** Only the schema versions this reader can render, with content that validates against that schema. */
+/** Only the schema versions this reader can render (2 and 3; schema 1 is intentionally not shown), with content that validates against that schema. */
 function validContent(version: unknown, content: unknown): boolean {
   if (version !== 2 && version !== 3) return false
   try {
@@ -49,7 +49,7 @@ export async function readExactRevision(fetcher: CheckpointFetcher, target: Pinn
   try {
     const response = await fetcher(checkpointPath(target), signal)
     if (response.status === 401 || response.status === 403) return { status: "denied" }
-    if (response.status === 404 || response.status === 410) return { status: "unavailable" }
+    if (response.status === 404 || response.status === 410 || response.status === 400 || response.status === 409) return { status: "unavailable" }
     if (response.status !== 200) return { status: "error" }
     return acceptCheckpoint(target, response.body)
   } catch {

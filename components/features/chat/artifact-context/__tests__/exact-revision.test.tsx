@@ -24,6 +24,7 @@ it.each([
   ["no content", { ...good, content: undefined }],
   ["bad schema", { ...good, schema: "x" }],
   ["schema -1", { ...good, schema: -1 }],
+  ["schema 1 (intentionally not rendered by this reader)", { ...good, schema: 1 }],
   ["unknown schema 99", { ...good, schema: 99 }],
   ["arbitrary non-empty content", { ...good, content: { anything: ["goes"] } }],
   ["a document node that does not validate", { ...good, content: { type: "doc" } }],
@@ -40,6 +41,9 @@ it("does not even request a checkpoint id outside the backend's bounded shape", 
 it("keeps missing, denied and temporary failures distinct", async () => {
   const status = (code: number) => readExactRevision(async () => ({ status: code, body: null }), pin)
   expect((await status(404)).status).toBe("unavailable")
+  // A malformed or conflicting request is permanent: no retry loop.
+  expect((await status(400)).status).toBe("unavailable")
+  expect((await status(409)).status).toBe("unavailable")
   expect((await status(403)).status).toBe("denied")
   expect((await status(503)).status).toBe("error")
   expect((await readExactRevision(async () => { throw new Error("offline") }, pin)).status).toBe("error")
