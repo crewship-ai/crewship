@@ -12,6 +12,17 @@ import (
 // Creation admission must commit the start, immutable human principal and
 // consent binding together. An execution ACK never precedes this transaction.
 func (h *InternalHandler) admitDocumentCreationStart(r *http.Request, entry journal.Entry, receipt *chataudience.Receipt, message string, intent documents.CreationIntent) (int, error) {
+	return h.admitDocumentRunStart(r, entry, receipt, message, &intent, nil)
+}
+
+func (h *InternalHandler) admitDocumentIterationStart(r *http.Request, entry journal.Entry, receipt *chataudience.Receipt, message string, intent documents.IterationIntent) (int, error) {
+	return h.admitDocumentRunStart(r, entry, receipt, message, nil, &intent)
+}
+
+func (h *InternalHandler) admitDocumentRunStart(r *http.Request, entry journal.Entry, receipt *chataudience.Receipt, message string, creation *documents.CreationIntent, iteration *documents.IterationIntent) (int, error) {
+	if receipt == nil || (creation == nil) == (iteration == nil) {
+		return http.StatusForbidden, errors.New("one original human Document purpose required")
+	}
 	emitter, ok := h.journal.(journal.TransactionEmitter)
 	if !ok {
 		return http.StatusServiceUnavailable, errors.New("transactional run journal unavailable")
@@ -44,7 +55,11 @@ func (h *InternalHandler) admitDocumentCreationStart(r *http.Request, entry jour
 	if err := captureArtifactChatPrincipalQuery(r, tx, entry.TraceID, entry.WorkspaceID, entry.AgentID, entry.CrewID, receipt.ChatID, message, receipt); err != nil {
 		return http.StatusForbidden, err
 	}
-	if err := bindDocumentCreationRunTx(r, h.db, tx, entry.TraceID, message, receipt, intent); err != nil {
+	if creation != nil {
+		if err := bindDocumentCreationRunTx(r, h.db, tx, entry.TraceID, message, receipt, *creation); err != nil {
+			return http.StatusForbidden, err
+		}
+	} else if err := bindDocumentIterationRunTx(r, h.db, tx, entry.TraceID, message, receipt, *iteration); err != nil {
 		return http.StatusForbidden, err
 	}
 	if err := tx.Commit(); err != nil {
