@@ -6,12 +6,12 @@ import { BLOCK_TEXT, addAttachment, attachmentId, buildIterationIntent, detachAt
 import type { LinkedViewerTarget } from "./linked-viewer-targets"
 import { useArtifactContextEnabled } from "./use-artifact-context-enabled"
 
-interface Input { workspaceId: string; chatId: string; executor: string | null; online: boolean; chatPrivacy: ChatPrivacy }
+interface Input { workspaceId: string; chatId: string; executor: string | null; online: boolean; chatPrivacy: ChatPrivacy; serverConfirmedPrivate: boolean }
 
 /** How long a handed-off send may stay unechoed before the strip says it is not confirmed. */
 export const UNCONFIRMED_AFTER_MS = 8000
 
-const EMPTY: ComposerArtifactContext = { executor: null, online: true, chatPrivacy: "checking", unconfirmed: false, attachments: [], mode: null, updateTargetId: null, createAudience: { kind: "unknown" }, createResultType: "Document" }
+const EMPTY: ComposerArtifactContext = { executor: null, online: true, chatPrivacy: "checking", serverConfirmedPrivate: false, unconfirmed: false, attachments: [], mode: null, updateTargetId: null, createAudience: { kind: "unknown" }, createResultType: "Document" }
 type Draft = ComposerArtifactContext
 
 export type PrepareSend = { ok: true; metadata: Record<string, unknown> | undefined; intent: DocumentIterationIntent | null } | { ok: false; message: string }
@@ -31,7 +31,7 @@ interface Pending { text: string; intent: DocumentIterationIntent | null; draftR
  * identical and the chosen target is the same page. A changed instruction or target is a
  * different request and gets a new submission_id.
  */
-export function useComposerArtifactState({ workspaceId, chatId, executor, online, chatPrivacy }: Input) {
+export function useComposerArtifactState({ workspaceId, chatId, executor, online, chatPrivacy, serverConfirmedPrivate }: Input) {
   const enabled = useArtifactContextEnabled()
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [unconfirmed, setUnconfirmed] = useState(false)
@@ -44,7 +44,7 @@ export function useComposerArtifactState({ workspaceId, chatId, executor, online
   const clearPending = useCallback(() => { clearTimer(); pending.current = null; setUnconfirmed(false) }, [])
   useEffect(() => { scopeRef.current = scope; clearPending(); setDraft(EMPTY) }, [scope, clearPending])
   useEffect(() => clearTimer, [])
-  const context = useMemo<ComposerArtifactContext>(() => ({ ...draft, executor, online, chatPrivacy, unconfirmed }), [draft, executor, online, chatPrivacy, unconfirmed])
+  const context = useMemo<ComposerArtifactContext>(() => ({ ...draft, executor, online, chatPrivacy, serverConfirmedPrivate, unconfirmed }), [draft, executor, online, chatPrivacy, serverConfirmedPrivate, unconfirmed])
   const contextRef = useRef(context)
   contextRef.current = context
   // Edits change the draft only; a pending send keeps its own snapshot.
@@ -73,9 +73,10 @@ export function useComposerArtifactState({ workspaceId, chatId, executor, online
   const setUpdateTarget = useCallback((id: string) => change(value => ({ ...value, updateTargetId: id })), [change])
 
   /** Blocks the send, or adds the targeted-edit intent to the message metadata. Does nothing when no artifact context is in play. */
-  const prepareSend = useCallback((text: string, metadata?: Record<string, unknown>): PrepareSend => {
+  const prepareSend = useCallback((text: string, metadata?: Record<string, unknown>, privacyAtSend?: ChatPrivacy): PrepareSend => {
     if (!enabled) return { ok: true, metadata, intent: null }
-    const current = contextRef.current
+    // The privacy estimate is re-evaluated by the caller right now, not the value captured at render.
+    const current = privacyAtSend ? { ...contextRef.current, chatPrivacy: privacyAtSend } : contextRef.current
     const block = sendBlock(current, text)
     if (block) return { ok: false, message: BLOCK_TEXT[block] }
     const fresh = buildIterationIntent(current, newSubmissionId())
@@ -91,12 +92,13 @@ export function useComposerArtifactState({ workspaceId, chatId, executor, online
    * (and the strip) until the message is echoed, and say so if it is not.
    */
   const markSent = useCallback((text: string, intent: DocumentIterationIntent | null) => {
-    if (!contextRef.current.attachments.length && !contextRef.current.mode) return
+    // A plain message with no artifact context ends any older pending send, so its "not confirmed" timer cannot fire for an unrelated message.
+    if (!contextRef.current.attachments.length && !contextRef.current.mode) { clearPending(); return }
     clearTimer()
     pending.current = { text, intent, draftRevision: draftRevision.current }
     setUnconfirmed(false)
     timer.current = setTimeout(() => setUnconfirmed(true), UNCONFIRMED_AFTER_MS)
-  }, [])
+  }, [clearPending])
 
   /**
    * The server echoed one of our own persisted messages (useChat onOwnMessageSaved). The echo
