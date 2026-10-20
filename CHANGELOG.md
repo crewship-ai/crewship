@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Composer artifact context and conversation library, behind the same flag.** An attached item needs an explicit create, update or reply-only choice, shows executor, location and the real audience before sending, and blocks on an ambiguous target. The library lists only explicitly linked items, with restricted links shown anonymously. Updating an attached document from chat stays disabled until the server confirms the chat's audience (no such signal exists yet); a reply-only or plain message is unaffected.
+
+- **Chat result cards and viewer switching, behind `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` (off by default).** Result cards report server run state, saved content and freshness separately, and give revoked access, lost connection, unknown result, conflict, stopped run, missing runtime and broken preview each their own next action. The side viewer header switches only between accessible conversation links and keeps an exact revision distinct from an explicit latest. These components are not mounted in this change and no backend serves their endpoints yet.
+
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 - Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
