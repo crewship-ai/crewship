@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
 // AssistantTurn leans on heavy ai-elements components (motion/react inside
@@ -124,7 +124,7 @@ describe("CH-04 grouped activity", () => {
     cleanup()
     const done = renderTurn(turn(parts, false))
     expect(done.container.querySelector("details")!.getAttribute("data-activity-tone")).toBe("neutral")
-    expect(screen.getByText("Outcome unknown")).toBeTruthy()
+    expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
   })
 
   it("labels denied and interrupted steps", () => {
@@ -226,7 +226,9 @@ describe("typed events from the stream consumer", () => {
 
   it("a typed unknown step reads Outcome unknown, not success", () => {
     renderTurn(turn([typed("a", "unknown")]))
-    expect(screen.getByText("Outcome unknown")).toBeTruthy()
+    // Once: in the header badge only, not repeated as a second label.
+    expect(screen.getByTestId("tool-header").getAttribute("data-label")).toBe("Outcome unknown")
+    expect(screen.queryByText("Outcome unknown")).toBeNull()
   })
   it("an input_streaming step reads as in progress, never Worked", () => {
     const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "input_streaming")], true))
@@ -235,9 +237,32 @@ describe("typed events from the stream consumer", () => {
   })
 
   it("an unrecognised state token degrades to Outcome unknown, never Worked", () => {
-    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "paused")]))
+    renderTurn(turn([typed("a", "succeeded"), typed("b", "paused")]))
     expect(screen.queryByText("Worked")).toBeNull()
-    expect(container.textContent).toContain("Outcome unknown")
+    expect(screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-label"))).toContain("Outcome unknown")
+  })
+
+  it("a typed running step on a finished turn reads Outcome unknown instead of spinning", () => {
+    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "running")], false))
+    expect(container.querySelector("details[data-activity-tone]")!.getAttribute("data-activity-tone")).toBe("neutral")
+    expect(screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-label"))).toContain("Outcome unknown")
+  })
+
+  it("a group the reader opened stays open when its tone changes", () => {
+    // Same part ids across renders, as in a live turn (the key is the first id).
+    const a = typed("a", "succeeded"), b = typed("b", "running")
+    const withB = (state: string) => ({ ...b, activity: { ...b.activity!, state } }) as TurnPart
+    const { container, rerender } = renderTurn(turn([a, b], true))
+    const details = () => container.querySelector("details[data-activity-tone]") as HTMLDetailsElement
+    expect(details().open).toBe(false)
+    details().open = true
+    fireEvent(details(), new Event("toggle"))
+    rerender(<AssistantTurn turn={turn([a, withB("failed")], true)} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(details().getAttribute("data-activity-tone")).toBe("attention")
+    expect(details().open).toBe(true)
+    rerender(<AssistantTurn turn={turn([a, withB("succeeded")], false)} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(details().getAttribute("data-activity-tone")).toBe("ok")
+    expect(details().open).toBe(true)
   })
 
   it("every thinking state renders without claiming a finished summary", () => {

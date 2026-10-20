@@ -57,9 +57,11 @@ export function parentToolIdOf(p: TurnPart): string | undefined {
 export function toolState(step: Pick<ToolStep, "call" | "result">, turnStreaming: boolean): ActivityState {
   const typed = step.call.activity?.state
   if (typed) {
-    if (typed === "input_streaming") return "running"
+    // A step still "running" on a turn that is no longer streaming has no
+    // live source left; it is unknown, as for a call with no recorded result.
+    if (typed === "input_streaming" || typed === "running") return turnStreaming ? "running" : "unknown"
     // A token this build does not know must not read as success or failure.
-    return typed in ACTIVITY_STATE_LABEL ? typed : "unknown"
+    return Object.hasOwn(ACTIVITY_STATE_LABEL, typed) ? typed : "unknown"
   }
   // A result with no call in this turn classifies itself.
   if (step.call.type === "tool_result" && !step.result) {

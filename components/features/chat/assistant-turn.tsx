@@ -2,7 +2,7 @@
 
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
 import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
@@ -352,7 +352,7 @@ function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: s
           {details}
         </ToolContent>
       </Tool>
-      {resolved && ["failed", "denied", "interrupted", "unknown"].includes(resolved) && (
+      {resolved && ["failed", "denied", "interrupted"].includes(resolved) && (
         <span className="text-label text-warn">{ACTIVITY_STATE_LABEL[resolved]}</span>
       )}
       {canOpenArtifact && safeFilePath && agentId && (
@@ -491,13 +491,22 @@ function ActivityGroup({ tools, agentId, turnStreaming }: { tools: ToolNode[]; a
   if (tools.length === 1 && !tools[0].children?.length) {
     return <ActivityToolCard node={tools[0]} agentId={agentId} turnStreaming={turnStreaming} />
   }
+  return <ActivityDisclosure tools={tools} agentId={agentId} turnStreaming={turnStreaming} />
+}
+
+function ActivityDisclosure({ tools, agentId, turnStreaming }: { tools: ToolNode[]; agentId?: string; turnStreaming: boolean }) {
   const steps = flattenSteps(tools)
   const summary = summarizeGroup(steps.map((t) => toolState(t, turnStreaming)))
+  const needsAttention = summary.tone === "attention"
+  // Anything that needs attention opens by itself, once; after that the
+  // reader's own toggle wins, so a later tone change never closes it.
+  const [open, setOpen] = useState(needsAttention)
+  useEffect(() => { if (needsAttention) setOpen(true) }, [needsAttention])
   return (
     <details
       className="rounded-xl border border-border bg-muted/20 overflow-hidden"
-      // Anything that needs attention opens by itself.
-      open={summary.tone === "attention" ? true : undefined}
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
       data-activity-tone={summary.tone}
     >
       <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-label text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
