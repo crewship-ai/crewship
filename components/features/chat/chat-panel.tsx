@@ -107,6 +107,7 @@ import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
 import { emitChatEvent } from "@/lib/telemetry"
+import { copyToClipboard } from "@/lib/clipboard"
 
 function getWsUrl(): string {
   const base = resolveWsBase()
@@ -980,9 +981,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     [sessionId],
   )
 
-  const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content).catch(() => {})
-  }, [])
+  const handleCopy = useCallback((content: string) => copyToClipboard(content), [])
 
   // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
   // like a plain send — otherwise the scroll behavior is inconsistent.

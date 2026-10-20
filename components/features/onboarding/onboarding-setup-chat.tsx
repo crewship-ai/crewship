@@ -1,5 +1,6 @@
 "use client"
 
+import { copyToClipboard } from "@/lib/clipboard"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { MessageSquareText, WifiOff } from "lucide-react"
 import { motion } from "motion/react"
@@ -651,9 +652,7 @@ function ConnectedSetupChat({
     return true
   }, [])
   const starters = starterPrompts(language)
-  const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content).catch(() => {})
-  }, [])
+  const handleCopy = useCallback((content: string) => copyToClipboard(content), [])
   const noopFileClick = useCallback(() => {}, [])
 
   // The ONLY call site of applyOnboardingProposal in this component, and it

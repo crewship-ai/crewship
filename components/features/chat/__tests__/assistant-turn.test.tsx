@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 
@@ -218,6 +218,23 @@ describe("AssistantTurn dispatch", () => {
   it("adds no note to a completed turn", () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "Done" })], { turnState: "completed" })} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.queryByRole("status")).toBeNull()
+  })
+  it("says Copied only after the clipboard confirmed the copy", async () => {
+    let confirm!: (ok: boolean) => void
+    const copy = vi.fn(() => new Promise<boolean>(resolve => { confirm = resolve }))
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={copy} onFileClick={onFileClick} />)
+    fireEvent.click(screen.getByTestId("action-copy"))
+    expect(copy).toHaveBeenCalledWith("Answer")
+    expect(screen.queryByText("Copied to clipboard")).toBeNull()
+    await act(async () => confirm(true))
+    expect(screen.getByRole("status")).toHaveTextContent("Copied to clipboard")
+    expect(screen.getByTestId("action-copied")).toBeInTheDocument()
+  })
+  it("says the copy failed instead of pretending it worked", async () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={() => Promise.resolve(false)} onFileClick={onFileClick} />)
+    await act(async () => { fireEvent.click(screen.getByTestId("action-copy")) })
+    expect(screen.getByRole("status")).toHaveTextContent("Copy failed. Select the text and copy it with your keyboard.")
+    expect(screen.queryByText("Copied to clipboard")).toBeNull()
   })
 
   it("renders status part via StatusIndicator", () => {
