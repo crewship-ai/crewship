@@ -305,7 +305,7 @@ test.describe("phone", () => {
     await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: TIMEOUT })
     expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches), "not a coarse pointer").toBe(true)
     const open = page.getByRole("button", { name: /^Search all chats/ })
-    if (!(await open.isVisible())) await page.getByRole("button", { name: /conversations|menu|sidebar/i }).first().click()
+    if (!(await open.isVisible())) await page.getByRole("button", { name: "Show conversations" }).click()
     const trigger = (await open.boundingBox())!
     expect(Math.min(trigger.width, trigger.height), "search button is under 44px").toBeGreaterThanOrEqual(44)
     await open.click()
