@@ -21,11 +21,11 @@ func (r *Router) RegisterSlidesHuman(enabled bool) {
 		return
 	}
 	h := &slidesHumanHTTP{pages: r.pages, store: slides.New(r.db, slides.Options{})}
-	authed, workspace := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// openapi: responses 200,400,401,403,404,409,500
-	r.mux.Handle("GET /api/v1/pages/{slug}/slides", authed(workspace(http.HandlerFunc(h.read))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/slides", authed(wsCtx(http.HandlerFunc(h.read))))
 	// openapi: responses 200,400,401,403,404,409,500
-	r.mux.Handle("GET /api/v1/pages/{slug}/slides/revisions/{revision}", authed(workspace(http.HandlerFunc(h.read))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/slides/revisions/{revision}", authed(wsCtx(http.HandlerFunc(h.read))))
 	// openapi: responses 200,400,401,403,404,409,429,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/initialize", roleInline, h.initialize)
 }
