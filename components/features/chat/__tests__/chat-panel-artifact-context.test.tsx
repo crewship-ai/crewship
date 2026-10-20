@@ -320,3 +320,41 @@ it("flag on, as shipped today (no server visibility signal): Update is disabled 
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
   expect(chat.sendMessage.mock.calls[0]).toEqual(["Please update it"])
 })
+
+const participantRequests = () => calls.filter(path => path.includes("/participants")).length
+const refreshTimers = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.filter(call => call[1] === 15_000).length
+
+it("flag off: exactly one participants request per session, none on focus or on an interval", async () => {
+  const timers = vi.spyOn(window, "setInterval")
+  mount()
+  await screen.findByRole("button", { name: "Send message" })
+  await waitFor(() => expect(participantRequests()).toBe(1))
+  act(() => { window.dispatchEvent(new Event("focus")) })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(participantRequests()).toBe(1)
+  expect(refreshTimers(timers)).toBe(0)
+})
+
+it("flag on but the server does not confirm privacy (today): still exactly one request, no refresh", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  seam.confirmed = false
+  const timers = vi.spyOn(window, "setInterval")
+  mount()
+  await screen.findByRole("button", { name: "Send message" })
+  await waitFor(() => expect(participantRequests()).toBe(1))
+  act(() => { window.dispatchEvent(new Event("focus")) })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(participantRequests()).toBe(1)
+  expect(refreshTimers(timers)).toBe(0)
+})
+
+it("flag on with the server confirming privacy: the participants read refreshes on focus and on an interval", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  const timers = vi.spyOn(window, "setInterval")
+  mount()
+  await screen.findByRole("button", { name: "Send message" })
+  await waitFor(() => expect(participantRequests()).toBe(1))
+  act(() => { window.dispatchEvent(new Event("focus")) })
+  await waitFor(() => expect(participantRequests()).toBe(2))
+  expect(refreshTimers(timers)).toBeGreaterThan(0)
+})

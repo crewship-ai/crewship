@@ -649,13 +649,18 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   privacyInputRef.current = privacyInput
   const chatPrivacy = deriveChatPrivacy(privacyInput)
   // Artifact context (flag off: inert). The strip's choices ride with the next send as one stable submission.
-  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", chatPrivacy, serverConfirmedPrivate: useServerConfirmedPrivate(sessionId ?? "") })
+  const serverConfirmedPrivate = useServerConfirmedPrivate(sessionId ?? "")
+  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", chatPrivacy, serverConfirmedPrivate })
+  // Repeating the participants read exists only for the privacy check that can matter once the server confirms privacy; otherwise it is the single load per session.
+  const refreshParticipants = artifactComposer.enabled && serverConfirmedPrivate
+  const refreshParticipantsRef = useRef(refreshParticipants)
+  refreshParticipantsRef.current = refreshParticipants
   const { prepareSend: prepareArtifactSend, markSent: artifactMarkSent, confirmEcho: artifactConfirmEcho } = artifactComposer
   artifactEchoRef.current = artifactConfirmEcho
   // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
   const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
     // Privacy is judged at the moment of sending, from a participants read that is not stale.
-    const prepared = prepareArtifactSend(text, metadata, deriveChatPrivacy({ ...privacyInputRef.current, now: Date.now() }))
+    const prepared = prepareArtifactSend(text, metadata, deriveChatPrivacy({ ...privacyInputRef.current, now: refreshParticipantsRef.current ? Date.now() : undefined }))
     if (!prepared.ok) { toast.error(prepared.message); return false }
     const sent = sendMessageWithPage(text, prepared.metadata)
     if (sent !== false) artifactMarkSent(text, prepared.intent)
@@ -670,7 +675,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (!sessionSegment) return
     let cancelled = false
     const scope = `${workspaceId}:${sessionId}`
-    // Read again now and then and on focus: membership changes, so a value captured once is not a signal.
+    // Read again now and then and on focus only when the privacy check can matter (flag on and the server confirms privacy); otherwise this is the one load per session.
     const load = () => {
       apiFetch(`/api/v1/chats/${sessionSegment}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
         .then(async (r) => ({ ok: r.ok, data: r.ok ? await r.json().catch(() => undefined) : undefined }))
@@ -687,10 +692,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         .catch(() => { if (!cancelled) setParticipantsLoad({ scope, status: "error", userIds: [], at: Date.now() }) /* no attribution; privacy stays unverified */ })
     }
     load()
-    const interval = window.setInterval(load, PARTICIPANTS_MAX_AGE_MS / 2)
-    window.addEventListener("focus", load)
-    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener("focus", load) }
-  }, [sessionId, workspaceId])
+    const interval = refreshParticipants ? window.setInterval(load, PARTICIPANTS_MAX_AGE_MS / 2) : null
+    if (refreshParticipants) window.addEventListener("focus", load)
+    return () => { cancelled = true; if (interval !== null) window.clearInterval(interval); window.removeEventListener("focus", load) }
+  }, [sessionId, workspaceId, refreshParticipants])
 
   const resolveAuthorName = useCallback(
     (userId: string): string | null => {
