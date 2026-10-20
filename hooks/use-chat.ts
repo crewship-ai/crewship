@@ -1910,8 +1910,17 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         return previous.find(old => old.runId === turn.runId && old.role === "assistant") ?? turn
       })
       if (!options.reset) for (const turn of previous) {
-        if (turn.isStreaming && turn.runId && canonicalRef.current.has(turn.runId)
-          && !merged.some(value => value.runId === turn.runId)) merged.push(turn)
+        if (!turn.runId || !canonicalRef.current.has(turn.runId) || merged.some(value => value.runId === turn.runId && value.role !== "user")) continue
+        if (turn.isStreaming) merged.push(turn)
+        // A stopped or failed run the server did not persist (a Stop before any
+        // output writes no assistant message) exists only here; keep it after
+        // the turn it answered (canonical timestamps are server time). The
+        // user message carrying the same run_id does not count as the reply.
+        // Completed runs are always persisted, so they are never kept.
+        else if (turn.role === "assistant" && turn.turnState && turn.turnState !== "completed" && terminalTurn(turn.turnState)) {
+          const at = merged.findIndex(value => value.timestamp > turn.timestamp)
+          merged.splice(at < 0 ? merged.length : at, 0, turn)
+        }
       }
       return merged.map(turn => {
         const cursor = turn.runId ? canonicalRef.current.get(turn.runId) : undefined
