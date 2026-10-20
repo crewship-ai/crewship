@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useStableOrder } from "./use-stable-order"
@@ -23,22 +23,40 @@ export function SidebarViewChips({ views, value, onChange }: { views: SidebarVie
  * inside (live changes surface as a Refresh offer), and the open chat is never
  * dropped by the filter.
  */
-export function SidebarViewList({ label, items, activeId, hold, onHold, onOpen }: {
+export function SidebarViewList({ label, viewId, query, items, activeId, hold, onHold, onOpen }: {
   label: string
+  /** With `query` and `activeId`, the user's own changes: they replace the held snapshot at once. */
+  viewId: string
+  query: string
   items: ViewItem[]
   activeId: string | null
   hold: boolean
   onHold: (hold: boolean) => void
   onOpen: (item: ViewItem) => void
 }) {
-  const stable = useStableOrder(items, (item) => item.id, hold, activeId ?? "", sameItem)
+  const stable = useStableOrder(items, (item) => item.id, hold, `${viewId}|${query}|${activeId ?? ""}`, sameItem)
+  const section = useRef<HTMLElement>(null)
+  const pointerInside = useRef(false)
+  const focusHold = useRef(false)
   // Unmounting with the pointer inside never fires pointerleave; release the hold ourselves.
   useEffect(() => () => onHold(false), [onHold])
-  return <section aria-label={label} onPointerEnter={() => onHold(true)} onPointerLeave={() => onHold(false)} onFocus={(event) => { if (isKeyboardFocus(event.target)) onHold(true) }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onHold(false) }}>
+  // A focused row that is removed fires no blur: release the focus hold when focus left the list.
+  useEffect(() => {
+    if (focusHold.current && !section.current?.contains(document.activeElement)) {
+      focusHold.current = false
+      if (!pointerInside.current) onHold(false)
+    }
+  }, [stable.items, onHold])
+  return <section ref={section} aria-label={label}
+    onPointerEnter={() => { pointerInside.current = true; onHold(true) }}
+    onPointerLeave={() => { pointerInside.current = false; if (!focusHold.current) onHold(false) }}
+    onFocus={(event) => { if (isKeyboardFocus(event.target)) { focusHold.current = true; onHold(true) } }}
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { focusHold.current = false; if (!pointerInside.current) onHold(false) } }}>
     {stable.pending && <div role="status" className="flex items-center gap-2 px-3 py-1 text-[11px] text-muted-foreground">This list changed.<Button type="button" variant="ghost" size="sm" onClick={stable.refresh}>Refresh</Button></div>}
     {stable.items.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nothing in {label} right now.</p>}
-    {stable.items.map((item) => <button key={item.id} type="button" disabled={item.fixture || item.disabled} aria-current={item.id === activeId ? "page" : undefined} onClick={() => onOpen(item)} className={cn("kit-tap mx-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-foreground/[0.04] disabled:opacity-70", item.id === activeId && "bg-primary/10")}>
+    {stable.items.map((item) => <button key={item.id} type="button" disabled={item.fixture || item.disabled} title={item.disabled ? "Not loaded yet: this agent's chats have not loaded" : undefined} aria-current={item.id === activeId ? "page" : undefined} onClick={() => onOpen(item)} className={cn("kit-tap mx-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-foreground/[0.04] disabled:opacity-70", item.id === activeId && "bg-primary/10")}>
       <span className="min-w-0 flex-1 truncate">{item.title}</span>
+      {item.disabled && <span className="sr-only"> (chats not loaded yet)</span>}
       {item.fixture && <span className="text-[9px] text-muted-foreground">Preview</span>}{item.kept && <span className="text-[9px] text-muted-foreground">Open chat</span>}
       {item.kind === "agent" && <span className="text-[9px] text-muted-foreground">AI</span>}
       {item.unread > 0 && <span className="text-[10px] tabular-nums text-primary">{item.unread}</span>}
