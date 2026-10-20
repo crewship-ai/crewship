@@ -57,6 +57,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   // read still works, edits are held in memory only and reported as unsaved.
   const [storageOff, setStorageOff] = useState(false)
   const [storageBusy, setStorageBusy] = useState(false)
+  const [storageLockless, setStorageLockless] = useState(false)
   // Rows found in a journal this tab could not lock: owner unknown, so download-only until explicitly discarded.
   const [unverified, setUnverified] = useState<DocumentDraft[]>([])
   const [journalWrites, setJournalWrites] = useState(0)
@@ -69,7 +70,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
-    setStorageReady(false); setStorageOff(false); setStorageBusy(false); setUnverified([]); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
+    setStorageReady(false); setStorageOff(false); setStorageBusy(false); setStorageLockless(false); setUnverified([]); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
     discardRecovery.current = async () => {};
     authorizationLost.current=false
     setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
@@ -164,9 +165,12 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         // Access may have been revoked while the store was opening.
         if (!active || authorizationLost.current) { opened.close(); return }
         storage = opened
-        if (!opened.exclusive && rows.length) {
-          // Rows may belong to a live tab: keep them for download, keep editing in memory.
-          unverifiedStaged = rows; restored = []; durableOff = true; setStorageOff(true); setStorageBusy(false)
+        if (!opened.exclusive) {
+          // No lock, no journal: this tab never writes rows it could not later prove it owns.
+          // Rows already there may belong to a live tab: download-only, editing continues in memory.
+          if (rows.length) unverifiedStaged = rows
+          restored = []; durableOff = true; setStorageOff(true); setStorageBusy(false); setStorageLockless(true)
+          if (!rows.length) opened.close()
           return
         }
         restored = rows
@@ -291,5 +295,5 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   let durability: DocumentDurability = "confirmed"
   if (recoveredDrafts.length) durability = "held"
   else if (pending > 0) durability = journalFailed || !storageReady ? (journalWrites > 0 && !journalFailed ? "writing" : "unsaved") : journalWrites > 0 ? "writing" : "local"
-  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, unverifiedDrafts: current ? unverified : [], storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
+  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, unverifiedDrafts: current ? unverified : [], storageLockless: current && storageOff && storageLockless && !denied, storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
 }

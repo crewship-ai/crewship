@@ -87,18 +87,14 @@ it("tab B sees tab A's unconfirmed batch as recovery only after tab A closes", a
   } finally { b.unmount(); server.destroy() }
 })
 
-it("without Web Locks a live tab A's journal survives tab B entirely: B only downloads, never deletes", async () => {
+it("without Web Locks a journal row of a live tab (e.g. from a locking browser tab) survives tab B entirely: B only downloads, never deletes", async () => {
   vi.stubGlobal("navigator", {})
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
-  const wrap = (client: QueryClient) => ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children)
-  const a = baseRenderHook(() => usePageDocument("w", "slug", "page"), { wrapper: wrap(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) })
-  await waitFor(() => expect(a.result.current.editable).toBe(true), { timeout: 4000 })
-  act(() => text(a.result.current.doc).insert(4, " a"))
-  await waitFor(() => expect(a.result.current.durability).toBe("local"), { timeout: 4000 })
-  const live = [...rows.keys()]
-  expect(live).toHaveLength(1)
-  const b = baseRenderHook(() => usePageDocument("w", "slug", "page"), { wrapper: wrap(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) })
+  const owner = JSON.stringify(["human", "w", "page"])
+  const key = [owner, JSON.stringify([3, "epoch", "live"])]
+  rows.set(JSON.stringify(key), { key, draft: { id: "live", update: "", attempted: false, schema: 3, epoch: "epoch", snapshot: documentSchema.snapshot(server) } as never })
+  const b = renderHook(() => usePageDocument("w", "slug", "page"), { wrapper: Fragment })
   try {
     await waitFor(() => expect(b.result.current.unverifiedDrafts).toHaveLength(1), { timeout: 4000 })
     expect(b.result.current.editable).toBe(true)
@@ -108,8 +104,25 @@ it("without Web Locks a live tab A's journal survives tab B entirely: B only dow
     expect("discardUnverifiedDrafts" in b.result.current).toBe(false) // there is no shared delete without a lock
     act(() => text(b.result.current.doc).insert(4, " b"))
     await waitFor(() => expect(b.result.current.durability).toBe("unsaved"))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)) })
     b.unmount()
-    expect([...rows.keys()]).toEqual(live) // A's journal is untouched while A is still mounted
-    expect(a.result.current.durability).toBe("local")
-  } finally { a.unmount(); server.destroy() }
+    expect([...rows.keys()]).toEqual([JSON.stringify(key)]) // untouched, nothing added
+  } finally { server.destroy() }
+})
+
+it("without a lock an empty journal is still never written: no undeletable rows are created", async () => {
+  vi.stubGlobal("navigator", {})
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"), { wrapper: Fragment })
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true), { timeout: 4000 })
+    expect(result.current.storageUnavailable).toBe(true)
+    expect(result.current.storageLockless).toBe(true)
+    act(() => text(result.current.doc).insert(4, " x"))
+    await waitFor(() => expect(result.current.durability).toBe("unsaved"))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)) })
+    expect(rows.size).toBe(0)
+    expect(result.current.durability).toBe("unsaved")
+  } finally { unmount(); server.destroy() }
 })
