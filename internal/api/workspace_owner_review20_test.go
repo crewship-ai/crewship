@@ -102,3 +102,63 @@ func TestOwnerCreationAuditAcknowledgesSemanticSnapshot(t *testing.T) {
 		t.Fatalf("actual configured chain invalid: %v", err)
 	}
 }
+
+// Keep the real configured writer's native MAC/INSERT checks. Only the supported
+// TransactionEmitter wrapper changes the shared producer input before delegation.
+type mutatingOwnerEmitter struct {
+	*journal.Writer
+	field  string
+	called *bool
+}
+
+func (w mutatingOwnerEmitter) AppendTx(ctx context.Context, tx *sql.Tx, e journal.Entry) (func(), error) {
+	if e.Type == journal.EntryMemberOwnerCreated {
+		*w.called = true
+		if w.field == "creation_path" {
+			e.Payload["creation_path"] = "wrong_creation_path"
+		} else {
+			snapshot := e.Payload["new_membership"].(ownerMembershipSnapshot)
+			snapshot.Role = "MEMBER"
+			e.Payload["new_membership"] = snapshot
+		}
+	}
+	return w.Writer.AppendTx(ctx, tx, e)
+}
+
+func TestOwnerCreationAuditRejectsEmitterMutation(t *testing.T) {
+	for _, door := range []string{"create", "signup", "bootstrap"} {
+		for _, field := range []string{"creation_path", "new_membership"} {
+			t.Run(door+"/"+field, func(t *testing.T) {
+				called := false
+				f := newOwnerCreationFixture(t, door, func(writer *journal.Writer) journal.Emitter { return mutatingOwnerEmitter{writer, field, &called} })
+				before := ownerCreationCounts(t, f.db)
+				response := f.mutate()
+				if !called {
+					t.Fatal("SETUP: actual producer did not reach the configured transactional emitter")
+				}
+				// If the faulty helper committed, distinguish the actual signed wrong
+				// business payload from a setup failure or a generic unsigned insertion.
+				if response.Code == 201 || (door == "signup" && response.Code == 202) {
+					var raw, workspace string
+					if err := f.db.QueryRow(`SELECT payload,workspace_id FROM journal_entries WHERE entry_type='member.owner_created'`).Scan(&raw, &workspace); err != nil {
+						t.Fatal("SETUP: no committed producer event")
+					}
+					var payload map[string]any
+					if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+						t.Fatal(err)
+					}
+					if (field == "creation_path" && payload["creation_path"] != "wrong_creation_path") || (field == "new_membership" && payload["new_membership"].(map[string]any)["role"] != "MEMBER") {
+						t.Fatal("SETUP: configured emitter did not retain its changed payload")
+					}
+					proof, err := journal.VerifyChainWithKey(t.Context(), f.db, workspace, f.key)
+					if err != nil || !proof.OK {
+						t.Fatal("SETUP: actual writer did not sign the changed payload")
+					}
+				}
+				if response.Code != 500 || !reflect.DeepEqual(before, ownerCreationCounts(t, f.db)) || f.published.Load() != 0 {
+					t.Errorf("emitter changed the expected audit: HTTP%d counts_unchanged=%t notifications=%d", response.Code, reflect.DeepEqual(before, ownerCreationCounts(t, f.db)), f.published.Load())
+				}
+			})
+		}
+	}
+}

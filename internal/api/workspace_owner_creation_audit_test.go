@@ -26,7 +26,7 @@ type ownerCreationFixture struct {
 	published atomic.Int64
 }
 
-func newOwnerCreationFixture(t *testing.T, door string) *ownerCreationFixture {
+func newOwnerCreationFixture(t *testing.T, door string, decorate ...func(*journal.Writer) journal.Emitter) *ownerCreationFixture {
 	t.Helper()
 	t.Setenv("ENCRYPTION_KEY", strings.Repeat("ac", 32))
 	t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", "v1")
@@ -52,7 +52,11 @@ func newOwnerCreationFixture(t *testing.T, door string) *ownerCreationFixture {
 		}
 	})
 	const secret = "owner-creation-authenticated-router-secret"
-	f.router, err = NewRouter(f.db, secret, newTestLogger(), WithJournal(writer), WithAllowSignup(true))
+	var emitter journal.Emitter = writer
+	if len(decorate) > 0 {
+		emitter = decorate[0](writer)
+	}
+	f.router, err = NewRouter(f.db, secret, newTestLogger(), WithJournal(emitter), WithAllowSignup(true))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,6 +31,7 @@ import { StatusIndicator } from "@/components/features/chat/status-indicator"
 import { useChatAgent } from "./chat-agent-context"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
+import { reasoningSeconds, safeThinking } from "@/lib/chat-event-contract"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
 import { cn } from "@/lib/utils"
 import { visibleAgentText } from "@/lib/chat-text"
@@ -236,7 +237,7 @@ function TaskCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { description?: string; prompt?: string; subagent_type?: string } | undefined
   if (!input?.description) return <DefaultToolCall part={part} agentId={agentId} />
 
-  const isCompleted = !!part.metadata?.completed
+  const isCompleted = part.activity ? part.activity.state === "succeeded" : !!part.metadata?.completed
   const promptPreview = input.prompt ? (input.prompt.length > 120 ? input.prompt.slice(0, 120) + "..." : input.prompt) : null
 
   return (
@@ -283,9 +284,10 @@ function redactSensitiveKeys(value: unknown): unknown {
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
 
 function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
-  const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
-  const isCompleted = !!part.metadata?.completed
-  const rawInput = part.metadata?.input as Record<string, unknown> | undefined
+  const toolName = part.activity?.name ?? part.activity?.kind ?? (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
+  const isCompleted = part.activity ? part.activity.state === "succeeded" : !!part.metadata?.completed
+  const isFailed = part.activity ? part.activity.state === "failed" : part.metadata?.is_error === true
+  const rawInput = part.activity ? part.activity.parameters : part.metadata?.input as Record<string, unknown> | undefined
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
   const openArtifact = useArtifactStore((s) => s.openFile)
 
@@ -317,20 +319,34 @@ function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }
   const canOpenArtifact = safeFilePath && FILE_TOOLS.has(toolName) && !!agentId
   const fileName = safeFilePath ? safeFilePath.split("/").pop() ?? safeFilePath : ""
 
+  const details = <>
+    {input != null && <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />}
+    {part.activity?.output !== undefined && <pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{part.activity.output}</pre>}
+    {part.activity?.diff !== undefined && <CodeBlock code={part.activity.diff} language="diff" />}
+    {part.activity?.truncated && <p className="text-label text-muted-foreground">Details truncated</p>}
+  </>
+  if (part.activity?.state === "unknown") return (
+    <details className="text-label text-muted-foreground"><summary>{toolName} · <span>Outcome unknown</span></summary>{details}</details>
+  )
   return (
     <div className="flex flex-col gap-1.5">
       <Tool defaultOpen={false}>
         <ToolHeader
           title={subtitle ? `${toolName}  ${subtitle}` : toolName}
           type="tool-invocation"
-          state={isCompleted ? "output-available" : "input-available"}
+          state={part.activity?.state === "denied" ? "output-denied"
+            : isFailed || part.activity?.state === "interrupted" ? "output-error"
+            : part.activity?.state === "awaiting_approval" ? "approval-requested"
+            : part.activity?.state === "input_streaming" ? "input-streaming"
+            : isCompleted ? "output-available" : "input-available"}
         />
         <ToolContent>
-          {input != null && (
-            <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
-          )}
+          {details}
         </ToolContent>
       </Tool>
+      {(isFailed || (part.activity && ["denied", "interrupted"].includes(part.activity.state))) && (
+        <span className="text-label text-warn">{isFailed ? "Failed" : part.activity?.state === "denied" ? "Denied" : "Interrupted"}</span>
+      )}
       {canOpenArtifact && safeFilePath && agentId && (
         <button
           type="button"
@@ -354,6 +370,7 @@ function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }
 }
 
 function InlineToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
+  if (part.activity) return <DefaultToolCall part={part} agentId={agentId} />
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
 
   switch (toolName) {
@@ -372,7 +389,7 @@ function InlineToolResult({ part }: { part: TurnPart }) {
       <ToolHeader
         title={`Result${isLong ? ` (${content.length} chars)` : ""}`}
         type="tool-invocation"
-        state="output-available"
+        state={part.metadata?.is_error === true ? "output-error" : "output-available"}
       />
       <ToolContent>
         <pre className="text-xs whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{content || "(empty)"}</pre>
@@ -441,7 +458,7 @@ function summarizeTools(tools: ToolNode[]): string {
 function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string }) {
   const isSubagent = node.call.metadata?.subagent === true
   const callPart: TurnPart = node.result
-    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: true } }
+    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: node.result.metadata?.is_error !== true, is_error: node.result.metadata?.is_error === true } }
     : node.call
   return (
     <div className={`flex flex-col gap-1.5${isSubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
@@ -449,7 +466,8 @@ function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string 
         <span className="text-micro text-muted-foreground">↳ subagent</span>
       )}
       <DefaultToolCall part={callPart} agentId={agentId} />
-      {node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
+      {!node.call.activity && node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
+      {node.children?.map(child => <div key={child.call.id} className="ml-3 border-l border-border pl-3"><ActivityToolCard node={child} agentId={agentId} /></div>)}
     </div>
   )
 }
@@ -459,16 +477,21 @@ function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string 
  *  activity never floods the transcript yet stays fully inspectable on expand. */
 function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string }) {
   if (tools.length === 0) return null
-  if (tools.length === 1) return <ActivityToolCard node={tools[0]} agentId={agentId} />
-  const allDone = tools.every((t) => !!t.result)
+  if (tools.length === 1 && !tools[0].children?.length) return <ActivityToolCard node={tools[0]} agentId={agentId} />
+  const flatten = (items: ToolNode[]): ToolNode[] => items.flatMap(item => [item, ...flatten(item.children ?? [])])
+  const steps = flatten(tools)
+  const statuses = steps.map(tool => tool.call.activity?.state ?? (tool.result?.metadata?.is_error === true ? "failed" : tool.result ? "succeeded" : "running"))
+  const failed = statuses.some(state => ["failed", "denied", "interrupted"].includes(state))
+  const unknown = statuses.some(state => state === "unknown")
+  const allDone = statuses.every(state => state === "succeeded")
   return (
     <details className="rounded-xl border border-border bg-muted/20 overflow-hidden">
       <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-label text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
         <Zap className="h-3.5 w-3.5" />
-        <span className="font-medium text-foreground">Worked</span>
-        <span>· {tools.length} steps · {summarizeTools(tools)}</span>
+        <span className="font-medium text-foreground">{failed ? "Activity incomplete" : unknown ? "Outcome unknown" : allDone ? "Worked" : "Working"}</span>
+        <span>· {steps.length} steps · {summarizeTools(steps)}</span>
         <span className="ml-auto inline-flex items-center">
-          {allDone ? (
+          {failed || unknown ? <AlertTriangle className="h-3.5 w-3.5 text-warn" /> : allDone ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-success" />
           ) : (
             <Clock className="h-3.5 w-3.5 animate-spin text-warn" />
@@ -532,7 +555,7 @@ function ReasoningLabel({ agentName }: { agentName: string | null }) {
   )
 }
 
-/** One reasoning block: collapsible, live "Thinking… Ns" header,
+/** One reasoning block: typed safe summary with persisted timing only,
  *  smooth-revealed content while streaming. Same trailing-space reflow
  *  workaround as StreamingProse — the reasoning body is Streamdown too.
  *
@@ -542,14 +565,17 @@ function ReasoningLabel({ agentName }: { agentName: string | null }) {
  *  still there, because a wrong answer is exactly when you want to read the
  *  reasoning, but reaching for it is the reader's decision. */
 function ThinkingBlock({ part }: { part: TurnPart }) {
-  const text = useSmoothText(part.content, !!part.isStreaming)
+  const thinking = safeThinking(part.thinking)
+  const streaming = thinking.state === "running"
+  const body = thinking.visibility === "summary" ? thinking.summary ?? "" : thinking.visibility === "redacted" ? "Reasoning redacted" : "Reasoning unavailable"
+  const text = useSmoothText(body, streaming)
   const agent = useChatAgent()
   return (
-    <Reasoning isStreaming={part.isStreaming} defaultOpen={false}>
+    <Reasoning isStreaming={streaming} duration={reasoningSeconds(thinking)} defaultOpen={false}>
       <ReasoningTrigger>
         <ReasoningLabel agentName={agent?.name ?? null} />
       </ReasoningTrigger>
-      <ReasoningContent>{part.isStreaming ? text + " " : text}</ReasoningContent>
+      <ReasoningContent>{(streaming ? text + " " : text) + (thinking.state === "cut_off" ? " — interrupted" : "")}</ReasoningContent>
     </Reasoning>
   )
 }
@@ -581,9 +607,10 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
 
   return (
     <Message from="assistant">
-      {groupTurnParts(visibleParts).map((node, nodeIdx) => {
+      {turn.streamIncomplete && <p role="status" className="text-sm text-muted-foreground">Partial response — stream recovery pending</p>}
+      {groupTurnParts(visibleParts).map((node) => {
         if (node.kind === "activity") {
-          return <ActivityGroup key={`act-${nodeIdx}`} tools={node.tools} agentId={agentId} />
+          return <ActivityGroup key={`act-${node.tools[0].call.id}`} tools={node.tools} agentId={agentId} />
         }
         const part = node.part
         switch (part.type) {
@@ -593,11 +620,17 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
           case "thinking":
             return <ThinkingBlock key={part.id} part={part} />
 
+          case "activity":
+            return part.activity ? <InlineToolCall key={part.id} part={part} agentId={agentId} /> : <p key={part.id}>Activity unavailable</p>
+
           case "tool_call":
             return <InlineToolCall key={part.id} part={part} agentId={agentId} />
 
           case "tool_result":
             return <InlineToolResult key={part.id} part={part} />
+
+          case "output":
+            return <p key={part.id} role="status" className="text-label text-muted-foreground">{part.output?.label ?? `Output ${part.output?.state ?? "unavailable"}`}</p>
 
           case "error":
             if (part.content.toLowerCase().includes("rate limit") || part.content.toLowerCase().includes("429")) {

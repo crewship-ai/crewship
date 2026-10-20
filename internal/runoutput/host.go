@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/scrubber"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const maxHostInputBytes = 16 << 20
@@ -294,7 +295,9 @@ func CaptureHost(ctx context.Context, input HostInput, executor HostExecutor) (R
 	if errors.Is(captureErr, ErrLimit) {
 		captureErr = nil
 	}
-	finishErr := store.Finish(result.ExitCode, result.Reason)
+	completedAt := time.Now()
+	result.CompletedAt = tsformat.Format(completedAt)
+	finishErr := store.FinishAt(result.ExitCode, result.Reason, completedAt)
 	var reservationErr error
 	if finishErr == nil {
 		reservationErr = shrinkHostReservation(context.WithoutCancel(ctx), input.Directory)

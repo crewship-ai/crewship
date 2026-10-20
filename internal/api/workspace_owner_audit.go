@@ -69,13 +69,15 @@ func appendWorkspaceOwnerAudit(ctx context.Context, tx *sql.Tx, emitter journal.
 		"subject_user_id": user, "member_id": member,
 		"old_membership": nil, "new_membership": snapshot,
 	}
-	entry := journal.Entry{ID: generateCUID(), WorkspaceID: workspace, Type: journal.EntryMemberOwnerCreated,
-		ActorType: journal.ActorUser, ActorID: user, Summary: "Initial workspace owner created", Payload: payload}
-	notify, err := appendAuthorizationAudit(ctx, tx, emitter, entry)
+	// Freeze the expected business snapshot before a configured emitter can
+	// normalize or mutate the shared entry payload. JSON bytes are local only.
+	expected, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	expected, err := json.Marshal(payload)
+	entry := journal.Entry{ID: generateCUID(), WorkspaceID: workspace, Type: journal.EntryMemberOwnerCreated,
+		ActorType: journal.ActorUser, ActorID: user, Summary: "Initial workspace owner created", Payload: payload}
+	notify, err := appendAuthorizationAudit(ctx, tx, emitter, entry)
 	if err != nil {
 		return nil, err
 	}

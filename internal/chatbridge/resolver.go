@@ -357,8 +357,21 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 
 // UpdateRun updates a run's status, exit code, and metadata via the internal API.
 func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error {
+	return r.UpdateRunWithCompletion(ctx, runID, status, exitCode, errorMsg, metadata, "")
+}
+
+// CompletionTimeUpdater carries host-captured time independently of arbitrary
+// provider metadata. Legacy callers omit it and retain their original bytes.
+type CompletionTimeUpdater interface {
+	UpdateRunWithCompletion(context.Context, string, string, *int, *string, map[string]interface{}, string) error
+}
+
+func (r *IPCResolver) UpdateRunWithCompletion(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
+	if completedAt != "" {
+		payload["completed_at"] = completedAt
+	}
 	if exitCode != nil {
 		payload["exit_code"] = *exitCode
 	}
