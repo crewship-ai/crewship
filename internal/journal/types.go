@@ -33,6 +33,7 @@ import (
 type EntryType string
 
 const (
+	EntryMemberOwnerCreated        EntryType = "member.owner_created"
 	EntryMemberAccessChanged       EntryType = "member.access_changed"
 	EntryMemberCapabilitiesChanged EntryType = "member.capabilities_changed"
 	EntryMemberRemoved             EntryType = "member.removed"

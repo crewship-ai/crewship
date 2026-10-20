@@ -109,8 +109,14 @@ func TestHistoricalMigrationsUpgradeExistingMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := ledger()
-	if len(after) != len(migrations) {
-		t.Fatalf("upgrade did not apply the full registry: want=%d after=%d", len(migrations), len(after))
+	bootMigrations := 0
+	for _, m := range migrations {
+		if !m.postDeploy {
+			bootMigrations++
+		}
+	}
+	if len(after) != bootMigrations {
+		t.Fatalf("upgrade did not apply the boot registry: want=%d after=%d", bootMigrations, len(after))
 	}
 	for version, prior := range beforeLedger {
 		if after[version] != prior {

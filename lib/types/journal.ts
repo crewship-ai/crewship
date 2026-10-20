@@ -161,6 +161,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "invitation.revoked",
   "invitation.accepted",
     "member.access_changed",
+    "member.owner_created",
     "member.capabilities_changed",
     "member.added",
     "crew.member_changed",

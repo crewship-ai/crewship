@@ -87,6 +87,7 @@ var AllEntryTypes = []EntryType{
 	EntryMemberAccessChanged,
 	EntryMemberAdded,
 	EntryMemberCapabilitiesChanged,
+	EntryMemberOwnerCreated,
 	EntryMemberRemoved,
 	EntryMemberRoleChanged,
 	EntryMemoryConfigUpdated,

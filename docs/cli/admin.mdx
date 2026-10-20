@@ -118,7 +118,9 @@ skipped. Human output reports the target `key_version`, totals for
 `Re-encrypted`, `Skipped`, and `Failed`, followed by per-table/per-column
 counts when present. JSON output contains `key_version`, `reencrypted`,
 `skipped`, `failed`, and `columns`. A non-zero exit means at least one value
-could not be decrypted with the configured keys; do not retire the old key.
+could not be decrypted with the configured keys; do not retire needed keys.
+Even with `Failed: 0`, keep the exact original `ENCRYPTION_KEY`: journal and
+instance-audit MACs retain this v1 root. Re-encryption does not re-sign history.
 
 ---
 

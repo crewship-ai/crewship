@@ -65,7 +65,7 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 func (h *PageHandler) loadProject(r *http.Request, rec *pageRecord) (*pageProjectDraft, error) {
 	var d pageProjectDraft
 	var spec string
-	err := h.db.QueryRowContext(r.Context(), `SELECT revision, source_digest, spec_json, git_commit FROM page_project_drafts WHERE page_id = ?`, rec.ID).Scan(&d.Revision, &d.Digest, &spec, &d.GitCommit)
+	err := h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT revision, source_digest, spec_json, git_commit FROM page_project_drafts WHERE page_id = ?`, rec.ID).Scan(&d.Revision, &d.Digest, &spec, &d.GitCommit)
 	if err != nil {
 		return nil, err
 	}

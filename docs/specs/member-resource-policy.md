@@ -665,7 +665,7 @@ rights, email or setup material. Audit or commit failure rolls back the membersh
 new account and setup-token writes; notification occurs only after commit.
 The same public whitelist is applied before automation preview samples, matcher
 explanations and observer matching/template rendering. Canonical rights remain
-unchanged. This does not cover initial workspace OWNER establishment or onboarding creation.
+unchanged. This does not cover onboarding creation.
 
 A workspace role update appends `member.role_changed`, a changed capability
 set appends `member.capabilities_changed`, and a removed workspace membership
@@ -697,7 +697,7 @@ Current values remain available through the existing ADMIN-only capability
 endpoint; this change adds no administrative historical-values API.
 
 Search compatibility limit: journal `q` searches only the summary for
-`member.added`, `member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
+`member.added`, `member.owner_created`, `member.access_changed`, `member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
 `page.folder_acl_changed`, including historical rows. Previously public payload
 IDs, actions and ACL versions therefore no longer match free-text search for
 these types. Explicit filters and non-search reads remain available; other event
@@ -737,6 +737,39 @@ duplicate/not-found behavior remain. These events use the general journal;
 this change adds no dedicated Settings Audit projection or history endpoint.
 The separate onboarding initial-membership writer and other F1 mutation paths
 remain outside this scoped contract.
+
+### Initial workspace ownership audit
+
+Workspace creation, signup without a redeemed invitation, and initial bootstrap
+append the dedicated `member.owner_created` event with `action=owner_created` in the same transaction
+as the first OWNER membership. The actor and subject are the actual inserted
+owner. The stored event has `old_membership=null`, the exact new membership
+(including native timestamp defaults and nullable capabilities), its sorted
+effective capabilities, and `creation_path` identifying the three entry points.
+Guest `POST /api/v1/workspaces` returns 403 without creating a workspace.
+Workspace creation rechecks the current account and global trusted ceiling in
+that transaction; the new OWNER row is not evidence of a prior grant.
+
+Audit failure, ignored writes, altered final membership or commit failure roll
+back creation. Notifications run only after commit, including bootstrap's
+committed `session_pending` response. Bootstrap retains its instance CLI-token
+audit and final token acknowledgement; invitation signup still joins the invited
+workspace without a personal-owner event. Generic signup responses retain their
+existing anti-enumeration behavior.
+
+General journal GET/SSE/WebSocket serialization, automation preview samples,
+predicates and template inputs expose only `member_id`, `subject_user_id`,
+`action` and `creation_path` for this event. The public projection leaves the
+canonical payload unchanged and provides no new administrative snapshot reader.
+
+Journal text search uses only the summary for `member.owner_created` and the entire
+`member.access_changed` family, including historical owner events and other actions. Previously searchable public
+payload fields in this family no longer match journal List or Count queries;
+unfiltered reads and canonical payloads are unchanged.
+The creation helper acknowledges the decoded audit snapshot semantically, rather
+than requiring JSON object byte order; the writer retains its signed native INSERT check.
+No email, password, token or invitation proof enters the owner audit. This does
+not add audit coverage to onboarding crew creation or Page/folder ACL writers.
 
 ### Per-frame realtime authorization cost
 
