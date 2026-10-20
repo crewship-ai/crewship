@@ -29,15 +29,19 @@ export const MESSAGE_ANCHOR_EVENT = "crewship:message-anchor"
  * visible) gets a neutral notice rather than a claim that it is gone.
  */
 export function useMessageAnchor(sessionId: string | null) {
-  const message = useSearchParams()?.get("message") ?? null
+  const params = useSearchParams()
+  const message = params?.get("message") ?? null
+  const urlSession = params?.get("session") ?? null
   const [seen, setSeen] = useState<string | null>(null)
-  const [target, setTarget] = useState<{ id: string } | null>(null)
+  // The target remembers the session the link named, captured while the param is present
+  // (the page rewrites the address later), so a hit never fires in an unrelated chat.
+  const [target, setTarget] = useState<{ id: string; session: string | null } | null>(null)
   // Derived-state update during render: a new `message` value becomes one pending target.
   if (message !== seen) {
     setSeen(message)
-    if (message) setTarget({ id: message })
+    if (message) setTarget({ id: message, session: urlSession })
   }
-  const handled = useRef<{ id: string } | null>(null)
+  const handled = useRef<typeof target>(null)
   const settle = useRef<(() => void) | null>(null)
   const mark = useRef<{ el: HTMLElement; timer: ReturnType<typeof setTimeout> } | null>(null)
   // A session switch or unmount ends the settle loop and the marker of the previous session.
@@ -48,6 +52,7 @@ export function useMessageAnchor(sessionId: string | null) {
 
   useEffect(() => {
     if (!sessionId || !target || handled.current === target) return
+    if (target.session && target.session !== sessionId) { handled.current = target; setTarget(null); return }
     const find = () => document.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(target.id)}"]`)
     const reveal = (el: HTMLElement) => {
       handled.current = target
@@ -73,10 +78,13 @@ export function useMessageAnchor(sessionId: string | null) {
       frame = requestAnimationFrame(tick)
       el.setAttribute("data-search-target", "true")
       if (mark.current) clearTimeout(mark.current.timer)
+      if (mark.current && mark.current.el !== el) mark.current.el.removeAttribute("data-search-target")
       mark.current = { el, timer: setTimeout(() => { el.removeAttribute("data-search-target"); mark.current = null }, MARK_MS) }
       // Keyboard and screen-reader users land on the hit: focus without scrolling, and say so.
       if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1")
-      el.focus({ preventScroll: true })
+      const active = document.activeElement
+      const typing = active instanceof HTMLElement && (active.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))
+      if (!typing) el.focus({ preventScroll: true })
       toast.message("Jumped to message")
       setTarget(null)
     }

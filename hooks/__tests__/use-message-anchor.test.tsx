@@ -143,3 +143,36 @@ it("moves focus to the hit without scrolling and announces the jump", () => {
   expect(el.focus).toHaveBeenCalledWith({ preventScroll: true })
   expect(toast).toHaveBeenCalledWith("Jumped to message")
 })
+
+it("a session switch while waiting drops the pending hit: no 'could not locate' in an unrelated chat", () => {
+  params.current = new URLSearchParams("session=s1&message=nope")
+  const { rerender } = renderHook(({ id }) => useMessageAnchor(id), { initialProps: { id: "s1" as string | null } })
+  rerender({ id: "s2" })
+  act(() => { vi.advanceTimersByTime(9000) })
+  expect(toast).not.toHaveBeenCalled()
+})
+
+it("a second reveal to a different element removes the marker from the old one", () => {
+  const a = turn("m1"), b = turn("m2")
+  params.current = new URLSearchParams("message=m1")
+  const { rerender } = renderHook(() => useMessageAnchor("s1"))
+  expect(a.getAttribute("data-search-target")).toBe("true")
+  params.current = new URLSearchParams("message=m2")
+  rerender()
+  expect(b.getAttribute("data-search-target")).toBe("true")
+  expect(a.hasAttribute("data-search-target")).toBe(false)
+})
+
+it("does not steal focus from an input the reader is typing in, but still scrolls and announces", () => {
+  const input = document.createElement("textarea")
+  document.body.appendChild(input)
+  input.focus()
+  const el = turn("m1")
+  el.focus = vi.fn()
+  params.current = new URLSearchParams("message=m1")
+  renderHook(() => useMessageAnchor("s1"))
+  expect(el.focus).not.toHaveBeenCalled()
+  expect(el.scrollIntoView).toHaveBeenCalled()
+  expect(toast).toHaveBeenCalledWith("Jumped to message")
+  expect(document.activeElement).toBe(input)
+})
