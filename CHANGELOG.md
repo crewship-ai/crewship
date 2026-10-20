@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
+
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
@@ -23,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
 
 ### Fixed
+
+- Preserve captured run completion timestamps across retained-output recovery and terminal replay; legacy records retain their original replay identity.
 
 - Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
 
@@ -83,6 +87,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
+- Render versioned chat progress with stable replay identities, explicit partial and tool outcomes, permitted reasoning summaries and persisted timing. Keep provider accounting separate from confirmed completion and clear protected transcript state on identity changes.
+- Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
 
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 

@@ -37,7 +37,7 @@ vi.mock("@/hooks/use-chat", async () => {
       }, [profile])
       return {
         turns: [], sendMessage, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(),
-        loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession, isStreaming: false,
+        loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession, isStreaming: false,
         connectionStatus: profile === "restricted" ? "connected" : status,
       }
     },
