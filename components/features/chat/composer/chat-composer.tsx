@@ -219,7 +219,7 @@ export function ChatComposer({
   // also see them — attaching a file must enable Send on an empty draft.
   // Falls back to a shared constant so an empty list keeps a stable identity
   // and does not re-create the submit callback on every render.
-  const { key: attachmentKey } = useAttachmentScope(sessionId)
+  const { key: attachmentKey, waitingForSignIn } = useAttachmentScope(sessionId)
   const sessionAttachments = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -243,13 +243,19 @@ export function ChatComposer({
   const sentRef = useRef(false)
 
   const unattached = unattachedAttachments(sessionAttachments)
-  const sendBlocked = !isStreaming && unattached.length > 0
+  const sendBlocked = !isStreaming && (waitingForSignIn || unattached.length > 0)
   const blockReasonId = `${useId()}-send-block`
-  const blockReasonText = sendBlocked
-    ? `Send is off: ${summarizeNames(unattached.map((a) => a.name))} ${
-        unattached.length === 1 ? "is" : "are"
-      } not attached. Use Retry or Remove on ${unattached.length === 1 ? "it" : "each"}, then send.`
-    : ""
+  const shown = unattached.slice(0, 2)
+  const reasons = shown.filter((a) => a.failureLabel).map((a) => `${a.name}: ${a.failureLabel}`)
+  const blockReasonText = !sendBlocked
+    ? ""
+    : waitingForSignIn
+      ? "Waiting for sign-in… Send is off until your session is confirmed."
+      : `Send is off: ${summarizeNames(unattached.map((a) => a.name))} ${
+          unattached.length === 1 ? "is" : "are"
+        } not attached${reasons.length ? ` (${reasons.join("; ")})` : ""}. Use Retry or Remove on ${
+          unattached.length === 1 ? "it" : "each"
+        }, then send.`
   const [announcement, setAnnouncement] = useState("")
   const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const blockTextRef = useRef(blockReasonText)
@@ -363,6 +369,10 @@ export function ChatComposer({
   const handleAskSubmit = useCallback(
     async (form: AskForm, text: string, envelope: AskSubmissionEnvelope): Promise<boolean> => {
       sentRef.current = false
+      if (waitingForSignIn) {
+        announceBlocked()
+        return false
+      }
       // The legacy content-keyed provenance map, still recorded because the
       // turn-renderer falls back to it for anything that reaches it without an
       // envelope. Keyed by the content that will actually be on the turn,
@@ -383,7 +393,7 @@ export function ChatComposer({
       })
       return sentRef.current
     },
-    [handleSubmit, sessionId, sessionAttachments],
+    [handleSubmit, sessionId, sessionAttachments, waitingForSignIn, announceBlocked],
   )
 
   const noopCloseAskForm = useCallback(() => {}, [])
@@ -445,7 +455,10 @@ export function ChatComposer({
   // Send uses aria-disabled rather than disabled: it stays focusable, so the
   // reason linked by aria-describedby reaches keyboard users, and an attempt
   // (click or Enter) is answered through an always-mounted live region.
-  const submitDisabled = !isStreaming && (!hasContent || !canSend)
+  // While waiting for sign-in the button is aria-disabled, not disabled, so it
+  // stays focusable and can say why (the text box is empty for an unknown
+  // identity, which would otherwise disable it silently).
+  const submitDisabled = !isStreaming && !waitingForSignIn && (!hasContent || !canSend)
   const blockReason = (
     <>
       {sendBlocked && (

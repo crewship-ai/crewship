@@ -59,6 +59,8 @@ export interface OutgoingAttachment {
   status?: "validating" | "uploading" | "ready" | "error" | "cancelled"
   /** The form field this upload answers, if any. See `AttachmentOwner`. */
   owner?: AttachmentOwner
+  /** Short sanitized reason class of a failed upload (never server text). */
+  failureLabel?: string
 }
 
 /** Control characters (C0 + DEL) are stripped from a path before it is named.

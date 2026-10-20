@@ -445,4 +445,121 @@ describe("attachment job lifecycle", () => {
       expect(all()).toEqual([])
     })
   })
+
+  describe("waiting for sign-in", () => {
+    const unknown = () => { userId = null; authStatus = "loading" }
+    const confirm = (id: string) => { userId = id; authStatus = "authenticated" }
+    const send = () => screen.getByLabelText("Submit") as HTMLButtonElement
+    const typeText = (v: string) => fireEvent.change(document.querySelector("textarea")!, { target: { value: v } })
+
+    it("keeps Send blocked with a visible, announced status; the text is never sent; same user resumes", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      const { rerender } = render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(g.calls).toHaveLength(1))
+      g.calls[0].fail() // a failed chip is held under A
+      await waitFor(() => expect(statuses()).toEqual(["error"]))
+      typeText("hello")
+
+      unknown() // brief null session for the same person
+      rerender(tree("desktop"))
+      expect(screen.queryByText("a.txt")).toBeNull() // chips masked...
+      expect(all()).toHaveLength(1) // ...not dropped
+      expect(send().getAttribute("aria-disabled")).toBe("true")
+      expect(send().getAttribute("aria-describedby")).toBeTruthy()
+      expect(screen.getByRole("note").textContent).toMatch(/Waiting for sign-in/)
+      fireEvent.click(send())
+      fireEvent.keyDown(document.querySelector("textarea")!, { key: "Enter" })
+      await tick(80)
+      expect(base.sendMessage).not.toHaveBeenCalled()
+      // (the composer's text box is per-person too, so it is empty for the
+      // unknown identity; the draft is kept under A and comes back below)
+      expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toMatch(/Waiting for sign-in/)
+
+      confirm("user-a") // same person confirmed
+      rerender(tree("desktop"))
+      expect(screen.getByText("a.txt")).toBeTruthy() // chips back, still failed
+      expect(screen.getByRole("note").textContent).toMatch(/a\.txt is not attached/)
+      expect(screen.getByRole("note").textContent).not.toMatch(/Waiting for sign-in/)
+      expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe("hello")
+    })
+
+    it("blocks Send for typed text alone while waiting, and unblocks when confirmed", async () => {
+      const { rerender } = render(tree("desktop"))
+      typeText("just text")
+      expect(send().getAttribute("aria-disabled")).toBeNull()
+      unknown()
+      rerender(tree("desktop"))
+      expect(send().getAttribute("aria-disabled")).toBe("true")
+      confirm("user-a")
+      rerender(tree("desktop"))
+      expect(send().getAttribute("aria-disabled")).toBeNull()
+    })
+
+    it("a request in flight when identity goes unknown is aborted when a different user is confirmed", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      const { rerender } = render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(g.calls).toHaveLength(1))
+      unknown()
+      rerender(tree("desktop"))
+      expect(g.calls[0].signal?.aborted).toBe(false) // unknown alone does not abort
+      confirm("user-b")
+      rerender(tree("desktop"))
+      expect(g.calls[0].signal?.aborted).toBe(true)
+      expect(g.calls).toHaveLength(1)
+      expect(all()).toEqual([])
+      expect(screen.queryByText("a.txt")).toBeNull()
+    })
+
+    it("no sending after the chat row is created if identity became unknown in between", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      let finish!: (ok: boolean) => void
+      ensureSession = vi.fn(() => new Promise<boolean>((r) => (finish = r)))
+      const { rerender } = render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(ensureSession).toHaveBeenCalled())
+      unknown()
+      rerender(tree("desktop"))
+      await act(async () => { finish(true) })
+      await tick(60)
+      expect(g.calls).toHaveLength(0)
+    })
+  })
+
+  describe("failure reasons are visible and announced", () => {
+    it.each([
+      [500, /server refused/i],
+      [413, /too large/i],
+      [415, /type not allowed/i],
+    ])("status %i shows a short reason class on the chip, in the notice and in the live region", async (status, label) => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(((url: string, init?: RequestInit) => {
+        g.impl(url, init)
+        return Promise.resolve({ ok: false, status, json: async () => ({ error: "/srv/secret/path: permission denied" }) })
+      }) as never)
+      render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(statuses()).toEqual(["error"]))
+      const chip = document.querySelector("[data-status='error']") as HTMLElement
+      expect(chip.textContent).toMatch(label)
+      expect(screen.getByRole("note").textContent).toMatch(label)
+      await waitFor(() =>
+        expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toMatch(label),
+      )
+      // never the server's own words
+      expect(document.body.textContent).not.toContain("/srv/secret")
+    })
+
+    it("a network failure says so", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
+      render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(statuses()).toEqual(["error"]))
+      expect((document.querySelector("[data-status='error']") as HTMLElement).textContent).toMatch(/network/i)
+    })
+  })
 })

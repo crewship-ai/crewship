@@ -17,6 +17,7 @@ import {
   abortIfPending,
   clearAbort,
   currentScopeEpoch,
+  identityConfirmed,
   queueFor,
   registerAbort,
   untilConfirmed,
@@ -28,6 +29,7 @@ import {
   filesFromClipboard,
   textFromClipboard,
   refusalMessage,
+  uploadFailureLabel,
   validateAttachmentBatch,
 } from "@/lib/chat-attachment-queue"
 
@@ -218,7 +220,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       if (!(await untilConfirmed(epoch))) return
       const current = (useComposerStore.getState().attachments[storeKey] ?? []).find((a) => a.id === att.id)
       if (!current || current.status === "cancelled" || stale()) return
-      updateAttachment(storeKey, att.id, { status: "uploading", error: undefined })
+      updateAttachment(storeKey, att.id, { status: "uploading", error: undefined, failureLabel: undefined })
       const ac = new AbortController()
       registerAbort(storeKey, att.id, ac)
       const startedAt = Date.now()
@@ -237,7 +239,10 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
           throw new UploadFailure("the conversation could not be started", "unknown")
         }
         // The identity can change, or become unknown, while the row is created.
-        if (!(await untilConfirmed(epoch))) return
+        for (;;) {
+          if (!(await untilConfirmed(epoch))) return
+          if (identityConfirmed()) break // re-read synchronously right before sending
+        }
         if (stale() || ac.signal.aborted || !(useComposerStore.getState().attachments[storeKey] ?? []).some((a) => a.id === att.id)) return
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
@@ -280,6 +285,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
           path: undefined,
           url: undefined,
           error: reason,
+          failureLabel: uploadFailureLabel(err instanceof UploadFailure ? err.reason : "network"),
           file,
         })
         // No toast: a toast sits over the chip row and can cover the very
@@ -373,7 +379,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         toast.error(refusalMessage(att.name, "too_many", PROVISIONAL_ATTACHMENT_LIMITS))
         return
       }
-      updateAttachment(storeKey, id, { status: "validating", error: undefined })
+      updateAttachment(storeKey, id, { status: "validating", error: undefined, failureLabel: undefined })
       await queueFor(storeKey).enqueue(id, () => runUpload(att, att.file as File, workspaceId, epoch))
     },
     [storeKey, workspaceId, ready, updateAttachment, runUpload],

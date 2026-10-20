@@ -96,6 +96,11 @@ function flushWaiters() {
   }
 }
 
+/** Synchronous read of the committed confirmation. */
+export function identityConfirmed(): boolean {
+  return confirmed
+}
+
 export function setIdentityConfirmed(value: boolean) {
   confirmed = value
   flushWaiters()

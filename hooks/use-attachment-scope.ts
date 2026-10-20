@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useLayoutEffect } from "react"
 
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -70,6 +70,9 @@ export function isConfirmed(input: IdentityInput): boolean {
   return !!input.userId && !!input.workspaceId
 }
 
+// Layout effects do not run on the server; fall back so SSR does not warn.
+const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
+
 function useIdentityInput(workspaceId: string | null | undefined): IdentityInput {
   const session = useSessionSafe()
   return { userId: session.data?.user?.id, status: session.status, workspaceId }
@@ -80,9 +83,11 @@ function useIdentityInput(workspaceId: string | null | undefined): IdentityInput
  *  does not depend on a composer being mounted. */
 export function useAttachmentScopeSync(workspaceId: string | null | undefined) {
   const input = useIdentityInput(workspaceId)
-  useEffect(() => {
+  // At commit (before paint and before passive effects), so the confirmation
+  // flag a paused job reads is as fresh as the render that saw the change.
+  useCommitEffect(() => {
     applyIdentity(input)
-  }, [input.userId, input.status, input.workspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [input.userId, input.status, input.workspaceId])
 }
 
 /** The prefix for this render, derived from the committed identity plus what
@@ -99,7 +104,17 @@ export function useAttachmentScopePrefix(): string {
 
 /** `{ prefix, key, ready }`: `key` indexes the composer store and the upload
  *  queue for this chat; `ready` is false until a human and workspace exist. */
-export function useAttachmentScope(chatId: string): { prefix: string; key: string; ready: boolean } {
+export function useAttachmentScope(chatId: string): {
+  prefix: string
+  key: string
+  ready: boolean
+  /** Identity is unknown right now but a person is on record: files are held
+   *  (masked), nothing may send, and the composer says it is waiting. */
+  waitingForSignIn: boolean
+} {
   const prefix = useAttachmentScopePrefix()
-  return { prefix, key: prefix + chatId, ready: prefix !== "" }
+  const { workspaceId } = useWorkspace()
+  const input = useIdentityInput(workspaceId)
+  const waitingForSignIn = !isConfirmed(input) && input.status !== "unauthenticated" && currentIdentity().prefix !== ""
+  return { prefix, key: prefix + chatId, ready: prefix !== "", waitingForSignIn }
 }

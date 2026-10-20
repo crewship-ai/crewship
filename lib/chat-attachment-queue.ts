@@ -131,3 +131,19 @@ export function createUploadQueue(onIdle?: () => void) {
     size: () => current.size,
   }
 }
+
+/** A short, sanitized reason class for a failed upload, from the closed set the
+ *  client already classifies into. Never the server's own words, which can name
+ *  a path or echo a driver error. Safe to show and to announce. */
+export function uploadFailureLabel(reason: string | undefined): string {
+  switch (reason) {
+    case "too_large": return "too large"
+    case "unsupported_type": return "type not allowed"
+    case "empty": return "empty file"
+    case "too_many": return "too many files"
+    case "rate_limited": return "too many requests"
+    case "http_error": return "server refused"
+    case "network": return "network problem"
+    default: return "could not be completed"
+  }
+}

@@ -29,6 +29,9 @@ export type Attachment = {
    *  states the failure in words regardless, because a tooltip is not
    *  reachable on a phone and not announced by a screen reader. */
   error?: string;
+  /** Short sanitized reason class ("too large", "network problem", ...), shown
+   *  as visible text on a failed chip. Never the server's own words. */
+  failureLabel?: string;
 };
 
 export type AttachmentsProps = ComponentProps<"div"> & {
@@ -126,7 +129,10 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       {failed ? (
         // Not a colour, not an icon: the sentence. This is the one thing on
         // screen that stops a refused upload from reading as an attachment.
-        <span className="text-[10px] font-medium">Upload failed — not attached</span>
+        <span className="text-[10px] font-medium">
+          Upload failed — not attached
+          {attachment.failureLabel ? ` (${attachment.failureLabel})` : ""}
+        </span>
       ) : cancelled ? (
         <span className="text-[10px] font-medium">Cancelled — not attached</span>
       ) : waiting ? (
