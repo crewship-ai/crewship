@@ -297,7 +297,6 @@ function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: s
   // liveness); without it fall back to what this one part says about itself.
   const resolved = state ?? (part.activity ? toolState({ call: part }, true) : undefined)
   const isCompleted = resolved ? resolved === "succeeded" : !!part.metadata?.completed
-  const isFailed = resolved ? resolved === "failed" : part.metadata?.is_error === true
   const rawInput = part.activity ? part.activity.parameters : part.metadata?.input as Record<string, unknown> | undefined
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
   const openArtifact = useArtifactStore((s) => s.openFile)
