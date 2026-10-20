@@ -180,8 +180,12 @@ func openTestDB(t *testing.T) *sql.DB {
 			created_by TEXT,
 			mode TEXT NOT NULL DEFAULT 'CHAT',
 			origin TEXT,
-			visibility TEXT NOT NULL DEFAULT 'private'
+			visibility TEXT NOT NULL DEFAULT 'private',
+            private_artifact_author_user_id TEXT
 		);
+        CREATE TABLE document_creation_consents (chat_id TEXT, message_id TEXT, workspace_id TEXT, human_user_id TEXT);
+        CREATE TABLE conversation_messages (id TEXT, session_id TEXT, agent_id TEXT, author_user_id TEXT, role TEXT);
+        CREATE TABLE document_creations (source_chat_id TEXT, workspace_id TEXT, human_user_id TEXT, agent_id TEXT);
 		CREATE TABLE access_grants (member_id TEXT, resource_kind TEXT, agent_id TEXT, project_id TEXT, operation TEXT);
         CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
 		CREATE TABLE pages (

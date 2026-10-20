@@ -169,6 +169,9 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "invitation.accepted",
     "member.access_changed",
     "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
     "member.removed",
   ],
   provisioning: [
