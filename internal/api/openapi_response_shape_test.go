@@ -55,6 +55,7 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointList", pointer: "/components/schemas/DocumentCheckpointList", value: documentCheckpointListResponse{}},
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
+	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
 	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},

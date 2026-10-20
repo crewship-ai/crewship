@@ -35,7 +35,7 @@ const chatStub = {
   regenerateLastTurn: vi.fn(),
   editAndResend: vi.fn(),
   loadHistory: vi.fn(),
-  markHistoryUnavailable: vi.fn(),
+  markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(),
   resubscribeSession,
   isStreaming: false,
   connectionStatus: "connected",

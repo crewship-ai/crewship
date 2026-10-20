@@ -107,7 +107,7 @@ func replayHostLocked(ctx context.Context, dir string, maxLineBytes int, project
 			return err
 		}
 		if record.Kind == "exit" {
-			terminal = &Result{ExitCode: record.ExitCode, Reason: record.Reason}
+			terminal = &Result{ExitCode: record.ExitCode, Reason: record.Reason, CompletedAt: record.CompletedAt}
 			snapshot := Snapshot{Version: 1, Sequence: record.Sequence, Complete: true, Result: terminal}
 			if ack.Terminal {
 				if ack.Sequence != record.Sequence {

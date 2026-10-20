@@ -14,8 +14,8 @@ import (
 //
 // Fields must cover every NOT NULL column in the canonical
 // credentials schema (see migrate.go migrationAddKeeper): omitting
-// created_by (NOT NULL FK to users.id) fails the restore INSERT with
-// a constraint violation. crew_id and scope preserve the credential's
+// created_by (a users.id FK required on live rows) fails an active restore
+// INSERT with a constraint violation. crew_id and scope preserve the credential's
 // workspace/crew wiring across hosts.
 type EncryptedCredential struct {
 	ID             string
@@ -42,7 +42,7 @@ type EncryptedCredential struct {
 	AccountEmail  string
 	LastCheckedAt string
 	LastError     string
-	CreatedBy     string // NOT NULL FK → users.id — MUST be exported
+	CreatedBy     string // required users.id FK on these active-only rows
 	CreatedAt     string
 	UpdatedAt     string
 }

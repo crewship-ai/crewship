@@ -136,6 +136,61 @@ async function openHistory() {
   fireEvent.click(await screen.findByRole("button",{name:/Revision 2/}))
   await screen.findByText("Confirmed historical body")
 }
+it("restores only after confirmation, locks the real editor and reopens confirmed content in a new epoch",async()=>{
+  const f=await historyFixture(),{documentSchema}=await import("@/lib/documents/schema")
+  const restored=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"old-text"},content:[{type:"text",text:"Confirmed historical body"}]}]},3)
+  const read=request.getMockImplementation()!
+  let committed=false,resolve!: (value:unknown)=>void
+  const receipt=new Promise(done=>{resolve=done})
+  request.mockImplementation((url:string,init?:RequestInit)=>{
+    if(url.includes("/restore")) { committed=true;const packet=JSON.parse(String(init?.body));return receipt.then(()=>({ok:true,status:200,json:async()=>({page_id:"page",id:packet.id,rev:8,epoch:"restored-epoch",kind:"restore"})})) }
+    if(committed&&!url.includes("/checkpoints")) return Promise.resolve({ok:true,status:200,json:async()=>({page_id:"page",schema:3,rev:8,epoch:"restored-epoch",can_write:true,snapshot:documentSchema.snapshot(restored)})})
+    return read(url,init)
+  })
+  try {
+    await openHistory()
+    fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+    expect(request.mock.calls.some(([url])=>url.includes("/restore"))).toBe(false)
+    fireEvent.click(screen.getByRole("button",{name:"Confirm restore"}))
+    expect(f.editor.isEditable).toBe(false)
+    expect(screen.getByRole("button",{name:"Close history"})).toBeDisabled()
+    await act(async()=>resolve(undefined))
+    await waitFor(()=>expect((screen.getByLabelText("Document editor")as HTMLElement&{editor:Editor}).editor).not.toBe(f.editor))
+    expect(screen.getByLabelText("Document editor")).toHaveTextContent("Confirmed historical body")
+    expect(request.mock.calls.filter(([url])=>url.includes("/restore"))).toHaveLength(1)
+  } finally {f.view.unmount();f.saved.destroy();restored.destroy()}
+})
+it("never offers restore over a real pending local draft",async()=>{
+  const f=await historyFixture()
+  try {
+    act(()=>f.editor.commands.insertContent("Local unsaved text "))
+    const before=f.editor.getJSON()
+    await openHistory()
+    expect(screen.queryByRole("button",{name:"Restore selected checkpoint"})).toBeNull()
+    expect(f.editor.getJSON()).toEqual(before)
+    expect(request.mock.calls.some(([url])=>url.includes("/restore"))).toBe(false)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("retains exact restore retry through service unavailability without unlocking the real editor",async()=>{
+  const f=await historyFixture(),read=request.getMockImplementation()!
+  request.mockImplementation((url:string,init?:RequestInit)=>url.includes("/restore")
+    ?Promise.resolve({ok:false,status:503,json:async()=>({error:"unconfirmed"})}):read(url,init))
+  try {
+    await openHistory()
+    fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+    fireEvent.click(screen.getByRole("button",{name:"Confirm restore"}))
+    await screen.findByRole("button",{name:"Retry exact restore"})
+    const packet=request.mock.calls.find(([url])=>url.includes("/restore"))![1].body
+    availability.enabled=false;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    expect(screen.queryByRole("region",{name:"Document history"})).toBeNull()
+    expect(f.editor.isEditable).toBe(false)
+    availability.enabled=true;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    fireEvent.click(await screen.findByRole("button",{name:"Retry exact restore"}))
+    await waitFor(()=>expect(request.mock.calls.filter(([url])=>url.includes("/restore"))).toHaveLength(2))
+    expect(request.mock.calls.filter(([url])=>url.includes("/restore"))[1][1].body).toBe(packet)
+    expect(f.editor.isEditable).toBe(false)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
 it("browses immutable history and closes without replacing the real editor or unsaved draft",async()=>{
   const f=await historyFixture()
   try {

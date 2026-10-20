@@ -17,7 +17,7 @@ describe("reasoning header labels", () => {
   })
 
   it("falls back when duration is unknown", () => {
-    expect(thoughtForLabel(undefined)).toBe("Thought for a few seconds")
+    expect(thoughtForLabel(undefined)).toBe("Reasoning duration unavailable")
   })
 
   it("live label shows elapsed seconds once at least 1s has passed", () => {
