@@ -3,6 +3,9 @@ package main
 // The envelope is versioned here; the bounded native deck profile is validated
 // by internal/slides and illustrated by testdata/slides-schema-v1.json.
 func slidesHumanSchemaCatalog() (map[string]DomainSchema, map[string]any) {
+	obj := func(properties map[string]any, required ...string) map[string]any {
+		return map[string]any{"type": "object", "properties": properties, "required": required}
+	}
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	positive := func() map[string]any { return map[string]any{"type": "integer", "minimum": 1} }
 	deck := map[string]any{"type": "object", "description": "Complete schema-1 native Slides deck; validated against the bounded Go profile and canonical fixture."}
