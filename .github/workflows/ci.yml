@@ -1480,6 +1480,9 @@ jobs:
       - name: E2E private artifact security tests
         timeout-minutes: 2
         run: node --test e2e/helpers/private-artifacts.test.mjs
+      - name: Static App preview engine selection tests
+        timeout-minutes: 3
+        run: node --test e2e/static-app-engines.test.mjs
 
   frontend-test-shards:
     needs: [merge-conflict-markers, changes]
