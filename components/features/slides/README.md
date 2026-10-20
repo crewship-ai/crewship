@@ -29,6 +29,18 @@ styles avoid author HTML/JS interpretation. Frames clip with measured overflow
 warnings. Present scopes navigation, avoids editing targets, traps focus and
 restores the opener; its close button remains available.
 
+Mounting: with `NEXT_PUBLIC_SLIDES_EDITOR=true`, `/pages/<slug>` renders
+`SlidesWorkspace` (through `components/features/pages/page-slides.tsx`) for a Page
+whose wire record carries `has_slides: true`. Off by default; the Page then renders
+exactly as before and no Slides request is made. Loading and saving use
+`lib/slides/http-client.ts` against the proposed `GET`/`PATCH
+/api/v1/pages/@{id}/slides` routes, which the server does not have yet. A missing
+route (non-JSON 404, 405, 501) is shown as "not available on this server yet" and a
+failed save keeps the draft; nothing is reported as saved without an acknowledgement
+that echoes the mutation id and a newer revision. Saving needs the separate
+`NEXT_PUBLIC_SLIDES_EDITOR_SAVE=true`. Browser flow: `e2e/slides-editor.spec.ts`
+(flag-on tests need a UI started with both flags and skip otherwise).
+
 Source provenance: existing editor/Present extraction #3206 commit
 `3ce3173e4b26882151d68cac171f70e3c916b500` and unused-import fix `6c831db30`,
 with schema-1/2 model from #3229 `f0a756d7151b2aa6431fb295416fa3056c1627f7`.

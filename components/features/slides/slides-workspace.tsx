@@ -20,6 +20,7 @@ const reasons: Record<Unrepresentable, string> = {
 type Phase =
   | { name: "loading" }
   | { name: "unavailable" }
+  | { name: "not_implemented" }
   | { name: "failed"; message: string }
   | { name: "ready"; snapshot: SlidesSnapshot; draft: SlideDeck; save: "idle" | "saving" | "saved" | "failed"; conflict?: SlidesSnapshot; stale?: boolean; message?: string }
 
@@ -43,7 +44,7 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
     client.load(pageId).then(result => {
       if (!active) return
       if ("deck" in result) setPhase({ name: "ready", snapshot: result, draft: result.deck, save: "idle" })
-      else if (result.status === "unavailable") setPhase({ name: "unavailable" })
+      else if (result.status === "unavailable") setPhase(result.reason === "not_implemented" ? { name: "not_implemented" } : { name: "unavailable" })
       else setPhase({ name: "failed", message: result.status === "error" ? result.message : "Loading failed." })
     }, () => { if (active) setPhase({ name: "failed", message: "The presentation could not be loaded." }) })
     return () => { active = false }
@@ -57,6 +58,7 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
 
   if (phase.name === "loading") return <p role="status">Loading presentation…</p>
   if (phase.name === "unavailable") return <p role="alert">This presentation is not available.</p>
+  if (phase.name === "not_implemented") return <p role="alert">Slides editing is not available on this server yet. The presentation cannot be loaded or saved here.</p>
   if (phase.name === "failed") return <div role="alert" className="space-y-2"><p>{phase.message}</p><button className={control} onClick={() => setAttempt(value => value + 1)}>Try again</button></div>
 
   const { snapshot, draft, save, conflict } = phase
@@ -76,6 +78,8 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
       if (current.name !== "ready") return current
       if (result.status === "saved") return { name: "ready", snapshot: result.snapshot, draft: result.snapshot.deck, save: "saved" }
       if (result.status === "conflict") return { ...current, save: "failed", conflict: result.current }
+      // A missing route is not a revoked page: the draft stays and nothing is claimed as saved.
+      if (result.status === "unavailable" && result.reason === "not_implemented") return { ...current, save: "failed", message: "Saving is not available on this server yet. Your changes were not saved; the draft is kept here." }
       if (result.status === "unavailable") return { name: "unavailable" }
       return { ...current, save: "failed", message: result.retryable ? "Saving failed. Your draft is kept; try again." : `This change cannot be saved: ${result.message}` }
     })

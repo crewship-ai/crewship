@@ -14,6 +14,8 @@ export type SlidesSaveResult =
   | { status: "conflict"; current: SlidesSnapshot }
   /** 404 (absent or private to the caller; never distinguished) or 403 (read-only). */
   | { status: "unavailable"; reason: "not_found" | "forbidden" }
+  /** The server has no Slides route (non-JSON 404, 405 or 501). Never shown as success or as "not found". */
+  | { status: "unavailable"; reason: "not_implemented" }
   /** 503 or network failure; the draft is retained and the same mutation_id is retried. */
   | { status: "error"; retryable: boolean; message: string }
 

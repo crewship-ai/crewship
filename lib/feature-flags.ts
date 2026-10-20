@@ -25,3 +25,15 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Mounts the native Slides editor on `/pages/<slug>` for a Page the server
+ * reports as `has_slides`. Default OFF: the page then behaves exactly as before.
+ *
+ * Mounting alone never writes. Saving is a second, separate gate
+ * (`NEXT_PUBLIC_SLIDES_EDITOR_SAVE`, lib/slides/save-client.ts), and the
+ * Slides read/save endpoints are still a proposed contract (FE-REQ-F5-1).
+ */
+export function slidesEditorMount(): boolean {
+  return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
+}
