@@ -2459,3 +2459,16 @@ return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
 
 Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+
+## Personal Documents view
+
+When Documents are enabled, **My space** in Artifacts shows the current user's private Documents within the existing workspace. It does not create another workspace. Custody access to another user's private output belongs to the workspace OWNER and remains a separate audited access path.
+
+Authorized Page index rows include the read-only boolean `private_audience`. A personal view requires both `private_audience: true` and the current user's `owner` reference; an unfiled Page or an ownership reference alone does not establish privacy. Existing `crewship page list --format json` output exposes this classification. Missing audience information is unknown, rather than permission to infer that a Page is public.
+
+The index accepts `audience=personal` for explicitly private Pages owned by the current human, or `audience=all` for the existing authorized catalog. OWNER custody of other people’s private Pages is excluded from the personal view. Unknown audience values return 400. `X-Total-Count` counts only authorized rows matching the audience. Catalog responses use `Cache-Control: no-store`; foreign private metadata requires the existing OWNER audit before its release, and an unavailable audit refuses the response.
+
+Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
+
+The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
