@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test"
 import { DatabaseSync } from "node:sqlite"
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { throwawayRefusal } from "./throwaway-guard"
 import { randomUUID } from "node:crypto"
 
 // Chat search (CH-25) against a REAL backend: the real POST
@@ -13,18 +14,37 @@ import { randomUUID } from "node:crypto"
 // store writes them (conversation.Store.Append): one JSONL line under
 // <data dir>/output/conversations/<chat id>.jsonl plus the row of the search
 // mirror, conversation_messages (its FTS5 triggers index it). The chats
-// themselves are created through the real API. Point E2E_CREWSHIP_DATA_DIR at
-// the data directory of the server under test (for scripts/throwaway-server.sh
-// that is the manifest's data_dir); without it the suite fails rather than
-// skipping.
+// themselves are created through the real API.
 //
-// The deleted-message case removes a line from a transcript file: there is no
-// message-delete API.
-test.describe.configure({ mode: "serial" })
-test.setTimeout(90_000)
+// Because it writes into the data directory directly, the suite fails closed:
+// it runs only under scripts/throwaway-server.sh (CREWSHIP_THROWAWAY_MANIFEST)
+// and skips, with the reason, unless E2E_CREWSHIP_DATA_DIR is exactly that
+// instance's data dir under the throwaway state root (never a shared env or
+// dev slot), the manifest is running, and the base URL is that instance's
+// server (host and port). A last read-only probe checks the backend behind the base URL knows
+// a workspace that is in that database before anything is written. Run:
+//
+//   scripts/throwaway-server.sh run NAME --binary PATH -- sh -c \
+//     'E2E_CREWSHIP_DATA_DIR=$(jq -r .data_dir "$CREWSHIP_THROWAWAY_MANIFEST") \
+//      PLAYWRIGHT_BASE_URL=$CREWSHIP_SERVER pnpm exec playwright test e2e/chat-search.spec.ts'
+//
+// (the server's embedded UI must be a build of this checkout: `pnpm build`,
+// `scripts/embed-web-out.sh sync`, `go build ./cmd/crewship`, then pass that
+// binary to --binary; the base URL is always the throwaway server itself.)
 
 const TIMEOUT = 20_000
 const DATA_DIR = process.env.E2E_CREWSHIP_DATA_DIR ?? ""
+
+/** Data dirs of the shared dev slots, from the host's environment registry when present. */
+function sharedSlotDataDirs(): string[] {
+  try {
+    const envs = JSON.parse(readFileSync("/etc/crewship/environments.json", "utf8")) as Record<string, Record<string, unknown>>
+    return Object.values(envs).flatMap((e) => ["state_root", "data_dir", "dataDir"].map((k) => e?.[k]).filter((v): v is string => typeof v === "string"))
+  } catch { return [] }
+}
+
+const REFUSAL = throwawayRefusal(process.env, process.env.PLAYWRIGHT_BASE_URL ?? "", sharedSlotDataDirs())
+test.skip(REFUSAL !== "", `chat-search e2e writes into the data dir and only runs on a verified throwaway server: ${REFUSAL}`)
 const KEY = `zq${Date.now().toString(36)}`
 const T = {
   general: `${KEY}a`,
@@ -101,7 +121,7 @@ function filler(n: number, prefix: string) {
 }
 
 test.beforeAll(async ({ browser }) => {
-  expect(DATA_DIR, "set E2E_CREWSHIP_DATA_DIR to the data directory of the server under test").not.toBe("")
+  test.skip(REFUSAL !== "", REFUSAL)
   const ctx = await browser.newContext({ storageState: test.info().project.use.storageState as string })
   const page = await ctx.newPage()
   await page.goto("/")
@@ -114,6 +134,12 @@ test.beforeAll(async ({ browser }) => {
     }
   })
   expect(found.agents.length).toBeGreaterThanOrEqual(5)
+  // Read-only: the backend behind the base URL must be the one that owns DATA_DIR.
+  const probe = new DatabaseSync(join(DATA_DIR, "crewship.db"), { readOnly: true })
+  try {
+    const row = probe.prepare("SELECT 1 AS ok FROM agents WHERE id = ?").get(found.agents[0].id)
+    if (!row) throw new Error("refusing to write: the agent served at the base URL is not in E2E_CREWSHIP_DATA_DIR's database")
+  } finally { probe.close() }
   const [a0, a1, a2, a3, a4] = found.agents
   const db = new DatabaseSync(join(DATA_DIR, "crewship.db"))
   db.exec("PRAGMA busy_timeout = 5000")
@@ -176,9 +202,12 @@ test.beforeAll(async ({ browser }) => {
 async function openSearch(page: Page, slug: string) {
   await page.goto(`/chat/${slug}`)
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: TIMEOUT })
-  await page.keyboard.press("Control+Shift+F")
   const dialog = page.getByRole("dialog")
-  await expect(dialog.getByRole("combobox", { name: "Search query" })).toBeVisible()
+  // The shortcut is registered on hydration; a key pressed before that is lost, so press again until it opens.
+  await expect(async () => {
+    await page.keyboard.press("Control+Shift+F")
+    await expect(dialog.getByRole("combobox", { name: "Search query" })).toBeVisible({ timeout: 1500 })
+  }).toPass({ timeout: TIMEOUT })
   return dialog
 }
 
