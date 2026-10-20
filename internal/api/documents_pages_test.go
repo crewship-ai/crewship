@@ -318,7 +318,7 @@ func TestHumanDocumentMetadataEditPreservesContentType(t *testing.T) {
 }
 
 func TestHumanDocumentRevisionSelectorNeverFallsForward(t *testing.T) {
-	for _, query := range []string{"?revision=1", "?revision=", "?revision=latest", "?revision=1&revision=2", ""} {
+	for _, query := range []string{"?revision=1", "?revision=", "?revision=latest", "?revision=1&revision=2", "?revision=%zz", "?revision=1;other=2", ""} {
 		t.Run(query, func(t *testing.T) {
 			h, ws, user := humanDocumentTransportFixture(t)
 			calls := 0
@@ -338,7 +338,11 @@ func TestHumanDocumentRevisionSelectorNeverFallsForward(t *testing.T) {
 				t.Fatalf("unsupported revision fell forward: status=%d calls=%d body=%s", w.Code, calls, w.Body.String())
 			}
 			var body map[string]any
-			if json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 1 || body["error"] != "selected revision reads are not enabled" {
+			message := "selected revision reads are not enabled"
+			if strings.ContainsAny(query, "%;") {
+				message = "invalid Document read query"
+			}
+			if json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 1 || body["error"] != message {
 				t.Fatalf("revision refusal must be a closed error: %s", w.Body.String())
 			}
 		})

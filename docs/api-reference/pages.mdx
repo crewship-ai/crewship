@@ -2361,7 +2361,11 @@ Authentication: a current human credential with current document read access;
 scoped CLI credentials need `pages:read`. Response: the confirmed content tree,
 outline, revision, opaque editing epoch and current write capability. Comment
 and resolve capabilities are disabled. The request does not accept a `block_id`
-selector in this release. Statuses: 200 document; 400 unsupported selector;
+or `revision` selector in this release. Any supplied `revision` query, including
+an empty or repeated value, returns 400 before contacting the document engine;
+it never falls forward to the current head. Malformed query encoding also
+returns 400 without reading content. Read a retained checkpoint through
+the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported selector;
 401 invalid credential; 403 missing access/scope; 404 unavailable Page/document;
 409 incompatible content; 413 oversized content; 500 storage failure;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
