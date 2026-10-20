@@ -593,6 +593,14 @@ Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditi
 
 Hovering over a user message reveals an "Edit" button. Editing the message rewrites that turn and **truncates** the conversation — every message after it is dropped. The new edit is sent as a fresh user turn. This matches the ChatGPT/Claude UX and lets operators reroll an agent's response without abandoning the whole session.
 
+## Tool activity and reasoning
+
+Consecutive tool steps in a reply collapse into one group. Each step is matched to its own result, including when several tools ran in parallel. The group title says **Worked** only when every step completed successfully. If a step failed, the title becomes **Activity incomplete**, the group opens by itself and the failed step carries its own label. While steps are still running the group reads **Working**. A reply whose steps have no recorded result reads **Finished**, which is neither success nor failure.
+
+A reasoning block is collapsed by default. Its header shows the first line of the approved safe summary next to the recorded time; redacted or unavailable reasoning shows no summary line.
+
+Subagent steps nest under their parent when the server correlates them, and approval requests stay outside the group.
+
 ## Message reactions
 
 An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.

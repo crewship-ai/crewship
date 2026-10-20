@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
+- **Tool activity in chat no longer shows failures as success.** A group of tool steps says "Worked" only when every step succeeded; a failed step is labelled, opens the group and is never green, and parallel tool calls are matched to their own results. A finished reply with steps that have no recorded result reads "Finished" rather than success. A reasoning block shows its approved safe summary line next to the recorded time.
+
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.

@@ -532,8 +532,11 @@ for (const width of [1280, 390]) {
       await page.getByRole("button", { name: /Reasoning duration unavailable/ }).click()
       await expect(page.getByText("Reasoning unavailable", { exact: true })).toBeVisible()
       await expect(page.getByText("legacy private content must not render")).toHaveCount(0)
-      await page.getByText("Activity incomplete", { exact: true }).click()
+      // A group with a failed step opens by itself: the failure is labelled
+      // without a click, and the group is never summarised as success.
+      await expect(page.getByText("Activity incomplete", { exact: true })).toBeVisible()
       await expect(page.getByText("Failed", { exact: true })).toBeVisible()
+      await expect(page.getByText("Worked", { exact: true })).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })

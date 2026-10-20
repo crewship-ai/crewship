@@ -33,6 +33,14 @@ import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { reasoningSeconds, safeThinking } from "@/lib/chat-event-contract"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
+import {
+  ACTIVITY_STATE_LABEL,
+  flattenSteps,
+  summarizeGroup,
+  toolState,
+  type ActivityState,
+} from "@/lib/chat-activity"
+import { thinkingHeadline } from "@/lib/chat-thinking"
 import { cn } from "@/lib/utils"
 import { visibleAgentText } from "@/lib/chat-text"
 import { formatCost } from "@/lib/utils/format"
@@ -283,10 +291,13 @@ function redactSensitiveKeys(value: unknown): unknown {
 
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
 
-function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
+function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: string; state?: ActivityState }) {
   const toolName = part.activity?.name ?? part.activity?.kind ?? (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
-  const isCompleted = part.activity ? part.activity.state === "succeeded" : !!part.metadata?.completed
-  const isFailed = part.activity ? part.activity.state === "failed" : part.metadata?.is_error === true
+  // `state` is the resolved step state (typed activity, paired result, or turn
+  // liveness); without it fall back to what this one part says about itself.
+  const resolved = state ?? (part.activity ? toolState({ call: part }, true) : undefined)
+  const isCompleted = resolved ? resolved === "succeeded" : !!part.metadata?.completed
+  const isFailed = resolved ? resolved === "failed" : part.metadata?.is_error === true
   const rawInput = part.activity ? part.activity.parameters : part.metadata?.input as Record<string, unknown> | undefined
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
   const openArtifact = useArtifactStore((s) => s.openFile)
@@ -325,27 +336,25 @@ function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }
     {part.activity?.diff !== undefined && <CodeBlock code={part.activity.diff} language="diff" />}
     {part.activity?.truncated && <p className="text-label text-muted-foreground">Details truncated</p>}
   </>
-  if (part.activity?.state === "unknown") return (
-    <details className="text-label text-muted-foreground"><summary>{toolName} · <span>Outcome unknown</span></summary>{details}</details>
-  )
   return (
     <div className="flex flex-col gap-1.5">
       <Tool defaultOpen={false}>
         <ToolHeader
           title={subtitle ? `${toolName}  ${subtitle}` : toolName}
           type="tool-invocation"
-          state={part.activity?.state === "denied" ? "output-denied"
-            : isFailed || part.activity?.state === "interrupted" ? "output-error"
-            : part.activity?.state === "awaiting_approval" ? "approval-requested"
+          state={resolved === "denied" ? "output-denied"
+            : resolved === "failed" || resolved === "interrupted" || resolved === "unknown" ? "output-error"
+            : resolved === "awaiting_approval" ? "approval-requested"
             : part.activity?.state === "input_streaming" ? "input-streaming"
             : isCompleted ? "output-available" : "input-available"}
+          statusLabel={resolved === "unknown" ? ACTIVITY_STATE_LABEL.unknown : undefined}
         />
         <ToolContent>
           {details}
         </ToolContent>
       </Tool>
-      {(isFailed || (part.activity && ["denied", "interrupted"].includes(part.activity.state))) && (
-        <span className="text-label text-warn">{isFailed ? "Failed" : part.activity?.state === "denied" ? "Denied" : "Interrupted"}</span>
+      {resolved && ["failed", "denied", "interrupted", "unknown"].includes(resolved) && (
+        <span className="text-label text-warn">{ACTIVITY_STATE_LABEL[resolved]}</span>
       )}
       {canOpenArtifact && safeFilePath && agentId && (
         <button
@@ -370,13 +379,13 @@ function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }
 }
 
 function InlineToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
-  if (part.activity) return <DefaultToolCall part={part} agentId={agentId} />
+  if (part.activity) return <DefaultToolCall part={part} agentId={agentId} state={toolState({ call: part }, true)} />
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
 
   switch (toolName) {
     case "TodoWrite": return <TodoWriteCard part={part} agentId={agentId} />
     case "Task": return <TaskCard part={part} agentId={agentId} />
-    default: return <DefaultToolCall part={part} agentId={agentId} />
+    default: return <DefaultToolCall part={part} agentId={agentId} state={toolState({ call: part }, true)} />
   }
 }
 
@@ -450,49 +459,62 @@ function summarizeTools(tools: ToolNode[]): string {
     .join(", ")
 }
 
-/** One tool invocation inside an activity group — the call card (with input),
- *  marked completed once its result arrives, plus any non-empty result body.
- *  Tool calls made by a nested subagent (Task tool) are indented and labelled
- *  so their activity reads as "inside" the delegation rather than the parent's
- *  own work. */
-function ActivityToolCard({ node, agentId }: { node: ToolNode; agentId?: string }) {
-  const isSubagent = node.call.metadata?.subagent === true
-  const callPart: TurnPart = node.result
-    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: node.result.metadata?.is_error !== true, is_error: node.result.metadata?.is_error === true } }
+/** One tool invocation inside an activity group: the call card carrying its
+ *  resolved state, any non-empty legacy result body, and correlated children
+ *  (subagent steps) indented under it. */
+function ActivityToolCard({ node, agentId, turnStreaming }: { node: ToolNode; agentId?: string; turnStreaming: boolean }) {
+  const isLegacySubagent = node.call.metadata?.subagent === true
+  const state = toolState(node, turnStreaming)
+  const callPart: TurnPart = state === "succeeded"
+    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: true } }
     : node.call
   return (
-    <div className={`flex flex-col gap-1.5${isSubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
-      {isSubagent && (
+    <div className={`flex flex-col gap-1.5${isLegacySubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
+      {isLegacySubagent && (
         <span className="text-micro text-muted-foreground">↳ subagent</span>
       )}
-      <DefaultToolCall part={callPart} agentId={agentId} />
+      <DefaultToolCall part={callPart} agentId={agentId} state={state} />
       {!node.call.activity && node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
-      {node.children?.map(child => <div key={child.call.id} className="ml-3 border-l border-border pl-3"><ActivityToolCard node={child} agentId={agentId} /></div>)}
+      {node.children?.map((child) => (
+        <div key={child.call.id} className="ml-3 border-l-2 border-border/60 pl-3" data-testid="nested-activity">
+          <ActivityToolCard node={child} agentId={agentId} turnStreaming={turnStreaming} />
+        </div>
+      ))}
     </div>
   )
 }
 
 /** A run of consecutive tool calls. A single tool renders as a plain card; two
- *  or more collapse into one quiet "Worked · N steps" disclosure so tool
- *  activity never floods the transcript yet stays fully inspectable on expand. */
-function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string }) {
+ *  or more collapse into one disclosure whose summary reads as successful only
+ *  when every step (nested ones included) succeeded. */
+function ActivityGroup({ tools, agentId, turnStreaming }: { tools: ToolNode[]; agentId?: string; turnStreaming: boolean }) {
   if (tools.length === 0) return null
-  if (tools.length === 1 && !tools[0].children?.length) return <ActivityToolCard node={tools[0]} agentId={agentId} />
-  const flatten = (items: ToolNode[]): ToolNode[] => items.flatMap(item => [item, ...flatten(item.children ?? [])])
-  const steps = flatten(tools)
-  const statuses = steps.map(tool => tool.call.activity?.state ?? (tool.result?.metadata?.is_error === true ? "failed" : tool.result ? "succeeded" : "running"))
-  const failed = statuses.some(state => ["failed", "denied", "interrupted"].includes(state))
-  const unknown = statuses.some(state => state === "unknown")
-  const allDone = statuses.every(state => state === "succeeded")
+  if (tools.length === 1 && !tools[0].children?.length) {
+    return <ActivityToolCard node={tools[0]} agentId={agentId} turnStreaming={turnStreaming} />
+  }
+  const steps = flattenSteps(tools)
+  const summary = summarizeGroup(steps.map((t) => toolState(t, turnStreaming)))
   return (
-    <details className="rounded-xl border border-border bg-muted/20 overflow-hidden">
+    <details
+      className="rounded-xl border border-border bg-muted/20 overflow-hidden"
+      // Anything that needs attention opens by itself.
+      open={summary.tone === "attention" ? true : undefined}
+      data-activity-tone={summary.tone}
+    >
       <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-label text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
         <Zap className="h-3.5 w-3.5" />
-        <span className="font-medium text-foreground">{failed ? "Activity incomplete" : unknown ? "Outcome unknown" : allDone ? "Worked" : "Working"}</span>
-        <span>· {steps.length} steps · {summarizeTools(steps)}</span>
+        <span className="font-medium text-foreground">{summary.title}</span>
+        <span>
+          · {steps.length} steps · {summarizeTools(steps)}
+          {summary.detail ? ` · ${summary.detail}` : ""}
+        </span>
         <span className="ml-auto inline-flex items-center">
-          {failed || unknown ? <AlertTriangle className="h-3.5 w-3.5 text-warn" /> : allDone ? (
+          {summary.tone === "attention" ? (
+            <AlertTriangle className="h-3.5 w-3.5 text-warn" role="img" aria-label={summary.detail || summary.title} />
+          ) : summary.tone === "ok" ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+          ) : summary.tone === "neutral" ? (
+            <CircleDot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           ) : (
             <Clock className="h-3.5 w-3.5 animate-spin text-warn" />
           )}
@@ -500,7 +522,7 @@ function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string
       </summary>
       <div className="flex flex-col gap-2 p-2 border-t border-border">
         {tools.map((t, i) => (
-          <ActivityToolCard key={t.call.id ?? i} node={t} agentId={agentId} />
+          <ActivityToolCard key={t.call.id ?? i} node={t} agentId={agentId} turnStreaming={turnStreaming} />
         ))}
       </div>
     </details>
@@ -533,7 +555,7 @@ function StreamingProse({ content, streaming }: { content: string; streaming: bo
  * `useReasoning()` — the timer and the open state live in the Reasoning
  * provider, and its children render inside it.
  */
-function ReasoningLabel({ agentName }: { agentName: string | null }) {
+function ReasoningLabel({ agentName, headline }: { agentName: string | null; headline?: string }) {
   const { isStreaming, isOpen, duration, elapsed } = useReasoning()
   const who = agentName?.trim() || "Agent"
   return (
@@ -547,6 +569,7 @@ function ReasoningLabel({ agentName }: { agentName: string | null }) {
           thoughtForLabel(duration)
         )}
       </span>
+      {!isStreaming && headline && <span className="min-w-0 truncate text-label text-muted-foreground" data-testid="thinking-headline">· {headline}</span>}
       <ChevronDown
         aria-hidden="true"
         className={cn("h-3.5 w-3.5 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
@@ -573,7 +596,7 @@ function ThinkingBlock({ part }: { part: TurnPart }) {
   return (
     <Reasoning isStreaming={streaming} duration={reasoningSeconds(thinking)} defaultOpen={false}>
       <ReasoningTrigger>
-        <ReasoningLabel agentName={agent?.name ?? null} />
+        <ReasoningLabel agentName={agent?.name ?? null} headline={thinkingHeadline(thinking)} />
       </ReasoningTrigger>
       <ReasoningContent>{(streaming ? text + " " : text) + (thinking.state === "cut_off" ? " — interrupted" : "")}</ReasoningContent>
     </Reasoning>
@@ -610,7 +633,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
       {turn.streamIncomplete && <p role="status" className="text-sm text-muted-foreground">Partial response — stream recovery pending</p>}
       {groupTurnParts(visibleParts).map((node) => {
         if (node.kind === "activity") {
-          return <ActivityGroup key={`act-${node.tools[0].call.id}`} tools={node.tools} agentId={agentId} />
+          return <ActivityGroup key={`act-${node.tools[0].call.id}`} tools={node.tools} agentId={agentId} turnStreaming={turn.isStreaming} />
         }
         const part = node.part
         switch (part.type) {
