@@ -410,7 +410,22 @@ for (const width of [1280, 390]) {
     await page.reload()
     await card.getByRole("button", { name: "Comment", exact: true }).click()
     await expect(card.getByText("The outcome is unknown. Your draft is kept.")).toBeVisible()
-    await card.getByRole("button", { name: "Check and retry the same operation" }).click()
+    const retry = card.getByRole("button", { name: "Check and retry the same operation" })
+    // The pointer is left at the edge of this button by the previous click. A
+    // hover lift would move the hit area from under it, so Playwright would
+    // see two alternating positions and never find the element stable.
+    await retry.hover()
+    // A cancelled or replaced transition rejects `finished` with AbortError,
+    // so settle every animation and look again until none is left.
+    await retry.evaluate(async el => {
+      for (let round = 0; round < 10; round++) {
+        const animations = el.getAnimations()
+        if (animations.length === 0) return
+        await Promise.allSettled(animations.map(animation => animation.finished))
+      }
+    })
+    expect(await retry.evaluate(el => getComputedStyle(el).translate)).toMatch(/^(none|0px)( 0px){0,2}$/)
+    await retry.click()
     await expect(card.getByRole("textbox", { name: "Comment", exact: true })).toHaveCount(0)
     expect(commentKeys.size).toBe(1)
     const opener = card.getByRole("button", { name: "Open on right" })
@@ -515,3 +530,57 @@ test("Guest card capability is generic and never fetches identity or object data
   await expect(page.getByText("ENG-1", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Synthetic title", { exact: true })).toHaveCount(0)
 })
+
+// CHAT-H0: isolated static UI fixtures only. Real WS replay, backend authority,
+// durable publication and provider execution are separate acceptance surfaces.
+for (const width of [1280, 390]) {
+  test(`CHAT-H0 safe persisted activity and reasoning at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.addInitScript(() => localStorage.setItem("crewship.workspaceId:chat-h0-user", "chat-h0-ws"))
+    const checkpoint = { version: 1, run_id: "run-h0", turn_id: "turn-h0", through_seq: 6, turn_state: "failed" }
+    const parts = [
+      { id: "reason-h0", type: "thinking", content: "legacy private content must not render", thinking: { visibility: "summary", state: "completed", summary: "Checked the public sources", intervals: [{ started_at: "2026-10-18T08:00:00Z", ended_at: "2026-10-18T08:00:02Z" }] } },
+      { id: "tool-h0-a", type: "activity", content: "Read", tool_call_id: "call-h0-a", activity: { kind: "read", name: "Read", state: "succeeded" } },
+      { id: "tool-h0-b", type: "activity", content: "Search", tool_call_id: "call-h0-b", activity: { kind: "search", name: "Search", state: "failed" } },
+      { id: "legacy-h0", type: "thinking", content: "legacy private content must not render" },
+      { id: "text-h0", type: "text", content: "A partial answer with a failed search." },
+      { id: "output-h0", type: "output", content: "", output: { state: "partial", label: "Output partial" } },
+    ]
+    await page.route("**/api/**", async route => {
+      const path = new URL(route.request().url()).pathname
+      let body: unknown = [], status = 200
+      if (path === "/api/auth/session") body = { user: { id: "chat-h0-user", name: "Chat reader", email: "chat-h0@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "chat-h0-ws", slug: "chat-h0", name: "Chat fixture", currentUserRole: "OWNER", currentUserAccessMode: "trusted" }]
+      else if (path === "/api/v1/agents" || path === "/api/v1/agents/chat-h0-agent") {
+        const agent = { id: "chat-h0-agent", name: "Jamie", slug: "_", status: "IDLE", crew_id: "chat-h0-crew", agent_role: "AGENT", current_user_can_chat: true }
+        body = path.endsWith("/agents") ? [agent] : agent
+      } else if (path === "/api/v1/crews") body = [{ id: "chat-h0-crew", name: "Chat fixture", slug: "chat-h0-crew" }]
+      else if (path.endsWith("/chats")) body = [{ id: "chat-h0", title: "Activity fixture", status: "IDLE", mode: "CHAT", origin: "UI", created_by: "chat-h0-user", visibility: "private", message_count: 1, started_at: "2026-10-18T08:00:00Z" }]
+      else if (path.endsWith("/execution-profile")) body = { mode: "trusted", audience: "private" }
+      else if (path === "/api/v1/chats/chat-h0/messages") body = { messages: [{ id: "turn-h0", run_id: "run-h0", role: "assistant", content: "A partial answer with a failed search.", parts: parts.filter(part => part.id !== "legacy-h0").map((part, index) => ({ ...part, run_id: "run-h0", turn_id: "turn-h0", first_seq: index + 1, last_seq: index + 1 })), checkpoint, ts: "2026-10-18T08:00:00Z" }, { id: "legacy-message-h0", role: "assistant", content: "", parts: [{ type: "thinking", content: "legacy private content must not render" }], ts: "2026-10-18T08:00:01Z" }] }
+      else if (path.endsWith("/conversations")) body = { conversations: [], next_offset: null }
+      else if (path === "/api/v1/me/preferences") body = {}
+      else if (path === "/api/v1/ws-token") { status = 404; body = {} }
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/chat/_?session=chat-h0")
+    for (const reload of [false, true]) {
+      if (reload) await page.reload()
+      await expect(page.getByText("A partial answer with a failed search.", { exact: true })).toHaveCount(1)
+      await expect(page.getByText("Output partial", { exact: true })).toBeVisible()
+      await expect(page.getByText("legacy private content must not render")).toHaveCount(0)
+      await expect(page.getByText("Thought for a few seconds")).toHaveCount(0)
+      await page.getByRole("button", { name: /Thought for 2 seconds/ }).click()
+      await expect(page.getByText("Checked the public sources", { exact: true })).toBeVisible()
+      await page.getByRole("button", { name: /Reasoning duration unavailable/ }).click()
+      await expect(page.getByText("Reasoning unavailable", { exact: true })).toBeVisible()
+      await expect(page.getByText("legacy private content must not render")).toHaveCount(0)
+      // A group with a failed step opens by itself: the failure is labelled
+      // without a click, and the group is never summarised as success.
+      await expect(page.getByText("Activity incomplete", { exact: true })).toBeVisible()
+      await expect(page.getByText("Failed", { exact: true })).toBeVisible()
+      await expect(page.getByText("Worked", { exact: true })).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    }
+  })
+}

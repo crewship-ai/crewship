@@ -199,8 +199,7 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	receipt, err := chataudience.CaptureTrusted(ctx, a.db, chatID, userID, nil)
-	return receipt != nil && err == nil, err
+	return chataudience.CanReadArtifactConversation(ctx, a.db, chatID, userID, "", true)
 }
 
 // Broad and protocol channels require a live account behind the trusted account

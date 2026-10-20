@@ -27,6 +27,12 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 
 vi.mock("../mention-autocomplete", () => ({
   MentionAutocomplete: () => null,
@@ -101,7 +107,7 @@ function pickFiles(files: File[]) {
 }
 
 function storeList() {
-  return useComposerStore.getState().attachments["sess-1"] ?? []
+  return useComposerStore.getState().attachments[K + "sess-1"] ?? []
 }
 
 /** Every chip carries a data-status, so "is this on screen as a failure" is a
@@ -172,20 +178,25 @@ describe("a rejected upload never reads as an attached file", () => {
       // disk and re-picking it is three screens on a phone.
       expect(within(c1).getByRole("button", { name: /retry invoice\.pdf/i })).toBeInTheDocument()
 
-      // One toast, naming the file, saying the reason and what to do next.
-      await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
-      const [title, opts] = toastError.mock.calls[0]
-      const said = `${title} ${JSON.stringify(opts ?? {})}`
-      expect(said).toContain("invoice.pdf")
-      expect(said).toMatch(c.reason)
-      expect(said).toMatch(/retry/i)
+      // No toast (it would sit over the chip row and cover Retry), and the
+      // server's own words appear in no attribute (title, aria-*) of the chip
+      // or its buttons: they reach the accessible description otherwise.
+      expect(toastError).not.toHaveBeenCalled()
+      const attrs = [c1, ...Array.from(c1.querySelectorAll("*"))].flatMap((el) =>
+        Array.from(el.attributes).map((a) => `${a.name}=${a.value}`),
+      )
+      for (const a of attrs) expect(a).not.toMatch(c.reason)
+      expect(c1.textContent ?? "").not.toMatch(c.reason)
+      const note = screen.getByRole("note").textContent ?? ""
+      expect(note).toContain("invoice.pdf")
+      expect(note).toMatch(/Retry or Remove/)
 
       // And the message that would go out says nothing about it.
       expect(composeMessageWithAttachments("have a look", storeList())).toBe("have a look")
     })
   }
 
-  it("gives two failed files two errors, not one", async () => {
+  it("shows two failed files as two failed chips and one notice naming both", async () => {
     global.fetch = vi.fn(() => Promise.resolve(serverError())) as unknown as typeof fetch
     render(<ChatComposer {...baseProps} variant="desktop" />)
 
@@ -194,18 +205,11 @@ describe("a rejected upload never reads as an attached file", () => {
     await waitFor(() => expect(storeList()).toHaveLength(2))
     await waitFor(() => expect(storeList().every((a) => a.status === "error")).toBe(true))
 
-    // Two toasts, one per file, each naming ITS file. The dev2 report was one
-    // toast for two failures, which is how a user concludes the other one
-    // worked.
-    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(2))
-    const said = toastError.mock.calls.map(([t, o]) => `${t} ${JSON.stringify(o ?? {})}`)
-    expect(said.filter((s) => s.includes("first.pdf"))).toHaveLength(1)
-    expect(said.filter((s) => s.includes("second.pdf"))).toHaveLength(1)
-    // Distinct toast ids, so sonner can never collapse one file's failure into
-    // another's.
-    const ids = toastError.mock.calls.map(([, o]) => (o as { id?: string } | undefined)?.id)
-    expect(new Set(ids).size).toBe(2)
-    expect(ids.every(Boolean)).toBe(true)
+    // No toasts. One notice names both files, so neither failure is hidden.
+    expect(toastError).not.toHaveBeenCalled()
+    const note = screen.getByRole("note").textContent ?? ""
+    expect(note).toContain("first.pdf")
+    expect(note).toContain("second.pdf")
 
     // Both chips say so.
     expect(chip("first.pdf").getAttribute("data-status")).toBe("error")
@@ -214,7 +218,7 @@ describe("a rejected upload never reads as an attached file", () => {
     expect(composeMessageWithAttachments("both of these", storeList())).toBe("both of these")
   })
 
-  it("one succeeds and one fails: the message carries exactly the one that landed", async () => {
+  it("one succeeds and one fails: the message carries exactly the one that landed once the failed chip is removed", async () => {
     let call = 0
     global.fetch = vi.fn(() => {
       call += 1
@@ -234,10 +238,18 @@ describe("a rejected upload never reads as an attached file", () => {
     expect(composed).not.toContain("bad.pdf")
     expect(composed).toMatch(/I've attached a file/)
 
-    // …and the send agrees with it: exactly one path on the wire.
+    // …and the send agrees with it: while the failed chip is still there the
+    // send is held and the file is named, so nothing is dropped silently.
     typeInComposer("two invoices")
     submitForm()
+    await waitFor(() =>
+      expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toContain("bad.pdf"),
+    )
+    expect(sendMessage).not.toHaveBeenCalled()
 
+    // Removing the failed chip lets exactly the one that landed go out.
+    fireEvent.click(screen.getByLabelText("Remove bad.pdf"))
+    submitForm()
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     const [content] = sendMessage.mock.calls[0] as [string]
     expect(content).toContain("attachments/sess-1/good.pdf")
@@ -260,7 +272,8 @@ describe("a rejected upload never reads as an attached file", () => {
 
     // With no text, a failed attachment is not content: Send used to look
     // available and then do nothing at all when pressed.
-    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled()
+    // aria-disabled (focusable, reason linked), not native disabled.
+    expect(screen.getByRole("button", { name: "Submit" })).toHaveAttribute("aria-disabled", "true")
 
     submitForm()
 

@@ -104,10 +104,11 @@ func (b *blockingRunner) callCount() int {
 }
 
 // waitForWebhookFire polls the webhook row until RecordFire has
-// stamped a last_status, then returns (last_run_id, last_status).
+// stamped a last_status, then returns (last_run_id, last_status). An optional
+// expected run ID excludes an older delivery outcome on the same webhook.
 // Fails the test after the deadline — a terminal record must always
 // land, however the run ends.
-func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline time.Duration) (string, string) {
+func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline time.Duration, expectedRunID ...string) (string, string) {
 	t.Helper()
 	stop := time.Now().Add(deadline)
 	for {
@@ -115,7 +116,7 @@ func waitForWebhookFire(t *testing.T, db *sql.DB, webhookID string, deadline tim
 		err := db.QueryRow(
 			`SELECT last_run_id, last_status FROM pipeline_webhooks WHERE id = ?`, webhookID,
 		).Scan(&runID, &status)
-		if err == nil && status.String != "" {
+		if err == nil && status.String != "" && (len(expectedRunID) == 0 || runID.String == expectedRunID[0]) {
 			return runID.String, status.String
 		}
 		if time.Now().After(stop) {
@@ -278,7 +279,7 @@ func TestPipelineWebhooks_Fire_BadSignature_NothingDispatched(t *testing.T) {
 	}
 	// Returns immediately when nothing was spawned — and proves the
 	// 401 path never reaches the dispatch WaitGroup.
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if n := runner.callCount(); n != 0 {
 		t.Errorf("runner invoked %d times on a rejected signature, want 0", n)
 	}
@@ -329,7 +330,7 @@ func TestPipelineWebhooks_Fire_Replay_DedupedToOriginalRun(t *testing.T) {
 	if firstRunID == "" {
 		t.Fatal("first fire missing run_id")
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	second := fire()
 	if second["status"] != "DEDUPED" || second["deduped"] != true {
@@ -338,7 +339,7 @@ func TestPipelineWebhooks_Fire_Replay_DedupedToOriginalRun(t *testing.T) {
 	if second["run_id"] != firstRunID {
 		t.Errorf("replay run_id = %v, want the original run's id %q", second["run_id"], firstRunID)
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if runner.calls != 1 {
 		t.Errorf("runner invoked %d times across a delivery + its replay, want exactly 1", runner.calls)
 	}
@@ -388,7 +389,7 @@ func TestPipelineWebhooks_Fire_ApprovalWait_ParksWaiting(t *testing.T) {
 	// The dispatch goroutine must return promptly (parked, not blocked
 	// in WaitFor until the approval timeout).
 	drained := make(chan struct{})
-	go func() { h.WaitWebhookDispatches(); close(drained) }()
+	go func() { waitPendingWebhookDispatches(t, h); close(drained) }()
 	select {
 	case <-drained:
 	case <-time.After(5 * time.Second):
@@ -437,96 +438,57 @@ func seedConcurrencyGatedPipeline(t *testing.T, db *sql.DB, wsID, id, slug strin
 	}
 }
 
-// TestPipelineWebhooks_Fire_ConcurrencyLimit_429Synchronous pins that
-// the concurrency-limit rejection stays a SYNCHRONOUS sender-visible
-// contract under async dispatch. RED against the first async handler:
-// the ErrConcurrencyLimitReached rejection had moved into the
-// background goroutine, so an over-limit delivery got a 202 +
-// {run_id, PENDING} the sender never retries — the background run
-// failed before any pipeline_runs row existed and the event was
-// permanently lost (the handed-out run_id 404s forever).
-//
-// Contract: while the routine's single concurrency slot is held,
-//   - a new delivery answers 429 + Retry-After BEFORE the 202, and
-//   - the 429 must NOT consume the idempotency reservation — the
-//     sender's retry of the SAME key must execute as a fresh run,
-//     not dedupe onto a run that never happened.
-func TestPipelineWebhooks_Fire_ConcurrencyLimit_429Synchronous(t *testing.T) {
+// Capacity queues accepted deliveries durably; the sender need not retry.
+func TestPipelineWebhooks_Fire_ConcurrencyLimit_DurablyQueues(t *testing.T) {
 	runner := newBlockingRunner()
 	h, db, _, wsID := webhookHandlerRig(t)
 	h.SetRunner(runner)
 	h.SetRunRegistry(pipeline.NewRunRegistry())
 	seedConcurrencyGatedPipeline(t, db, wsID, "pln_conc", "conc-target")
 	wh := seedWebhookRow(t, db, wsID, "pln_conc", "conc-secret", true)
-
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	var once sync.Once
+	release := func() { once.Do(func() { close(runner.release) }) }
 	t.Cleanup(release)
-
-	fire := func(body, idemKey string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
-		req.SetPathValue("token", wh.Token)
-		req.Header.Set("X-Crewship-Signature", covPSWSign("conc-secret", body))
-		req.Header.Set("Idempotency-Key", idemKey)
-		rr := httptest.NewRecorder()
-		h.FireWebhook(rr, req)
-		return rr
-	}
-
-	// Delivery 1 takes the single "serial" slot and parks in the runner.
-	rr1 := fire(`{"n":1}`, "evt-1")
-	if rr1.Code != 202 {
-		t.Fatalf("first fire status = %d, want 202; body=%s", rr1.Code, rr1.Body.String())
+	first := fireRoutineWebhook(t, h, wh.Token, "conc-secret", `{"n":1}`, "evt-1")
+	if first.Code != 202 {
+		t.Fatalf("first accept: %d %s", first.Code, first.Body.String())
 	}
 	select {
 	case <-runner.started:
-		// RunStep entered → the registry slot is definitely acquired.
 	case <-time.After(2 * time.Second):
-		t.Fatal("first run never started")
+		t.Fatal("first run did not start")
 	}
-
-	// Delivery 2 while the slot is held: must be rejected synchronously.
-	rr2 := fire(`{"n":2}`, "evt-2")
-	if rr2.Code != 429 {
-		t.Fatalf("over-limit fire status = %d, want 429; body=%s — a 202 here hands the sender a run_id that will never exist (event permanently lost, sender never retries)", rr2.Code, rr2.Body.String())
+	second := fireRoutineWebhook(t, h, wh.Token, "conc-secret", `{"n":2}`, "evt-2")
+	if second.Code != 202 {
+		t.Fatalf("capacity must queue: %d %s", second.Code, second.Body.String())
 	}
-	if rr2.Header().Get("Retry-After") == "" {
-		t.Error("429 response missing Retry-After header")
+	var accepted map[string]any
+	if err := json.Unmarshal(second.Body.Bytes(), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	var queued int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pending_runs WHERE run_id=?`, accepted["run_id"]).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("accepted work missing: %d %v", queued, err)
 	}
 	if n := runner.callCount(); n != 1 {
-		t.Errorf("runner invoked %d times with the slot held, want 1 (the parked run only)", n)
+		t.Fatalf("capacity exceeded: %d calls", n)
 	}
-
-	// Free the slot, drain the first run.
 	release()
-	h.WaitWebhookDispatches()
-
-	// The sender retries delivery 2 with the SAME idempotency key. The
-	// 429 must not have burned the key: this retry must execute as a
-	// fresh PENDING run — DEDUPED here means the reservation leaked and
-	// the event is lost for good.
-	rr3 := fire(`{"n":2}`, "evt-2")
-	if rr3.Code != 202 {
-		t.Fatalf("retry after 429 status = %d, want 202; body=%s", rr3.Code, rr3.Body.String())
-	}
-	var resp3 map[string]any
-	if err := json.Unmarshal(rr3.Body.Bytes(), &resp3); err != nil {
-		t.Fatalf("decode retry response: %v", err)
-	}
-	if resp3["status"] != "PENDING" || resp3["deduped"] == true {
-		t.Errorf("retry after 429 = %v, want status PENDING (fresh run) — the 429 consumed the idempotency reservation", resp3)
-	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if n := runner.callCount(); n != 2 {
-		t.Errorf("runner invoked %d times across slot-held fire + retry, want 2 (parked run + executed retry)", n)
+		t.Fatalf("queued delivery did not execute: %d calls", n)
+	}
+	duplicate := fireRoutineWebhook(t, h, wh.Token, "conc-secret", `{"n":2}`, "evt-2")
+	var repeated map[string]any
+	_ = json.Unmarshal(duplicate.Body.Bytes(), &repeated)
+	if duplicate.Code != 202 || repeated["run_id"] != accepted["run_id"] || repeated["deduped"] != true {
+		t.Fatalf("capacity retry changed identity: %d %v", duplicate.Code, repeated)
 	}
 }
 
 // TestPipelineWebhooks_Fire_ConcurrencyGate_UnderLimit_202AndRuns pins
-// the other half of the synchronous concurrency contract: a delivery
-// for a concurrency-gated routine whose slot is FREE still answers
-// 202 + PENDING and the run executes to COMPLETED under the handed-out
-// run id — the pre-check must reject only genuinely over-limit fires.
+// A delivery with free capacity is accepted durably and executes to
+// COMPLETED under the handed-out identity, just like a queued delivery.
 func TestPipelineWebhooks_Fire_ConcurrencyGate_UnderLimit_202AndRuns(t *testing.T) {
 	runner := &stubRunner{output: "ok"}
 	h, db, _, wsID := webhookHandlerRig(t)
@@ -554,7 +516,7 @@ func TestPipelineWebhooks_Fire_ConcurrencyGate_UnderLimit_202AndRuns(t *testing.
 	}
 	respRunID, _ := resp["run_id"].(string)
 
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	recordedRunID, recordedStatus := waitForWebhookFire(t, db, wh.ID, 3*time.Second)
 	if recordedStatus != "COMPLETED" {
 		t.Errorf("recorded last_status = %q, want COMPLETED", recordedStatus)
@@ -591,7 +553,7 @@ func TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous(t *testing.T) {
 	if rr.Code != 409 {
 		t.Fatalf("status = %d, want 409; body=%s", rr.Code, rr.Body.String())
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if n := runner.callCount(); n != 0 {
 		t.Errorf("runner invoked %d times for an inactive routine, want 0", n)
 	}

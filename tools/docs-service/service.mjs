@@ -54,6 +54,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
   async function go(page, operation, context, data = {}) {
+    let deadline;
     return new Promise((resolve, reject) => {
       const bytes = JSON.stringify(data);
       const req = http.request({ socketPath: authoritySocket, path: operation === 'health' ? '/health/ready' : `/internal/docs/v1/${encodeURIComponent(page)}/${operation}`, method: operation === 'health' ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bytes), 'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': context.workspace, ...(context.authorization ? { Authorization: context.authorization } : {}) } }, res => {
@@ -62,9 +63,11 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         res.on('end', () => { try { const result = JSON.parse(Buffer.concat(chunks).toString()); if (res.statusCode >= 400) reject(fault(res.statusCode, result.error || 'authority rejected request',result.code)); else resolve(result); } catch { reject(fault(502, 'invalid authority response')); } });
         res.on('error', () => reject(fault(502, 'authority unavailable')));
       });
-      req.setTimeout(timeoutMs, () => req.destroy());
+      // Bound the whole authority exchange, including response bytes. Socket
+      // inactivity timeouts alone can be extended forever by a slow response.
+      deadline = setTimeout(() => { reject(fault(503, 'authority unavailable')); req.destroy(); }, timeoutMs);
       req.on('error', () => reject(fault(503, 'authority unavailable'))); req.end(bytes);
-    });
+    }).finally(() => clearTimeout(deadline));
   }
   function enqueue(key, fn) {
     let entry = documents.get(key);

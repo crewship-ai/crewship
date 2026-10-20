@@ -26,6 +26,7 @@ const VisibleSQL = `EXISTS (
 	    SELECT 1 FROM live_access_grants g WHERE g.member_id = wm.id
 	      AND g.resource_kind = 'agent' AND g.agent_id = c.agent_id AND g.operation = 'chat'
 	  )))
+	  AND (` + PrivateArtifactContextSQL + `)
 	  AND (
 	    (c.created_by = ? AND c.visibility IN ('private','group'))
 	    OR (c.visibility = 'group' AND EXISTS (

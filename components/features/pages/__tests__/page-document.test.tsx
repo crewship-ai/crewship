@@ -7,11 +7,14 @@ import type { Editor } from "@tiptap/core"
 import { PageDocument } from "../page-document"
 import { encodeUpdate } from "@/hooks/use-page-document"
 const availability=vi.hoisted(()=>({enabled:true}))
+const account=vi.hoisted(()=>({id:"document-test-human"}))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({data:availability.enabled,isPending:false}) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
-afterEach(() => { cleanup(); request.mockReset();availability.enabled=true })
+const recoveryJournal=vi.hoisted(()=>({drafts:[] as import("@/lib/document-queue").DocumentDraft[],remove:vi.fn(async()=>{}),exclusive:true}))
+vi.mock("@/lib/document-queue", async importOriginal => ({...await importOriginal<typeof import("@/lib/document-queue")>(),openDocumentDrafts:async()=>({load:async()=>recoveryJournal.drafts,put:async()=>{},remove:recoveryJournal.remove,close: () => {}, exclusive: recoveryJournal.exclusive})}))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: account.id } } }) }))
+afterEach(() => { cleanup(); request.mockReset();availability.enabled=true;account.id="document-test-human";recoveryJournal.drafts=[];recoveryJournal.remove.mockClear() })
 it("hydrates saved CRDT content before binding the editor without manufacturing a local write", async () => {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "saved-paragraph")
@@ -113,4 +116,172 @@ it.each([
     expect(editor.getJSON().content).toHaveLength(1)
     expect(node.querySelector("p")).toBeNull()
   } finally {cleanup();saved.destroy()}
+})
+
+
+async function historyFixture() {
+  const { documentSchema } = await import("@/lib/documents/schema")
+  const saved = documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"live-text"},content:[{type:"text",text:"Current live revision"}]}]},3)
+  const confirmed = {type:"doc",content:[{type:"paragraph",attrs:{id:"old-text"},content:[{type:"text",text:"Confirmed historical body"}]}]}
+  const pin = {id:"confirmed-pin",rev:2,schema:3,actor:"user:document-test-human",created_at:"2026-10-18T00:00:00Z"}
+  request.mockImplementation(async(url:string) => ({ok:true,status:200,json:async()=>url.includes("/checkpoints/confirmed-pin")
+    ? {page_id:"page",id:pin.id,rev:pin.rev,schema:3,content:confirmed}
+    : url.includes("/checkpoints") ? {checkpoints:[pin]}
+    : {page_id:"page",schema:3,rev:7,epoch:"current-live-epoch",can_write:true,snapshot:documentSchema.snapshot(saved)}}))
+  const dirty=vi.fn(), view=render(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={dirty} />)
+  const node=await screen.findByLabelText("Document editor"),editor=(node as HTMLElement&{editor:Editor}).editor
+  await waitFor(()=>expect(editor.isEditable).toBe(true))
+  return {saved,view,node,editor,dirty}
+}
+async function openHistory() {
+  fireEvent.click(screen.getByRole("button",{name:"History"}))
+  fireEvent.click(await screen.findByRole("button",{name:/Revision 2/}))
+  await screen.findByText("Confirmed historical body")
+}
+it("restores only after confirmation, locks the real editor and reopens confirmed content in a new epoch",async()=>{
+  const f=await historyFixture(),{documentSchema}=await import("@/lib/documents/schema")
+  const restored=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"old-text"},content:[{type:"text",text:"Confirmed historical body"}]}]},3)
+  const read=request.getMockImplementation()!
+  let committed=false,resolve!: (value:unknown)=>void
+  const receipt=new Promise(done=>{resolve=done})
+  request.mockImplementation((url:string,init?:RequestInit)=>{
+    if(url.includes("/restore")) { committed=true;const packet=JSON.parse(String(init?.body));return receipt.then(()=>({ok:true,status:200,json:async()=>({page_id:"page",id:packet.id,rev:8,epoch:"restored-epoch",kind:"restore"})})) }
+    if(committed&&!url.includes("/checkpoints")) return Promise.resolve({ok:true,status:200,json:async()=>({page_id:"page",schema:3,rev:8,epoch:"restored-epoch",can_write:true,snapshot:documentSchema.snapshot(restored)})})
+    return read(url,init)
+  })
+  try {
+    await openHistory()
+    fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+    expect(request.mock.calls.some(([url])=>url.includes("/restore"))).toBe(false)
+    fireEvent.click(screen.getByRole("button",{name:"Confirm restore"}))
+    expect(f.editor.isEditable).toBe(false)
+    expect(screen.getByRole("button",{name:"Close history"})).toBeDisabled()
+    await act(async()=>resolve(undefined))
+    await waitFor(()=>expect((screen.getByLabelText("Document editor")as HTMLElement&{editor:Editor}).editor).not.toBe(f.editor))
+    expect(screen.getByLabelText("Document editor")).toHaveTextContent("Confirmed historical body")
+    expect(request.mock.calls.filter(([url])=>url.includes("/restore"))).toHaveLength(1)
+  } finally {f.view.unmount();f.saved.destroy();restored.destroy()}
+})
+it("never offers restore over a real pending local draft",async()=>{
+  const f=await historyFixture()
+  try {
+    act(()=>f.editor.commands.insertContent("Local unsaved text "))
+    const before=f.editor.getJSON()
+    await openHistory()
+    expect(screen.queryByRole("button",{name:"Restore selected checkpoint"})).toBeNull()
+    expect(f.editor.getJSON()).toEqual(before)
+    expect(request.mock.calls.some(([url])=>url.includes("/restore"))).toBe(false)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("retains exact restore retry through service unavailability without unlocking the real editor",async()=>{
+  const f=await historyFixture(),read=request.getMockImplementation()!
+  request.mockImplementation((url:string,init?:RequestInit)=>url.includes("/restore")
+    ?Promise.resolve({ok:false,status:503,json:async()=>({error:"unconfirmed"})}):read(url,init))
+  try {
+    await openHistory()
+    fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+    fireEvent.click(screen.getByRole("button",{name:"Confirm restore"}))
+    await screen.findByRole("button",{name:"Retry exact restore"})
+    const packet=request.mock.calls.find(([url])=>url.includes("/restore"))![1].body
+    availability.enabled=false;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    expect(screen.queryByRole("region",{name:"Document history"})).toBeNull()
+    expect(f.editor.isEditable).toBe(false)
+    availability.enabled=true;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={f.dirty}/>)
+    fireEvent.click(await screen.findByRole("button",{name:"Retry exact restore"}))
+    await waitFor(()=>expect(request.mock.calls.filter(([url])=>url.includes("/restore"))).toHaveLength(2))
+    expect(request.mock.calls.filter(([url])=>url.includes("/restore"))[1][1].body).toBe(packet)
+    expect(f.editor.isEditable).toBe(false)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("browses immutable history and closes without replacing the real editor or unsaved draft",async()=>{
+  const f=await historyFixture()
+  try {
+    expect(request.mock.calls.some(([url])=>url.includes("/checkpoints"))).toBe(false)
+    act(()=>f.editor.commands.insertContent("Unsaved local draft "))
+    const before=f.editor.getJSON(),dirtyCalls=f.dirty.mock.calls.length
+    await openHistory()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect((f.node as HTMLElement&{editor:Editor}).editor).toBe(f.editor)
+    expect(f.editor.getJSON()).toEqual(before);expect(f.editor.getText()).not.toContain("Confirmed historical body")
+    fireEvent.click(screen.getByRole("button",{name:"Close history"}))
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect(f.editor.getJSON()).toEqual(before);expect(f.dirty.mock.calls.slice(dirtyCalls)).not.toContainEqual([false])
+    const historyCalls=request.mock.calls.filter(([url])=>url.includes("/checkpoints"))
+    expect(historyCalls.map(([url])=>url)).toEqual(["/api/v1/pages/%40page/document/checkpoints?workspace_id=w","/api/v1/pages/%40page/document/checkpoints/confirmed-pin?workspace_id=w"])
+    expect(historyCalls.every(([,init])=>!init?.method&&!init?.body)).toBe(true)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("removes history on unavailable service while retaining the admitted real editor and draft",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory();act(()=>f.editor.commands.insertContent("Keep local draft "))
+    availability.enabled=false;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByRole("button",{name:"History"})).toBeDisabled()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect(f.editor.getText()).toContain("Keep local draft")
+    await waitFor(()=>expect(f.editor.isEditable).toBe(false))
+    expect(screen.getByRole("button",{name:"Download unsaved draft"})).toBeEnabled()
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("clears and disables protected history on auth expiry without remounting the editor",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory()
+    act(()=>window.dispatchEvent(new Event("auth:session-expired")))
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByRole("button",{name:"History"})).toBeDisabled()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect((f.node as HTMLElement&{editor:Editor}).editor).toBe(f.editor)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("drops the former human's history immediately on account change without auto-fetching it",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory();const count=request.mock.calls.filter(([url])=>url.includes("/checkpoints")).length
+    account.id="another-human";f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.queryByRole("region",{name:"Confirmed revision 2"})).toBeNull()
+    expect(request.mock.calls.filter(([url])=>url.includes("/checkpoints"))).toHaveLength(count)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("downloads the persisted recovery content and explicitly discards it before reopening",async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema")
+ const confirmed=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Confirmed head"}]}]},3)
+ const draft=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Pending browser draft"}]}]},3)
+ recoveryJournal.drafts=[{id:"pending",schema:3,epoch:"previous-epoch",attempted:true,update:"bytes",snapshot:documentSchema.snapshot(draft)}]
+ request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:3,rev:1,epoch:"current-epoch",can_write:true,snapshot:documentSchema.snapshot(confirmed)}}))
+ const blobs:Blob[]=[]
+ const create=vi.spyOn(URL,"createObjectURL").mockImplementation(blob=>{blobs.push(blob as Blob);return "blob:recovery"})
+ const revoke=vi.spyOn(URL,"revokeObjectURL").mockImplementation(()=>{})
+ const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
+ try{
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  fireEvent.click(await screen.findByRole("button",{name:"Download unsaved draft"}))
+  expect(await blobs[0].text()).toContain("Pending browser draft")
+  fireEvent.click(screen.getByRole("button",{name:"Discard recovered drafts and reopen"}))
+  await waitFor(()=>expect(recoveryJournal.remove).toHaveBeenCalledWith("pending"))
+  await waitFor(()=>expect(screen.queryByRole("button",{name:"Download unsaved draft"})).toBeNull())
+  expect(request.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+ }finally{create.mockRestore();revoke.mockRestore();click.mockRestore();confirmed.destroy();draft.destroy()}
+})
+
+it("keeps editing when the journal cannot be locked; earlier rows are download-only with no delete",async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema")
+ const confirmed=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Confirmed head"}]}]},3)
+ recoveryJournal.exclusive=false
+ recoveryJournal.remove.mockClear()
+ recoveryJournal.drafts=[{id:"earlier",schema:3,epoch:"previous-epoch",attempted:false,update:"bytes",snapshot:documentSchema.snapshot(confirmed)}]
+ request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:3,rev:1,epoch:"current-epoch",can_write:true,snapshot:documentSchema.snapshot(confirmed)}}))
+ try{
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  expect(await screen.findByRole("button",{name:"Download earlier draft"})).toBeTruthy()
+  const node=await screen.findByLabelText("Document editor")
+  await waitFor(()=>expect((node as HTMLElement&{editor:Editor}).editor.isEditable).toBe(true))
+  expect(screen.queryByRole("button",{name:/Discard/})).toBeNull()
+  expect(document.body.textContent).toContain("could not lock this document's local drafts and an earlier draft exists")
+  expect(document.body.textContent).not.toContain("retained privately")
+  expect(recoveryJournal.remove).not.toHaveBeenCalled()
+ }finally{recoveryJournal.exclusive=true;confirmed.destroy()}
 })

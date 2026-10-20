@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -334,7 +335,7 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 				}
 				used[id] = kind
 			}
-			candidate.Slides = append(candidate.Slides, *op.Slide)
+			candidate.Slides = append(candidate.Slides, cloneSlidePayload(*op.Slide))
 			position := *op.Position
 			candidate.SlideOrder = append(candidate.SlideOrder, "")
 			copy(candidate.SlideOrder[position+1:], candidate.SlideOrder[position:])
@@ -366,7 +367,7 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 				if op.Element == nil || op.Element.ID != op.ElementID {
 					return Deck{}, errors.New("replacement must preserve identity")
 				}
-				slide.Elements[elementIndex] = *op.Element
+				slide.Elements[elementIndex] = cloneElementPayload(*op.Element)
 			}
 			continue
 		}
@@ -383,7 +384,7 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 				return Deck{}, ErrConflict
 			}
 			used[op.Element.ID] = "element"
-			slide.Elements = append(slide.Elements, *op.Element)
+			slide.Elements = append(slide.Elements, cloneElementPayload(*op.Element))
 		case "set_notes":
 			if op.Notes == nil {
 				return Deck{}, errors.New("notes required")
@@ -408,4 +409,39 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 		return Deck{}, err
 	}
 	return candidate, nil
+}
+
+// Candidates own their payloads even after a later operation rejects a batch.
+// Preserve nil/empty slices and strings exactly; copying must not normalize an
+// invalid programmatic value before the final model validation sees it.
+func cloneSlidePayload(slide Slide) Slide {
+	slide.Elements = slices.Clone(slide.Elements)
+	for i := range slide.Elements {
+		slide.Elements[i] = cloneElementPayload(slide.Elements[i])
+	}
+	return slide
+}
+
+func cloneElementPayload(element Element) Element {
+	if element.Text != nil {
+		value := *element.Text
+		element.Text = &value
+	}
+	if element.Shape != nil {
+		value := *element.Shape
+		element.Shape = &value
+	}
+	if element.Table != nil {
+		value := *element.Table
+		value.Cells = slices.Clone(value.Cells)
+		for i := range value.Cells {
+			value.Cells[i] = slices.Clone(value.Cells[i])
+		}
+		element.Table = &value
+	}
+	if element.Image != nil {
+		value := *element.Image
+		element.Image = &value
+	}
+	return element
 }

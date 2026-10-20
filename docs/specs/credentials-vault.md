@@ -170,9 +170,19 @@ Reusing a retired name creates a new credential ID. Within the replacement
 transaction, the old name gains ` [retired:<unchanged credential ID>]`; the full
 original name remains before that exact suffix, without truncation. A name
 collision or failed replacement rolls back the rename. Old assignments cannot
-become grants to the replacement ID. The retirement does not rewrite encrypted
-values, credential IDs or historical audit rows. Workspace backups retain tombstones
-and workspace-attributed history; legacy audit rows with NULL workspace
-attribution remain outside that scope. A replacement restore that would orphan
+become grants to the replacement ID. Retirement preserves credential IDs and
+historical audit rows, but irreversibly clears encrypted secret and refresh-token
+values, OAuth configuration, account/username metadata, description, tags, error
+and IP hints, custom fields and pending OAuth state/PKCE verifiers. The migration
+also scrubs existing tombstones. Native guards apply the same erasure to later
+retirement and historical restore/fork inserts, including child rows inserted
+after their retired parent. Active credentials and their fields/state remain
+unchanged. A refused scrub rolls back the retirement rather than reporting it
+complete. Integration removal retires its unshared OAuth credentials and records
+each REVOKE in the same transaction; storage, scrub or audit failure rolls back
+the integration removal and its bindings.
+
+Workspace backups retain erased tombstones and workspace-attributed history;
+legacy audit rows with NULL workspace attribution remain outside that scope. A replacement restore that would orphan
 those rows is refused and rolled back, rather than deleting history absent from
 the bundle. The separate active-secret export excludes tombstones.

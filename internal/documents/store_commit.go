@@ -101,7 +101,7 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if err = t.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&logCount, &logBytes); err != nil {
 			return err
 		}
-		if logBytes+len(c.Update) > s.opts.MaxLogBytes {
+		if len(c.Update) > s.opts.MaxLogBytes {
 			return ErrQuota
 		}
 		r = Receipt{c.ID, v.HeadRev + 1, v.Epoch, actor, c.Kind}
@@ -111,7 +111,11 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if _, err = t.ExecContext(ctx, "INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) VALUES(?,?,?,?,?,?,?,?,?)", k.WorkspaceID, k.PageID, c.ID, d, c.Fingerprint, r.Rev, r.Epoch, actor, c.Kind); err != nil {
 			return err
 		}
-		if logCount+1 >= 32 || logBytes+len(c.Update) >= 64<<10 {
+		// Replay capacity bounds the retained log, not the document lifetime.
+		// A validated candidate can replace accumulated updates atomically before
+		// they exceed the configured replay budget. Individual oversized updates
+		// remain rejected above. Checkpoints and receipts are never compacted here.
+		if logCount+1 >= 32 || logBytes+len(c.Update) >= 64<<10 || logBytes+len(c.Update) > s.opts.MaxLogBytes {
 			if _, err = t.ExecContext(ctx, "UPDATE documents SET snapshot=?,snapshot_rev=? WHERE workspace_id=? AND page_id=?", c.CandidateSnapshot, r.Rev, k.WorkspaceID, k.PageID); err != nil {
 				return err
 			}

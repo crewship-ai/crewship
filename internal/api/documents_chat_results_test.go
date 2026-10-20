@@ -81,17 +81,14 @@ func TestDocumentChatResultsDurableProvenanceAndCurrentReach(t *testing.T) {
 	pagesSeedUser(t, h, workspace, "result-reader", "result-reader@example.invalid", "MEMBER")
 	mustExec(t, h.db, `INSERT INTO chat_participants(chat_id,user_id,role) VALUES('principal-chat','result-reader','member')`)
 	hidden := read("result-reader")
-	if len(documentResultsDecode(t, hidden)) != 0 || strings.Contains(hidden.Body.String(), saved.PageID) || strings.Contains(hidden.Body.String(), saved.Title) {
+	creationExpect(t, hidden, 404)
+	if strings.Contains(hidden.Body.String(), saved.PageID) || strings.Contains(hidden.Body.String(), saved.Title) {
 		t.Fatal("chat reach disclosed private Document")
 	}
 	mustExec(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user','result-reader','read',?)`, saved.PageID, owner)
-	if len(documentResultsDecode(t, read("result-reader"))) != 0 {
-		t.Fatal("ordinary grant widened private audience")
-	}
+	creationExpect(t, read("result-reader"), 404)
 	mustExec(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id='result-reader'`, saved.PageID)
-	if len(documentResultsDecode(t, read("result-reader"))) != 0 {
-		t.Fatal("revoked Page grant retained result")
-	}
+	creationExpect(t, read("result-reader"), 404)
 	mustExec(t, h.db, `DELETE FROM chat_participants WHERE user_id='result-reader'`)
 	creationExpect(t, read("result-reader"), 404)
 	mustExec(t, h.db, `DELETE FROM document_creations`)

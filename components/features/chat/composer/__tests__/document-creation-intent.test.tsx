@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const { identity } = vi.hoisted(() => ({ identity: { id: "human-a" as string | null } }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: identity.id ? { user: { id: identity.id } } : null }) }))
 vi.mock("../attachment-zone", () => ({
   AttachmentZone: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -78,4 +79,13 @@ describe("explicit document creation consent", () => {
     identity.id = null; view.rerender(<ChatComposer {...props} />)
     expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
   })
+})
+
+it.each(["desktop", "mobile"] as const)("shows the actual selected personal audience on %s", variant => {
+ render(<ChatComposer {...props} variant={variant} />)
+ expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
+ selectCreation()
+ expect(screen.getByText("My space · You and workspace OWNER (audited access)")).toBeTruthy()
+ selectCreation()
+ expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
 })

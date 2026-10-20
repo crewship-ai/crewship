@@ -395,13 +395,13 @@ describe("useMessageSubmit — attachments ride along with the message", () => {
     expect(toastError.mock.calls[0][0]).toMatch(/uploading/i)
   })
 
-  it("ignores a failed upload rather than naming a file that is not there", async () => {
+  it("holds the send while a failed upload is still in the composer instead of dropping it silently", async () => {
     const { result, sendMessage } = setup({
       attachments: [{ name: "big.zip", status: "error" as const }],
     })
 
     await act(async () => { await result.current({ text: "here it is", files: [] }) })
 
-    expect(sendMessage).toHaveBeenCalledWith("here it is")
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 })

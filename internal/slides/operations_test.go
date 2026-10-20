@@ -217,3 +217,114 @@ func TestPureImageUpgradeRequiresOriginalContentFence(t *testing.T) {
 		t.Fatal("upgrade mutated original schema1 deck")
 	}
 }
+
+func TestPatchRejectedBatchPreservesDecodedRequest(t *testing.T) {
+	deck, _, _ := modelFixture(t)
+	first := Element{ID: "new_first", Type: "text", Width: 20, Height: 20, Text: &Text{Value: "First", FontFamily: "Arial", FontSize: 12, Color: "#112233", Align: "left"}}
+	second := first
+	second.ID = "new_second"
+	slide := Slide{ID: "new_slide", Elements: []Element{first, second}}
+	firstHash, _ := ElementHash(first)
+	staleSlideHash, _ := SlideHash(slide)
+	position, order := 0, int64(0)
+	notes := "Later operation must fail"
+	request := PatchRequest{PageID: deck.DeckID, SchemaVersion: deck.SchemaVersion, BaseRev: 1, MutationID: "request_atomicity", IfOrderVersion: &order, Operations: []Operation{
+		{Op: "insert_slide", Slide: &slide, Position: &position},
+		{Op: "delete_element", SlideID: slide.ID, ElementID: first.ID, IfHash: firstHash},
+		{Op: "set_notes", SlideID: slide.ID, IfHash: staleSlideHash, Notes: &notes},
+	}}
+	raw, _ := json.Marshal(request)
+	decoded, err := DecodePatch(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(decoded)
+	if _, err := ApplyPatch(deck, decoded); !errors.Is(err, ErrConflict) {
+		t.Fatalf("later stale hash must reject batch: %v", err)
+	}
+	after, _ := json.Marshal(decoded)
+	if string(after) != string(before) {
+		t.Fatal("rejected batch mutated its strictly decoded request")
+	}
+}
+
+func TestPatchCandidateAndDecodedPayloadAreIndependent(t *testing.T) {
+	for _, operation := range []string{"insert_slide", "insert_element", "set_element"} {
+		for _, kind := range []string{"text", "shape", "table", "image"} {
+			for _, direction := range []string{"candidate", "request"} {
+				t.Run(operation+"/"+kind+"/"+direction, func(t *testing.T) {
+					deck, _, _ := modelFixture(t)
+					deck.SchemaVersion = ImageSchemaVersion
+					element := Element{ID: "independent_element", Type: kind, Width: 20, Height: 20}
+					switch kind {
+					case "text":
+						element.Text = &Text{Value: "Original", FontFamily: "Arial", FontSize: 12, Color: "#112233", Align: "left"}
+					case "shape":
+						element.Shape = &Shape{Kind: "rectangle", Fill: "#FFFFFF", Stroke: "#112233", StrokeWidth: 1}
+					case "table":
+						element.Table = &Table{Cells: [][]string{{"Original"}}, FontFamily: "Arial", FontSize: 12, Color: "#112233", Fill: "#FFFFFF", Border: "#112233"}
+					case "image":
+						element.Image = &Image{AssetID: "independent_asset", ExpectedSHA256: strings.Repeat("a", 64), Alt: "Original"}
+					}
+					op := Operation{Op: operation, SlideID: deck.Slides[0].ID, Element: &element}
+					order, position := int64(0), 0
+					request := PatchRequest{PageID: deck.DeckID, SchemaVersion: deck.SchemaVersion, BaseRev: 1, MutationID: "payload_isolation", Operations: []Operation{op}}
+					switch operation {
+					case "insert_slide":
+						request.IfOrderVersion = &order
+						request.Operations[0] = Operation{Op: operation, Slide: &Slide{ID: "independent_slide", Elements: []Element{element}}, Position: &position}
+					case "set_element":
+						element.ID = deck.Slides[0].Elements[0].ID
+						request.Operations[0].ElementID = element.ID
+						request.Operations[0].IfHash, _ = ElementHash(deck.Slides[0].Elements[0])
+					default:
+						request.Operations[0].IfHash, _ = SlideHash(deck.Slides[0])
+					}
+					raw, _ := json.Marshal(request)
+					decoded, err := DecodePatch(raw)
+					if err != nil {
+						t.Fatal(err)
+					}
+					candidate, err := ApplyPatch(deck, decoded)
+					if err != nil {
+						t.Fatal(err)
+					}
+					payload := decoded.Operations[0].Element
+					if operation == "insert_slide" {
+						payload = &decoded.Operations[0].Slide.Elements[0]
+					}
+					var result *Element
+					for i := range candidate.Slides {
+						for j := range candidate.Slides[i].Elements {
+							if candidate.Slides[i].Elements[j].ID == element.ID {
+								result = &candidate.Slides[i].Elements[j]
+							}
+						}
+					}
+					if result == nil {
+						t.Fatal("successful candidate lost inserted/replaced identity")
+					}
+					changed, retained := result, payload
+					if direction == "request" {
+						changed, retained = payload, result
+					}
+					before, _ := json.Marshal(retained)
+					switch kind {
+					case "text":
+						changed.Text.Value = "Mutated"
+					case "shape":
+						changed.Shape.Fill = "#445566"
+					case "table":
+						changed.Table.Cells[0][0] = "Mutated"
+					case "image":
+						changed.Image.Alt = "Mutated"
+					}
+					after, _ := json.Marshal(retained)
+					if string(after) != string(before) {
+						t.Fatal("candidate and decoded request retain shared nested payload")
+					}
+				})
+			}
+		}
+	}
+}

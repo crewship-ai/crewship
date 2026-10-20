@@ -195,7 +195,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 			},
 			SuccessStatuses: []string{"200", "202"},
 			Response: object(map[string]any{
-				"run_id": str(), "status": str(), "deduped": boolean(), "delivery_id": str(),
+				"run_id": str(), "status": str(), "deduped": boolean(), "delivery_id": str(), "pending_id": str(),
 				"duplicate": boolean(), "reason": str(),
 			}, "status"),
 		},
@@ -209,7 +209,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 				"valid": boolean(), "problem": str(),
 			}, "inputs", "ignored_template_keys", "valid"),
 		},
-		"POST /api/v1/webhooks/{token}": {Response: object(map[string]any{"run_id": str(), "status": str()})},
+		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str(), "pending_id": str(), "delivery_id": str(), "deduped": boolean(), "duplicate": boolean()})},
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,

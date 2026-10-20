@@ -168,6 +168,9 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		debug["agent_logs"] = []interface{}{}
 	}
 
+	if !h.allowPrivateArtifactDiagnostics(w, r, agentID, workspaceID) {
+		return
+	}
 	writeJSON(w, http.StatusOK, debug)
 }
 
@@ -214,7 +217,11 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	var data map[string]interface{}
-	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+	decoded := json.NewDecoder(resp.Body).Decode(&data) == nil
+	if !h.allowPrivateArtifactDiagnostics(w, r, agentID, workspaceID) {
+		return
+	}
+	if decoded {
 		if logs, ok := data["logs"]; ok {
 			writeJSON(w, http.StatusOK, logs)
 			return
@@ -354,6 +361,19 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
+		return
+	}
+	// The IPC read may outlive the initial authorization. Recheck the current
+	// artifact-context seal and require the OWNER inspection audit before any
+	// transcript bytes are released to this human.
+	allowed, err = chataudience.CanReadArtifactConversation(r.Context(), h.db, chatID, user.ID, WorkspaceIDFromContext(r.Context()), false)
+	if err != nil || !allowed {
+		resp.Body.Close()
+		if err != nil {
+			replyInternalError(w, h.logger, "authorize private conversation output", err)
+		} else {
+			replyError(w, http.StatusNotFound, "Chat not found")
+		}
 		return
 	}
 	if canReadCosts(r.Context()) {
