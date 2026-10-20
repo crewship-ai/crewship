@@ -13,10 +13,8 @@ type documentPrivateReadAdmission struct{ pageID string }
 // Admission only: the actual handler/Store still checks exact credentials and
 // current custody again before returning content. No role/grant widens custody.
 var restrictedPrivateCustody = restrictedRule{check: func(m *AuthMiddleware, _ access.Store, r *http.Request, userID string) error {
+	// These Page/Docs read paths carry no workspace path parameter.
 	workspace := r.URL.Query().Get("workspace_id")
-	if workspace == "" {
-		workspace = r.PathValue("workspaceId")
-	}
 	if workspace == "" {
 		workspace = r.Header.Get("X-Workspace-ID")
 	}

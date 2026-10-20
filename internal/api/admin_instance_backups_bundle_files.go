@@ -99,12 +99,10 @@ func (h *InstanceBackupsHandler) DownloadBundle(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/zstd")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(entry.FilePath)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	n, copyErr := copyBackupDownload(w, r, h.db, f, true)
 
 	// The audit entry is a write, and this is a GET the quiet window's gate

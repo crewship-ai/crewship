@@ -65,6 +65,9 @@ func backupDownloadAuthority(r *http.Request, db *sql.DB, instanceOnly bool) err
 }
 
 func copyBackupDownload(w http.ResponseWriter, r *http.Request, db *sql.DB, source io.Reader, instanceOnly bool) (int64, error) {
+	// Keep arbitrary bundle bytes inert even when called without endpoint headers.
+	w.Header().Set("Content-Type", "application/zstd")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	buffer := make([]byte, 16384)
 	controller := http.NewResponseController(w)
 	var copied int64

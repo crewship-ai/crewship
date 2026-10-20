@@ -131,3 +131,16 @@ func TestBackupDownloadStopsAtAuthorityLoss(t *testing.T) {
 		}
 	}
 }
+
+func TestBackupCopyAlwaysUsesNonHTMLResponse(t *testing.T) {
+	h, user, workspace, _ := covBk2Rig(t)
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, workspace, "OWNER")
+	w := httptest.NewRecorder()
+	body := []byte("<html><script>alert('backup')</script></html>")
+	if n, err := copyBackupDownload(w, req, h.db, bytes.NewReader(body), false); err != nil || n != int64(len(body)) {
+		t.Fatalf("copy bytes=%d err=%v", n, err)
+	}
+	if w.Result().Header.Get("Content-Type") != "application/zstd" || w.Result().Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("backup content must never be interpreted as HTML: %v", w.Result().Header)
+	}
+}
