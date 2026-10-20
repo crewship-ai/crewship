@@ -182,6 +182,16 @@ complete. Integration removal retires its unshared OAuth credentials and records
 each REVOKE in the same transaction; storage, scrub or audit failure rolls back
 the integration removal and its bindings.
 
+For GDPR identity erasure, a retired credential's `created_by` becomes NULL;
+its actor and approver attribution are cleared too. It needs no live custodian.
+A live credential still requires a valid user custodian and keeps the existing
+transfer-or-refuse behavior. Native constraints reject NULL creators on live
+inserts/updates and reject reactivation of a creatorless tombstone. The nullable
+creator keeps its users foreign key with NO ACTION and its ownership index.
+Workspace normal/fork backups preserve nullable retired creators by column name,
+including across the migration's changed column order, while keeping IDs and
+audit bindings (or the ordinary fork ID mapping).
+
 Workspace backups retain erased tombstones and workspace-attributed history;
 legacy audit rows with NULL workspace attribution remain outside that scope. A replacement restore that would orphan
 those rows is refused and rolled back, rather than deleting history absent from
