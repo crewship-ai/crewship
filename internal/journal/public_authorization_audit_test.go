@@ -7,7 +7,7 @@ import (
 )
 
 func TestPublicAuthorizationAuditPreservesCanonicalAndPublicFields(t *testing.T) {
-	for _, typ := range []EntryType{EntryMemberCapabilitiesChanged, EntryPageGrantAdded, EntryPageGrantRemoved, "page.folder_acl_changed", "unrelated.event"} {
+	for _, typ := range []EntryType{EntryMemberAdded, EntryMemberCapabilitiesChanged, EntryPageGrantAdded, EntryPageGrantRemoved, "page.folder_acl_changed", "unrelated.event"} {
 		t.Run(string(typ), func(t *testing.T) {
 			e := Entry{Type: typ, Payload: map[string]any{"action": "changed", "subject_user_id": "subject", "acl_version": 7, "previous_capabilities": []string{"chat"}, "capabilities": []string{"issue.create"}, "previous_grant": map[string]any{"issuer": "old"}, "grant": map[string]any{"issuer": "new"}, "previous_acl": map[string]any{"issuer": "old"}, "acl": map[string]any{"issuer": "new"}, "previous_acl_version": 6}}
 			before, _ := json.Marshal(e)
@@ -16,6 +16,8 @@ func TestPublicAuthorizationAuditPreservesCanonicalAndPublicFields(t *testing.T)
 				want[k] = v
 			}
 			switch typ {
+			case EntryMemberAdded:
+				want = map[string]any{"subject_user_id": "subject", "action": "changed"}
 			case EntryMemberCapabilitiesChanged:
 				delete(want, "previous_capabilities")
 				delete(want, "capabilities")

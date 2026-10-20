@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -196,19 +197,43 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	memberID := generateCUID()
+	tx, currentRole := h.beginMemberMutation(w, r, crewID, "create")
+	if tx == nil {
+		return
+	}
+	defer tx.Rollback()
+	if roleParam.Valid && roleRank[roleParam.String] > roleRank[currentRole] {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	// Recheck the target on the writer too: middleware/body processing
+	// must not turn a removed workspace member into a new crew member.
+	err = tx.QueryRowContext(r.Context(), `SELECT id FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, req.UserID).Scan(&wsMemberID)
+	if err == sql.ErrNoRows {
+		replyError(w, http.StatusBadRequest, "User is not a member of this workspace")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "recheck target workspace membership", err)
+		return
+	}
 
-	_, err = h.db.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		"INSERT INTO crew_members (id, crew_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, crewID, req.UserID, roleParam, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert crew member", err)
 		return
 	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge crew membership insert", errors.Join(err, errors.New("membership insert did not affect one row")))
+		return
+	}
 
 	// Return member with user info
 	var m crewMemberResponse
 	var u memberUser
-	err = h.db.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT cm.id, cm.crew_id, cm.user_id, cm.created_at,
 			u.id, u.email, u.full_name, u.avatar_url
 		FROM crew_members cm
@@ -221,6 +246,10 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.User = &u
+	if err := h.commitMemberMutation(r, tx, "added", nil, &crewMembershipState{ID: memberID, CrewID: crewID, UserID: req.UserID, CreatedAt: now, Role: roleParam}); err != nil {
+		replyInternalError(w, h.logger, "commit audited crew membership insert", err)
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, m)
 }
@@ -273,11 +302,33 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.db.ExecContext(r.Context(),
+	tx, _ := h.beginMemberMutation(w, r, crewID, "manage")
+	if tx == nil {
+		return
+	}
+	defer tx.Rollback()
+	before, err := readCrewMembership(r.Context(), tx, crewID, memberID)
+	if err == sql.ErrNoRows {
+		replyError(w, http.StatusNotFound, "Crew member not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read removed crew membership", err)
+		return
+	}
+	res, err := tx.ExecContext(r.Context(),
 		"DELETE FROM crew_members WHERE id = ? AND crew_id = ?",
 		memberID, crewID)
 	if err != nil {
 		replyInternalError(w, h.logger, "delete crew member", err)
+		return
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge crew membership removal", errors.Join(err, errors.New("membership delete did not affect one row")))
+		return
+	}
+	if err := h.commitMemberMutation(r, tx, "removed", before, nil); err != nil {
+		replyInternalError(w, h.logger, "commit audited crew membership removal", err)
 		return
 	}
 
@@ -370,9 +421,38 @@ func (h *CrewHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 		roleParam = sql.NullString{String: req.Role, Valid: true}
 	}
 
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE crew_members SET role = ? WHERE id = ?", roleParam, memberID); err != nil {
+	tx, currentRole := h.beginMemberMutation(w, r, crewID, "manage")
+	if tx == nil {
+		return
+	}
+	defer tx.Rollback()
+	if roleParam.Valid && roleRank[roleParam.String] > roleRank[currentRole] {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	before, err := readCrewMembership(r.Context(), tx, crewID, memberID)
+	if err == sql.ErrNoRows {
+		replyError(w, http.StatusNotFound, "Crew member not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read previous crew membership", err)
+		return
+	}
+	res, err := tx.ExecContext(r.Context(),
+		"UPDATE crew_members SET role = ? WHERE id = ?", roleParam, memberID)
+	if err != nil {
 		replyInternalError(w, h.logger, "update crew member role", err)
+		return
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge crew role update", errors.Join(err, errors.New("membership update did not affect one row")))
+		return
+	}
+	after := *before
+	after.Role = roleParam
+	if err := h.commitMemberMutation(r, tx, "role_changed", before, &after); err != nil {
+		replyInternalError(w, h.logger, "commit audited crew role update", err)
 		return
 	}
 
