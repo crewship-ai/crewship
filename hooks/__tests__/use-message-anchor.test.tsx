@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { MESSAGE_ANCHOR_EVENT } from "@/components/features/chat/message-anchor-release"
 import { useMessageAnchor } from "../use-message-anchor"
 
 const params = vi.hoisted(() => ({ current: new URLSearchParams() }))
@@ -64,4 +65,14 @@ it("keeps a pending target when the page strips the param before the turn render
   const el = turn("m1")
   await act(async () => { await Promise.resolve() })
   expect(el.scrollIntoView).toHaveBeenCalled()
+})
+
+it("tells the transcript to release its stick-to-bottom lock after scrolling, so the load does not jump back to the bottom", () => {
+  const order: string[] = []
+  const el = turn("m1")
+  el.scrollIntoView = vi.fn(() => { order.push("scroll") })
+  window.addEventListener(MESSAGE_ANCHOR_EVENT, () => order.push("release"), { once: true })
+  params.current = new URLSearchParams("message=m1")
+  renderHook(() => useMessageAnchor("s1"))
+  expect(order).toEqual(["scroll", "release"])
 })

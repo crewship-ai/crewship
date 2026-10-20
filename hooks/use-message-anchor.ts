@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import { MESSAGE_ANCHOR_EVENT } from "@/components/features/chat/message-anchor-release"
 
 const WAIT_MS = 8000
 const MARK_MS = 2500
@@ -37,6 +38,8 @@ export function useMessageAnchor(sessionId: string | null) {
     const reveal = (el: HTMLElement) => {
       handled.current = target
       el.scrollIntoView({ block: "center" })
+      // The transcript must not scroll back to its bottom (see MessageAnchorRelease).
+      window.dispatchEvent(new Event(MESSAGE_ANCHOR_EVENT))
       el.setAttribute("data-search-target", "true")
       setTimeout(() => el.removeAttribute("data-search-target"), MARK_MS)
       setTarget(null)
