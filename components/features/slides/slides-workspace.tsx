@@ -3,7 +3,7 @@
 import * as React from "react"
 import type { SlideDeck } from "@/lib/slides/model"
 import { diffToPatch, type Unrepresentable } from "@/lib/slides/operations"
-import { slidesEditorSave, type SlidesSaveClient, type SlidesSnapshot } from "@/lib/slides/save-client"
+import type { SlidesSaveClient, SlidesSnapshot } from "@/lib/slides/save-client"
 import { SlidesEditor } from "./slides-editor"
 
 const control = "min-h-9 coarse:min-h-12 rounded border px-3 disabled:opacity-50"
@@ -29,12 +29,16 @@ const randomId = () => globalThis.crypto?.randomUUID?.().replaceAll("-", "") ?? 
 export interface SlidesWorkspaceProps {
   pageId: string
   client: SlidesSaveClient
-  /** Defaults to the NEXT_PUBLIC_SLIDES_EDITOR_SAVE flag. */
+  /**
+   * Off by default and never turned on by an environment flag: the server has no save route
+   * (backend decision F5-7), so editing is a local draft. Only tests with the in-memory
+   * contract fixture enable it.
+   */
   saveEnabled?: boolean
 }
 
 /** Loads a deck and owns the saved snapshot, the local draft and the save/conflict states. */
-export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave() }: SlidesWorkspaceProps) {
+export function SlidesWorkspace({ pageId, client, saveEnabled = false }: SlidesWorkspaceProps) {
   const [phase, setPhase] = React.useState<Phase>({ name: "loading" })
   const [attempt, setAttempt] = React.useState(0)
   const mutation = React.useRef<{ key: string; id: string }>(undefined)
@@ -55,6 +59,14 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
     if (!ready || !saveEnabled || JSON.stringify(ready.draft) === JSON.stringify(ready.snapshot.deck)) return []
     try { return diffToPatch(ready.snapshot.deck, ready.draft, { pageId, schemaVersion: ready.snapshot.deck.schema_version, baseRev: ready.snapshot.rev, orderVersion: ready.snapshot.orderVersion, mutationId: "preview" }).unrepresentable } catch { return ["unreproduced"] }
   }, [ready?.draft, ready?.snapshot, saveEnabled, pageId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unsaved = !saveEnabled && phase.name === "ready" && JSON.stringify(phase.draft) !== JSON.stringify(phase.snapshot.deck)
+  React.useEffect(() => {
+    if (!unsaved) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault() }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [unsaved])
 
   if (phase.name === "loading") return <p role="status">Loading presentation…</p>
   if (phase.name === "unavailable") return <p role="alert">This presentation is not available.</p>
@@ -85,7 +97,9 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
       return { ...current, save: "failed", message: result.retryable ? "Saving failed. Your draft is kept; try again." : `This change cannot be saved: ${result.message}` }
     })
   }
-  const status = !saveEnabled ? "Saving is not available yet. Changes in this preview are not saved."
+  const status = !saveEnabled ? (dirty
+      ? `Local draft, not saved. Saving is not available yet, so these edits stay in this tab and are lost when you reload. Revision ${snapshot.rev} on the server is unchanged.`
+      : `Revision ${snapshot.rev}. Saving is not available yet: edits become a local draft that is lost when you reload.`)
     : save === "saving" ? "Saving…"
     : blocked.length ? `Changes to ${blocked.map(reason => reasons[reason]).join(", ")} cannot be saved yet. They stay in this draft only.`
     : dirty ? "Unsaved changes." : save === "saved" ? `Saved as revision ${snapshot.rev}.` : `Revision ${snapshot.rev}.`
