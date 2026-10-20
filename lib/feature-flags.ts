@@ -30,9 +30,9 @@ export function legacyMcpIntegrations(): boolean {
  * Mounts the native Slides editor on `/pages/<slug>` for a Page the server
  * reports as `has_slides`. Default OFF: the page then behaves exactly as before.
  *
- * Mounting alone never writes. Saving is a second, separate gate
- * (`NEXT_PUBLIC_SLIDES_EDITOR_SAVE`, lib/slides/save-client.ts), and the
- * Slides read/save endpoints are still a proposed contract (FE-REQ-F5-1).
+ * Mounting alone never writes. The server has Slides Read and Initialize only
+ * (behind CREWSHIP_SLIDES_ENABLED); there is no save route, so editing stays a
+ * local draft (coord FE-REQ-F5-1).
  */
 export function slidesEditorMount(): boolean {
   return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"

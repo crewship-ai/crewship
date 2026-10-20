@@ -46,14 +46,14 @@ it("flag off: a has_slides Page renders as before and no Slides request is made"
 
 it("flag on: mounts the editor and loads the deck through the Slides route", async () => {
   vi.stubEnv("NEXT_PUBLIC_SLIDES_EDITOR", "true")
-  await open(path => path === "/api/v1/pages/%40slides-id/slides" ? Response.json({ deck: { ...fixture.deck, deck_id: page.id }, rev: 3, order_version: 1 }) : undefined)
+  await open(path => path === "/api/v1/pages/%40slides-id/slides" ? Response.json({ schema_version: 1, revision: 3, order_version: 1, content_hash: "a".repeat(64), deck: { ...fixture.deck, deck_id: page.id } }) : undefined)
   expect(await screen.findByLabelText("Slides editor")).toBeInTheDocument()
   expect(screen.getByRole("heading", { name: "Quarterly deck" })).toBeInTheDocument()
   expect(htmlHost).not.toHaveBeenCalled()
   // Edit would open the panel editor, which cannot edit a deck.
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
-  // Save is a separate gate: with it off the editor says so and offers no Save button.
-  expect(screen.getByText(/Saving is not available yet/)).toBeInTheDocument()
+  // The server has no save route: edits are a labelled local draft and there is no Save button.
+  expect(screen.getByText(/Revision 3\. Saving is not available yet/)).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
 })
 

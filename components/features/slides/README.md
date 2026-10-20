@@ -32,14 +32,28 @@ restores the opener; its close button remains available.
 Mounting: with `NEXT_PUBLIC_SLIDES_EDITOR=true`, `/pages/<slug>` renders
 `SlidesWorkspace` (through `components/features/pages/page-slides.tsx`) for a Page
 whose wire record carries `has_slides: true`. Off by default; the Page then renders
-exactly as before and no Slides request is made. Loading and saving use
-`lib/slides/http-client.ts` against the proposed `GET`/`PATCH
-/api/v1/pages/@{id}/slides` routes, which the server does not have yet. A missing
-route (non-JSON 404, 405, 501) is shown as "not available on this server yet" and a
-failed save keeps the draft; nothing is reported as saved without an acknowledgement
-that echoes the mutation id and a newer revision. Saving needs the separate
-`NEXT_PUBLIC_SLIDES_EDITOR_SAVE=true`. Browser flow: `e2e/slides-editor.spec.ts`
-(flag-on tests need a UI started with both flags and skip otherwise).
+exactly as before and no Slides request is made.
+
+Backend contract (decision F5-7, public PR #3837, behind `CREWSHIP_SLIDES_ENABLED`):
+`lib/slides/http-client.ts` speaks `GET /api/v1/pages/@{id}/slides` and
+`POST /api/v1/pages/@{id}/slides/initialize`, and nothing else. The read body is
+exactly `{schema_version, revision, order_version, content_hash, deck}`; there is no
+`page_id` and no `rev`. Identity is `deck.deck_id`, which must equal the requested
+Page ID, and a mismatch is an error state. Initialize takes exactly
+`{page_id, schema_version, base_rev: 0, mutation_id, deck}` and answers
+`{mutation_id, revision, order_version, content_hash, duplicate}`. Both bodies must
+have exactly those keys; a missing or extra key is refused, and a 2xx that is not a
+verifiable receipt is never reported as saved. A missing route (non-JSON 404 when the
+flag is off, 405, 501) is shown as "not available on this server yet".
+
+There is no PATCH, order or agent route yet, so editing is a local draft: the status
+line says so, there is no Save button, and leaving with edits asks the browser to
+confirm. `SlidesWorkspace` can drive the proposed save contract only when a caller
+passes `saveEnabled` (tests, with the in-memory fixture); no environment flag
+enables it, and `patch` on the HTTP client sends nothing. Browser flow:
+`e2e/slides-editor.spec.ts` (flag-on tests need a UI started with
+`NEXT_PUBLIC_SLIDES_EDITOR=true` and skip otherwise). `lib/slides/__tests__/real-server-capture.json`
+holds bodies recorded from a server built from #3837.
 
 Source provenance: existing editor/Present extraction #3206 commit
 `3ce3173e4b26882151d68cac171f70e3c916b500` and unused-import fix `6c831db30`,
@@ -66,8 +80,8 @@ values, and `diffToPatch`, which turns a local draft into a sequentially valid
 operation batch. Changes the wire contract cannot express (element z-order,
 slide reorder, theme/size) are reported as `unrepresentable` and never dropped;
 the save button must stay disabled for them. `lib/slides/save-client.ts` defines
-the proposed save interface behind `NEXT_PUBLIC_SLIDES_EDITOR_SAVE`;
-`save-fixture.ts` is an in-memory stand-in used by tests. JSON integers cannot be
+the client interface (the read and initialize it names are served; `patch` is a
+proposed contract); `save-fixture.ts` is an in-memory stand-in used by tests. JSON integers cannot be
 told from `24.0` in JavaScript, so that one Go rejection is not mirrored.
 
 ## Editing interactions
@@ -86,5 +100,5 @@ available, error (retry), saving, conflict (load latest or keep editing locally,
 never overwritten) and offline (draft kept, same mutation id on retry) states. It
 saves through `diffToPatch` and a `SlidesSaveClient`; layer order, slide order and
 theme edits cannot be expressed by the current operations, so save is blocked with
-the reason while they remain in the draft. Save is off unless
-`NEXT_PUBLIC_SLIDES_EDITOR_SAVE=true`.
+the reason while they remain in the draft. Save is off unless the caller passes
+`saveEnabled`; the Pages route never does.

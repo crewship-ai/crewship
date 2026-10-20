@@ -1,46 +1,70 @@
 import { apiFetch } from "@/lib/api-fetch"
 import type { SlideDeck } from "./model"
-import type { PatchRequest } from "./operations"
-import type { SlidesSaveClient, SlidesSaveResult, SlidesSnapshot } from "./save-client"
-import { validateSlideDeck } from "./validate"
+import type { SlidesHttpClient, SlidesInitializeRequest, SlidesInitializeResult, SlidesReceipt, SlidesSaveResult, SlidesSnapshot } from "./save-client"
+import { HASH_PATTERN, isIdentifier, isSupportedSchema, validateSlideDeck } from "./validate"
 
-// HTTP binding of the proposed contract (coord FE-REQ-F5-1). None of these
-// routes exist on the server yet; every response is checked before it is
-// believed, and a missing route is reported as such instead of as "not found".
+// HTTP binding of the backend contract (decision F5-7, PR #3837): Read and Initialize
+// only. There is no PATCH, order or agent route, so `patch` never touches the network.
+// Every response is checked before it is believed, and a missing route is reported as such.
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)
+/** The server's structs are closed: exactly these keys, nothing missing and nothing extra. */
+const hasExactly = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
+const positive = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1
 
 const MISMATCH = { status: "error", retryable: false, message: "The presentation does not belong to this Page." } as const
 const clip = (text: string) => (text.length > 200 ? `${text.slice(0, 200)}…` : text)
 
-// The read answers `revision` (backend branch feat/slides-human-read-create-adapter, no page_id);
-// the proposed PATCH answers `rev`. Either is accepted, and both must agree when both are present.
+const READ_FIELDS = ["schema_version", "revision", "order_version", "content_hash", "deck"] as const
+const RECEIPT_FIELDS = ["mutation_id", "revision", "order_version", "content_hash", "duplicate"] as const
+const INITIALIZE_FIELDS = ["page_id", "schema_version", "base_rev", "mutation_id", "deck"] as const
+
+/**
+ * Identity is `deck.deck_id`, which must be the requested immutable Page ID; there is no
+ * `page_id` and no `rev` on the wire. A mismatch is an error state, never a fallback.
+ */
 function snapshotOf(body: unknown, pageId: string): SlidesSnapshot | typeof MISMATCH | null {
-  if (!object(body)) return null
-  const rev = body.revision ?? body.rev
-  if (body.revision !== undefined && body.rev !== undefined && body.revision !== body.rev) return null
-  if (!Number.isSafeInteger(rev) || (rev as number) < 0 || !Number.isSafeInteger(body.order_version) || (body.order_version as number) < 0) return null
+  if (!object(body) || !hasExactly(body, READ_FIELDS)) return null
+  if (!positive(body.revision) || !positive(body.order_version) || typeof body.content_hash !== "string" || !HASH_PATTERN.test(body.content_hash)) return null
   try { validateSlideDeck(body.deck) } catch { return null }
-  // The Page binding comes from the request path and deck_id; a page_id field, when sent, must agree.
-  if ((body.deck as SlideDeck).deck_id !== pageId || (body.page_id !== undefined && body.page_id !== pageId)) return MISMATCH
-  return { deck: body.deck as SlideDeck, rev: rev as number, orderVersion: body.order_version as number }
+  const deck = body.deck as SlideDeck
+  if (!isSupportedSchema(body.schema_version) || body.schema_version !== deck.schema_version) return null
+  if (deck.deck_id !== pageId) return MISMATCH
+  return { deck, rev: body.revision, orderVersion: body.order_version, contentHash: body.content_hash }
+}
+
+function receiptOf(body: unknown, mutationId: string): SlidesReceipt | null {
+  if (!object(body) || !hasExactly(body, RECEIPT_FIELDS)) return null
+  if (body.mutation_id !== mutationId || !positive(body.revision) || !positive(body.order_version) || typeof body.content_hash !== "string" || !HASH_PATTERN.test(body.content_hash) || typeof body.duplicate !== "boolean") return null
+  return { mutationId, revision: body.revision, orderVersion: body.order_version, contentHash: body.content_hash, duplicate: body.duplicate }
+}
+
+/** The five-field request, checked before transport; null when the contract would refuse it. */
+function initializeBody(request: unknown): SlidesInitializeRequest | null {
+  if (!object(request) || !hasExactly(request, INITIALIZE_FIELDS)) return null
+  if (!isIdentifier(request.page_id) || !isIdentifier(request.mutation_id) || request.base_rev !== 0 || request.schema_version !== 1) return null
+  try { validateSlideDeck(request.deck) } catch { return null }
+  const deck = request.deck as SlideDeck
+  return deck.deck_id === request.page_id && deck.schema_version === request.schema_version ? (request as unknown as SlidesInitializeRequest) : null
 }
 
 const json = async (response: Response): Promise<unknown> => { try { return await response.json() } catch { return undefined } }
 /**
- * Heuristic, not a contract: today an unknown route answers 404 text/plain (Go's default
- * mux), while a missing or private Page must answer a JSON 404 (FE-REQ-F5-1 addendum). If
- * the real handler answered a missing Page with text/plain, it would read as "not available
- * on this server yet" instead of "not available". 405 and 501 are also read as a missing route.
+ * Heuristic, not a contract: with CREWSHIP_SLIDES_ENABLED off the routes are not installed
+ * and Go's mux answers 404 text/plain, while a missing or private Page answers a JSON 404
+ * (`{"error": ...}`). 405 and 501 are also read as a missing route.
  */
 const routeMissing = (response: Response) => response.status === 405 || response.status === 501 || (response.status === 404 && !(response.headers.get("content-type") ?? "").includes("json"))
 
-export function createHttpSlidesClient(workspaceId: string): SlidesSaveClient {
-  const url = (pageId: string) => `/api/v1/pages/${encodeURIComponent("@" + pageId)}/slides?${new URLSearchParams({ workspace_id: workspaceId })}`
+export function createHttpSlidesClient(workspaceId: string): SlidesHttpClient {
+  const scope = new URLSearchParams({ workspace_id: workspaceId })
+  const url = (pageId: string, suffix = "") => `/api/v1/pages/${encodeURIComponent("@" + pageId)}/slides${suffix}?${scope}`
   const failure = (response: Response): Extract<SlidesSaveResult, { status: "unavailable" | "error" }> =>
     routeMissing(response) ? { status: "unavailable", reason: "not_implemented" }
       : response.status === 401 ? { status: "unavailable", reason: "signed_out" }
       : response.status === 404 ? { status: "unavailable", reason: "not_found" }
       : response.status === 403 ? { status: "unavailable", reason: "forbidden" }
+      : response.status === 409 ? { status: "error", retryable: false, message: "This presentation conflicts with what the server holds or uses a format this editor cannot read." }
+      : response.status === 429 ? { status: "error", retryable: false, message: "The server's Slides storage limit has been reached." }
       : { status: "error", retryable: response.status >= 500, message: response.status === 503 ? "Slides are temporarily unavailable." : "The request failed." }
   return {
     async load(pageId) {
@@ -51,22 +75,19 @@ export function createHttpSlidesClient(workspaceId: string): SlidesSaveClient {
       if (snapshot === MISMATCH) return MISMATCH
       return snapshot ?? { status: "error", retryable: false, message: "The server returned a presentation this editor cannot read." }
     },
-    async patch(request: PatchRequest) {
+    async initialize(raw): Promise<SlidesInitializeResult> {
+      const request = initializeBody(raw)
+      if (!request) return { status: "error", retryable: false, message: "This initialization request is not valid." }
       let response: Response
-      try { response = await apiFetch(url(request.page_id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }) } catch { return { status: "error", retryable: true, message: "Saving failed." } }
+      try { response = await apiFetch(url(request.page_id, "/initialize"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }) } catch { return { status: "error", retryable: true, message: "The presentation could not be saved." } }
       const body = await json(response)
-      if (response.status === 409) {
-        const current = snapshotOf(body, request.page_id)
-        if (current === MISMATCH) return MISMATCH
-        return current ? { status: "conflict", current } : { status: "error", retryable: false, message: "The presentation changed and the latest version could not be read." }
-      }
-      if (response.status === 400) return { status: "error", retryable: false, message: object(body) && typeof body.error === "string" && body.error.trim() ? clip(body.error) : "The server rejected this change." }
+      if (response.status === 400) return { status: "error", retryable: false, message: object(body) && typeof body.error === "string" && body.error.trim() ? clip(body.error) : "The server rejected this presentation." }
       if (!response.ok) return failure(response)
-      const snapshot = snapshotOf(body, request.page_id)
-      if (snapshot === MISMATCH) return MISMATCH
-      // A 2xx that is not a verifiable acknowledgement is never reported as saved.
-      if (!snapshot || !object(body) || body.mutation_id !== request.mutation_id || snapshot.rev <= request.base_rev) return { status: "error", retryable: true, message: "Saving could not be confirmed. Try again." }
-      return { status: "saved", snapshot, mutationId: request.mutation_id }
+      // A 2xx that is not a verifiable receipt for this mutation is never reported as saved.
+      const receipt = receiptOf(body, request.mutation_id)
+      return receipt ? { status: "initialized", receipt } : { status: "error", retryable: true, message: "Saving could not be confirmed. Retry the same request." }
     },
+    // No route serves saving yet (F5-7): nothing is sent, so nothing can be mistaken for a save.
+    patch: async () => ({ status: "unavailable", reason: "not_implemented" }),
   }
 }
