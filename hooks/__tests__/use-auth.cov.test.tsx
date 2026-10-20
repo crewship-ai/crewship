@@ -70,7 +70,7 @@ describe("AuthProvider session-expired redirect", () => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_revoked" } }))
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     const target = replaceSpy.mock.calls[0][0] as string
     expect(target).toContain("/login?")
     expect(target).toContain("reason=expired")
@@ -90,7 +90,7 @@ describe("AuthProvider session-expired redirect", () => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "x" } }))
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
   })
 
   it("handles a cross-tab 'session-expired' broadcast like the local event", async () => {
@@ -104,7 +104,7 @@ describe("AuthProvider session-expired redirect", () => {
       channel!.onmessage?.({ data: { type: "session-expired" } })
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toContain("reason=expired")
   })
 
@@ -118,7 +118,7 @@ describe("AuthProvider session-expired redirect", () => {
       channel!.onmessage?.({ data: { type: "signout" } })
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toBe("/login")
   })
 
@@ -161,7 +161,7 @@ describe("AuthProvider session-expired redirect", () => {
     act(() => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "x" } }))
     })
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
   })
 })
 
