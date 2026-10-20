@@ -55,4 +55,13 @@ describe("the chat breadcrumb", () => {
     expect(screen.queryByText("_crewship-setup-guide")).not.toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Crews" })).toBeInTheDocument()
   })
+
+  it("gives way on a phone: the whole path is the area crumb the back control hides", () => {
+    breadcrumbs = [{ label: "Crews", href: "/crews" }, { label: "Ops", href: "/crews?crew=ops" }, { label: "Riley", href: "/crews?agent=riley" }]
+    pathname = "/chat/riley"
+    render(<TooltipProvider><AppToolbar /></TooltipProvider>)
+    const crumb = screen.getByRole("link", { name: "Riley" }).closest('[data-slot="area-crumb"]')
+    expect(crumb).not.toBeNull()
+    expect(crumb).toContainElement(screen.getByText("Chat"))
+  })
 })

@@ -861,6 +861,9 @@ function ChatClientBody() {
   const subbar = <SubBar
     icon={MessageSquare}
     title="Chat"
+    // On a phone the bar names who you are talking to; the Crews path that
+    // says so on desktop does not fit beside the back control.
+    section={isMobile && agent && !humanConversationId ? agent.name : undefined}
     description={`${agents?.length ?? 0} agents · ${sharedConversations} conversations · ${allSessions} sessions`}
     ariaLabel="Chat"
     leading={isMobile ? <button type="button" onClick={() => setDrawerOpen(true)} aria-label="Show conversations" className="rounded p-1.5 text-muted-foreground hover:text-foreground"><Menu className="size-4" /></button> : undefined}
