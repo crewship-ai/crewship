@@ -22,7 +22,17 @@ func documentSchemaComponents() map[string]any {
 	receipt := obj(map[string]any{"id": str(), "rev": integer(), "epoch": str(), "actor": str(), "kind": str(), "schema": integer(), "checkpoint": str(), "duplicate": boolean(), "found": boolean()}, "id", "rev", "epoch")
 	state := obj(map[string]any{"page_id": str(), "schema": integer(), "rev": integer(), "epoch": str(), "generation": integer(), "incarnation": str(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block), "content": ref("DocumentNode"), "outline": arr(outline), "can_write": boolean(), "can_comment": boolean(), "can_resolve": boolean()}, "page_id", "schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks", "content", "outline", "can_write", "can_comment", "can_resolve")
 	result := obj(map[string]any{"page_id": str(), "type": map[string]any{"type": "string", "enum": []string{"document"}}, "page_slug": str(), "title": str(), "revision": map[string]any{"type": "integer", "enum": []int{0}}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}, "page_id", "type", "page_slug", "title", "revision", "created_at", "agent_id", "agent_name", "run_id", "on_behalf_of_user_id")
+	checkpointID := map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}
+	revision := map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+	checkpoint := obj(map[string]any{"id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "minimum": 1}, "actor": str(), "created_at": str()}, "id", "rev", "schema", "actor", "created_at")
+	checkpoint["additionalProperties"] = false
+	history := obj(map[string]any{"checkpoints": map[string]any{"type": "array", "maxItems": 1000, "items": checkpoint}}, "checkpoints")
+	history["additionalProperties"] = false
+	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
+	selected["additionalProperties"] = false
 	return map[string]any{
+		"DocumentCheckpointList":      history,
+		"DocumentCheckpoint":          selected,
 		"DocumentChatResults":         obj(map[string]any{"results": map[string]any{"type": "array", "maxItems": 20, "items": result}}, "results"),
 		"DocumentAvailability":        obj(map[string]any{"enabled": boolean()}, "enabled"),
 		"DocumentInitializationState": obj(map[string]any{"schema": integer(), "rev": integer(), "epoch": integer(), "generation": integer(), "incarnation": str(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block)}, "schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks"),
@@ -46,6 +56,13 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		out["GET "+path] = DomainSchema{Response: ref(name), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "429", "500", "502", "503"}}
 	}
 	get(base, "DocumentState")
+	get(base+"/checkpoints", "DocumentCheckpointList")
+	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
+	for _, path := range []string{base + "/checkpoints", base + "/checkpoints/{checkpoint}"} {
+		contract := out["GET "+path]
+		contract.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
+		out["GET "+path] = contract
+	}
 	out["GET /api/v1/chats/{chatId}/document-results"] = DomainSchema{Response: ref("DocumentChatResults"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "500", "503"}}
 	out["GET /api/v1/documents/status"] = DomainSchema{Response: ref("DocumentAvailability"), SuccessStatuses: []string{"200"}}
 	post := func(path string, request map[string]any) {

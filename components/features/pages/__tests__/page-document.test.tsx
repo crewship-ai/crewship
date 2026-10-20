@@ -7,11 +7,12 @@ import type { Editor } from "@tiptap/core"
 import { PageDocument } from "../page-document"
 import { encodeUpdate } from "@/hooks/use-page-document"
 const availability=vi.hoisted(()=>({enabled:true}))
+const account=vi.hoisted(()=>({id:"document-test-human"}))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({data:availability.enabled,isPending:false}) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
-afterEach(() => { cleanup(); request.mockReset();availability.enabled=true })
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: account.id } } }) }))
+afterEach(() => { cleanup(); request.mockReset();availability.enabled=true;account.id="document-test-human" })
 it("hydrates saved CRDT content before binding the editor without manufacturing a local write", async () => {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "saved-paragraph")
@@ -113,4 +114,78 @@ it.each([
     expect(editor.getJSON().content).toHaveLength(1)
     expect(node.querySelector("p")).toBeNull()
   } finally {cleanup();saved.destroy()}
+})
+
+
+async function historyFixture() {
+  const { documentSchema } = await import("@/lib/documents/schema")
+  const saved = documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"live-text"},content:[{type:"text",text:"Current live revision"}]}]},3)
+  const confirmed = {type:"doc",content:[{type:"paragraph",attrs:{id:"old-text"},content:[{type:"text",text:"Confirmed historical body"}]}]}
+  const pin = {id:"confirmed-pin",rev:2,schema:3,actor:"user:document-test-human",created_at:"2026-10-18T00:00:00Z"}
+  request.mockImplementation(async(url:string) => ({ok:true,status:200,json:async()=>url.includes("/checkpoints/confirmed-pin")
+    ? {page_id:"page",id:pin.id,rev:pin.rev,schema:3,content:confirmed}
+    : url.includes("/checkpoints") ? {checkpoints:[pin]}
+    : {page_id:"page",schema:3,rev:7,epoch:"current-live-epoch",can_write:true,snapshot:documentSchema.snapshot(saved)}}))
+  const dirty=vi.fn(), view=render(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={dirty} />)
+  const node=await screen.findByLabelText("Document editor"),editor=(node as HTMLElement&{editor:Editor}).editor
+  await waitFor(()=>expect(editor.isEditable).toBe(true))
+  return {saved,view,node,editor,dirty}
+}
+async function openHistory() {
+  fireEvent.click(screen.getByRole("button",{name:"History"}))
+  fireEvent.click(await screen.findByRole("button",{name:/Revision 2/}))
+  await screen.findByText("Confirmed historical body")
+}
+it("browses immutable history and closes without replacing the real editor or unsaved draft",async()=>{
+  const f=await historyFixture()
+  try {
+    expect(request.mock.calls.some(([url])=>url.includes("/checkpoints"))).toBe(false)
+    act(()=>f.editor.commands.insertContent("Unsaved local draft "))
+    const before=f.editor.getJSON(),dirtyCalls=f.dirty.mock.calls.length
+    await openHistory()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect((f.node as HTMLElement&{editor:Editor}).editor).toBe(f.editor)
+    expect(f.editor.getJSON()).toEqual(before);expect(f.editor.getText()).not.toContain("Confirmed historical body")
+    fireEvent.click(screen.getByRole("button",{name:"Close history"}))
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect(f.editor.getJSON()).toEqual(before);expect(f.dirty.mock.calls.slice(dirtyCalls)).not.toContainEqual([false])
+    const historyCalls=request.mock.calls.filter(([url])=>url.includes("/checkpoints"))
+    expect(historyCalls.map(([url])=>url)).toEqual(["/api/v1/pages/%40page/document/checkpoints?workspace_id=w","/api/v1/pages/%40page/document/checkpoints/confirmed-pin?workspace_id=w"])
+    expect(historyCalls.every(([,init])=>!init?.method&&!init?.body)).toBe(true)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("removes history on unavailable service while retaining the admitted real editor and draft",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory();act(()=>f.editor.commands.insertContent("Keep local draft "))
+    availability.enabled=false;f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByRole("button",{name:"History"})).toBeDisabled()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect(f.editor.getText()).toContain("Keep local draft")
+    await waitFor(()=>expect(f.editor.isEditable).toBe(false))
+    expect(screen.getByRole("button",{name:"Download unsaved draft"})).toBeEnabled()
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("clears and disables protected history on auth expiry without remounting the editor",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory()
+    act(()=>window.dispatchEvent(new Event("auth:session-expired")))
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.getByRole("button",{name:"History"})).toBeDisabled()
+    expect(screen.getByLabelText("Document editor")).toBe(f.node)
+    expect((f.node as HTMLElement&{editor:Editor}).editor).toBe(f.editor)
+  } finally {f.view.unmount();f.saved.destroy()}
+})
+it("drops the former human's history immediately on account change without auto-fetching it",async()=>{
+  const f=await historyFixture()
+  try {
+    await openHistory();const count=request.mock.calls.filter(([url])=>url.includes("/checkpoints")).length
+    account.id="another-human";f.view.rerender(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+    expect(screen.queryByText("Confirmed historical body")).toBeNull()
+    expect(screen.queryByRole("region",{name:"Confirmed revision 2"})).toBeNull()
+    expect(request.mock.calls.filter(([url])=>url.includes("/checkpoints"))).toHaveLength(count)
+  } finally {f.view.unmount();f.saved.destroy()}
 })
