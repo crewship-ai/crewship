@@ -92,6 +92,20 @@ describe("history compare and revert", () => {
     await waitFor(() => expect(actions.revertChange).toHaveBeenCalledTimes(2))
     expect(actions.revertChange.mock.calls[1][0].requestId).toBe(actions.revertChange.mock.calls[0][0].requestId)
   })
+  it("never reuses a request ID for a different expected revision", async () => {
+    const actions = { revertChange: vi.fn().mockResolvedValueOnce({ status: "unknown" }).mockResolvedValueOnce(done) }
+    const { props, rerender } = view({ actions })
+    fireEvent.click(screen.getByRole("button", { name: "Revert this change" }))
+    fireEvent.click(revert())
+    await screen.findByRole("button", { name: "Try again (same request)" })
+    rerender(<DocumentHistory {...props} review={{ ...props.review, headRev: 6 }} />)
+    fireEvent.click(revert(0)) // reopen: now reviewing revision 6
+    fireEvent.click(revert())
+    await waitFor(() => expect(actions.revertChange).toHaveBeenCalledTimes(2))
+    const [first, second] = actions.revertChange.mock.calls.map(call => call[0])
+    expect([first.expectedRev, second.expectedRev]).toEqual([5, 6])
+    expect(second.requestId).not.toBe(first.requestId)
+  })
   it("sends the revision the user reviewed even if the head moves while confirming", async () => {
     const actions = { revertChange: vi.fn().mockResolvedValue(done) }
     const { props, rerender } = view({ actions })

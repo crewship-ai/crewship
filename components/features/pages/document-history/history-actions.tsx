@@ -32,18 +32,18 @@ export function HistoryActions({ checkpointId, revision, headRev, hasLocalDraft,
   const [reviewedRev, setReviewedRev] = useState(headRev)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<HistoryActionResult>()
-  const requestId = useRef<string>(undefined)
+  /** One request ID per decision, bound to the revision it names: a retry repeats it, a new expected revision never reuses it. */
+  const request = useRef<{ id: string; rev: number }>(undefined)
   const moved = open && headRev !== reviewedRev
-  const close = () => { if (!busy) { setOpen(false); requestId.current = undefined } }
+  const close = () => { if (!busy) { setOpen(false); request.current = undefined } }
   async function confirm() {
     if (busy || hasLocalDraft) return
     setBusy(true); setResult(undefined)
-    // One request ID per decision: a retry after an unknown result repeats it.
-    requestId.current ??= crypto.randomUUID()
-    const outcome = await actions.revertChange({ checkpointId, expectedRev: reviewedRev, requestId: requestId.current })
+    if (request.current?.rev !== reviewedRev) request.current = { id: crypto.randomUUID(), rev: reviewedRev }
+    const outcome = await actions.revertChange({ checkpointId, expectedRev: reviewedRev, requestId: request.current.id })
     setBusy(false); setResult(outcome)
     if (outcome.status === "unknown") return // keep the same request ID for a retry
-    requestId.current = undefined
+    request.current = undefined
     if (outcome.status === "done") { setOpen(false); onDone(outcome.rev) }
   }
   const retrying = result?.status === "unknown"
