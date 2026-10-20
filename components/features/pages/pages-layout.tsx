@@ -521,7 +521,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   </>
                 ) : nativeSlides ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
-                    : <PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} />
+                    : <PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}

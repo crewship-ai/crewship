@@ -62,7 +62,8 @@ test.describe("Slides editor mount", () => {
     await page.goto(`/pages/${SLUG}`)
     await expect(editor(page)).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole("heading", { name: "Quarterly deck" })).toBeVisible()
-    await expect(status(page)).toContainText("Revision 3. Saving is not available yet")
+    await expect(status(page)).toContainText("Revision 3.")
+    await expect(editor(page).getByText(/Saving is not available yet.*lost on reload/)).toBeVisible()
     await expect(editor(page).getByRole("button", { name: "Save changes" })).toHaveCount(0)
 
     const title = page.getByRole("button", { name: "text 1", exact: true })
@@ -73,7 +74,7 @@ test.describe("Slides editor mount", () => {
     await page.keyboard.press("ArrowDown")
     await expect.poll(() => position(page, "title_b")).toEqual({ x: before.x + 10, y: before.y + 1 })
     await expect(status(page)).toContainText("Local draft, not saved")
-    await expect(status(page)).toContainText("Revision 3 on the server is unchanged")
+    await expect(status(page)).toContainText("Revision 3 is the version you opened")
 
     await editor(page).getByRole("button", { name: "Bring forward" }).click()
     await editor(page).getByRole("button", { name: "Undo" }).click()
@@ -85,7 +86,8 @@ test.describe("Slides editor mount", () => {
     page.once("dialog", dialog => dialog.accept())
     await page.reload()
     await expect(editor(page)).toBeVisible({ timeout: 30_000 })
-    await expect(status(page)).toContainText("Revision 3. Saving is not available yet")
+    await expect(status(page)).toContainText("Revision 3.")
+    await expect(editor(page).getByText(/Saving is not available yet.*lost on reload/)).toBeVisible()
     expect(await position(page, "title_b")).toEqual(before)
   })
 
@@ -111,7 +113,8 @@ test.describe("Slides editor mount", () => {
     await mockPage(page, "ok")
     await page.goto(`/pages/${SLUG}`)
     await expect(editor(page)).toBeVisible({ timeout: 30_000 })
-    await expect(status(page)).toContainText("read-only preview")
+    await expect(editor(page).getByText("Read-only preview; editing is available on a larger screen.")).toBeVisible()
+    await expect(editor(page).getByText(/not saved|local draft/i)).toHaveCount(0)
     for (const name of ["Undo", "Redo", "New slide", "Bring forward"]) await expect(editor(page).getByRole("button", { name }).first()).toBeDisabled()
     await expect(editor(page).getByRole("button", { name: "Save changes" })).toHaveCount(0)
     await expect(editor(page).getByRole("button", { name: "Present" })).toBeEnabled()

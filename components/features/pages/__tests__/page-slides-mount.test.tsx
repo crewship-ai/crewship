@@ -1,10 +1,11 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import fixture from "@/testdata/slides-schema-v1.json"
 import { PagesLayout } from "../pages-layout"
 import { pagesKeys } from "@/hooks/use-pages"
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
 const requests = vi.hoisted(() => vi.fn())
@@ -53,7 +54,8 @@ it("flag on: mounts the editor and loads the deck through the Slides route", asy
   // Edit would open the panel editor, which cannot edit a deck.
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
   // The server has no save route: edits are a labelled local draft and there is no Save button.
-  expect(screen.getByText(/Revision 3\. Saving is not available yet/)).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Revision 3.")
+  expect(screen.getByText(/Saving is not available yet.*lost on reload/)).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
 })
 
@@ -68,4 +70,13 @@ it("flag on, a non-slides Page is unaffected", async () => {
   vi.stubEnv("NEXT_PUBLIC_SLIDES_EDITOR", "true")
   page.has_slides = false
   try { await open(); await waitFor(() => expect(htmlHost).toHaveBeenCalled()); expect(slidesCalls()).toHaveLength(0) } finally { page.has_slides = true }
+})
+
+it("flag on: an in-app navigation is refused while a local draft exists", async () => {
+  vi.stubEnv("NEXT_PUBLIC_SLIDES_EDITOR", "true")
+  await open(path => path === "/api/v1/pages/%40slides-id/slides" ? Response.json({ schema_version: 1, revision: 3, order_version: 1, content_hash: "a".repeat(64), deck: { ...fixture.deck, deck_id: page.id } }) : undefined)
+  const notes = await screen.findByLabelText("Speaker notes")
+  expect(navigationAllowed(() => {})).toBe(true)
+  await act(async () => { fireEvent.change(notes, { target: { value: "unsaved words" } }) })
+  expect(navigationAllowed(() => {})).toBe(false)
 })

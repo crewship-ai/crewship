@@ -42,9 +42,11 @@ exactly `{schema_version, revision, order_version, content_hash, deck}`; there i
 Page ID, and a mismatch is an error state. Initialize takes exactly
 `{page_id, schema_version, base_rev: 0, mutation_id, deck}` and answers
 `{mutation_id, revision, order_version, content_hash, duplicate}`. Both bodies must
-have exactly those keys; a missing or extra key is refused, and a 2xx that is not a
-verifiable receipt is never reported as saved. A missing route (non-JSON 404 when the
-flag is off, 405, 501) is shown as "not available on this server yet".
+have all of those keys (unknown extra keys are ignored, since the server's strict
+decoder applies to requests only; the deck stays strict). The receipt must echo the
+request's `mutation_id` and carry the hash of the deck that was sent, and a 2xx that is
+not a verifiable receipt is never reported as saved. A missing route (a plain-text 404 when the
+flag is off, because the routes are not installed; 405, 501) is shown as "not available on this server yet".
 
 There is no PATCH, order or agent route yet, so editing is a local draft: the status
 line says so, there is no Save button, and leaving with edits asks the browser to

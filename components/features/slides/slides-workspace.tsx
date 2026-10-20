@@ -35,10 +35,12 @@ export interface SlidesWorkspaceProps {
    * contract fixture enable it.
    */
   saveEnabled?: boolean
+  /** Called with true while the local draft differs from the opened revision, and false on unmount. */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 /** Loads a deck and owns the saved snapshot, the local draft and the save/conflict states. */
-export function SlidesWorkspace({ pageId, client, saveEnabled = false }: SlidesWorkspaceProps) {
+export function SlidesWorkspace({ pageId, client, saveEnabled = false, onDirtyChange }: SlidesWorkspaceProps) {
   const [phase, setPhase] = React.useState<Phase>({ name: "loading" })
   const [attempt, setAttempt] = React.useState(0)
   const mutation = React.useRef<{ key: string; id: string }>(undefined)
@@ -60,13 +62,17 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = false }: SlidesW
     try { return diffToPatch(ready.snapshot.deck, ready.draft, { pageId, schemaVersion: ready.snapshot.deck.schema_version, baseRev: ready.snapshot.rev, orderVersion: ready.snapshot.orderVersion, mutationId: "preview" }).unrepresentable } catch { return ["unreproduced"] }
   }, [ready?.draft, ready?.snapshot, saveEnabled, pageId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const unsaved = !saveEnabled && phase.name === "ready" && JSON.stringify(phase.draft) !== JSON.stringify(phase.snapshot.deck)
+  const draftDiffers = phase.name === "ready" && JSON.stringify(phase.draft) !== JSON.stringify(phase.snapshot.deck)
   React.useEffect(() => {
-    if (!unsaved) return
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault() }
+    onDirtyChange?.(draftDiffers)
+    return () => onDirtyChange?.(false)
+  }, [draftDiffers, onDirtyChange])
+  React.useEffect(() => {
+    if (!draftDiffers) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
-  }, [unsaved])
+  }, [draftDiffers])
 
   if (phase.name === "loading") return <p role="status">Loading presentation…</p>
   if (phase.name === "unavailable") return <p role="alert">This presentation is not available.</p>
@@ -97,9 +103,7 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = false }: SlidesW
       return { ...current, save: "failed", message: result.retryable ? "Saving failed. Your draft is kept; try again." : `This change cannot be saved: ${result.message}` }
     })
   }
-  const status = !saveEnabled ? (dirty
-      ? `Local draft, not saved. Saving is not available yet, so these edits stay in this tab and are lost when you reload. Revision ${snapshot.rev} on the server is unchanged.`
-      : `Revision ${snapshot.rev}. Saving is not available yet: edits become a local draft that is lost when you reload.`)
+  const status = !saveEnabled ? (dirty ? `Local draft, not saved. Revision ${snapshot.rev} is the version you opened.` : `Revision ${snapshot.rev}.`)
     : save === "saving" ? "Saving…"
     : blocked.length ? `Changes to ${blocked.map(reason => reasons[reason]).join(", ")} cannot be saved yet. They stay in this draft only.`
     : dirty ? "Unsaved changes." : save === "saved" ? `Saved as revision ${snapshot.rev}.` : `Revision ${snapshot.rev}.`
@@ -116,7 +120,7 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = false }: SlidesW
       <button className={control} onClick={() => loadLatest(conflict)}>Load latest and discard my draft</button>
     </div>}
     {phase.message && <p role="alert">{phase.message}</p>}
-    <SlidesEditor deck={draft} onChange={next => setPhase({ ...phase, draft: next, save: "idle", message: undefined })} disabled={save === "saving"} persistenceStatus={status}
+    <SlidesEditor deck={draft} onChange={next => setPhase({ ...phase, draft: next, save: "idle", message: undefined })} disabled={save === "saving"} persistenceStatus={status} persistenceNote={saveEnabled ? undefined : "Saving is not available yet: edits stay in this tab and are lost on reload."}
       onSave={saveEnabled ? () => void submit() : undefined} saveDisabled={!dirty || blocked.length > 0 || save === "saving" || Boolean(conflict) || Boolean(phase.stale)} />
   </div>
 }
