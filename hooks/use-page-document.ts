@@ -106,7 +106,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         }
       } catch (cause) {
         dirty.clear()
-        if (!active) return
+        // A denial already processed owns the status; a journal failure must not rewrite it.
+        if (!active || authorizationLost.current) return
         journalBroken = true;blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
         setError(cause instanceof Error ? cause.message : "Could not retain draft.")
         throw cause
@@ -261,13 +262,14 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       } catch (cause) {
         if (!active) return
         setPending(total())
-        if (cause instanceof DocumentStorageError || journalBroken) {
+        // Authority decides first: a denial must not be masked by a storage failure, whatever the journal state.
+        if (authorizationLost.current || (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status))) {
+          authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
+          blocked = blockedOther = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
+        } else if (cause instanceof DocumentStorageError || journalBroken) {
           blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (cause instanceof UnconfirmedReceipt) {
           blocked = blockedOther = true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
-        } else if (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status)) {
-          authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);client.removeQueries({queryKey,exact:true})
-          blocked = blockedOther = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentAPIError && ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota"))) {
           blocked = blockedOther = true; setRecovery(true); setStatus("Document update was rejected. Recover your draft before reopening.")
         } else if (cause instanceof DocumentAPIError && cause.status === 429 && cause.code === "document_rate_limit") {
