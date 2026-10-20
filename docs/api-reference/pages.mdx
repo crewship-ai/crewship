@@ -2400,6 +2400,37 @@ Statuses: 200 checkpoint; 400 invalid identity; 401 invalid or revoked credentia
 Responses use `Cache-Control: no-store`.
 CLI: `crewship doc checkpoint <page-slug> <checkpoint-id>`.
 
+## Restore a saved document checkpoint
+
+`POST /api/v1/pages/{slug}/document/restore`
+
+Authentication: a current human credential with current Page and document write
+access; scoped CLI credentials need `pages:write`. Agent run credentials are
+refused. Reading somebody else's private document as workspace OWNER requires
+an audit entry before disclosure; earlier checkpoint permissions are not reused.
+
+Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
+`schema` (2 or 3), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+the current editing epoch and revision, a retained checkpoint ID and a new
+mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
+digits, underscores or hyphens. A changed Page identity, revision or epoch
+refuses the operation; the server does not select a replacement checkpoint.
+
+Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
+optional `schema` and `duplicate`. Restoration creates a new revision, preserving
+the retained checkpoint. After an uncertain confirmation, retry the original
+packet with the same mutation ID and preconditions; an exact authorized retry
+returns the original receipt without another restoration. A lost confirmation
+is not evidence that the write failed.
+
+Statuses: 200 confirmed receipt; 400 invalid or oversized packet or Page identity;
+401 invalid or revoked credential; 403 missing write scope or human credential;
+404 unavailable Page, document or checkpoint; 409 stale or incompatible state;
+413 engine size limit; 422 rejected content; 429 capacity limit; 500 audit failure;
+502 invalid receipt; 503 disabled service or unavailable confirmation.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc restore <page-slug> --file <request.json>`.
+
 ## Initialize a native document
 
 `POST /api/v1/pages/{slug}/document/initialize`
