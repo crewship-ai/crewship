@@ -124,6 +124,10 @@ export function createUploadQueue(onIdle?: () => void) {
     cancel(id: string) {
       current.delete(id)
     },
+    /** Invalidate everything not yet started (identity change, logout, unmount). */
+    cancelAll() {
+      current.clear()
+    },
     size: () => current.size,
   }
 }

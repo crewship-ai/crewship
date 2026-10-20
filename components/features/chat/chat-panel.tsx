@@ -1,5 +1,6 @@
 "use client"
 
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
@@ -227,8 +228,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // `messageOwnAttachments` rather than the raw list: an attachment with an
   // `owner` belongs to an ask-form field, not to the message being typed, and
   // filling in a form is not a reason to take the follow-up chips away.
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
   const hasStagedAttachment = useComposerStore(
-    (s) => messageOwnAttachments(s.attachments[sessionId] ?? []).length > 0,
+    (s) => messageOwnAttachments(s.attachments[attachmentKey] ?? []).length > 0,
   )
 
   // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed

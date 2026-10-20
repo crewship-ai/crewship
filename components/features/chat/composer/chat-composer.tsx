@@ -12,6 +12,7 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
@@ -212,7 +213,8 @@ export function ChatComposer({
   // also see them — attaching a file must enable Send on an empty draft.
   // Falls back to a shared constant so an empty list keeps a stable identity
   // and does not re-create the submit callback on every render.
-  const sessionAttachments = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
+  const sessionAttachments = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
   const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
@@ -284,9 +286,9 @@ export function ChatComposer({
   // The typed text belongs to the typed path alone — see handleTypedSubmit.
   const handleSent = useCallback(() => {
     sentRef.current = true
-    clearAttachments(sessionId)
+    clearAttachments(attachmentKey)
     onSent?.()
-  }, [clearAttachments, sessionId, onSent])
+  }, [clearAttachments, attachmentKey, onSent])
 
   const handleSubmit = useMessageSubmit({
     sessionId,

@@ -1,5 +1,6 @@
 "use client"
 
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useCallback, useMemo, useRef } from "react"
 import { Camera, Paperclip } from "lucide-react"
 
@@ -69,7 +70,8 @@ export function AskFieldAttachments({
     () => ({ formId, field: field.name }),
     [formId, field.name],
   )
-  const all = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
+  const all = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
   const mine = useMemo(() => attachmentsForOwner(all, owner), [all, owner])
   const claim = useComposerStore((s) => s.claimAttachmentsForFiles)
 
@@ -88,10 +90,10 @@ export function AskFieldAttachments({
   const handleFiles = useCallback(
     (files: File[], source?: AttachmentSource) => {
       const done = upload(files, source)
-      claim(sessionId, owner, files)
+      claim(attachmentKey, owner, files)
       void done.catch(() => {})
     },
-    [upload, claim, sessionId, owner],
+    [upload, claim, attachmentKey, owner],
   )
 
   const isPhoto = field.type === "photo"
@@ -175,14 +177,15 @@ function AskAttachmentChips({
   sessionId: string
   attachments: ComposerAttachment[]
 }) {
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const { retry } = useAttachmentUpload(agentId, sessionId)
 
   // Removal is per attachment id, so it can only ever affect the one chip the
   // user pressed — the other field's answer is a different id in the same list.
   const handleRemove = useCallback(
-    (id: string) => removeAttachment(sessionId, id),
-    [removeAttachment, sessionId],
+    (id: string) => removeAttachment(attachmentKey, id),
+    [removeAttachment, attachmentKey],
   )
   const handleRetry = useCallback((id: string) => void retry(id), [retry])
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useRef } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef } from "react"
 import { Camera } from "lucide-react"
 import { toast } from "sonner"
 
@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
 import {
@@ -59,7 +60,7 @@ class UploadFailure extends Error {
 // Limits (25 MB per file, file count per message) live in
 // lib/chat-attachment-queue.ts; every entry point validates through there.
 
-/** One upload queue per conversation. Picker, paste, drop, camera and retry all
+/** One upload queue per human + workspace + conversation (the scoped key). Picker, paste, drop, camera and retry all
  *  enqueue here, so uploads run one at a time in the order the user added
  *  them, and one conversation's slow upload never blocks another's. */
 const uploadQueues = new Map<string, ReturnType<typeof createUploadQueue>>()
@@ -97,6 +98,19 @@ interface AttachmentZoneProps {
 // files can't sneak through to the server side.
 const abortRegistry = new Map<string, AbortController>()
 const abortKey = (sessionId: string, id: string) => `${sessionId}::${id}`
+
+/** Stop every queued and running upload under `keyPrefix` (a scope prefix, or a
+ *  full scoped chat key). Queued jobs are invalidated so they never start;
+ *  running requests are aborted. */
+function invalidateJobs(keyPrefix: string) {
+  for (const [k, q] of uploadQueues) if (k.startsWith(keyPrefix)) q.cancelAll()
+  for (const [k, ac] of abortRegistry) {
+    if (k.startsWith(keyPrefix)) {
+      ac.abort()
+      abortRegistry.delete(k)
+    }
+  }
+}
 
 function abortIfPending(sessionId: string, id: string) {
   const ac = abortRegistry.get(abortKey(sessionId, id))
@@ -243,6 +257,25 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   const updateAttachment = useComposerStore((s) => s.updateAttachment)
   const { workspaceId } = useWorkspace()
   const ensureChatSession = useContext(EnsureChatSessionContext)
+  const { prefix, key: storeKey } = useAttachmentScope(sessionId)
+  const dropByPrefix = useComposerStore((s) => s.dropAttachmentsByPrefix)
+
+  // The human + workspace this hook currently speaks for. A job closes over the
+  // prefix it was queued under and refuses to touch the network if this has
+  // moved on, so an old closure can never upload with the new person's cookies.
+  const livePrefix = useRef(prefix)
+  livePrefix.current = prefix
+  const previousPrefix = useRef(prefix)
+  useEffect(() => {
+    const before = previousPrefix.current
+    previousPrefix.current = prefix
+    if (before && before !== prefix) {
+      // Identity changed (other human, other workspace, logout): cancel and
+      // abort the old scope's jobs and drop its chips and Files.
+      invalidateJobs(before)
+      dropByPrefix(before)
+    }
+  }, [prefix, dropByPrefix])
 
   /** One file, start to finish. The chip already exists in the store and is
    *  patched IN PLACE — never removed and re-added, which would move it to the
@@ -251,10 +284,11 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   const runUpload = useCallback(
     async (att: ComposerAttachment, file: File, wsId: string, source?: AttachmentSource) => {
       // Cancelled while it waited in the queue: stay cancelled.
-      const current = (useComposerStore.getState().attachments[sessionId] ?? []).find((a) => a.id === att.id)
-      if (!current || current.status === "cancelled") return
-      updateAttachment(sessionId, att.id, { status: "uploading", error: undefined })
-      const key = abortKey(sessionId, att.id)
+      const stale = () => livePrefix.current !== prefix
+      const current = (useComposerStore.getState().attachments[storeKey] ?? []).find((a) => a.id === att.id)
+      if (!current || current.status === "cancelled" || stale()) return
+      updateAttachment(storeKey, att.id, { status: "uploading", error: undefined })
+      const key = abortKey(storeKey, att.id)
       const ac = new AbortController()
       abortRegistry.set(key, ac)
       const startedAt = Date.now()
@@ -272,11 +306,13 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         if (ensureChatSession && !(await ensureChatSession())) {
           throw new UploadFailure("the conversation could not be started", "unknown")
         }
+        // The identity can change while the row is being created.
+        if (stale() || !(useComposerStore.getState().attachments[storeKey] ?? []).some((a) => a.id === att.id)) return
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
         // outgoing message names — without it the file lands in the
         // container and nothing ever tells the agent it is there.
-        updateAttachment(sessionId, att.id, {
+        updateAttachment(storeKey, att.id, {
           status: "ready",
           url: agent_path,
           path,
@@ -308,7 +344,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         // No path and no url: a failed upload has no file behind it, so there
         // is nothing for `sendableAttachments` to name even by accident. The
         // File is KEPT — it is what Retry re-sends.
-        updateAttachment(sessionId, att.id, {
+        updateAttachment(storeKey, att.id, {
           status: "error",
           path: undefined,
           url: undefined,
@@ -317,15 +353,15 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         })
         // Only announce a failure for a chip the user can still see. A file
         // they removed mid-upload failing afterwards is not news.
-        const stillThere = (useComposerStore.getState().attachments[sessionId] ?? []).some(
+        const stillThere = (useComposerStore.getState().attachments[storeKey] ?? []).some(
           (a) => a.id === att.id,
         )
-        if (stillThere) toastUploadFailure(sessionId, att, reason)
+        if (stillThere) toastUploadFailure(storeKey, att, reason)
       } finally {
         abortRegistry.delete(key)
       }
     },
-    [agentId, sessionId, updateAttachment, ensureChatSession],
+    [agentId, sessionId, storeKey, prefix, updateAttachment, ensureChatSession],
   )
 
   const upload = useCallback(
@@ -339,7 +375,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // Pair each chip with its source File so a skipped (oversized)
       // file can't shift indices and mismatch chip ↔ file.
       const queued: Array<{ att: ComposerAttachment; file: File }> = []
-      const counted = (useComposerStore.getState().attachments[sessionId] ?? []).filter(
+      const counted = (useComposerStore.getState().attachments[storeKey] ?? []).filter(
         (a) => a.status !== "cancelled" && a.status !== "error",
       ).length
       const { accepted, rejected } = validateAttachmentBatch(counted, files)
@@ -370,12 +406,12 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         })
       }
       if (queued.length === 0) return
-      addAttachments(sessionId, queued.map(({ att }) => att))
+      addAttachments(storeKey, queued.map(({ att }) => att))
       await Promise.all(
-        queued.map(({ att, file }) => queueFor(sessionId).enqueue(att.id, () => runUpload(att, file, workspaceId, source))),
+        queued.map(({ att, file }) => queueFor(storeKey).enqueue(att.id, () => runUpload(att, file, workspaceId, source))),
       )
     },
-    [sessionId, workspaceId, addAttachments, runUpload],
+    [sessionId, storeKey, workspaceId, addAttachments, runUpload],
   )
 
   /** Re-send a chip whose upload was refused, keeping its id and its place in
@@ -387,7 +423,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         toast.error("Workspace not loaded yet — try again in a moment")
         return
       }
-      const att = (useComposerStore.getState().attachments[sessionId] ?? []).find(
+      const att = (useComposerStore.getState().attachments[storeKey] ?? []).find(
         (a) => a.id === id,
       )
       // Already running — the Retry control is only rendered on an error chip,
@@ -400,28 +436,28 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         toast.error("Attach the file again — the browser no longer has it to retry.")
         return
       }
-      const others = (useComposerStore.getState().attachments[sessionId] ?? []).filter(
+      const others = (useComposerStore.getState().attachments[storeKey] ?? []).filter(
         (a) => a.id !== id && a.status !== "cancelled" && a.status !== "error",
       ).length
       if (others >= PROVISIONAL_ATTACHMENT_LIMITS.maxCount) {
         toast.error(refusalMessage(att.name, "too_many", PROVISIONAL_ATTACHMENT_LIMITS))
         return
       }
-      updateAttachment(sessionId, id, { status: "validating", error: undefined })
-      await queueFor(sessionId).enqueue(id, () => runUpload(att, att.file as File, workspaceId))
+      updateAttachment(storeKey, id, { status: "validating", error: undefined })
+      await queueFor(storeKey).enqueue(id, () => runUpload(att, att.file as File, workspaceId))
     },
-    [sessionId, workspaceId, updateAttachment, runUpload],
+    [storeKey, workspaceId, updateAttachment, runUpload],
   )
 
   /** Stop a queued or running upload but keep the chip (as cancelled) so the
    *  file can be retried. Removing the chip is a separate action. */
   const cancel = useCallback(
     (id: string) => {
-      queueFor(sessionId).cancel(id)
-      updateAttachment(sessionId, id, { status: "cancelled", error: undefined })
-      abortIfPending(sessionId, id)
+      queueFor(storeKey).cancel(id)
+      updateAttachment(storeKey, id, { status: "cancelled", error: undefined })
+      abortIfPending(storeKey, id)
     },
-    [sessionId, updateAttachment],
+    [storeKey, updateAttachment],
   )
 
   return { upload, retry, cancel }
@@ -436,7 +472,8 @@ export function AttachmentZone({
   // Subscribe only to THIS session's attachment list — the whole-store
   // subscription re-rendered every mounted zone on any session's draft or
   // attachment write.
-  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[sessionId])
+  const { key: storeKey } = useAttachmentScope(sessionId)
+  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[storeKey])
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []
 
@@ -476,10 +513,26 @@ export function AttachmentZone({
   // still finish uploading server-side.
   const handleRemove = useCallback(
     (id: string) => {
-      abortIfPending(sessionId, id)
-      removeAttachment(sessionId, id)
+      abortIfPending(storeKey, id)
+      removeAttachment(storeKey, id)
     },
-    [sessionId, removeAttachment],
+    [storeKey, removeAttachment],
+  )
+
+  // Leaving the chat (or the composer going away) cancels what has not
+  // finished: queued jobs never start, running requests abort, and the chips
+  // stay as cancelled so the same person can retry them on return.
+  useEffect(
+    () => () => {
+      invalidateJobs(storeKey)
+      const { attachments, updateAttachment } = useComposerStore.getState()
+      for (const a of attachments[storeKey] ?? []) {
+        if (a.status === "uploading" || a.status === "validating") {
+          updateAttachment(storeKey, a.id, { status: "cancelled", error: undefined })
+        }
+      }
+    },
+    [storeKey],
   )
 
   return (

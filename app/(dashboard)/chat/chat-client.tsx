@@ -1,5 +1,6 @@
 "use client"
 
+import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
@@ -481,6 +482,7 @@ export function ChatClient() {
    * two PATCHes. It makes "once" a property of the page rather than a race.
    */
   const autoTitledRef = useRef<Set<string>>(new Set())
+  const attachmentPrefix = useAttachmentScopePrefix()
   const autoTitleSession = useCallback(
     (sid: string, text: string) => {
       if (!agent || !workspaceId || !sid) return
@@ -491,7 +493,7 @@ export function ChatClient() {
       // in the store at onSend time — the composer clears them one step later,
       // on onSent. Only consulted when the text says nothing usable, which is
       // the "here, look at this" message whose whole content is a file name.
-      const attachmentNames = (useComposerStore.getState().attachments[sid] ?? []).map((a) => a.name)
+      const attachmentNames = (useComposerStore.getState().attachments[attachmentPrefix + sid] ?? []).map((a) => a.name)
       const title = deriveSessionTitle({ text, attachmentNames })
       // An untitled session reads worse than a good name and better than "…".
       if (!title) return
@@ -520,7 +522,7 @@ export function ChatClient() {
         }
       })()
     },
-    [agent, workspaceId, tree],
+    [agent, workspaceId, tree, attachmentPrefix],
   )
 
   const handleSend = useCallback(
