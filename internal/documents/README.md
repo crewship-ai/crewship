@@ -22,6 +22,14 @@ incomplete document as valid. The caller remains responsible for interpreting
 and validating the document's CRDT payload; this storage foundation does not
 claim that arbitrary binary data is a valid document.
 
+The replay log compacts atomically into the validated candidate snapshot when
+accumulated updates reach the count or byte threshold, including pressure on a
+smaller configured replay budget. A single update exceeding that budget still
+returns quota. Compaction retains pinned checkpoints and retry receipts; a
+storage failure rolls the entire edit back. This prevents accumulated replay
+bytes from permanently blocking a valid edit (T-OPS-01). It does not implement
+time-based version or receipt retention (T-RET-01).
+
 An edit requires the current lease owner, writer identity, epoch and expiry,
 plus a matching revision and any supplied generation or block-hash conditions.
 Current authorization runs inside the fenced transaction before receipt lookup.

@@ -61,11 +61,11 @@ func (d *LineDecoder) Push(record Record) (err error) {
 	}
 	switch record.Kind {
 	case "accepted":
-		if record.Sequence != 1 || len(record.Data) != 0 || record.Stream != "" || record.Reason != "" || record.ExitCode != 0 {
+		if record.Sequence != 1 || len(record.Data) != 0 || record.Stream != "" || record.Reason != "" || record.ExitCode != 0 || record.CompletedAt != "" {
 			return errors.New("invalid retained acceptance")
 		}
 	case "output":
-		if record.Sequence == 1 || (record.Stream != "stdout" && record.Stream != "stderr") || len(record.Data) == 0 || len(record.Data) > chunkBytes || record.ExitCode != 0 || record.Reason != "" {
+		if record.Sequence == 1 || (record.Stream != "stdout" && record.Stream != "stderr") || len(record.Data) == 0 || len(record.Data) > chunkBytes || record.ExitCode != 0 || record.Reason != "" || record.CompletedAt != "" {
 			return errors.New("invalid retained output")
 		}
 		// Scan each bounded input fragment before copying; a long line cannot
@@ -91,7 +91,7 @@ func (d *LineDecoder) Push(record Record) (err error) {
 			remaining = remaining[n+1:]
 		}
 	case "exit":
-		snapshot := Snapshot{Version: 1, Sequence: record.Sequence, Complete: true, Result: &Result{ExitCode: record.ExitCode, Reason: record.Reason}}
+		snapshot := Snapshot{Version: 1, Sequence: record.Sequence, Complete: true, Result: &Result{ExitCode: record.ExitCode, Reason: record.Reason, CompletedAt: record.CompletedAt}}
 		if len(record.Data) != 0 || record.Stream != "" {
 			return errors.New("invalid retained exit payload")
 		}

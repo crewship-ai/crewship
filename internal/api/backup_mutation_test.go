@@ -36,7 +36,15 @@ func backupMutationRig(t *testing.T) (*BackupHandler, string, string) {
 	t.Helper()
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
+	// The backup guard is process-wide, unlike this fixture's SQLite database.
+	// Use a distinct identity so another database's mission cannot block it.
+	wsID := generateCUID()
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Test', 'test')`, wsID); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('m1', ?, ?, 'OWNER')`, wsID, userID); err != nil {
+		t.Fatalf("insert member: %v", err)
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewBackupHandler(db, logger, nil, "test-version")
 	return h, userID, wsID
@@ -541,5 +549,35 @@ func TestBackup_SetJournal_NilFallsBackToNoop(t *testing.T) {
 	// deliberately do not exercise — the contract is "stays callable".
 	if err := h.journal.Flush(context.Background()); err != nil {
 		t.Errorf("Flush on fallback emitter errored: %v", err)
+	}
+}
+
+// Separate SQLite fixtures share the process-wide guard, so their workspace
+// identities must not alias a mission running in another test database.
+func TestBackupMutationRig_IsolatedFromOtherDatabaseMission(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	otherDB := setupTestDB(t)
+	otherUser := seedTestUser(t, otherDB)
+	otherWorkspace := seedTestWorkspace(t, otherDB, otherUser)
+	release, err := backup.DefaultGuard().BeginMission(otherWorkspace)
+	if err != nil {
+		t.Fatalf("begin other database mission: %v", err)
+	}
+	defer release()
+	h, userID, workspaceID := backupMutationRig(t)
+	path := covBk3CreateBundle(t, h, userID, workspaceID)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("encrypted backup not created: %v", err)
+	}
+	// Isolation must preserve the guard for a mission in the same workspace.
+	ownRelease, err := backup.DefaultGuard().BeginMission(workspaceID)
+	if err != nil {
+		t.Fatalf("begin own workspace mission: %v", err)
+	}
+	defer ownRelease()
+	rr := httptest.NewRecorder()
+	h.Create(rr, withWorkspaceUser(httptest.NewRequest("POST", "/x", jsonBody(map[string]any{"scope": "workspace", "passphrase": covBk3Passphrase})), userID, workspaceID, "OWNER"))
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), backup.ErrGuardMissionsInFlight.Error()) {
+		t.Fatalf("same-workspace mission must block backup: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

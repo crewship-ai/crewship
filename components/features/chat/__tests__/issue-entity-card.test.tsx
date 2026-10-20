@@ -69,6 +69,8 @@ it("retains draft on validation and retries an unknown comment with the same req
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await screen.findByText("The outcome is unknown. Your draft is kept.")
   fetch.mockResolvedValueOnce(new Response("{}"))
+  // Hover must not lift the hit area away from a pointer resting on its edge.
+  expect(screen.getByRole("button", { name: "Check and retry the same operation" }).className).not.toMatch(/(^|\s)hover:-translate-y-px/)
   fireEvent.click(screen.getByRole("button", { name: "Check and retry the same operation" }))
   await waitFor(() => expect(props.reconcile).toHaveBeenCalled())
   const writes = fetch.mock.calls.filter(([, init]) => init?.method === "POST")
