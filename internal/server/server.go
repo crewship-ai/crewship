@@ -1049,6 +1049,7 @@ func (s *Server) mountAPIRouter(
 		}
 	} else {
 		s.apiRouter = apiRouter
+		apiRouter.RegisterSlidesHuman(cfg.Slides.Enabled)
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
 		// credential monitor's tick when there is one, and runs on its own
 		// ticker otherwise — a ChatGPT login must be renewed whether or not

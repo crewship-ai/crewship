@@ -4,24 +4,34 @@ title: Native Slides initialization and reads
 
 The schema-1 native Slides adapter can initialize a populated presentation on an
 existing empty private Page and read its saved head or an exact revision.
-A server must explicitly install the human adapter before these routes exist;
-default Router construction leaves it disabled.
+The routes are disabled by default. Enable `slides.enabled: true` in the server
+configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
+This switch does not require the separate Document engine and does not enable
+agent authoring or unsupported editing operations.
+
+The human endpoints are `GET /api/v1/pages/{slug}/slides`,
+`GET /api/v1/pages/{slug}/slides/revisions/{revision}` and
+`POST /api/v1/pages/{slug}/slides/initialize`. A slug or the encoded `@PAGE_ID`
+form addresses the same immutable Page. Disabled routes return 404. An enabled
+route still requires a current human credential and workspace context.
 
 Use a current human session or CLI token. Initialization requires the Page's
 current human custodian and `pages:write`; reading requires current private
 access and `pages:read`. Another unrestricted workspace OWNER can read with a
 mandatory private-access audit. An ADMIN role or ordinary Page grant does not
 widen a private Page's audience. Agent, internal and acting-agent credentials
-are refused.
+are refused. For another private Page, malformed input returns the same 404 as
+a missing Page; validation errors cannot disclose that the Page exists.
 
 ```bash
-crewship slide initialize @PAGE_ID --file initialization.json
-crewship slide read @PAGE_ID
-crewship slide at-rev @PAGE_ID 1
+crewship slides initialize @PAGE_ID --file initialization.json
+crewship slides read @PAGE_ID
+crewship slides at-rev @PAGE_ID 1
 ```
 
-The initialization file uses the existing strict Slides contract: `page_id`,
-`schema_version: 1`, `mutation_id` and a complete `deck` whose `deck_id` equals
+The singular `slide` command remains an alias. The initialization file uses the
+existing strict Slides contract: `page_id`,
+`schema_version: 1`, `base_rev: 0`, `mutation_id` and a complete `deck` whose `deck_id` equals
 `page_id`. Geometry, text, shape, table, notes and theme use the bounded typed
 schema. Read the shared [schema fixture](../../testdata/slides-schema-v1.json)
 for the deck structure. The CLI validates this request before transport.

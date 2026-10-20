@@ -234,3 +234,73 @@ func TestSlidesHumanSession(t *testing.T) {
 	mustExec(t, f.db, `UPDATE user_sessions SET revoked_at='2000-01-01T00:00:00Z' WHERE id=?`, session.ID)
 	wantCode(t, f.do(token, "GET", base+"?workspace_id=ws-old", ""), 401, "revoked exact session")
 }
+
+// Invalid content or revision syntax must not distinguish a private Page from
+// an absent Page. Exercise registered Router middleware and handlers with fully
+// scoped authenticated humans, rather than directly calling the Store guard.
+func TestSlidesHumanPrivateValidationDoesNotRevealExistence(t *testing.T) {
+	f := newInstanceFixture(t)
+	f.r.RegisterSlidesHuman(true)
+	seedInstanceUser(t, f.db, "slides-member", "member@slides.test", "ws-old", "MEMBER")
+	member := mintTokenFor(t, f.db, "slides-member", "slidesmemberoracle000000000")
+	const pageID, slug, title = "slides-secret", "private-deck", "PRIVATE_SLIDES_TITLE"
+	wmSeedPage(t, f.db, "ws-old", pageID, slug, title, "boss", "")
+	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id=?`, pageID)
+	deck := humanSlidesDeck(t, pageID)
+	body := humanSlidesJSON(t, slides.InitializeRequest{PageID: pageID, SchemaVersion: 1, MutationID: "private-init", Deck: deck})
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/"+slug+"/slides/initialize?workspace_id=ws-old", body), 200, "original human initializes private deck")
+	// Authorized callers still receive useful validation errors; privacy does
+	// not mean hiding invalid requests from the actual author.
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/"+slug+"/slides/initialize?workspace_id=ws-old", "{"), 400, "author malformed request")
+	wantCode(t, f.do(f.boss, "GET", "/api/v1/pages/"+slug+"/slides/revisions/invalid?workspace_id=ws-old", ""), 400, "author malformed revision")
+	var initialAudits int
+	if err := f.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND entity_id=?`, pageID).Scan(&initialAudits); err != nil || initialAudits != 0 {
+		t.Fatalf("author unexpectedly used custody audit: audits=%d err=%v", initialAudits, err)
+	}
+	cases := []struct{ name, method, suffix, input string }{
+		{"latest", "GET", "", ""},
+		{"exact revision", "GET", "/revisions/1", ""},
+		{"malformed revision", "GET", "/revisions/not-a-number", ""},
+		{"zero revision", "GET", "/revisions/0", ""},
+		{"negative revision", "GET", "/revisions/-1", ""},
+		{"overflow revision", "GET", "/revisions/9223372036854775808", ""},
+		{"valid initialization", "POST", "/initialize", body},
+		{"malformed initialization", "POST", "/initialize", "{"},
+		{"incomplete initialization", "POST", "/initialize", "{}"},
+	}
+	for _, principal := range []struct{ name, token string }{{"ADMIN", f.wsAdmin}, {"MEMBER", member}} {
+		for _, reference := range []struct{ name, private, missing string }{{"slug", slug, "missing-deck"}, {"immutable ID", "@" + pageID, "@missing-deck"}} {
+			for _, tc := range cases {
+				t.Run(principal.name+"/"+reference.name+"/"+tc.name, func(t *testing.T) {
+					request := func(ref string) *httptest.ResponseRecorder {
+						return f.do(principal.token, tc.method, "/api/v1/pages/"+ref+"/slides"+tc.suffix+"?workspace_id=ws-old", tc.input)
+					}
+					missing, private := request(reference.missing), request(reference.private)
+					if missing.Code != 404 || private.Code != 404 || missing.Body.String() != private.Body.String() {
+						t.Errorf("private existence distinguished: missing=%d %q private=%d %q", missing.Code, missing.Body.String(), private.Code, private.Body.String())
+					}
+					for _, response := range []*httptest.ResponseRecorder{missing, private} {
+						if response.Header().Get("Cache-Control") != "no-store" {
+							t.Error("private refusal may be cached")
+						}
+						for _, secret := range []string{title, pageID, deck.Slides[0].ID, `"content_hash"`, `"canonical_json"`, `"deck"`} {
+							if strings.Contains(response.Body.String(), secret) {
+								t.Errorf("refusal exposed private content or metadata: %q", secret)
+							}
+						}
+					}
+					var audits, revisions, receipts int
+					if err := f.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND entity_id=?`, pageID).Scan(&audits); err != nil || audits != initialAudits {
+						t.Errorf("unauthorized request used OWNER custody audit: audits=%d err=%v", audits, err)
+					}
+					if err := f.db.QueryRow(`SELECT count(*) FROM slides_revisions WHERE page_id=?`, pageID).Scan(&revisions); err != nil || revisions != 1 {
+						t.Errorf("unauthorized request changed revisions: revisions=%d err=%v", revisions, err)
+					}
+					if err := f.db.QueryRow(`SELECT count(*) FROM slides_receipts WHERE page_id=?`, pageID).Scan(&receipts); err != nil || receipts != 1 {
+						t.Errorf("unauthorized request changed receipts: receipts=%d err=%v", receipts, err)
+					}
+				})
+			}
+		}
+	}
+}

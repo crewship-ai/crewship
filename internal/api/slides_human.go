@@ -22,8 +22,11 @@ func (r *Router) RegisterSlidesHuman(enabled bool) {
 	}
 	h := &slidesHumanHTTP{pages: r.pages, store: slides.New(r.db, slides.Options{})}
 	authed, workspace := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	// openapi: responses 200,400,401,403,404,409,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides", authed(workspace(http.HandlerFunc(h.read))))
+	// openapi: responses 200,400,401,403,404,409,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides/revisions/{revision}", authed(workspace(http.HandlerFunc(h.read))))
+	// openapi: responses 200,400,401,403,404,409,429,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/initialize", roleInline, h.initialize)
 }
 
@@ -122,7 +125,7 @@ func slidesHumanError(w http.ResponseWriter, err error) {
 	}
 	replyError(w, code, message)
 }
-func (h *slidesHumanHTTP) key(r *http.Request) (slides.Key, error) {
+func (h *slidesHumanHTTP) key(r *http.Request, initialize bool) (slides.Key, error) {
 	key := slides.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	// Resolving a slug here does not authorize content. Initialization binds the
 	// request's immutable Page ID again inside the fenced transaction.
@@ -134,11 +137,22 @@ func (h *slidesHumanHTTP) key(r *http.Request) (slides.Key, error) {
 	if err != nil {
 		return key, errSlidesHumanAccess
 	}
+	// Hide private Page existence before reporting request-shape errors.
+	// This read-only preflight ends before reading the request body; the Store
+	// still rechecks live authority twice inside its fenced transaction.
+	tx, err := h.pages.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return key, errSlidesHumanAccess
+	}
+	defer tx.Rollback()
+	if _, err := h.authorize(r, key, initialize, nil)(r.Context(), tx); err != nil {
+		return key, errSlidesHumanAccess
+	}
 	return key, nil
 }
 func (h *slidesHumanHTTP) read(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	key, err := h.key(r)
+	key, err := h.key(r, false)
 	if err != nil {
 		slidesHumanError(w, err)
 		return
@@ -173,7 +187,7 @@ func (h *slidesHumanHTTP) read(w http.ResponseWriter, r *http.Request) {
 }
 func (h *slidesHumanHTTP) initialize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	key, err := h.key(r)
+	key, err := h.key(r, true)
 	if err != nil {
 		slidesHumanError(w, err)
 		return

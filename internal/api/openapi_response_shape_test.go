@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -56,6 +57,8 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
+	{name: "NativeSlidesState", pointer: "/components/schemas/NativeSlidesState", value: slides.State{}},
+	{name: "NativeSlidesReceipt", pointer: "/components/schemas/NativeSlidesReceipt", value: slides.Receipt{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
 	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},

@@ -97,6 +97,9 @@ func TestSlidesHumanBinary(t *testing.T) {
 	if string(pinned) != string(saved) {
 		t.Fatalf("pinned differs %s", pinned)
 	}
+	if plural := require("", "slides", "read", "@slides-binary-page"); string(plural) != string(saved) {
+		t.Fatalf("canonical slides command differs from singular alias: %s", plural)
+	}
 	for _, op := range []string{"patch", "restore", "reorder", "history", "export"} {
 		if out, e := run("", "slide", op, "binary-slides"); e == nil {
 			t.Fatalf("unsupported %s: %s", op, out)

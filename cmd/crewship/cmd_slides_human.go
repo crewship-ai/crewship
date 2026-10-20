@@ -1,8 +1,8 @@
 package main
 
-// GET /api/v1/pages/{slug}/slides slide read
-// GET /api/v1/pages/{slug}/slides/revisions/{revision} slide at-rev
-// POST /api/v1/pages/{slug}/slides/initialize slide initialize
+// GET /api/v1/pages/{slug}/slides slides read
+// GET /api/v1/pages/{slug}/slides/revisions/{revision} slides at-rev
+// POST /api/v1/pages/{slug}/slides/initialize slides initialize
 
 import (
 	"encoding/json"
@@ -20,7 +20,7 @@ import (
 // Retains the native CLI's immutable request contract; no automatic Page lookup,
 // precondition refresh, broad write operations or agent-profile fallback.
 func newSlideCommand() *cobra.Command {
-	root := &cobra.Command{Use: "slide", Short: "Read or initialize saved schema-1 Slides on a private Page", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
+	root := &cobra.Command{Use: "slides", Aliases: []string{"slide"}, Short: "Read or initialize saved schema-1 Slides on a private Page", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
 	for _, operation := range []string{"read", "at-rev", "initialize"} {
 		cmd := &cobra.Command{Use: operation + " <page-slug|@ID>", Args: cobra.ExactArgs(1), Short: "Slides " + operation, RunE: func(cmd *cobra.Command, args []string) error {
 			if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
