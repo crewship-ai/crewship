@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import {
+  __resetForTests,
   cancelJobsForKey,
   cancelJobsForScope,
   currentScopeEpoch,
@@ -19,6 +20,8 @@ function held(key: string) {
 }
 
 describe("attachment job guards, one at a time", () => {
+  beforeEach(() => __resetForTests())
+
   it("cancelling a key skips the queued task (cancelAll, not the epoch)", async () => {
     const h = held("u::w::chat")
     await Promise.resolve()

@@ -1,52 +1,31 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
 
-import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
-import { cancelJobsForKey, cancelJobsForScope } from "@/lib/chat-attachment-jobs"
+import { bumpEpoch, cancelJobsForScope, currentIdentity } from "@/lib/chat-attachment-jobs"
 import { useComposerStore } from "@/stores/composer-store"
 
-/** Stop pending uploads of one chat and keep their chips as `cancelled`, so the
- *  same person can retry them. Finished chips are left alone. */
-function cancelPending(key: string) {
-  cancelJobsForKey(key)
-  const { attachments, updateAttachment } = useComposerStore.getState()
-  for (const a of attachments[key] ?? []) {
-    if (a.status === "uploading" || a.status === "validating") {
-      updateAttachment(key, a.id, { status: "cancelled", error: undefined })
-    }
-  }
-}
-
 /**
- * Owns the upload queue's lifetime for the chat page. Mounted ONCE, above every
- * layout branch (desktop, phone, Artifacts tab), so it survives the composer
- * remounting - which a breakpoint change or the phone's Artifacts / Work tab
- * does routinely and which must not cancel an upload.
+ * Owns the upload queue's lifetime for the chat page. Mounted once, above both
+ * layouts (desktop and phone), so the composer remounting - a breakpoint change
+ * or the phone's Artifacts / Work tab - never touches an upload.
  *
- * Uploads are cancelled when:
- *   - the selected chat changes (that chat's exact key),
- *   - the chat page unmounts (the person left /chat),
- *   - the human or workspace changes or signs out (handled by
- *     `useAttachmentScopePrefix`, which this component also runs so the
- *     invalidation happens with no composer mounted).
+ * Switching to another chat does NOT cancel: the queue is module-level, so the
+ * upload finishes in the background and is done when the person comes back.
+ *
+ * Leaving the chat page does cancel: running requests abort, queued jobs never
+ * start, the epoch moves (so nothing in flight can send later), and unfinished
+ * chips stay as "cancelled" so the same person can retry them.
+ *
+ * Changes of person or workspace and sign-out are `AttachmentScopeSync`'s job.
  */
-export function AttachmentLifecycle({ sessionId }: { sessionId: string | null }) {
-  const prefix = useAttachmentScopePrefix()
-  const prefixRef = useRef(prefix)
-  prefixRef.current = prefix
-  const key = sessionId && prefix ? prefix + sessionId : null
-
-  useEffect(() => {
-    if (!key) return
-    return () => cancelPending(key)
-  }, [key])
-
+export function AttachmentLifecycle() {
   useEffect(
     () => () => {
-      const p = prefixRef.current
+      const p = currentIdentity().prefix
       if (!p) return
       cancelJobsForScope(p)
+      bumpEpoch()
       const { attachments, updateAttachment } = useComposerStore.getState()
       for (const [k, list] of Object.entries(attachments)) {
         if (!k.startsWith(p)) continue

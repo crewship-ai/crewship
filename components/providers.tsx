@@ -1,5 +1,6 @@
 "use client"
 
+import { AttachmentScopeSync } from "@/components/features/chat/composer/attachment-scope-sync"
 import { useState } from "react"
 import { MotionConfig } from "motion/react"
 import { ThemeProvider } from "next-themes"
@@ -50,6 +51,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           choice is the data-motion attribute (app/globals.css). */}
       <MotionConfig reducedMotion={motionConfigValue(reducedMotion)}>
         <AuthProvider>
+          <AttachmentScopeSync />
           {children}
           <Toaster />
         </AuthProvider>

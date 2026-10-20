@@ -127,7 +127,18 @@ const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquar
  * rebuilds the dashboard chrome to look at a different name, and the reader
  * feels every one of those.
  */
+/** One wrapper above both layouts, so the lifecycle owner is the same instance
+ *  across a breakpoint crossing and unmounts only when the person leaves /chat. */
 export function ChatClient() {
+  return (
+    <>
+      <AttachmentLifecycle />
+      <ChatClientBody />
+    </>
+  )
+}
+
+function ChatClientBody() {
   const searchParams = useSearchParams()
   const unified = useUnifiedConversations()
   const humanConversationId = unified ? unified.selectedId : searchParams.get("conversation")
@@ -870,7 +881,6 @@ export function ChatClient() {
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-        <AttachmentLifecycle sessionId={sessionId} />
         {subbar}
 
         {!humanConversationId && <div
@@ -947,9 +957,6 @@ export function ChatClient() {
      * centre is a raised reading surface inside a card-coloured frame.
      */
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-      {/* First child in both layouts, so it is the one instance across the
-          breakpoint: it owns the upload queue's lifetime. */}
-      <AttachmentLifecycle sessionId={sessionId} />
       {subbar}
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* The column's frame, matching /routines and /issues: the aside owns

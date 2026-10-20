@@ -4,7 +4,7 @@ import { useEffect } from "react"
 
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { cancelJobsForScope, enterScope } from "@/lib/chat-attachment-jobs"
+import { cancelJobsForScope, currentIdentity, enterScope } from "@/lib/chat-attachment-jobs"
 import { useComposerStore } from "@/stores/composer-store"
 
 /**
@@ -21,21 +21,70 @@ export function attachmentScopePrefix(userId: string | null | undefined, workspa
   return userId && workspaceId ? `${userId}::${workspaceId}::` : ""
 }
 
-/** Prefix plus a module-level scope that outlives every component: when the
- *  scope changes, the old one's jobs are cancelled and its chips dropped no
- *  matter which component (or none) is mounted at that moment. */
-export function useAttachmentScopePrefix(): string {
+export interface IdentityInput {
+  userId: string | null | undefined
+  status: string
+  workspaceId: string | null | undefined
+}
+interface Identity {
+  userId: string | null
+  prefix: string
+}
+
+/**
+ * What the scope becomes, given what it is and what auth/workspace say now.
+ * Pure, so a render can use it without side effects.
+ *
+ * Only a change from one real identity to another, or an explicit sign-out,
+ * moves the scope. A momentary gap (session being revalidated, workspace
+ * briefly unknown) keeps the current one - cancelling an upload because a
+ * request was in flight would be worse than the problem it guards.
+ */
+export function nextIdentity(cur: Identity, input: IdentityInput): Identity {
+  if (input.status === "unauthenticated") return { userId: null, prefix: "" }
+  if (!input.userId) return cur // session unread: not a sign-out
+  if (input.workspaceId) {
+    return { userId: input.userId, prefix: attachmentScopePrefix(input.userId, input.workspaceId) }
+  }
+  // Known person, workspace momentarily unknown. The same person: keep going.
+  // A different person must not inherit the previous scope.
+  return input.userId === cur.userId ? cur : { userId: input.userId, prefix: "" }
+}
+
+/** Commit the identity: advance the epoch and, when a real scope is left,
+ *  cancel its jobs and drop its chips. Idempotent. */
+export function applyIdentity(input: IdentityInput) {
+  const next = nextIdentity(currentIdentity(), input)
+  const { changed, previous } = enterScope(next.prefix, next.userId)
+  if (changed && previous) {
+    cancelJobsForScope(previous)
+    useComposerStore.getState().dropAttachmentsByPrefix(previous)
+  }
+}
+
+function useIdentityInput(workspaceId: string | null | undefined): IdentityInput {
   const session = useSessionSafe()
-  const { workspaceId } = useWorkspace()
-  const prefix = attachmentScopePrefix(session.data?.user?.id, workspaceId)
+  return { userId: session.data?.user?.id, status: session.status, workspaceId }
+}
+
+/** Keep the module's scope in step with auth and workspace. Safe to call from
+ *  any number of places; `AttachmentScopeSync` calls it from the app shell so it
+ *  does not depend on a composer being mounted. */
+export function useAttachmentScopeSync(workspaceId: string | null | undefined) {
+  const input = useIdentityInput(workspaceId)
   useEffect(() => {
-    const { changed, previous } = enterScope(prefix)
-    if (changed && previous) {
-      cancelJobsForScope(previous)
-      useComposerStore.getState().dropAttachmentsByPrefix(previous)
-    }
-  }, [prefix])
-  return prefix
+    applyIdentity(input)
+  }, [input.userId, input.status, input.workspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** The prefix for this render, derived from the committed identity plus what
+ *  auth says now (no one-render window where a new person reads the old key),
+ *  and kept in sync as a side effect for consumers mounted without the shell. */
+export function useAttachmentScopePrefix(): string {
+  const { workspaceId } = useWorkspace()
+  const input = useIdentityInput(workspaceId)
+  useAttachmentScopeSync(workspaceId)
+  return nextIdentity(currentIdentity(), input).prefix
 }
 
 /** `{ prefix, key, ready }`: `key` indexes the composer store and the upload

@@ -68,16 +68,44 @@ export function cancelJobsForScope(prefix: string) {
 // the network if it has moved on - including A -> B -> A, where the prefix
 // alone would look current again.
 let scopePrefix: string | null = null
+let scopeUserId: string | null = null
 let epoch = 0
 
 export function currentScopeEpoch(): number {
   return epoch
 }
 
-export function enterScope(prefix: string): { changed: boolean; previous: string | null } {
-  if (prefix === scopePrefix) return { changed: false, previous: scopePrefix }
+/** The identity the module last committed. Consumers derive from it (see
+ *  hooks/use-attachment-scope.ts) so a transient gap does not read as a change. */
+export function currentIdentity(): { userId: string | null; prefix: string } {
+  return { userId: scopeUserId, prefix: scopePrefix ?? "" }
+}
+
+/** Move the epoch without touching jobs, for callers that cancel on their own
+ *  terms (leaving the chat page): cancel and epoch must move together. */
+export function bumpEpoch() {
+  epoch++
+}
+
+export function enterScope(
+  prefix: string,
+  userId: string | null = null,
+): { changed: boolean; previous: string | null } {
+  if (prefix === scopePrefix && userId === scopeUserId) return { changed: false, previous: scopePrefix }
   const previous = scopePrefix
   scopePrefix = prefix
+  scopeUserId = userId
   epoch++
   return { changed: true, previous }
+}
+
+/** Test isolation: forget queues, abort handles and the scope. */
+export function __resetForTests() {
+  for (const q of queues.values()) q.cancelAll()
+  queues.clear()
+  for (const e of aborts.values()) e.ac.abort()
+  aborts.clear()
+  scopePrefix = null
+  scopeUserId = null
+  epoch = 0
 }

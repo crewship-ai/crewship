@@ -2,16 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 
 let userId: string | null = "user-a"
-let workspaceId = "ws-1"
+let authStatus = "authenticated"
+let workspaceId: string | null = "ws-1"
 vi.mock("@/hooks/use-auth", async (orig) => ({
   ...(await orig<typeof import("@/hooks/use-auth")>()),
   useSessionSafe: () => ({
     data: userId ? { user: { id: userId, name: userId, email: "" } } : null,
-    status: userId ? "authenticated" : "unauthenticated",
+    status: authStatus,
   }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId, loading: false }),
+  useCurrentWorkspaceId: () => workspaceId,
 }))
 vi.mock("../mention-autocomplete", () => ({ MentionAutocomplete: () => null }))
 const toastError = vi.fn()
@@ -19,6 +21,8 @@ vi.mock("sonner", () => ({ toast: { error: (m: string) => toastError(m), success
 
 import { ChatComposer } from "../chat-composer"
 import { AttachmentLifecycle } from "../attachment-lifecycle"
+import { AttachmentScopeSync } from "../attachment-scope-sync"
+import { __resetForTests, currentScopeEpoch, enterScope } from "@/lib/chat-attachment-jobs"
 import { useComposerStore } from "@/stores/composer-store"
 
 const SID = "chat-1"
@@ -35,7 +39,7 @@ const composer = (variant: "desktop" | "mobile", sessionId = SID, key?: string) 
 )
 const tree = (variant: "desktop" | "mobile", opts: { sessionId?: string; key?: string; owner?: boolean } = {}) => (
   <>
-    {opts.owner !== false && <AttachmentLifecycle sessionId={opts.sessionId ?? SID} />}
+    {opts.owner !== false && <AttachmentLifecycle />}
     {composer(variant, opts.sessionId ?? SID, opts.key)}
   </>
 )
@@ -68,7 +72,9 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 
 describe("attachment job lifecycle", () => {
   beforeEach(() => {
+    __resetForTests()
     userId = "user-a"
+    authStatus = "authenticated"
     workspaceId = "ws-1"
     ensureSession = vi.fn(async () => true)
     toastError.mockClear()
@@ -95,7 +101,7 @@ describe("attachment job lifecycle", () => {
   it("the whole composer disappearing (phone Artifacts tab) and coming back keeps the upload", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
-    const owner = () => <AttachmentLifecycle sessionId={SID} />
+    const owner = () => <AttachmentLifecycle />
     const { rerender } = render(<>{owner()}{composer("mobile")}</>)
     pick([file("a.txt")])
     await waitFor(() => expect(g.calls).toHaveLength(1))
@@ -163,36 +169,32 @@ describe("attachment job lifecycle", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
     let finish!: (ok: boolean) => void
     ensureSession = vi.fn(() => new Promise<boolean>((r) => (finish = r)))
-    const { rerender } = render(tree("desktop", { sessionId: SID }))
+    const { unmount } = render(tree("desktop"))
     pick([file("a.txt")])
     await waitFor(() => expect(ensureSession).toHaveBeenCalled())
-    rerender(tree("desktop", { sessionId: "chat-2" })) // selected chat changed
+    unmount() // leaving the chat page cancels
     await act(async () => finish(true))
     await tick()
     expect(g.calls).toHaveLength(0)
   })
 
-  it("changing the selected chat cancels pending chips (exact key) and keeps finished ones", async () => {
+  it("switching to another chat does not cancel: the upload finishes in the background and is done on return", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
     const { rerender } = render(tree("desktop"))
-    pick([file("done.txt")])
-    await waitFor(() => expect(g.calls).toHaveLength(1))
-    g.calls[0].release()
-    await waitFor(() => expect(statuses()).toEqual(["ready"]))
     pick([file("run.txt"), file("wait.txt")])
-    await waitFor(() => expect(g.calls).toHaveLength(2))
-    // a sibling chat whose id merely starts with the same text is untouched
-    useComposerStore.getState().addAttachments(`user-a::ws-1::${SID}-10`, [
-      { id: "s", name: "sib.txt", size: 1, type: "text/plain", status: "validating" },
-    ])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
     rerender(tree("desktop", { sessionId: "chat-2" }))
-    expect(g.calls[1].signal?.aborted).toBe(true)
-    const byName = Object.fromEntries(all().map((a) => [a.name, a.status]))
-    expect(byName).toMatchObject({ "done.txt": "ready", "run.txt": "cancelled", "wait.txt": "cancelled", "sib.txt": "validating" })
+    expect(g.calls[0].signal?.aborted).toBe(false)
+    expect(statuses()).not.toContain("cancelled")
+    g.calls[0].release()
+    await waitFor(() => expect(g.calls).toHaveLength(2)) // the queued file still runs
     g.calls[1].release()
-    await tick()
-    expect(g.calls).toHaveLength(2) // wait.txt never started
+    await waitFor(() => expect(statuses()).toEqual(["ready", "ready"]))
+    rerender(tree("desktop")) // back to the first chat
+    expect(screen.getByText("run.txt")).toBeTruthy()
+    expect(screen.getByText("wait.txt")).toBeTruthy()
+    expect(screen.queryByText(/Send is off/)).toBeNull()
   })
 
   it("the owner unmounting (leaving /chat) cancels pending uploads", async () => {
@@ -201,8 +203,10 @@ describe("attachment job lifecycle", () => {
     const { unmount } = render(tree("desktop"))
     pick([file("a.txt"), file("b.txt")])
     await waitFor(() => expect(g.calls).toHaveLength(1))
+    const before = currentScopeEpoch()
     unmount()
     expect(g.calls[0].signal?.aborted).toBe(true)
+    expect(currentScopeEpoch()).toBeGreaterThan(before) // cancel and epoch move together
     await tick()
     expect(g.calls).toHaveLength(1)
     expect(statuses()).toEqual(["cancelled", "cancelled"])
@@ -211,7 +215,7 @@ describe("attachment job lifecycle", () => {
   it("a scope change cancels jobs even though the composer is unmounted", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
-    const owner = () => <AttachmentLifecycle sessionId={SID} />
+    const owner = () => <AttachmentScopeSync />
     const { rerender } = render(<>{owner()}{composer("mobile")}</>)
     pick([file("a.txt"), file("b.txt")])
     await waitFor(() => expect(g.calls).toHaveLength(1))
@@ -223,5 +227,81 @@ describe("attachment job lifecycle", () => {
     g.calls[0].release()
     await tick()
     expect(g.calls).toHaveLength(1)
+  })
+
+  it("A signs out and B signs in on a page with no composer and no owner: A's job never sends", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    let finish!: (ok: boolean) => void
+    ensureSession = vi.fn(() => new Promise<boolean>((r) => (finish = r)))
+    const sync = () => <AttachmentScopeSync />
+    const { rerender } = render(<>{sync()}{composer("desktop")}</>)
+    pick([file("a.txt"), file("a2.txt")])
+    await waitFor(() => expect(ensureSession).toHaveBeenCalled())
+    rerender(<>{sync()}</>) // composer unmounted, nobody consuming the scope
+    userId = null
+    authStatus = "unauthenticated"
+    rerender(<>{sync()}</>)
+    userId = "user-b"
+    authStatus = "authenticated"
+    rerender(<>{sync()}</>)
+    await act(async () => finish(true))
+    await tick()
+    expect(g.calls).toHaveLength(0)
+    expect(all()).toEqual([])
+  })
+
+  it("a momentary missing workspace or session does not cancel or drop", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    const { rerender } = render(tree("desktop"))
+    pick([file("a.txt"), file("b.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    const epoch = currentScopeEpoch()
+    workspaceId = null // revalidation: workspace briefly unknown
+    rerender(tree("desktop"))
+    userId = null
+    authStatus = "loading" // and the session briefly unread
+    rerender(tree("desktop"))
+    expect(g.calls[0].signal?.aborted).toBe(false)
+    expect(statuses()).not.toContain("cancelled")
+    expect(all()).toHaveLength(2)
+    userId = "user-a"
+    authStatus = "authenticated"
+    workspaceId = "ws-1"
+    rerender(tree("desktop"))
+    expect(currentScopeEpoch()).toBe(epoch)
+    g.calls[0].release()
+    await waitFor(() => expect(g.calls).toHaveLength(2))
+    g.calls[1].release()
+    await waitFor(() => expect(statuses()).toEqual(["ready", "ready"]))
+  })
+
+  it("a different user behind a momentary missing workspace is still a change", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    const { rerender } = render(tree("desktop"))
+    pick([file("a.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    userId = "user-b"
+    workspaceId = null
+    rerender(tree("desktop"))
+    expect(g.calls[0].signal?.aborted).toBe(true)
+    expect(all()).toEqual([])
+  })
+
+  it("runUpload's epoch check alone stops a job (no cancelAll, no abort, chips kept)", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    let finish!: (ok: boolean) => void
+    ensureSession = vi.fn(() => new Promise<boolean>((r) => (finish = r)))
+    render(composer("desktop"))
+    pick([file("a.txt")])
+    await waitFor(() => expect(ensureSession).toHaveBeenCalled())
+    enterScope("someone-else::ws-9::", "someone-else") // moves the epoch only
+    await act(async () => finish(true))
+    await tick()
+    expect(g.calls).toHaveLength(0)
+    expect(all()).toHaveLength(1) // not dropped: only the epoch guard acted
   })
 })
