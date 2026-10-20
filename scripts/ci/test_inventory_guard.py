@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -342,13 +344,63 @@ class GuardTests(unittest.TestCase):
     def test_queue_control_change_requires_its_own_admin_dispatch(self):
         self.merge_group(); path = 'scripts/ci/verdict.py'
         self.changes[path] = (self.root / path).read_bytes() + b'\n# deliberate\n'; self.refresh_candidate()
-        self.assertEqual(self.inspect()['state'], 'failure')
+        self.assertEqual(self.inspect()['state'], 'pending')
         self.dispatch()
         self.env['GITHUB_SHA'] = 'b' * 40
         self.event['inputs'].update(pr_number='', queue_ref=self.queue, expected_base_sha='b' * 40)
         self.assertEqual(self.inspect()['state'], 'success')
         self.event['inputs']['expected_base_sha'] = 'c' * 40
         with self.assertRaises(m.Rejected): self.inspect()
+
+    def test_queue_control_change_waits_pending_for_exact_admin_decision(self):
+        self.merge_group()
+        path = 'scripts/ci/verdict.py'
+        self.changes[path] = (self.root / path).read_bytes() + b'\n# reviewed change\n'
+        # An invalid inventory is a real failure, not an approval wait.
+        self.assertEqual(self.inspect()['state'], 'failure')
+        self.refresh_candidate()
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            report = m.execute(self.event, self.env, self.api, self.root)
+            self.assertEqual(report['state'], 'pending')
+            self.assertEqual([v['state'] for _, v in self.calls if v is not None], ['pending', 'pending'])
+            self.assertFalse(report['approval_requested'])
+            self.assertIn(path, report['changed_control_files'])
+            self.assertEqual(report['candidate_inventory_errors'], [])
+            # A separate exact-head administrator still has to decide.
+            self.dispatch('false'); self.env['GITHUB_SHA'] = 'b' * 40
+            self.event['inputs'].update(pr_number='', queue_ref=self.queue, expected_base_sha='b' * 40)
+            self.calls.clear()
+            self.assertEqual(m.execute(self.event, self.env, self.api, self.root)['state'], 'failure')
+            self.assertEqual([v['state'] for _, v in self.calls if v is not None], ['pending', 'failure'])
+            self.event['inputs']['approve_control_changes'] = 'true'
+            self.calls.clear()
+            self.assertEqual(m.execute(self.event, self.env, self.api, self.root)['state'], 'success')
+            self.assertEqual([v['state'] for _, v in self.calls if v is not None], ['pending', 'success'])
+        finally: os.chdir(previous)
+
+    def test_queue_approval_wait_entrypoint_exits_cleanly_but_never_posts_success(self):
+        self.merge_group()
+        self.changes['scripts/ci/inventory-guard.py'] = (self.root / 'scripts/ci/inventory-guard.py').read_bytes() + b'\n# candidate data\n'
+        event_path = self.root / 'event.json'; event_path.write_text(json.dumps(self.event))
+        def open_response(request, **kwargs):
+            endpoint = request.full_url.removeprefix('https://api.github.com/')
+            payload = json.loads(request.data) if request.data is not None else None
+            return io.BytesIO(json.dumps(self.api(endpoint, payload)).encode())
+        opener = type('Opener', (), {'open': staticmethod(open_response)})()
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            with patch.dict(os.environ, {**self.env, 'GITHUB_EVENT_PATH': str(event_path), 'GITHUB_TOKEN': 'synthetic-key'}), \
+                    patch.object(m.urllib.request, 'build_opener', return_value=opener), \
+                    patch.object(sys, 'argv', [str(ROOT / 'scripts/ci/inventory-guard.py')]), \
+                    patch.object(sys, 'stdout', io.StringIO()):
+                with self.assertRaises(SystemExit) as stopped:
+                    runpy.run_path(str(ROOT / 'scripts/ci/inventory-guard.py'), run_name='__main__')
+            self.assertEqual(stopped.exception.code, 0)
+            self.assertEqual([v['state'] for _, v in self.calls if v is not None], ['pending', 'pending'])
+        finally: os.chdir(previous)
 
     def test_queue_wrong_base_ref_branch_or_moving_head_fails_closed(self):
         self.merge_group()
@@ -380,7 +432,7 @@ class GuardTests(unittest.TestCase):
         self.changes[path] = (self.root / path).read_bytes() + b'\n# predecessor change\n'
         self.refresh_candidate()
         report = self.inspect()
-        self.assertEqual(report['state'], 'failure')
+        self.assertEqual(report['state'], 'pending')
         self.assertIn(path, report['changed_control_files'])
         self.assertFalse(report['approval_requested'])
 

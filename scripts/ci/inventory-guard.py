@@ -375,12 +375,13 @@ def inspect(event, env, api, root=ROOT, on_target=None):
         if path not in changed:
             changed.append(path)
     candidate_errors = candidate_manifest_errors(snapshot[MANIFEST], snapshot)
+    awaiting_approval = kind == 'merge_group' and bool(changed) and not approved and not candidate_errors
     return {'repository': repo, 'pr_number': number, 'head_sha': head,
             'queue_ref': queue_ref, 'queue_base_sha': queue_base, 'trusted_sha': trusted, 'diff_url': 'https://github.com/' + repo + '/compare/' + trusted + '...' + head, 'event': kind, 'actor': env.get('GITHUB_ACTOR'),
             'triggering_actor': env.get('GITHUB_TRIGGERING_ACTOR'), 'approval_requested': approved,
             'changed_control_files': changed, 'baseline': baseline, 'candidate': candidate,
             'candidate_inventory_errors': candidate_errors,
-            'state': 'success' if not candidate_errors and (not changed or approved) else 'failure',
+            'state': 'success' if not candidate_errors and (not changed or approved) else 'pending' if awaiting_approval else 'failure',
             'decision': 'candidate inventory must be refreshed before approval' if candidate_errors else 'explicit administrator exception' if changed and approved else 'unchanged controls' if not changed else 'control changes require a separate administrator dispatch'}
 
 
@@ -424,7 +425,8 @@ if __name__ == '__main__':
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
         report = execute(event, os.environ, API(os.environ['GITHUB_TOKEN']))
         print(report['decision'])
-        sys.exit(report['state'] != 'success')
+        # The required status stays pending; a valid approval wait is not a failed job.
+        sys.exit(report['state'] not in ('success', 'pending'))
     except (Rejected, OSError, ValueError, KeyError, TypeError) as error:
         # No raw response, token or PR-controlled text is printed.
         print('CI inventory guard failed closed: ' + str(error), file=sys.stderr)
