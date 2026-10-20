@@ -445,8 +445,39 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		where += " AND services_json IS ?"
 		whereArgs = append(whereArgs, previousServices)
 	}
+	tx, _ := h.beginMemberMutation(w, r, crewID, "manage")
+	if tx == nil {
+		return
+	}
+	defer tx.Rollback()
+	var previousSecurity map[string]any
+	if req.DevcontainerConfig != nil {
+		var previous sql.NullString
+		if err := tx.QueryRowContext(r.Context(), `SELECT devcontainer_config FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&previous); err != nil {
+			replyInternalError(w, h.logger, "read previous crew privilege", err)
+			return
+		}
+		previousSecurity = crewPrivilegeAudit(previous.String)
+	}
+	// Recheck the workspace privilege ceiling on the same writer snapshot.
+	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
+		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
+		if err != nil {
+			replyInternalError(w, h.logger, "parse validated crew configuration", err)
+			return
+		}
+		var allow bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT allow_privileged_credentials FROM workspaces WHERE id=? AND deleted_at IS NULL`, workspaceID).Scan(&allow); err != nil {
+			replyInternalError(w, h.logger, "read crew privilege ceiling", err)
+			return
+		}
+		if err := cfg.ValidateSecurity(allow); err != nil {
+			replyDevcontainerSecurityError(w, err)
+			return
+		}
+	}
 	query, args := ub.Build("crews", where, whereArgs...)
-	result, err := h.db.ExecContext(r.Context(), query, args...)
+	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "update crew", err)
 		return
@@ -467,7 +498,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// quieter one — the crew settings dropdown — and without this the change
 	// would appear to do nothing for any agent already backfilled.
 	if req.AvatarStyle != nil {
-		if _, err := h.db.ExecContext(r.Context(), `
+		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE agents SET avatar_svg = NULL, avatar_svg_hash = NULL
 			WHERE crew_id = ? AND avatar_style IS NULL AND avatar_svg IS NOT NULL AND deleted_at IS NULL`,
 			crewID); err != nil {
@@ -478,7 +509,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated crew
 	var c crewResponse
-	err = scanCrewRow(h.db.QueryRowContext(r.Context(), `
+	err = scanCrewRow(tx.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config,
@@ -499,9 +530,54 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// allowed-domain list or an MCP config, and the audit log is read by more
 	// people than those settings are meant for. What changed is the question
 	// the log has to answer; the current value is one GET away.
-	auditFromRequest(r, h.db, "crew.update", "CREW", crewID, map[string]interface{}{
-		"name": c.Name, "fields": changedCrewFields(&req),
-	})
+	if err := settingsUpdatePersisted(r.Context(), tx, "crews", crewID, ub); err != nil {
+		replyInternalError(w, h.logger, "acknowledge crew settings", err)
+		return
+	}
+	expected, err := settingsNativeRow(r.Context(), tx, "crews", crewID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read crew settings", err)
+		return
+	}
+	metadata := map[string]any{"name": c.Name, "fields": changedCrewFields(&req)}
+	if req.DevcontainerConfig != nil {
+		current := ""
+		if c.DevcontainerConfig != nil {
+			current = *c.DevcontainerConfig
+		}
+		metadata["previous"], metadata["current"] = previousSecurity, crewPrivilegeAudit(current)
+	}
+	notify, err := appendSettingsAudit(r, tx, h.policyJournal, "crew.update", "CREW", crewID, metadata)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit crew settings", err)
+		return
+	}
+	if err := acknowledgeSettingsRow(r.Context(), tx, "crews", crewID, expected); err != nil {
+		replyInternalError(w, h.logger, "acknowledge crew settings", err)
+		return
+	}
+	if req.AvatarStyle != nil {
+		var pending bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE crew_id=? AND avatar_style IS NULL AND avatar_svg IS NOT NULL AND deleted_at IS NULL)`, crewID).Scan(&pending); err != nil || pending {
+			replyInternalError(w, h.logger, "acknowledge inherited avatars", fmt.Errorf("inherited avatar update did not persist: %v", err))
+			return
+		}
+	}
+	if err := settingsActorIn(r, tx); err != nil {
+		if err == sql.ErrNoRows {
+			replyError(w, http.StatusForbidden, "Forbidden")
+		} else {
+			replyInternalError(w, h.logger, "recheck crew settings authority", err)
+		}
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit crew settings", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 
 	// #1638: same advisory as Create, computed from the row as it now stands
 	// rather than from the patch — a crew can be shrunk into the undersized

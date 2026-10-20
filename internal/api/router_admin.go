@@ -70,7 +70,7 @@ func (r *Router) registerAdminRoutes() {
 	// devices and CLI tokens, signing one or all of them out, and lifting a
 	// sign-in lockout. Same session store the auth middleware checks, so a
 	// revoke takes effect on the next request.
-	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore)
+	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore).WithJournal(r.journal)
 	// openapi: responses 200,400,401,403,404,500
 	r.authedAdminPeople("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
 	// openapi: responses 204,400,401,403,404,500

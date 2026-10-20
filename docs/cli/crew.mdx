@@ -14,6 +14,11 @@ A crew is a team of AI agents that share one runtime container and a common Shar
 crewship crew <subcommand> [flags]
 ```
 
+Crew settings and deletion require their audit to commit with the change.
+Audit failures leave the previous settings and memberships in place. Changes
+to privileged mode and explicit capabilities retain their previous/new values
+without copying private environment settings into the audit.
+
 ## Subcommands
 
 | Command | Description |

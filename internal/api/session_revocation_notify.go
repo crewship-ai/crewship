@@ -113,3 +113,24 @@ func (s *notifyingSessionStore) RevokeAllForUser(ctx context.Context, userID, re
 	}
 	return count, nil
 }
+
+func (s *notifyingSessionStore) RevokeSessionTx(ctx context.Context, tx *sql.Tx, user, id, reason string) (bool, func(), error) {
+	store, ok := s.Store.(sessions.SingleTransactionRevoker)
+	if !ok {
+		return false, nil, errors.New("session store does not support atomic revocation")
+	}
+	changed, notify, err := store.RevokeSessionTx(ctx, tx, user, id, reason)
+	if err != nil {
+		return false, nil, err
+	}
+	return changed, func() {
+		if notify != nil {
+			notify()
+		}
+		if changed {
+			for _, n := range s.notifiers {
+				n.NotifySessionRevoked(id)
+			}
+		}
+	}, nil
+}

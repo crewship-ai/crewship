@@ -19,6 +19,9 @@ func (r *Router) registerAuthRoutes() {
 
 	// Onboarding (require auth, no workspace context needed)
 	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
+	if _, noop := r.journal.(noopEmitter); !noop {
+		onboardingSvc.SetJournal(r.journal)
+	}
 	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
 	r.authedSelfMut("POST", "/api/v1/onboarding/complete", onboarding.Complete)
