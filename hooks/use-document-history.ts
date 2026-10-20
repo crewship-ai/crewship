@@ -127,3 +127,79 @@ export function useDocumentHistory({ enabled, workspaceId, humanId, pageId, acti
     : state.selection !== selection ? { status: "loading" } : state.snapshot
   return { scopeKey: scope.scopeKey, list, snapshot, selectedId, onSelect, refresh }
 }
+
+type RestoreHead = { page_id: string; rev: number; schema: number; epoch: string; can_write?: boolean }
+type RestorePacket = { page_id: string; id: string; schema: number; epoch: string; ifRev: number; checkpoint: string }
+type RestoreStatus = "idle" | "pending" | "uncertain" | "error" | "denied"
+interface RestoreScope extends DocumentHistoryScope {
+  head?: RestoreHead
+  snapshot: HistoryRead<DocumentCheckpointSnapshot>
+  historyScopeKey: string
+  blocked: boolean
+  onStart: () => void
+  onRestored: () => void
+  onRefused: (denied: boolean) => void
+}
+
+/** Restore is a separate explicit human write. Never rebuild an uncertain
+ * packet from a later head; the service/Store retain receipt and epoch fencing. */
+export function useDocumentHistoryRestore(input: RestoreScope) {
+  const { workspaceId, humanId, pageId, activationKey, enabled, head, snapshot, blocked } = input
+  // Availability may disappear after a write commits. Keep its exact retry
+  // packet across an outage; the caller changes activationKey on auth loss.
+  const key = JSON.stringify([workspaceId, humanId, pageId, activationKey])
+  const latest = useRef(input); latest.current = input
+  const current = useRef(key); current.current = key
+  const inFlight = useRef<AbortController | undefined>(undefined)
+  useEffect(() => {
+    current.current = key
+    return () => { if (current.current === key) current.current = ""; inFlight.current?.abort() }
+  }, [key])
+  const request = useRef<{ key: string; packet: RestorePacket; busy: boolean } | undefined>(undefined)
+  const [result, setResult] = useState<{ key: string; status: RestoreStatus }>({ key, status: "idle" })
+  const status = result.key === key ? result.status : "idle"
+  const allowed = enabled === true && nonempty(workspaceId) && nonempty(humanId) && identifier(pageId) && nonempty(activationKey)
+    && !blocked && head?.page_id === pageId && head.can_write === true && revision(head.rev) && head.rev < Number.MAX_SAFE_INTEGER && supported(head.schema)
+    && typeof head.epoch === "string" && head.epoch.length > 0 && head.epoch.length <= 256
+    && snapshot.status === "ready" && snapshot.scopeKey === input.historyScopeKey && snapshot.data.page_id === pageId && identifier(snapshot.data.id) && supported(snapshot.data.schema)
+  const run = useCallback(async (captured: { key: string; packet: RestorePacket; busy: boolean }) => {
+    if (current.current !== captured.key || captured.busy) return
+    captured.busy = true
+    setResult({ key: captured.key, status: "pending" })
+    const controller = new AbortController(); inFlight.current = controller
+    const timer = setTimeout(() => controller.abort(), 30000)
+    try {
+      latest.current.onStart()
+      const response = await apiFetch(`/api/v1/pages/${encodeURIComponent(`@${captured.packet.page_id}`)}/document/restore?${new URLSearchParams({ workspace_id: workspaceId })}`, {
+        method: "POST", cache: "no-store", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(captured.packet),
+      })
+      if (current.current !== captured.key) return
+      if (!response.ok) {
+        if ([401, 403, 404].includes(response.status)) throw new HistoryFailure("denied")
+        if ([400, 409, 413, 422, 429].includes(response.status)) throw new HistoryFailure("error")
+        throw new Error("unconfirmed restore")
+      }
+      const receipt: unknown = await response.json()
+      if (current.current !== captured.key) return
+      if (!object(receipt) || receipt.page_id !== captured.packet.page_id || receipt.id !== captured.packet.id || receipt.rev !== captured.packet.ifRev + 1
+        || receipt.kind !== "restore" || typeof receipt.epoch !== "string" || !receipt.epoch || receipt.epoch === captured.packet.epoch || receipt.epoch.length > 256
+        || (receipt.schema !== undefined && (typeof receipt.schema !== "number" || ![1, 2, 3].includes(receipt.schema)))) throw new Error("unconfirmed restore")
+      request.current = undefined
+      setResult({ key: captured.key, status: "idle" })
+      latest.current.onRestored()
+    } catch (error) {
+      if (current.current !== captured.key) return
+      const next = error instanceof HistoryFailure ? error.status === "denied" ? "denied" : "error" : "uncertain"
+      if (next !== "uncertain") { request.current = undefined; latest.current.onRefused(next === "denied") }
+      setResult({ key: captured.key, status: next })
+    } finally { clearTimeout(timer); captured.busy = false }
+  }, [workspaceId])
+  const onConfirm = () => {
+    if (!allowed || request.current?.key === key || status === "pending" || status === "uncertain" || status === "denied" || !head || snapshot.status !== "ready") return
+    const captured = { key, packet: { page_id: pageId, id: crypto.randomUUID(), schema: head.schema, epoch: head.epoch, ifRev: head.rev, checkpoint: snapshot.data.id }, busy: false }
+    request.current = captured
+    void run(captured)
+  }
+  const onRetry = () => { const captured = request.current; if (enabled === true && captured?.key === key && status === "uncertain") void run(captured) }
+  return { allowed: Boolean(allowed), baseKey: JSON.stringify([head?.page_id, head?.rev, head?.epoch, head?.schema]), status, onConfirm, onRetry }
+}

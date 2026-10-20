@@ -380,7 +380,15 @@ for (const width of [1280, 390]) {
     // hover lift would move the hit area from under it, so Playwright would
     // see two alternating positions and never find the element stable.
     await retry.hover()
-    await retry.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
+    // A cancelled or replaced transition rejects `finished` with AbortError,
+    // so settle every animation and look again until none is left.
+    await retry.evaluate(async el => {
+      for (let round = 0; round < 10; round++) {
+        const animations = el.getAnimations()
+        if (animations.length === 0) return
+        await Promise.allSettled(animations.map(animation => animation.finished))
+      }
+    })
     expect(await retry.evaluate(el => getComputedStyle(el).translate)).toMatch(/^(none|0px)( 0px){0,2}$/)
     await retry.click()
     await expect(card.getByRole("textbox", { name: "Comment", exact: true })).toHaveCount(0)
