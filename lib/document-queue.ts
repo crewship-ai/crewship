@@ -16,6 +16,8 @@ export interface DocumentDraftStore {
   close(): void
 }
 export class DocumentStorageError extends Error {}
+/** Another tab of this browser is the active writer of this Page's journal. */
+export class DocumentStorageBusy extends DocumentStorageError {}
 /** A browser that never answers an open (blocked profile, stuck upgrade) must not stall the editor. */
 export const STORAGE_OPEN_TIMEOUT_MS = 2000
 const message = "Private document storage is unavailable. Changes are unsaved; recover your draft."
@@ -23,6 +25,19 @@ const message = "Private document storage is unavailable. Changes are unsaved; r
 export async function openDocumentDrafts(human: string, workspace: string, page: string): Promise<DocumentDraftStore> {
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
+  // One live writer per Page: rows in a journal that is free are orphans of a
+  // closed tab and may be offered as recovery; rows of an active tab never are.
+  let releaseLock: (() => void) | undefined
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    const acquired = await new Promise<(() => void) | null>(resolve => {
+      navigator.locks.request(`crewship-document-drafts:${owner}`, { ifAvailable: true }, lock => {
+        if (!lock) { resolve(null); return }
+        return new Promise<void>(release => resolve(release))
+      }).catch(() => resolve(null))
+    })
+    if (!acquired) throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
+    releaseLock = acquired
+  }
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     let settled = false
     const timer = setTimeout(() => { settled = true; reject(new DocumentStorageError(message)) }, STORAGE_OPEN_TIMEOUT_MS)
@@ -38,7 +53,7 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         settled = true; clearTimeout(timer); resolve(request.result)
       }
     } catch { fail() }
-  }).catch(() => { throw new DocumentStorageError(message) })
+  }).catch(() => { releaseLock?.(); throw new DocumentStorageError(message) })
   db.onversionchange = () => db.close()
   const keys = new Map<string, [string, string]>()
   function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -79,6 +94,6 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       await transaction("readwrite", store => store.delete(key))
       keys.delete(id)
     },
-    close() { db.close() },
+    close() { db.close(); releaseLock?.() },
   }
 }

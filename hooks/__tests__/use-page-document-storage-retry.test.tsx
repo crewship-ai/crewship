@@ -188,3 +188,81 @@ it("keeps session edits in the pending count and sends them once the held draft 
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true)
   } finally { unmount(); server.destroy() }
 })
+
+it("does not offer recovered content or say Saved when access is denied while the store is opening", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  let finish: ((value: ReturnType<typeof store>) => void) | undefined
+  journal.open.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  fetchMock.mockImplementation(() => response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(finish).toBeDefined())
+    act(() => result.current.deny())
+    await act(async () => finish!(store()))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)) })
+    expect(result.current.recoveredDrafts).toHaveLength(0)
+    expect(result.current.state).toBeUndefined()
+    expect(result.current.status).not.toBe("Saved")
+    expect(result.current.denied).toBe(true)
+  } finally { unmount(); server.destroy() }
+})
+
+it("keeps dirty protection and never shows confirmed after discarding a held draft while session edits are unsent", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  journal.open.mockRejectedValueOnce(await storageError())
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+    act(() => text(result.current.doc).insert(4, " mem"))
+    later()
+    await waitFor(() => expect(result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
+    await act(async () => { await result.current.discardRecoveredDrafts() })
+    expect(result.current.pending).toBe(1)
+    expect(result.current.durability).not.toBe("confirmed")
+    await waitFor(() => expect(["writing", "local"]).toContain(result.current.durability))
+    expect(journal.rows.has("d1")).toBe(false)
+    expect(journal.rows.size).toBe(1)
+    const event = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  } finally { unmount(); server.destroy() }
+})
+
+it("treats a journal owned by another tab as busy: nothing is shown as recovery and the edit is still sent", async () => {
+  const server = model()
+  journal.rows.set("a1", heldDraft(server)) // tab A's live batch, never visible to this tab
+  const { DocumentStorageBusy } = await import("@/lib/document-queue")
+  journal.open.mockRejectedValue(new DocumentStorageBusy("busy"))
+  let rev = 4
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    expect(result.current.storageBusy).toBe(true)
+    expect(result.current.recoveredDrafts).toHaveLength(0)
+    act(() => text(result.current.doc).insert(4, " b"))
+    await waitFor(() => expect(result.current.pending).toBe(0), { timeout: 3000 })
+    expect(journal.remove).not.toHaveBeenCalled()
+    expect(journal.rows.has("a1")).toBe(true)
+  } finally { unmount(); server.destroy() }
+})
+
+it("coalesces rapid edits into few journal writes and keeps every edit", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    await act(async () => { for (let i = 0; i < 30; i++) text(result.current.doc).insert(4, "x") })
+    await waitFor(() => expect(result.current.durability).toBe("local"), { timeout: 4000 })
+    expect(journal.put.mock.calls.length).toBeLessThanOrEqual(3)
+    const rows = [...journal.rows.values()] as { snapshot: string }[]
+    const probe = new Y.Doc({ gc: false })
+    Y.applyUpdate(probe, Uint8Array.from(atob(rows.at(-1)!.snapshot), c => c.charCodeAt(0)))
+    expect(text(probe).toString().match(/x/g)).toHaveLength(30)
+    probe.destroy()
+  } finally { unmount(); server.destroy() }
+})
