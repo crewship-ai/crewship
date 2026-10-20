@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS run_tags (
 func openScheduleTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openStoreTestDB(t)
+	installSchedulePendingSchema(t, db)
 	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
 		t.Fatalf("schedule schema: %v", err)
 	}

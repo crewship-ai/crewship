@@ -37,7 +37,7 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('rm1','cdocresultworkspace001','result-owner','MEMBER'),('rm2','cdocresultworkspace001','result-reader','MEMBER'),('rm3','cdocresultworkspace001','result-outsider','MEMBER')`,
 		`INSERT INTO crews(id,workspace_id,name,slug) VALUES('result-crew','cdocresultworkspace001','Result crew','result-crew')`,
 		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,status,cli_adapter,tool_profile,timeout_seconds,memory_enabled) VALUES('result-agent','cdocresultworkspace001','result-crew','Ada','ada','AGENT','IDLE','CLAUDE_CODE','CODING',1800,0)`,
-		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('result-chat','cdocresultworkspace001','result-agent','result-owner','group')`,
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('result-chat','cdocresultworkspace001','result-agent','result-owner','private')`,
 		`INSERT INTO chat_participants(chat_id,user_id,role) VALUES('result-chat','result-reader','member')`,
 		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('result-page','cdocresultworkspace001','finished-report','Finished report','result-owner','{}')`,
 		`INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES('cdocresultworkspace001','result-page',3,'PRIVATE_DOC_SNAPSHOT','[]')`,
@@ -123,17 +123,20 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		}
 		return len(wire.Results)
 	}
-	if list("result-owner") != 1 || list("result-reader") != 0 {
-		t.Fatal("result Page ACL ignored")
+	if list("result-owner") != 1 {
+		t.Fatal("result author missing")
 	}
+	assertReaderDenied := func() {
+		t.Helper()
+		if output, err := run("result-reader"); err == nil || !strings.Contains(output, "404") || strings.Contains(output, "Finished report") {
+			t.Fatalf("private source widened by Page grant: err=%v output=%s", err, output)
+		}
+	}
+	assertReaderDenied()
 	execSQL(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('result-page','user','result-reader','read','result-owner')`)
-	if list("result-reader") != 1 {
-		t.Fatal("granted reader missing result")
-	}
+	assertReaderDenied()
 	execSQL(`DELETE FROM page_grants WHERE page_id='result-page'`)
-	if list("result-reader") != 0 {
-		t.Fatal("Page revocation retained result")
-	}
+	assertReaderDenied()
 	for _, test := range []struct{ user, status string }{{"result-outsider", "404"}, {"narrow-owner", "403"}} {
 		if output, err := run(test.user); err == nil || !strings.Contains(output, test.status) || strings.Contains(output, "Finished report") {
 			t.Fatalf("denied current scope/chat %s: %v %s", test.user, err, output)

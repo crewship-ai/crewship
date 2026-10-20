@@ -856,9 +856,6 @@ type OutcomeCriterion struct {
 // Pipeline is the persisted record. Mirrors the pipelines table 1:1
 // with the JSON columns parsed into typed fields where it helps.
 type Pipeline struct {
-	// genericVersion preserves the numeric selection inside the generic runner.
-	genericVersion *int
-
 	ID                   string
 	WorkspaceID          string
 	Slug                 string

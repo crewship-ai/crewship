@@ -38,7 +38,8 @@ func covPSWWebhookRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string) 
 	h.SetWebhookStore(pipeline.NewWebhookStore(db))
 	// Drain async FireWebhook run goroutines before the test DB closes
 	// (registered after setupTestDB's cleanup, so it runs first).
-	t.Cleanup(h.WaitWebhookDispatches)
+	h.SetRunStore(pipeline.NewRunStore(db))
+	startWebhookTestDispatcher(t, h)
 	return h, db, userID, wsID
 }
 

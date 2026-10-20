@@ -177,8 +177,28 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := UserFromContext(r.Context())
+	if actor == nil {
+		replyError(w, 401, "Authentication required")
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin member creation", err)
+		return
+	}
+	defer tx.Rollback()
+	if err := memberCreateActorIn(r.Context(), tx, actor.ID, workspaceID, req.Role); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, 403, "Forbidden")
+		} else {
+			replyInternalError(w, h.logger, "authorize member creation", err)
+		}
+		return
+	}
+
 	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		workspaceID, req.UserID).Scan(&existingID)
 	if err == nil {
@@ -191,7 +211,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userExists bool
-	err = h.db.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
+	err = tx.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "User not found")
 		return
@@ -204,12 +224,29 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	memberID := generateCUID()
 
-	_, err = h.db.ExecContext(r.Context(),
+	result, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		memberID, workspaceID, req.UserID, req.Role, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert member", err)
 		return
+	}
+
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge member insert", errors.Join(err, errors.New("membership insert did not affect one row")))
+		return
+	}
+	notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, req.UserID, req.Role, now, access.Membership{ID: memberID, Mode: "trusted", Revision: 1})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit member creation", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit member creation", err)
+		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	writeJSON(w, http.StatusCreated, memberResponse{

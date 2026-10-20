@@ -44,6 +44,7 @@ import (
 func openFactoryTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openResumeTestDB(t)
+	installSchedulePendingSchema(t, db)
 	installExecutionSchema(t, db)
 	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
 		t.Fatalf("schedule schema: %v", err)

@@ -16,6 +16,9 @@ import (
 func documentCreationAdmissionFixture(t *testing.T, drafting ...bool) (*artifactPrincipalFixture, documents.CreationIntent) {
 	t.Helper()
 	f := newArtifactPrincipalFixture(t)
+	// Creation comes from the private human chat entrypoint; the generic
+	// principal fixture also serves unrelated group-chat tests.
+	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
 	mustExec(t, f.rig.db, `UPDATE workspace_members SET capabilities='["chat","page.create"]' WHERE user_id=?`, f.a.HumanUserID)
 	var err error
 	f.receipt, err = chataudience.CaptureTrusted(t.Context(), f.rig.db, f.a.ChatID, f.a.HumanUserID, nil)

@@ -78,9 +78,10 @@ func TestRoutinePublicationValidationDoesNotCreateExecutionAuthority(t *testing.
 	reference := map[string]any{"draft_id": draft.DraftID, "revision": draft.Revision, "base_revision": draft.BaseRevision}
 	validated := call("POST", path+"/validate", reference, 200)
 	var result struct {
-		Valid bool `json:"valid"`
+		Valid bool   `json:"valid"`
+		Scope string `json:"scope"`
 	}
-	if err := json.Unmarshal(validated.Body.Bytes(), &result); err != nil || !result.Valid {
+	if err := json.Unmarshal(validated.Body.Bytes(), &result); err != nil || !result.Valid || result.Scope != "structure_only" {
 		t.Fatal("missing structural validation result", err)
 	}
 	for _, table := range []string{"pipeline_runs", "chats", "access_attempts", "restricted_workflow_jobs"} {

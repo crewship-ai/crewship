@@ -2609,7 +2609,7 @@ Only agent-run steps on `responses_text` and `native_api_key` qualify. Existing
 attached schedules/webhooks prevent publication; published selections cannot be
 created, retargeted or enabled through the legacy trigger paths.
 
-**Response:** validate returns `{"valid":true,"draft_id":"drf_example","revision":2,"base_revision":3}`.
+**Response:** validate returns `{"valid":true,"scope":"structure_only","draft_id":"drf_example","revision":2,"base_revision":3}`. It checks structure with View/Edit only; Publish, dependency grants, profiles and attached triggers are checked when publishing.
 Publish returns the routine `id`, archived numeric `version` and new
 `publication_revision`. It consumes the exact draft and commits the immutable
 version, historical authority metadata and audit together, preserving authors
@@ -2617,11 +2617,9 @@ and origin. Notifications follow commit. Both responses use `Cache-Control: no-s
 
 **Statuses:** `200` validated/published; `400` malformed or oversized request;
 `401` authentication; `403` workspace/credential scope; `404` unavailable
-routine, local membership or required authority; `409` changed draft/base or
-attached execution trigger; `422` unsupported structure/profile; `500`
+routine, local membership or required authority; `409` changed draft/base or busy writer; `422` unsupported structure/profile or attached execution trigger; `500`
 operational storage or audit failure. No automatic retry or authority refresh.
-This server API does not yet enable bounded execution, CLI/UI publication or
-schedules, webhooks, nested and resume for published selections.
+This authoring API and its `routine draft validate|publish` CLI do not enable bounded execution or UI publication. Schedules, webhooks, nested execution and resume for published selections remain unsupported.
 
 
 ## Guest shared routine run history and outputs

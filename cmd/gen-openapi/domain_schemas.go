@@ -74,6 +74,18 @@ func executionSchemaComponents() map[string]any {
 		// carries it so the Activity home can narrow to the rail's chains.
 		"chain_origin": str(),
 	})
+	// A planned start is a different read shape: it has no confirmed start
+	// timestamp or execution fields. Keep PipelineRun unchanged for run lists.
+	acceptedPipelineRun := obj(map[string]any{
+		"id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(),
+		"status":     map[string]any{"type": "string", "enum": []string{"QUEUED", "FAILED", "EXPIRED", "CANCELLED"}},
+		"pending_id": str(), "reason_code": str(),
+	}, "id", "workspace_id", "pipeline_id", "pipeline_slug", "status", "pending_id", "reason_code")
+	acceptedPipelineRun["additionalProperties"] = false
+	pipelineRunDetail := map[string]any{"oneOf": []any{
+		map[string]any{"allOf": []any{refOrString("PipelineRun"), map[string]any{"required": []string{"id", "workspace_id", "pipeline_id", "pipeline_slug", "status", "mode", "started_at"}}}},
+		refOrString("AcceptedPipelineRun"),
+	}}
 	runFailure := obj(map[string]any{
 		"kind": map[string]any{"type": "string", "enum": []string{
 			"checker_rejected", "validation_failed", "transform_input", "timeout", "cancelled",
@@ -168,7 +180,7 @@ func executionSchemaComponents() map[string]any {
 		"AccessMeDecision":   accessDecision,
 		"RoutineAccessMe":    obj(map[string]any{"routine": str(), "actions": accessActions("read", "run", "edit", "approve", "disable", "replay", "manage_schedules")}, "routine", "actions"),
 		"CredentialAccessMe": obj(map[string]any{"credential_id": str(), "actions": accessActions("read", "edit", "rotate", "manage_bindings", "reveal", "delete", "lower_sensitivity")}, "credential_id", "actions"),
-		"RunResult":          runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
+		"RunResult":          runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "PipelineRunDetail": pipelineRunDetail, "AcceptedPipelineRun": acceptedPipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
 		"RunRecord": runRecord, "RunRecordList": arr(refOrString("RunRecord")), "PipelineRunTree": arr(obj(map[string]any{"id": str(), "parent_id": str(), "pipeline_slug": str(), "status": str(), "triggered_via": str(), "cost_usd": number()})),
 		"RunLogEntry": obj(map[string]any{"ts": timeString(), "level": str(), "message": str(), "type": str()}), "RunLogList": arr(refOrString("RunLogEntry")),
 		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "SchedulePreview": schedulePreview, "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),
@@ -197,7 +209,7 @@ func executionResponseSchemas() map[string]string {
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview":   "SchedulePreview",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active":        "ActiveRunList",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs":                "PipelineRunList",
-		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}":        "PipelineRun",
+		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}":        "PipelineRunDetail",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree":   "PipelineRunTree",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs":   "RunLogList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors":        "FailureGroupList",

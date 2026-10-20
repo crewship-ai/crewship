@@ -333,10 +333,10 @@ func TestRoutineServerPublicationRefusalRollsBack(t *testing.T) {
 				want = 500
 			case "schedule":
 				execOrFatal(t, f.db, `INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr) VALUES('publish-schedule',?,'Existing schedule','publish-routine','0 9 * * *')`, f.workspace)
-				want = 409
+				want = 422
 			case "webhook":
 				execOrFatal(t, f.db, `INSERT INTO pipeline_webhooks(id,workspace_id,name,target_pipeline_id,token) VALUES('publish-webhook',?,'Existing webhook','publish-routine','synthetic-inert-token')`, f.workspace)
-				want = 409
+				want = 422
 			}
 			var notifications atomic.Int32
 			f.writer.AddReadObserver(func(entries []journal.Entry) {

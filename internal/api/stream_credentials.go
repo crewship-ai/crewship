@@ -21,6 +21,7 @@ func earlierExpiry(a, b time.Time) time.Time {
 // already-invalid credential. No database work is repeated per frame.
 func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims) (context.Context, func(), error) {
 	epoch := m.streams.Epoch()
+	defer m.streams.ReleaseEpoch(epoch)
 	if (c.Sid == "") == (c.CLITokenID == "") {
 		return nil, nil, errors.New("missing stream credential")
 	}

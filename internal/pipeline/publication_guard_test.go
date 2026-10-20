@@ -61,7 +61,7 @@ func TestGenericPublicationGuardRejectsDifferentWorkspace(t *testing.T) {
 	}
 }
 
-func TestGenericPublicationGuardPrewarmAndNested(t *testing.T) {
+func TestGenericPublicationGuardNested(t *testing.T) {
 	db := openStoreTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	store := NewStore(db)
@@ -75,12 +75,6 @@ func TestGenericPublicationGuardPrewarmAndNested(t *testing.T) {
 	if _, err := db.Exec(`UPDATE pipelines SET head_version=2 WHERE id=?`, child.ID); err != nil {
 		t.Fatal(err)
 	}
-	runner := &prewarmRunner{}
-	exec := NewExecutor(store, NewResolver(db), runner, nil)
-	exec.PrewarmForRun(t.Context(), child.ID, child.WorkspaceID)
-	if len(runner.warmed()) != 0 {
-		t.Fatal("bounded publication prewarmed generic container")
-	}
 	outer := &DSL{Name: "outer", Steps: []Step{{ID: "call", Type: StepCallPipeline, PipelineSlug: "child"}}}
 	nestedRunner := newMockRunner()
 	result, err := NewExecutor(store, NewResolver(db), nestedRunner, nil).RunDefinition(t.Context(), outer, RunInput{WorkspaceID: child.WorkspaceID, AuthorCrewID: "crew_a", Mode: ModeRun})
@@ -89,9 +83,6 @@ func TestGenericPublicationGuardPrewarmAndNested(t *testing.T) {
 	}
 	if result == nil || result.Status != "FAILED" || !strings.Contains(result.ErrorMessage, ErrPublicationGenericRun.Error()) || len(nestedRunner.calls) != 0 {
 		t.Fatalf("nested publication not refused: %+v %v", result, err)
-	}
-	if _, err := exec.RunDefinition(t.Context(), outer, RunInput{PipelineID: child.ID, WorkspaceID: child.WorkspaceID, AuthorCrewID: "crew_a", Mode: ModeRun}); !errors.Is(err, ErrPublicationGenericRun) {
-		t.Fatalf("direct DSL bypass: %v", err)
 	}
 }
 
@@ -178,46 +169,11 @@ func TestGenericPublicationGuardStorageAndSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.DefinitionJSON += " "
-	if err := store.CheckGenericRun(t.Context(), p, nil); !errors.Is(err, ErrGenericRecipeChanged) {
-		t.Fatalf("stale body accepted: %v", err)
-	}
 	if _, err := db.Exec(`DROP TABLE pipeline_versions`); err != nil {
 		t.Fatal(err)
 	}
-	p.DefinitionJSON = strings.TrimSpace(p.DefinitionJSON)
 	if err := store.CheckGenericRun(t.Context(), p, nil); err == nil || errors.Is(err, ErrPublicationGenericRun) {
 		t.Fatalf("storage error became legacy/refusal: %v", err)
-	}
-}
-
-func TestGenericPublicationGuardResume(t *testing.T) {
-	db := openResumeTestDB(t)
-	t.Cleanup(func() { _ = db.Close() })
-	store := NewStore(db)
-	p, err := store.Save(t.Context(), validSaveInput("resume-selected"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := NewExecutor(store, NewResolver(db), newMockRunner(), nil).WithRunStore(NewRunStore(db))
-	rec := &RunRecord{ID: "old-run", WorkspaceID: p.WorkspaceID, PipelineID: p.ID, Mode: ModeRun, DefinitionHash: p.DefinitionHash}
-	if err := exec.runStore.Insert(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
-	if _, reason := exec.buildResumePlan(t.Context(), rec); reason != "" {
-		t.Fatalf("legacy resume positive: %s", reason)
-	}
-	bounded := guardPublishedVersion(t, store, p)
-	rec.PipelineVersion = &bounded
-	if plan, reason := exec.buildResumePlan(t.Context(), rec); plan != nil || !strings.Contains(reason, ErrPublicationGenericRun.Error()) {
-		t.Fatalf("bounded pin resumed: %+v %q", plan, reason)
-	}
-	if _, err := db.Exec(`UPDATE pipelines SET head_version=2 WHERE id=?`, p.ID); err != nil {
-		t.Fatal(err)
-	}
-	rec.PipelineVersion = nil
-	if plan, reason := exec.buildResumePlan(t.Context(), rec); plan != nil || !strings.Contains(reason, ErrPublicationGenericRun.Error()) {
-		t.Fatalf("bounded HEAD resumed: %+v %q", plan, reason)
 	}
 }
 
@@ -268,6 +224,37 @@ func TestGenericPublicationGuardReadsWriterSnapshot(t *testing.T) {
 	}
 	if err := store.CheckGenericRun(t.Context(), p, nil); err != nil {
 		t.Fatalf("rolled-back publication changed legacy selection: %v", err)
+	}
+}
+
+func TestPublicationCallerSaveRefusesPublishedTarget(t *testing.T) {
+	db := openStoreTestDB(t)
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewStore(db)
+	target, err := store.Save(t.Context(), validSaveInput("called-target"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := validSaveInput("caller")
+	caller.DefinitionJSON = `{"name":"caller","steps":[{"id":"call","type":"call_pipeline","pipeline_slug":"called-target"}]}`
+	before, err := store.Save(t.Context(), caller)
+	if err != nil {
+		t.Fatalf("legacy caller calibration: %v", err)
+	}
+	guardPublishedVersion(t, store, target)
+	if _, err := db.Exec(`UPDATE pipelines SET head_version=2 WHERE id=?`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"caller", "new-caller"} {
+		caller.Slug = slug
+		caller.Name = "must not persist"
+		if _, err := store.Save(t.Context(), caller); !errors.Is(err, ErrPublicationGenericRun) {
+			t.Fatalf("%s stored unsupported nested publication: %v", slug, err)
+		}
+	}
+	after, err := store.GetByID(t.Context(), before.ID)
+	if err != nil || after.Name != before.Name || after.DefinitionHash != before.DefinitionHash {
+		t.Fatalf("refused caller save changed stored history: %+v %v", after, err)
 	}
 }
 

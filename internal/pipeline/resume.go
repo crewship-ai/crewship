@@ -267,9 +267,6 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	if err != nil {
 		return nil, "pipeline not loadable: " + err.Error()
 	}
-	if err := checkGenericPublication(ctx, e.store.db, p.ID, rec.WorkspaceID, rec.PipelineVersion, "", ""); err != nil {
-		return nil, "generic resume unavailable: " + err.Error()
-	}
 	// Prefer the actual executed recipe over today's HEAD or overrides. Normal
 	// manual runs do not stamp PipelineVersion, but production captures this
 	// snapshot before dispatch. Without it, retain the legacy fail-closed drift

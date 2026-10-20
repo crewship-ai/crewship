@@ -11,6 +11,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
+// ErrPublicationHasTriggers distinguishes unsupported v1 authoring from a
+// stale draft revision. The caller must explicitly remove the trigger first.
+var ErrPublicationHasTriggers = errors.New("publication requires removing existing triggers")
+
 // PublishDraftIn consumes the exact authorized collaborative draft. The caller
 // owns the writer transaction, live authorization, audit, commit and notify.
 // Its result describes stored history and cannot authorize execution.
@@ -27,7 +31,7 @@ func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string
 		Description *string         `json:"description"`
 		Definition  json.RawMessage `json:"definition"`
 	}
-	if err := json.Unmarshal(draft.Document, &content); err != nil || content.Name == "" || content.Description == nil || !json.Valid(content.Definition) {
+	if err := json.Unmarshal(draft.Document, &content); err != nil || content.Name == "" || !json.Valid(content.Definition) {
 		return 0, errors.New("invalid stored publication draft")
 	}
 	var head, revision int
@@ -47,7 +51,7 @@ func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string
 		return 0, err
 	}
 	if triggers {
-		return 0, ErrDraftConflict
+		return 0, ErrPublicationHasTriggers
 	}
 	raw, hash := string(content.Definition), definitionHash(string(content.Definition))
 	var version int
@@ -86,7 +90,7 @@ func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string
 	}
 	// The existing publication trigger increments changed recipes. An exact
 	// content/authority dedup still consumes a draft and advances its base once.
-	result, err = tx.ExecContext(ctx, `UPDATE pipelines SET publication_revision=CASE WHEN name IS ? AND description IS ? AND definition_json IS ? AND head_version IS ? THEN publication_revision+1 ELSE publication_revision END,name=?,description=?,definition_json=?,definition_hash=?,head_version=?,updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_revision=?`, content.Name, *content.Description, raw, version, content.Name, *content.Description, raw, hash, version, tsformat.Format(time.Now()), draft.BasePipelineID, draft.WorkspaceID, draft.BaseRevision)
+	result, err = tx.ExecContext(ctx, `UPDATE pipelines SET publication_revision=CASE WHEN name IS ? AND description IS ? AND definition_json IS ? AND head_version IS ? THEN publication_revision+1 ELSE publication_revision END,name=?,description=?,definition_json=?,definition_hash=?,head_version=?,updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_revision=?`, content.Name, content.Description, raw, version, content.Name, content.Description, raw, hash, version, tsformat.Format(time.Now()), draft.BasePipelineID, draft.WorkspaceID, draft.BaseRevision)
 	if err != nil {
 		return 0, err
 	}

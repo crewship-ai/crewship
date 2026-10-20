@@ -22,6 +22,7 @@ type publicationDraftReference struct {
 
 type routinePublicationValidationResponse struct {
 	Valid        bool   `json:"valid"`
+	Scope        string `json:"scope"`
 	DraftID      string `json:"draft_id"`
 	Revision     int    `json:"revision"`
 	BaseRevision int    `json:"base_revision"`
@@ -69,7 +70,7 @@ func (r *Router) routinePublicationValidate(w http.ResponseWriter, req *http.Req
 		replyError(w, 422, "Routine requires unsupported publication steps or resources")
 		return
 	}
-	writeJSON(w, 200, routinePublicationValidationResponse{Valid: true, DraftID: draft.ID, Revision: draft.Revision, BaseRevision: draft.BaseRevision})
+	writeJSON(w, 200, routinePublicationValidationResponse{Valid: true, Scope: "structure_only", DraftID: draft.ID, Revision: draft.Revision, BaseRevision: draft.BaseRevision})
 }
 
 // Both doors resolve identities and the exact reviewed snapshot on the host.
@@ -106,6 +107,10 @@ func (r *Router) publicationDraftIn(ctx context.Context, tx *sql.Tx, user, works
 func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	fail := func(err error) {
+		if errors.Is(err, pipeline.ErrPublicationHasTriggers) {
+			replyError(w, http.StatusUnprocessableEntity, "Remove existing routine triggers before publishing this v1 routine")
+			return
+		}
 		if errors.Is(err, restrictedworkflow.ErrDenied) {
 			err = access.ErrDenied
 		}
@@ -133,7 +138,8 @@ func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	// database.Open uses _txlock=immediate: acquire the writer before reading
-	// authority or the draft. A busy writer remains a 500, never a CAS conflict.
+	// authority or the draft. Write contention returns 409 without retrying or
+	// consuming the caller's reviewed snapshot.
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
 		fail(err)

@@ -57,7 +57,7 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 
 	positiveRevision := func() map[string]any { return map[string]any{"type": "integer", "minimum": 1} }
 	components["RestrictedRoutinePublicationRequest"] = obj(map[string]any{"draft_id": map[string]any{"type": "string", "minLength": 1}, "revision": positiveRevision(), "base_revision": positiveRevision()}, "draft_id", "revision", "base_revision")
-	components["RestrictedRoutinePublicationValidation"] = obj(map[string]any{"valid": map[string]any{"type": "boolean", "enum": []bool{true}}, "draft_id": str(), "revision": positiveRevision(), "base_revision": positiveRevision()}, "valid", "draft_id", "revision", "base_revision")
+	components["RestrictedRoutinePublicationValidation"] = obj(map[string]any{"valid": map[string]any{"type": "boolean", "enum": []bool{true}}, "scope": map[string]any{"type": "string", "enum": []string{"structure_only"}}, "draft_id": str(), "revision": positiveRevision(), "base_revision": positiveRevision()}, "valid", "scope", "draft_id", "revision", "base_revision")
 	components["RestrictedRoutinePublication"] = obj(map[string]any{"id": str(), "version": positiveRevision(), "publication_revision": positiveRevision()}, "id", "version", "publication_revision")
 
 	components["RestrictedPageInput"] = obj(map[string]any{"name": str(), "label": str(), "type": map[string]any{"type": "string", "enum": []string{"text", "textarea", "number", "boolean", "select"}}, "required": map[string]any{"type": "boolean"}, "options": arr(str())}, "name", "type", "required")

@@ -392,7 +392,7 @@ Run keeps the existing root-routine plus every agent/provider dependency checks.
 | Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
 | Regular routine run history and outputs | Kept through deliberate Results with View | Existing definition-only and invocation-only shares are not widened. The new share exposes past/future regular results while retaining every inherited private conversation audience. |
 | View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
-| Edit and version publication | Draft editing and server publication delivered; CLI/UI and bounded execution pending | The collaborative draft uses current View/Edit; server publication additionally checks Publish, exact revisions and dependencies atomically. Trusted publication keeps its separate testing/review controls. |
+| Edit and version publication | Draft editing, server publication and CLI delivered; UI and bounded execution pending | The collaborative draft uses current View/Edit; server publication additionally checks Publish, exact revisions and dependencies atomically. Trusted publication keeps its separate testing/review controls. |
 
 `GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
 routine View/Run shares, with `can_view`, `can_results` eligibility, current graph `can_run`, and runtime
@@ -505,7 +505,7 @@ and `POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId
 and `base_revision` for the current persisted draft. Unknown or trailing JSON
 is rejected. Validate checks the stored structure without starting an agent,
 creating an execution receipt or returning a transferable authorization token.
-It is a preview; publish repeats its checks under the writer lock.
+Its response explicitly reports `scope: "structure_only"`: it checks structure with current View/Edit, not Publish, dependency grants, profiles or attached triggers. Publish checks those separately under the writer lock.
 
 Publish requires current explicit View, Edit and Publish on that routine,
 live grant issuers, and the execution shares and provider declaration for every
@@ -520,20 +520,18 @@ Publication consumes the exact draft, preserves stored authors and origin,
 appends the immutable version and nonsecret authority manifest, and writes its
 audit in one transaction. Identical content and authority reuse their archived
 version. A stale draft/base returns 409, unavailable authority returns 404,
-unsupported structure returns 422, and operational database errors remain 500.
+unsupported structure or existing attached triggers return 422. SQLite write contention returns 409; other operational database errors remain 500. Nullable descriptions remain nullable.
 An audit failure rolls back publication. Notifications follow commit. The
 manifest is historical metadata, never an execution receipt; it remains byte
 preserved through backup and fork, whose typed parent IDs are remapped without
 rewriting the embedded historical identity. Explicit shares are retained.
 
-This server slice does not enable published execution. Generic run, prewarm,
-nested, resume and the older restricted runner refuse a published selection;
+This server slice does not enable published execution. The generic executor entry,
+nested-call entry and older restricted runner refuse a published selection;
 numeric legacy pins retain their own identity. Creating, retargeting or enabling
 a schedule or webhook against a published selection is refused in its writer
 transaction. Publication also refuses existing attached triggers, preventing
-them from silently acquiring a new authority. CLI/UI publication, the v2
-Edit + Publish preset, bounded runtime and live profile acceptance remain
-separate work.
+them from silently acquiring a new authority. The CLI exposes `routine draft validate|publish <routine>` with explicit `--draft-id`, `--revision` and `--base-revision`; it sends one reviewed reference without a hidden draft GET or retry. Legacy `routine draft publish <file>` retains its validation-receipt flow. UI publication, the v2 Edit + Publish preset, bounded runtime and live profile acceptance remain separate work.
 
 
 ### Explicit routine history and outputs
@@ -563,7 +561,7 @@ Private restricted-runtime receipts retain their separate actor/attempt/proof
 ceiling and existing own-result surface; they are not read from raw output
 storage through the history projection. Generalizing those result audiences
 remains open. Ordered View/Run/Edit presets are available through Preview and Apply.
-Server-side direct Guest publication is described above; its CLI, UI and
+Server-side direct Guest publication and CLI are described above; its UI and
 bounded runtime acceptance remain open.
 UI hard 401/403/404 responses remove result data, while transient refresh errors
 retain the last successful authorized projection with a notice.
@@ -631,9 +629,42 @@ Browser and CLI WebSockets, journal SSE and run NDJSON retain the authenticated
 session or CLI-token row ID and its original expiry. Successful API revocation
 invalidates matching in-memory stream leases after commit and wakes idle streams;
 every frame is fenced again at delivery, including replay and control frames.
-A monotonic admission epoch captured before database authentication prevents
-late registration with a pre-revocation validation result. No TTL or batch skips
-extend access. The registry retains active requests/connections only.
+An admission snapshot captured before database authentication compares only
+the selected session/token and the applicable user revocation epochs. Revoking
+another identity cannot reject a valid concurrent request. Snapshot cleanup also
+covers failed/canceled authentication; counters disappear when no earlier
+admission can need them. This prevents late registration with a pre-revocation
+validation result. No TTL or batch skips
+extend access. The registry retains active requests/connections and pending authentications only.
+Repeated signout still updates the stored revocation reason/timestamp, but only
+a committed active-to-revoked session transition sends a notification. An empty
+bulk session revocation does not advance a user epoch. Custom session stores
+without atomic transition reporting retain their existing notification contract.
+
+Container terminals share that same source-credential authenticator and registry.
+They fence PTY output, terminal input, resize and ping replies; credential loss
+also wakes idle connections and closes the PTY. Restricted chat/run text streams,
+including native project-file requests, check the credential before each text or
+done frame and emit no error body after credential loss. This does not permit
+restricted accounts to open terminals or widen their workspace access.
+
+Terminals additionally recheck the active account, live crew and workspace,
+trusted membership with MEMBER-or-higher role, and global restricted-profile
+ceiling in one fresh SQL snapshot before each PTY input/output data frame,
+resize or pong, and resource-bound info/error response. Container preparation
+is followed by another check before starting the PTY. Database errors refuse
+use and close the connection; they do not revoke the source credential.
+The same watcher checks idle CLI and browser shells on a 30-second cadence.
+Resource queries configure a five-second context deadline, but native SQLite
+busy handling can outlast cancellation; this is not a hard maximum closure
+bound. A failed check releases no frame. These checks also observe database
+mutations made outside HTTP, without relying on a post-commit notification in
+this process.
+Already authorized or in-flight operations cannot be recalled. This is a
+security fallback costing one resource query per data/control frame, not the
+H1 zero-SQL authority design; that performance goal remains open. Other users'
+credentials and streams are not revoked by another user's membership change.
+
 
 Revocation stops admission of the next frame; already authorized or in-flight
 bytes cannot be recalled. Ordinary logout does not cancel an already started
@@ -656,22 +687,88 @@ retain their class for server-side handling and logging.
 
 ## Capability and membership audit
 
-A changed capability set appends `member.capabilities_changed`, and a removed
-workspace membership appends `member.removed`, in the same transaction as the
-mutation. Capability changes revalidate the caller’s active, trusted OWNER/ADMIN
-authority inside the write transaction, after reading the request body. Member
-removal requires exactly one deleted membership row. An audit append or commit failure rolls back the mutation, including
-page transfers and crew membership cleanup during departure. Notifications are
-published only after commit. An unchanged capability set or already absent
-membership does not append a duplicate change event.
+Adding an existing account to a workspace or provisioning a new or existing account
+commits the membership and `member.added` chained audit together. Both provisioning
+commit paths recheck the live trusted administrator and OWNER-only ADMIN grant
+boundary inside their writer transaction. The internal event records the stored,
+normalized initial rights after Guest policy replacement; public GET/SSE/WS
+serialization exposes only opaque member/subject IDs and the action, never role,
+rights, email or setup material. Audit or commit failure rolls back the membership,
+new account and setup-token writes; notification occurs only after commit.
+The same public whitelist is applied before automation preview samples, matcher
+explanations and observer matching/template rendering. Canonical rights remain
+unchanged. This does not cover initial workspace OWNER establishment or onboarding creation.
 
-Both events identify the actor through the standard journal actor fields and
-contain only `subject_user_id` and `action` in their payload. Capability values,
-names of changed capabilities and hashes of those values are excluded: values
-remain available through the existing ADMIN-only capability endpoint. The
-journal records who changed whose access and when; it cannot reconstruct old
-capability sets. This contract does not add chained auditing for instance-level
-CLI token creation or revocation.
+A workspace role update appends `member.role_changed`, a changed capability
+set appends `member.capabilities_changed`, and a removed workspace membership
+appends `member.removed`, in the same transaction as the mutation. Role and
+capability changes revalidate the caller's live account, workspace membership
+and account-wide trusted ceiling inside the writer after reading the request
+body. Existing role ladders, the last-OWNER guard and immutable OWNER capability
+rules still apply. The role event identifies the membership and subject user
+and records the previous and resulting role.
+
+The existing `member.role_change` / `WorkspaceMember` record in `audit_logs`
+is retained in the same transaction for Settings Audit category filters, CSV
+and IP/UA presentation. Its actor, subject and from/to metadata keep their
+existing shape. Both audit records and the role must survive final readback;
+an ignored or altered audit write rolls back the entire change.
+
+Capability events retain sorted `previous_capabilities` and `capabilities`
+sets in their durable, keyed journal payload. These are the effective sets
+used by the mutation, including the existing role-default interpretation of
+NULL or empty storage. The shared GET, SSE and WebSocket journal serializer
+omits both sets without altering the retained event or its chain. Automation
+preview samples, matcher diagnostics and observer matching/template inputs use
+the same public projection before evaluating an event. Page grant snapshots
+(`previous_grant`, `grant`) and folder ACL snapshots (`previous_acl`, `acl`,
+`previous_acl_version`) are also canonical-only; existing public event fields
+remain available. The feed
+continues to expose only the subject and action for capability changes.
+Current values remain available through the existing ADMIN-only capability
+endpoint; this change adds no administrative historical-values API.
+
+Search compatibility limit: journal `q` searches only the summary for
+`member.added`, `member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
+`page.folder_acl_changed`, including historical rows. Previously public payload
+IDs, actions and ACL versions therefore no longer match free-text search for
+these types. Explicit filters and non-search reads remain available; other event
+types retain summary-and-payload search. List and Count use the same boundary,
+without rewriting canonical payloads, FTS indexes or keyed audit history.
+Transactional journal appends acknowledge the exact surviving native INSERT
+tuple, including its configured-key hash, before the business transaction can
+commit; post-insert removal or alteration aborts the mutation and notification.
+Background batching retains its existing query path.
+
+
+Role and capability writes acknowledge their final stored state after the
+audit append. An append or commit failure rolls back the mutation; observers
+are notified only after commit. Member removal requires exactly one deleted
+membership row and rolls back page transfers and crew cleanup with its event.
+An unchanged capability set or already absent membership does not append a
+duplicate event. This scoped contract does not establish complete audit
+coverage for crew memberships, owner transfers or Page grants
+and folder ACL mutations; those remain separate authorization paths. The crew audit below covers the three explicit membership handlers only; onboarding insertion and crew-deletion cascades remain outside this cut.
+
+### Crew membership mutation audit
+
+The crew member add, remove and role-update HTTP handlers append a keyed
+`crew.member_changed` event in the same transaction as the membership write.
+They recheck the live caller, workspace and crew on that writer, retaining the
+existing role floors and grant ceilings. The event identifies the actor, crew,
+membership and subject user, with `previous_membership` and `membership` role
+snapshots. A missing membership is NULL; a present membership with a NULL role
+inherits the workspace role. Those states are distinct. No credential or user
+profile data is included.
+
+The final membership must survive audit append and readback before commit.
+Audit insert/commit failures, ignored writes or audit-trigger state changes
+roll back the entire mutation. Observers are notified only after commit; an
+unchanged role override emits no change event. Existing response shapes and
+duplicate/not-found behavior remain. These events use the general journal;
+this change adds no dedicated Settings Audit projection or history endpoint.
+The separate onboarding initial-membership writer and other F1 mutation paths
+remain outside this scoped contract.
 
 ### Per-frame realtime authorization cost
 

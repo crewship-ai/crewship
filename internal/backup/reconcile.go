@@ -112,6 +112,11 @@ func ReconcileUsersByEmail(ctx context.Context, tx *sql.Tx, dump *DBDump) (map[s
 				userColumns = append(userColumns, e.FromColumn)
 			}
 		}
+		// The retained privacy identity has no cascading user FK, but must
+		// follow the same authenticated email reconciliation as chat custody.
+		if table == "chats" {
+			userColumns = append(userColumns, privateArtifactMarker)
+		}
 		if len(userColumns) == 0 {
 			continue
 		}

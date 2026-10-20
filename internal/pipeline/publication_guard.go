@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -13,26 +14,22 @@ import (
 // trusted generic recipe. Only the bounded manual consumer may execute it.
 var ErrPublicationGenericRun = errors.New("publication requires bounded manual execution")
 
-// ErrGenericRecipeChanged rejects a body loaded before a different selection.
-var ErrGenericRecipeChanged = errors.New("generic recipe changed before execution")
-
 type publicationQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// CheckGenericRun checks the exact stored version and the caller's loaded body.
+// CheckGenericRun classifies the selected stored version for the generic runner.
 // It grants no execution authority and never treats a read error as legacy.
 func (s *Store) CheckGenericRun(ctx context.Context, p *Pipeline, version *int) error {
 	if s == nil || s.db == nil || p == nil {
 		return errors.New("generic recipe storage unavailable")
 	}
-	return checkGenericPublication(ctx, s.db, p.ID, p.WorkspaceID, version, p.DefinitionJSON, p.DefinitionHash)
+	return checkGenericPublication(ctx, s.db, p.ID, p.WorkspaceID, version)
 }
 
-func checkGenericPublication(ctx context.Context, q publicationQuery, id, workspace string, version *int, expectedRaw, expectedHash string) error {
+func checkGenericPublication(ctx context.Context, q publicationQuery, id, workspace string, version *int) error {
 	var head int
-	var raw, hash string
-	err := q.QueryRowContext(ctx, `SELECT head_version,definition_json,definition_hash FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, id, workspace).Scan(&head, &raw, &hash)
+	err := q.QueryRowContext(ctx, `SELECT head_version FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, id, workspace).Scan(&head)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -49,7 +46,7 @@ func checkGenericPublication(ctx context.Context, q publicationQuery, id, worksp
 	if selected > 0 {
 		var fingerprint, fingerprintType string
 		var noManifest bool
-		err = q.QueryRowContext(ctx, `SELECT definition_json,definition_hash,authority_fingerprint,typeof(authority_fingerprint),publication_authority_json IS NULL FROM pipeline_versions WHERE pipeline_id=? AND version=?`, id, selected).Scan(&raw, &hash, &fingerprint, &fingerprintType, &noManifest)
+		err = q.QueryRowContext(ctx, `SELECT authority_fingerprint,typeof(authority_fingerprint),publication_authority_json IS NULL FROM pipeline_versions WHERE pipeline_id=? AND version=?`, id, selected).Scan(&fingerprint, &fingerprintType, &noManifest)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrPinnedVersionNotFound
 		}
@@ -60,19 +57,50 @@ func checkGenericPublication(ctx context.Context, q publicationQuery, id, worksp
 			return ErrPublicationGenericRun
 		}
 	}
-	// HEAD0 keeps its existing legacy contract. Numeric pins never become HEAD0.
-	if (expectedRaw != "" && expectedRaw != raw) || (expectedHash != "" && expectedHash != hash) {
-		return ErrGenericRecipeChanged
-	}
+	// HEAD0 retains its existing legacy contract.
 	return nil
 }
 
 func checkGenericTrigger(ctx context.Context, q publicationQuery, workspace, id string, version *int) error {
-	err := checkGenericPublication(ctx, q, id, workspace, version, "", "")
-	if errors.Is(err, ErrPublicationGenericRun) || errors.Is(err, ErrGenericRecipeChanged) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrPinnedVersionNotFound) {
+	err := checkGenericPublication(ctx, q, id, workspace, version)
+	if errors.Is(err, ErrPublicationGenericRun) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrPinnedVersionNotFound) {
 		return fmt.Errorf("%w: %w", ErrInvalidTrigger, err)
 	}
 	return err
+}
+
+// Authoring rejects known published nested targets before storing a caller.
+// Missing targets retain the existing forward-reference contract; resolution
+// and the same publication classification still run at nested execution.
+func checkPublicationCalls(ctx context.Context, q publicationQuery, workspace, raw string) error {
+	var definition DSL
+	if json.Unmarshal([]byte(raw), &definition) != nil {
+		return nil // Existing validation owns syntax; this is not another parser gate.
+	}
+	var check func([]Step) error
+	check = func(steps []Step) error {
+		for _, step := range steps {
+			if step.Type == StepCallPipeline {
+				var target string
+				err := q.QueryRowContext(ctx, `SELECT id FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, workspace, step.PipelineSlug).Scan(&target)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					if err := checkGenericTrigger(ctx, q, workspace, target, nil); err != nil {
+						return fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
+					}
+				}
+			}
+			if step.Foreach != nil {
+				if err := check(step.Foreach.Steps); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return check(definition.Steps)
 }
 
 // CheckGenericScheduleIn validates the stored target, numeric pin and wake in

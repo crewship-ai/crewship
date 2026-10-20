@@ -201,6 +201,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 		if err := bindSaveOrigin(ctx, tx, &in, existingID); err != nil {
 			return nil, nil, err
 		}
+		if err := checkPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
+			return nil, nil, err
+		}
 		// Read inside the tx so the "did the recipe change" question and the
 		// write that answers it cannot straddle another writer.
 		var existingDefinition string
@@ -342,6 +345,9 @@ WHERE id = ?`,
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := bindSaveOrigin(ctx, tx, &in, ""); err != nil {
+		return nil, nil, err
+	}
+	if err := checkPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
 		return nil, nil, err
 	}
 	if err := s.consumeDraftTx(ctx, tx, in); err != nil {

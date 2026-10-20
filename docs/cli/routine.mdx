@@ -70,7 +70,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Authoring | `iterate <slug>` | Scored improvement loop: run → grade → optimize → save new version |
-| Authoring | `draft list/get/save/publish/discard` | Work on an unpublished draft of a routine; nothing is live until `publish` |
+| Authoring | `draft list/get/save/validate/publish/discard` | Work on an unpublished draft of a routine; nothing is live until `publish` |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
 | Bundles | `import [bundle.json] --crew <slug>` | Import bundle from file or stdin into an author crew |
 | Triggers | `schedules ...` | Cron schedule CRUD |
@@ -2313,3 +2313,21 @@ Administrators grant deliberately with
 `crewship share routine ROUTINE_ID --with MEMBER --operation view,results`.
 
 Shared-result table output quotes strings and escapes line breaks and control characters. JSON/YAML retain the structured values.
+
+## Shared draft publication
+
+Read the current snapshot with `crewship routine shared-draft <routine> -f json`.
+Retain its `draft_id`, `revision` and `base_revision` for explicit review:
+
+```bash
+crewship routine draft validate <routine> --draft-id <id> --revision <n> --base-revision <n>
+crewship routine draft publish <routine> --draft-id <id> --revision <n> --base-revision <n>
+```
+
+Validation reports `structure_only`; it does not promise publication permission,
+provider readiness or a successful run. Publish rechecks current View, Edit and
+Publish plus supported dependencies atomically. A stale snapshot or busy writer
+returns 409; unsupported content or existing triggers return 422. No automatic
+refresh or retry occurs. Publishing stores a version; bounded execution and its
+UI remain separate work. Existing `routine draft publish <draft.json>` keeps
+its validation-receipt flow.
