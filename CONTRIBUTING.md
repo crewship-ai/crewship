@@ -267,10 +267,12 @@ The content of the change sets the tier, not its author:
 |---|---|---|
 | Low | Docs, tests, copy, additive code behind a default-off flag | Required checks and an automated review by a session other than the author |
 | Ordinary | Product behavior visible to users | The above, and the person directing the work is accountable for the result |
-| High | Authorization, privacy, data deletion, migrations, CI workflows, branch rules, release and infrastructure | The above, and explicit approval from the maintainer for the exact head SHA |
+| High | Authorization, privacy, data deletion, migrations, CI workflows, branch rules, release and infrastructure | The above, and a deep independent review of the exact head SHA by a separate session focused on security and data loss, recorded in the pull request, plus a regression test at the affected boundary |
 
-- An automated review never counts as the maintainer's approval for a
-  high-tier change. A new head SHA needs fresh approval.
+- A new head SHA needs a fresh high-tier review. High-tier merges are listed
+  in the daily summary to the maintainer.
+- Only irreversible actions wait for the maintainer: production, destructive
+  data operations, secrets, history rewrites and removing required checks.
 - **Review rounds are capped at three.** After the third round of findings and
   fixes, stop fixing and decide: merge with the remaining findings recorded as
   known debt in the pull request, or close it. Later rounds review only the new
