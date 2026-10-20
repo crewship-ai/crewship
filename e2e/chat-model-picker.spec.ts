@@ -2,6 +2,10 @@ import { test, expect, type Page } from "@playwright/test"
 
 // The chat's model indicator and catalogue, against a REAL backend.
 //
+// Runs only on a disposable instance from scripts/throwaway-server.sh (a fresh
+// seeded database, own port and data directory), never on a shared dev slot or
+// stage: it sends a message and so creates a conversation.
+//
 // Nothing is mocked. The chat's model is whatever the server's run-preflight
 // reports for the agent; the list comes from GET /api/v1/models for the
 // provider that preflight names. The page must never call the retired
@@ -57,13 +61,21 @@ async function checkFlow(page: Page, nth: number) {
   const response = await openWithPreflight(page, slug)
   expect(response.status()).toBe(200)
   const snapshot = await response.json()
-  expect(snapshot.model, "run-preflight must name the configured model").toBeTruthy()
 
   // The current model is the configured one, not the first catalogue entry.
   const provider: string | undefined = snapshot.payer?.provider
+  // The list is requested only when the menu opens.
+  await expect(page.getByRole("button", { name: /^Model: / })).toBeVisible({ timeout: TIMEOUT })
+  expect(requests.some((u) => u.includes("/api/v1/models"))).toBe(false)
   const catalogue = provider
     ? page.waitForResponse((r) => r.url().includes("/api/v1/models?"), { timeout: TIMEOUT })
     : null
+  if (!snapshot.model) {
+    // An agent with no llm_model: say so, do not invent a model.
+    await page.getByRole("button", { name: "Model: not set" }).click()
+    await expect(page.getByText("No model is set on the agent; the provider default may apply.")).toBeVisible()
+    return
+  }
   const trigger = page.getByRole("button", { name: `Model: ${snapshot.model}` })
   await expect(trigger).toBeVisible({ timeout: TIMEOUT })
   await trigger.click()

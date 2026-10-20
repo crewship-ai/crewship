@@ -57,7 +57,7 @@ it("shows the configured model from run-preflight as current and does not pick m
 })
 
 it("keeps the configured model and says so when the catalogue fails", async () => {
-  route(() => json(preflight()), () => json({ detail: "boom" }, 502))
+  route(() => json(preflight()), () => json({ detail: "boom" }, 500))
   setup()
   await open()
   expect(await screen.findByText(/Could not load the model list/)).toBeInTheDocument()
@@ -85,8 +85,9 @@ it("does not claim the listed models are permitted or in effect", async () => {
   setup()
   await open()
   expect(await screen.findByText(/does not mean you may use it/)).toBeInTheDocument()
-  await screen.findAllByRole("menuitem")
-  expect(screen.getAllByRole("menuitem").every((el) => el.getAttribute("aria-disabled") === "true" || el.hasAttribute("data-disabled"))).toBe(true)
+  expect(await screen.findAllByRole("listitem")).toHaveLength(2)
+  expect(screen.queryAllByRole("menuitem")).toHaveLength(0)
+  expect(screen.getByText(/not a permission check/)).toBeInTheDocument()
 })
 
 it("flags a configured model that the catalogue does not list", async () => {
@@ -109,4 +110,45 @@ it("renders nothing when the chat is not readable", async () => {
   const { container } = setup()
   await waitFor(() => expect(fetch).toHaveBeenCalled())
   await waitFor(() => expect(container).toBeEmptyDOMElement())
+})
+
+it("makes no /models request until the menu opens", async () => {
+  route(() => json(preflight()), () => json(catalogue("curated", ["claude-sonnet-4-6"])))
+  setup()
+  await screen.findByRole("button", { name: /Model: claude-sonnet-4-6/ })
+  expect(modelCalls()).toEqual([])
+  await open()
+  await screen.findByText(/Curated list/)
+  expect(modelCalls()).toHaveLength(1)
+})
+
+it("says no list exists for a provider the server cannot list (400)", async () => {
+  route(() => json(preflight()), () => json({ detail: "unsupported provider" }, 400))
+  setup()
+  await open()
+  expect(await screen.findByText("No model list is available for this provider.")).toBeInTheDocument()
+  expect(screen.queryByText(/Could not load/)).not.toBeInTheDocument()
+})
+
+it("says the provider is unreachable (502)", async () => {
+  route(() => json(preflight()), () => json({ detail: "down" }, 502))
+  setup()
+  await open()
+  expect(await screen.findByText(/Provider unreachable\./)).toBeInTheDocument()
+  expect(screen.getByText(/still uses claude-sonnet-4-6/)).toBeInTheDocument()
+})
+
+it("distinguishes an agent with no model set from a preflight failure", async () => {
+  route(() => json(preflight({ model: "" })), () => json(catalogue("curated", ["x"])))
+  setup()
+  await open(/Model: not set/)
+  expect(await screen.findByText("No model is set on the agent; the provider default may apply.")).toBeInTheDocument()
+  expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument()
+})
+
+it("says the configured model could not be read when preflight fails", async () => {
+  route(() => json({ error: "x" }, 503), () => json(catalogue("curated", ["x"])))
+  setup()
+  await open(/Model: unknown/)
+  expect(await screen.findByText("The configured model could not be read.")).toBeInTheDocument()
 })
