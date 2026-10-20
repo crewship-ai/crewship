@@ -91,9 +91,9 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
-    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} /></div>
+    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} /></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
-    {!sync.denied && (sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your unsaved draft is retained privately in this browser. Download it before discarding it.</p><Button onClick={() => {
+    {!sync.denied && (sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>{sync.storageUnavailable || sync.unverifiedDrafts.length ? "Your unsaved changes are held only in this tab, not stored in this browser. Download them before closing it." : "Your unsaved draft is retained privately in this browser. Download it before discarding it."}</p><Button onClick={() => {
       try {
         const recovered = sync.recoveredDrafts.map(draft => {
           const local = documentSchema.load(draft.snapshot)
@@ -114,7 +114,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
         download(`${slug}-earlier-draft.json`, JSON.stringify(earlier, null, 2))
       } catch { setActionError("Could not read the earlier draft. It remains stored in this browser.") }
     }}>Download earlier draft</Button><Button variant="outline" onClick={() => {
-      if (window.confirm("Make sure no other tab of this document is open. Discard the earlier draft stored in this browser?")) void sync.discardUnverifiedDrafts().catch(() => setActionError("Could not discard the earlier draft."))
+      if (window.confirm("Make sure no other tab of this document is open. If another tab is still using it, its unsent edits will be lost. Discard?")) void sync.discardUnverifiedDrafts().catch(() => setActionError("Could not discard the earlier draft."))
     }}>Discard earlier draft</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}

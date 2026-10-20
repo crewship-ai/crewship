@@ -14,10 +14,10 @@ export function durabilityLabel(durability: DocumentDurability, status: string):
 }
 
 /** Extends the header status; it stays the single live region for save state. */
-export function DocumentSaveState({ status, durability, storageUnavailable, storageBusy }: { status: string; durability: DocumentDurability; storageUnavailable?: boolean; storageBusy?: boolean }) {
+export function DocumentSaveState({ status, durability, storageUnavailable, storageBusy, unverifiedDraft }: { status: string; durability: DocumentDurability; storageUnavailable?: boolean; storageBusy?: boolean; unverifiedDraft?: boolean }) {
   const label = durabilityLabel(durability, status)
   return <span role="status" aria-live="polite" className="text-sm" data-durability={durability}>
     {status}{label ? <span className="text-muted-foreground"> · {label}</span> : null}
-    {storageUnavailable ? <span className="text-muted-foreground"> · {storageBusy ? "Another tab of this browser is editing this document; edits here are not stored locally" : "This browser's storage is not available; an earlier unsent draft may exist"}</span> : null}
+    {storageUnavailable ? <span className="text-muted-foreground"> · {unverifiedDraft ? "This browser could not lock this document's local drafts and an earlier draft exists; edits here are not stored locally" : storageBusy ? "Another tab of this browser is editing this document; edits here are not stored locally" : "This browser's storage is not available; an earlier unsent draft may exist"}</span> : null}
   </span>
 }
