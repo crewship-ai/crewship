@@ -107,7 +107,7 @@ export function VirtualConversation({
 
   if (turns.length === 0 && !historyLoading) {
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto" role="log">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto" role="log" aria-live="off">
         <ConversationEmptyState
           className="h-auto flex-1"
           icon={<Bot className="h-12 w-12" />}
@@ -120,7 +120,7 @@ export function VirtualConversation({
   }
 
   return (
-    <div className="relative flex-1 min-h-0" role="log">
+    <div className="relative flex-1 min-h-0" role="log" aria-live="off">
       <Virtuoso
         key={sessionId}
         ref={virtuosoRef}

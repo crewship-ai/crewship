@@ -80,6 +80,7 @@ import { PARTICIPANTS_MAX_AGE_MS, deriveChatPrivacy, type ParticipantsLoad } fro
 import { useConversationLinks } from "./artifact-context/use-artifact-context-data"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
+import { ReplyAnnouncer } from "./reply-announcer"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { RestrictedFiles } from "./files/restricted-files"
 import { RestrictedMemory } from "./restricted-memory"
@@ -1344,7 +1345,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       footer={<>{entityStatus}{documentResultCards}{artifactContextCards}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
     />
   ) : (
-    <Conversation>
+    <Conversation aria-live="off">
       <MessageAnchorRelease sessionId={sessionId} sendNonce={pinNonce} />
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
@@ -1472,6 +1473,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {artifactLibrary}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
+          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} />
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
@@ -1586,6 +1588,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {artifactLibrary}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
+          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} />
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}

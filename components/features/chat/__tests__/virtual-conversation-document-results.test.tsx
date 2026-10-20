@@ -41,3 +41,7 @@ it.each(["disabled", "unknown human"])("does not request or show saved Documents
   expect(screen.queryByText("Restored saved plan")).toBeNull()
   expect(apiFetch).not.toHaveBeenCalled()
 })
+it("the transcript log never reads streamed tokens aloud: live announcements are off", () => {
+  mount()
+  for (const log of screen.getAllByRole("log")) expect(log).toHaveAttribute("aria-live", "off")
+})
