@@ -56,6 +56,7 @@ type Config struct {
 	License   LicenseConfig   `yaml:"license"`
 	Composio  ComposioConfig  `yaml:"composio"`
 	Documents DocumentsConfig `yaml:"documents"`
+	Slides    SlidesConfig    `yaml:"slides"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -537,6 +538,9 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
 		cfg.Documents.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
+		cfg.Slides.Enabled = v == "true" || v == "1"
 	}
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET"); ok {
 		cfg.Documents.AuthoritySocket = v

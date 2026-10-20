@@ -34,3 +34,39 @@ it.skipIf(!existsSync(chromium.executablePath()))("purges a Page's rows, then ot
     expect(result.afterSignOut).toEqual({ a2: [], aw2: [], b: [] })
   } finally { await browser.close() }
 })
+
+it("closes an IndexedDB connection that opens after the purge deadline", async () => {
+  const { vi } = await import("vitest")
+  const { purgeDocumentDrafts, STORAGE_OPEN_TIMEOUT_MS } = await import("./document-queue")
+  const close = vi.fn()
+  const request = { result: { close } } as unknown as IDBOpenDBRequest
+  vi.useFakeTimers()
+  vi.stubGlobal("indexedDB", { open: () => request })
+  try {
+    const purge = purgeDocumentDrafts("alice", "w", "p")
+    await vi.advanceTimersByTimeAsync(STORAGE_OPEN_TIMEOUT_MS)
+    await purge
+    request.onsuccess?.call(request, new Event("success"))
+    expect(close).toHaveBeenCalledOnce()
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals() }
+})
+
+it("aborts a stuck purge transaction and closes its connection at the deadline", async () => {
+  const { vi } = await import("vitest")
+  const { purgeDocumentDrafts, STORAGE_OPEN_TIMEOUT_MS } = await import("./document-queue")
+  const abort = vi.fn(), close = vi.fn()
+  const transaction = { abort, objectStore: () => ({ openCursor: () => ({}) }) }
+  const request = { result: { close, transaction: () => transaction } } as unknown as IDBOpenDBRequest
+  vi.useFakeTimers()
+  vi.stubGlobal("indexedDB", { open: () => request })
+  vi.stubGlobal("IDBKeyRange", { bound: () => undefined })
+  try {
+    let settled = false
+    void purgeDocumentDrafts("alice", "w", "p").then(() => { settled = true })
+    request.onsuccess?.call(request, new Event("success"))
+    await vi.advanceTimersByTimeAsync(STORAGE_OPEN_TIMEOUT_MS)
+    expect(settled).toBe(true)
+    expect(abort).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals() }
+})

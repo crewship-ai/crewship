@@ -88,7 +88,7 @@ it("does not recommit an acknowledged update when its authorized refresh fails",
   return committed && readFails?response({error:"read unavailable"},503):response(state(server,committed?5:4))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
- try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"local "));await waitFor(()=>expect(result.current.status).toBe("Reconnecting…"));expect(result.current.pending).toBe(0);readFails=false;await waitFor(()=>expect(result.current.status).toBe("Saved"));expect(posts).toBe(1)}finally{unmount();server.destroy()}
+ try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"local "));await waitFor(()=>expect(result.current.status).toBe("Disconnected"));expect(result.current.pending).toBe(0);readFails=false;await waitFor(()=>expect(result.current.status).toBe("Saved"));expect(posts).toBe(1)}finally{unmount();server.destroy()}
 })
 
 it("retains immutable attempted bytes and Page identity while its slug changes",async()=>{

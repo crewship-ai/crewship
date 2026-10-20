@@ -66,6 +66,7 @@ describe("AuthProvider → signed-out screens", () => {
   it("an expired session goes to reason=expired with the way back, and remembers who was signed in", async () => {
     await signedIn()
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_expired" } })) })
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(target().pathname).toBe("/login")
     expect(target().searchParams.get("reason")).toBe("expired")
     expect(target().searchParams.get("redirect")).toBe("/")
@@ -75,6 +76,7 @@ describe("AuthProvider → signed-out screens", () => {
   it("a session revoked elsewhere goes to reason=revoked", async () => {
     await signedIn()
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_revoked" } })) })
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(target().searchParams.get("reason")).toBe("revoked")
   })
 
@@ -84,6 +86,7 @@ describe("AuthProvider → signed-out screens", () => {
     localStorage.setItem("crewship-composer", JSON.stringify({ state: { modelId: null, drafts: { [key]: "Rebuild both images tonight" } }, version: 0 }))
     noteUnsentDraft(key, "Riley", "Rebuild both images tonight")
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_expired" } })) })
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(readSignedOut()).toEqual({ email: "ada@example.test", draftAgent: "Riley" })
     // A draft sent or cleared since is not claimed to be kept.
     localStorage.setItem("crewship-composer", JSON.stringify({ state: { modelId: null, drafts: {} }, version: 0 }))
@@ -93,6 +96,7 @@ describe("AuthProvider → signed-out screens", () => {
   it("a visitor who never had a session goes to plain sign-in", async () => {
     await signedIn()
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "no_credentials" } })) })
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(target().searchParams.get("reason")).toBeNull()
   })
 
@@ -100,6 +104,7 @@ describe("AuthProvider → signed-out screens", () => {
     await signedIn()
     const channel = FakeBroadcastChannel.instances.find((c) => c.name === AUTH_CHANNEL)
     act(() => { channel!.onmessage?.({ data: { type: "signout" } }) })
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toBe("/login?reason=signed-out")
   })
 

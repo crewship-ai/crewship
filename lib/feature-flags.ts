@@ -49,6 +49,26 @@ export function artifactCopyMove(): boolean {
 }
 
 /**
+ * Gates the static HTML App preview (`StaticAppPreview`).
+ *
+ * Default OFF: no Page endpoint returns publication HTML yet, so nothing
+ * mounts the preview in app routes. A mount site must also pass a freshly
+ * authorized publication; this flag only keeps the component dark until then.
+ */
+export function staticAppPreview(): boolean {
+  return process.env.NEXT_PUBLIC_STATIC_APP_PREVIEW === "true"
+}
+
+/**
+ * Gates Document revert and proposal review (client for endpoints that
+ * the backend has not shipped yet; see the F3 coordination requests).
+ * Default OFF.
+ */
+export function documentReviewActions(): boolean {
+  return process.env.NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS === "true"
+}
+
+/**
  * Chat search "Files" tab (CH-25). There is no file-search endpoint yet; with
  * the flag on, the tab runs against a fixture client so the states can be
  * reviewed. Default OFF: the tab then says plainly that file search is not
@@ -86,15 +106,4 @@ export function chatSidebarViews(): boolean {
  */
 export function slidesEditorMount(): boolean {
   return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
-}
-
-/**
- * Gates the static HTML App preview (`StaticAppPreview`).
- *
- * Default OFF: no Page endpoint returns publication HTML yet, so nothing
- * mounts the preview in app routes. A mount site must also pass a freshly
- * authorized publication; this flag only keeps the component dark until then.
- */
-export function staticAppPreview(): boolean {
-  return process.env.NEXT_PUBLIC_STATIC_APP_PREVIEW === "true"
 }

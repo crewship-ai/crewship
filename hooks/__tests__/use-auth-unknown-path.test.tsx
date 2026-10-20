@@ -39,7 +39,7 @@ describe("session-expired redirect on a path the app has no page for", () => {
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "auth_failed" } })) })
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toBe(`/login?reason=expired&redirect=${encodeURIComponent("/issues/CRE-12")}`)
   })
 
@@ -48,7 +48,7 @@ describe("session-expired redirect on a path the app has no page for", () => {
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "no_credentials" } })) })
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toBe(`/login?redirect=${encodeURIComponent("/routines?tab=library")}`)
   })
 })

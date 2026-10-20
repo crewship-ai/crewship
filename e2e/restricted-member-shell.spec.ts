@@ -86,7 +86,9 @@ for (const width of [1280, 390]) {
     }
     const dialog = page.getByRole("dialog", { name: "Connect the CLI" })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR --server=${new URL(page.url()).origin}`)
+    const origin = new URL(page.url()).origin
+    const isDefaultLocalServer = origin === "http://localhost:8080" || origin === "http://127.0.0.1:8080"
+    await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR${isDefaultLocalServer ? "" : ` --server=${origin}`}`)
     expect(starts).toBe(1)
     consumed = true
     await expect(dialog.getByRole("status")).toHaveText(/CLI connected/)

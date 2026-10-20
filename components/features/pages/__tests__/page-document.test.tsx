@@ -246,6 +246,43 @@ it("drops the former human's history immediately on account change without auto-
     expect(request.mock.calls.filter(([url])=>url.includes("/checkpoints"))).toHaveLength(count)
   } finally {f.view.unmount();f.saved.destroy()}
 })
+
+async function openReviewHistory(canWrite:boolean,flag=true) {
+  const {documentSchema}=await import("@/lib/documents/schema")
+  vi.stubEnv("NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS",flag?"true":"false")
+  const content={type:"doc",content:[{type:"paragraph",attrs:{id:"p1"},content:[{type:"text",text:"Old"}]}]}
+  const saved=documentSchema.create(content,3)
+  request.mockImplementation(async(url:string)=>{
+    const json=url.includes("/proposals")?{proposals:[]}:url.includes("/checkpoints/cp1")?{page_id:"page",id:"cp1",rev:1,schema:3,content}
+      :url.includes("/checkpoints")?{checkpoints:[{id:"cp1",rev:1,schema:3,actor:"Ada",created_at:"2026-10-19T10:00:00Z"}]}
+      :{page_id:"page",schema:3,rev:2,epoch:"epoch",generation:1,incarnation:"i",content,can_write:canWrite,can_comment:false,can_resolve:false,snapshot:documentSchema.snapshot(saved)}
+    return {ok:true,status:200,json:async()=>json}
+  })
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  fireEvent.click(await screen.findByRole("button",{name:"History"}))
+  fireEvent.click(await screen.findByRole("button",{name:/Revision 1/}))
+  await screen.findByRole("button",{name:"Compare with saved version"})
+  saved.destroy()
+}
+it("offers Revert to a writer",async()=>{
+  await openReviewHistory(true)
+  expect(screen.getByRole("button",{name:"Revert this change"})).toBeInTheDocument()
+  vi.unstubAllEnvs()
+})
+it("never offers Revert to a reader",async()=>{
+  await openReviewHistory(false)
+  expect(screen.queryByRole("button",{name:"Revert this change"})).toBeNull()
+  vi.unstubAllEnvs()
+})
+it("offers Compare without the review flag, but neither Revert nor proposals",async()=>{
+  await openReviewHistory(true,false)
+  expect(screen.getByRole("button",{name:"Compare with saved version"})).toBeInTheDocument()
+  expect(screen.queryByRole("button",{name:"Revert this change"})).toBeNull()
+  expect(screen.queryByRole("region",{name:"Document proposals"})).toBeNull()
+  expect(request.mock.calls.some(([url])=>String(url).includes("/proposals"))).toBe(false)
+  vi.unstubAllEnvs()
+})
+
 it("downloads the persisted recovery content and explicitly discards it before reopening",async()=>{
  const {documentSchema}=await import("@/lib/documents/schema")
  const confirmed=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"p"},content:[{type:"text",text:"Confirmed head"}]}]},3)

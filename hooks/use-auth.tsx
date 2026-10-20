@@ -165,11 +165,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // clobber fresh session state.
   const refreshGen = useRef(0)
 
-  const settle = useCallback((next: AuthSession | null) => {
+  const settle = useCallback(async (next: AuthSession | null, gen: number) => {
+    if (gen !== refreshGen.current) return
     clearTimeout(unreachableTimer.current)
     unreachableTimer.current = undefined
     purgeOtherE2Recovery(next?.user.id ?? null)
-    void purgeOtherDocumentDrafts(next?.user.id ?? null)
+    await purgeOtherDocumentDrafts(next?.user.id ?? null)
+    if (gen !== refreshGen.current) return
     setUnreachable(null)
     setSession(next)
     setStatus(next ? "authenticated" : "unauthenticated")
@@ -185,7 +187,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const result = await fetchSession()
     if (gen !== refreshGen.current) return
     if (result.kind === "settled") {
-      settle(result.session)
+      await settle(result.session, gen)
       return
     }
     const ms = sessionRetryPolicy.unreachableRetryMs
@@ -204,7 +206,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.kind === "settled") {
         if (gen !== refreshGen.current) return
-        settle(result.session)
+        await settle(result.session, gen)
         return
       }
 
@@ -258,7 +260,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (typeof window === "undefined") return
 
     let redirected = false
-    const goLoginExpired = (reason?: string) => {
+    const goLoginExpired = async (reason?: string) => {
       if (redirected) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
@@ -267,8 +269,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // page is not where an unknown link should lead.
       if (!isKnownAppPath(window.location.pathname)) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
-      void purgeOtherDocumentDrafts(null)
+      await purgeOtherDocumentDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -289,15 +292,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       window.location.replace(`/login?${params.toString()}`)
     }
-    const goLoginSignedOutElsewhere = () => {
+    const goLoginSignedOutElsewhere = async () => {
       if (redirected) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
-      void purgeOtherDocumentDrafts(null)
+      await purgeOtherDocumentDrafts(null)
       window.location.replace(SIGNED_OUT_URL)
     }
 
-    const expiredHandler = (e: Event) => goLoginExpired((e as CustomEvent<{ reason?: string }>).detail?.reason)
+    const expiredHandler = (e: Event) => { void goLoginExpired((e as CustomEvent<{ reason?: string }>).detail?.reason) }
     window.addEventListener(AUTH_EVENT, expiredHandler)
 
     let channel: BroadcastChannel | null = null
@@ -305,8 +309,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
-          if (ev.data?.type === "session-expired") goLoginExpired(ev.data?.reason)
-          else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
+          if (ev.data?.type === "session-expired") void goLoginExpired(ev.data?.reason)
+          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere()
         }
       } catch {
         channel = null
@@ -381,6 +385,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!serverAcknowledged) {
       return false
     }
+    ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
     // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
     await purgeOtherDocumentDrafts(null)

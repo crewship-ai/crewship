@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Extension } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
@@ -19,6 +19,11 @@ import { usePageDocument } from "@/hooks/use-page-document"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentHistory, useDocumentHistoryRestore } from "@/hooks/use-document-history"
 import { DocumentHistory } from "./document-history/document-history"
+import type { DocumentHistoryReview } from "./document-history/types"
+import { DocumentProposals } from "./document-proposals/document-proposals"
+import { createHttpHistoryActions } from "@/lib/documents/history-actions"
+import { createHttpProposalClient } from "@/lib/documents/proposals"
+import { documentReviewActions } from "@/lib/feature-flags"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -77,6 +82,11 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   const [linkAddress, setLinkAddress] = useState("")
   const [actionError, setActionError] = useState<string>()
   const [restoring, setRestoring] = useState(false)
+  const reviewEnabled = documentReviewActions()
+  const revertActions = useMemo(() => createHttpHistoryActions(workspaceId, pageId), [workspaceId, pageId])
+  const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
+  const hasLocalDraft = sync.pending > 0 || sync.recovery
+  const downloadDraft = () => download(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)
   useEffect(() => {
     const changed = (_update: Uint8Array, origin: unknown) => { if (origin !== "remote") localVersion.current++ }
@@ -115,6 +125,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
       } catch { setActionError("Could not read the earlier draft. It remains stored in this browser.") }
     }}>Download earlier draft</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
+      review={{ currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: reviewEnabled && sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() }}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}
       onRefused={denied => { if (denied) sync.deny(); setRestoring(false) }}
@@ -122,6 +133,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
         if (localVersion.current !== restoreVersion.current) { setActionError("Restore is confirmed. Recover your local draft before reopening the saved document."); return }
         onRestored()
       }} />
+    {reviewEnabled && sync.state && !sync.denied && <div className="px-3"><DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} /></div>}
     {!sync.denied && <>
     {sync.editable && !restoring && editor && <div aria-label="Document formatting" className="flex flex-wrap gap-1 px-6">
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().setParagraph().run()}>Paragraph</Button>
@@ -137,9 +149,9 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   </section>
 }
 
-function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, onStart, onRestored, onRefused }: {
+function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, review, onStart, onRestored, onRefused }: {
   workspaceId: string; pageId: string; humanId: string; available: boolean; denied: boolean
-  head?: ReturnType<typeof usePageDocument>["state"]; blocked: boolean
+  head?: ReturnType<typeof usePageDocument>["state"]; blocked: boolean; review?: DocumentHistoryReview
   onStart:()=>void; onRestored:()=>void; onRefused:(denied:boolean)=>void
 }) {
   const [open, setOpen] = useState(false)
@@ -159,6 +171,6 @@ function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, 
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} />}
   </div>
 }
