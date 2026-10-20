@@ -41,13 +41,15 @@ function usePinnedRead(target: Extract<LinkedViewerTarget, { mode: "revision" }>
   return state?.key === key ? state.read : { status: "loading" }
 }
 
-function PinnedPanel({ active, links, layout, expanded, onExpandedChange, onClose, extra, openerRef }: PanelProps & { extra: React.ReactNode }) {
+function PinnedPanel({ active, links, layout, expanded, onExpandedChange, onClose, extra, openerRef }: PanelProps & { extra: (ready: boolean) => React.ReactNode }) {
   const target = active.target as Extract<LinkedViewerTarget, { mode: "revision" }>
   const [attempt, setAttempt] = useState(0)
   const read = usePinnedRead(target, attempt)
   const mobile = layout === "mobile"
   const CloseIcon = mobile ? ArrowLeft : X
-  const title = active.title ?? links.find(link => targetKey(link.target) === targetKey(target))?.title ?? "Document"
+  // Title and revision are shown only for a verified read; after denial or a missing revision the header names nothing.
+  const ready = read.status === "ready"
+  const title = !ready ? "Document" : active.title ?? links.find(link => targetKey(link.target) === targetKey(target))?.title ?? "Document"
   const close = () => { onClose(); requestAnimationFrame(() => openerRef?.current?.isConnected && openerRef.current.focus()) }
   return <section aria-label="Document preview" data-layout={layout} data-expanded={expanded} data-pinned="true" className="flex h-full min-w-0 flex-col overflow-hidden border-l bg-background"
     onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close() } }}>
@@ -57,8 +59,8 @@ function PinnedPanel({ active, links, layout, expanded, onExpandedChange, onClos
       </Button>
       <div className="min-w-0 flex-1">
         <h2 className="truncate font-semibold">{title}</h2>
-        <p className="text-xs text-muted-foreground">Saved revision {target.revision}</p>
-        {extra}
+        {ready && <p className="text-xs text-muted-foreground">Saved revision {target.revision}</p>}
+        {extra(ready)}
       </div>
       {!mobile && <Button type="button" variant="ghost" size="icon" className="coarse:min-h-12 coarse:min-w-12" aria-label={expanded ? "Show chat alongside" : "Expand document preview"} aria-pressed={expanded} onClick={() => onExpandedChange(!expanded)}>
         {expanded ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
@@ -77,7 +79,8 @@ function PinnedPanel({ active, links, layout, expanded, onExpandedChange, onClos
 export function LinkedArtifactPanel(props: PanelProps) {
   const { active, links, onSwitch, onUseInMessage } = props
   const titleFor = useCallback((target: LinkedViewerTarget) => links.find(link => targetKey(link.target) === targetKey(target))?.title ?? null, [links])
-  const extra = useMemo(() => <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+  // Without a verified read the header offers nothing that names the item (the switcher lists titles).
+  const extra = useCallback((ready: boolean) => !ready ? null : <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
     <ViewerLinkSwitcher links={links} current={active.target}
       onSwitch={target => onSwitch(target, titleFor(target))}
       onViewLatest={() => onSwitch({ workspaceId: active.target.workspaceId, pageId: active.target.pageId, mode: "latest" }, active.title)} />
@@ -87,9 +90,9 @@ export function LinkedArtifactPanel(props: PanelProps) {
   return <LatestPanel {...props} extra={extra} />
 }
 
-function LatestPanel({ workspaceId, chatId, currentUserId, active, layout, expanded, onExpandedChange, onClose, openerRef, extra }: PanelProps & { extra: React.ReactNode }) {
+function LatestPanel({ workspaceId, chatId, currentUserId, active, layout, expanded, onExpandedChange, onClose, openerRef, extra }: PanelProps & { extra: (ready: boolean) => React.ReactNode }) {
   const viewerTarget = useMemo(() => ({ workspaceId: active.target.workspaceId, pageId: active.target.pageId, type: "document" as const, mode: "latest" as const }), [active.target])
   const { scopeKey, read } = useDocumentViewerRead({ workspaceId, chatId, currentUserId, activationKey: String(active.activation), target: viewerTarget, enabled: true })
-  return <DocumentViewer target={viewerTarget} scopeKey={scopeKey} read={read} layout={layout} expanded={expanded} onExpandedChange={onExpandedChange} onClose={onClose} openerRef={openerRef} headerExtra={extra}
+  return <DocumentViewer target={viewerTarget} scopeKey={scopeKey} read={read} layout={layout} expanded={expanded} onExpandedChange={onExpandedChange} onClose={onClose} openerRef={openerRef} headerExtra={extra(read.status === "ready")}
     renderBody={body => <DocumentReadonly schema={body.content.schema} content={body.content.content} accessibleLabel="Saved document body" />} />
 }

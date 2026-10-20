@@ -1,5 +1,5 @@
 "use client"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { fetchLibrary, fetchLinks, fetchWorkCards, type Fetched, type LibraryRow, type WorkCardEntry } from "./client"
@@ -22,7 +22,14 @@ function useChatContextQuery<T>(name: string, scope: Scope, fetcher: (signal: Ab
     refetchInterval: query => refetchInterval(query.state.data), refetchIntervalInBackground: false,
     queryFn: ({ signal }) => fetcher(signal),
   })
-  return { enabled, refetch: query.refetch, loading: enabled && query.isPending, result: enabled ? query.data : undefined }
+  // A failed refresh keeps the last good data of this same scope and says so; a denial or an unserved route never does.
+  const lastGood = useRef<{ key: string; value: Fetched<T> } | null>(null)
+  const scopeKey = JSON.stringify(key)
+  if (enabled && query.data?.status === "ok") lastGood.current = { key: scopeKey, value: query.data }
+  if (!enabled || (query.data && query.data.status !== "error" && query.data.status !== "ok")) lastGood.current = null
+  const stale = enabled && query.data?.status === "error" && lastGood.current?.key === scopeKey
+  const result = !enabled ? undefined : stale ? lastGood.current!.value : query.data
+  return { enabled, refetch: query.refetch, loading: enabled && query.isPending, result, stale }
 }
 
 const ACTIVE = new Set(["queued", "running", "waiting"])

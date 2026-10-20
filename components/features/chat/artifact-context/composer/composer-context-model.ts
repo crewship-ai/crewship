@@ -121,17 +121,3 @@ export function buildSubmission(ctx: ComposerArtifactContext, submissionId: stri
     ...(target ? { update_page_id: target.target.pageId } : {}),
   }
 }
-
-export type SubmitOutcome = "accepted" | "stale" | "unreadable" | "unknown"
-
-/**
- * 409 means the item changed since it was attached: re-confirm, keep the same
- * draft. 404 means it can no longer be read: drop it. Anything else (503,
- * timeout) is unknown: retry with the SAME submission id, never a new one.
- */
-export function classifySubmit(status: number | "network"): SubmitOutcome {
-  if (status === 200 || status === 201 || status === 202) return "accepted"
-  if (status === 409) return "stale"
-  if (status === 404) return "unreadable"
-  return "unknown"
-}
