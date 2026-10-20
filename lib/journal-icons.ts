@@ -277,6 +277,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "crew.member_changed": ShieldCheck,
   "member.role_changed": ShieldCheck,
   "member.removed": UserMinus,
+  "workspace.deleted": FileX,
 
   // ── Memory ────────────────────────────────────────────────────────
   "memory.searched": Search,

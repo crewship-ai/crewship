@@ -176,6 +176,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "crew.member_changed",
     "member.role_changed",
     "member.removed",
+    "workspace.deleted",
   ],
   provisioning: [
     "provisioning.queued",

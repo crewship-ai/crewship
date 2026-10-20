@@ -63,6 +63,9 @@ type RecoveryHandler struct {
 // a mailer is configured, we also refuse to send: there's no safe
 // way to build an origin without it, and r.Host is attacker-tainted.
 func NewRecoveryHandler(db *sql.DB, logger *slog.Logger, mail mailer.Mailer, sessionsStore sessions.Store) *RecoveryHandler {
+	if sessionsStore == nil {
+		sessionsStore = sessions.NewDBStore(db)
+	}
 	h := &RecoveryHandler{db: db, logger: logger, mail: mail, sessions: sessionsStore}
 
 	raw := strings.TrimSpace(os.Getenv("CREWSHIP_PUBLIC_URL"))
@@ -366,27 +369,45 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := acknowledgePasswordTx(r.Context(), tx, userID, string(hashed)); err != nil {
+		replyInternalError(w, h.logger, "reset password: acknowledge", err)
+		return
+	}
+
+	ids, notify, err := passwordSessionsTx(r.Context(), tx, h.sessions, userID, "")
+	if err != nil {
+		replyInternalError(w, h.logger, "reset password: revoke sessions", err)
+		return
+	}
+	if err := auditPasswordTx(r.Context(), tx, userID, "auth.password_reset", now, len(ids), 0); err != nil {
+		replyInternalError(w, h.logger, "reset password: audit", err)
+		return
+	}
+	if err := acknowledgePasswordSessions(r.Context(), tx, userID, string(hashed), "", ids); err != nil {
+		replyInternalError(w, h.logger, "reset password: final acknowledge", err)
+		return
+	}
+	var proofs int
+	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM verification_tokens WHERE token=?`, tokenHash).Scan(&proofs); err != nil {
+		replyInternalError(w, h.logger, "reset password: acknowledge proof", err)
+		return
+	}
+	if proofs != 0 {
+		replyInternalError(w, h.logger, "reset password: acknowledge proof", errors.New("reset proof survived mutation"))
+		return
+	}
+
+	if err := acknowledgePasswordRecoveryTx(r.Context(), tx, userID); err != nil {
+		replyInternalError(w, h.logger, "reset password: acknowledge lockout", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "reset password: commit", err)
 		return
 	}
-
-	// Invalidate every active session for this user. A stolen
-	// session cookie (the reason somebody often resets a password
-	// in the first place) must not outlive the reset, so a revoke
-	// failure has to be a hard failure: we tell the caller something
-	// went wrong instead of returning 200 with stale sessions still
-	// live. The password write has already committed, so the user's
-	// next login attempt will work — but they'll know to retry and
-	// the operator will see the cause in the logs.
-	if h.sessions != nil {
-		if _, err := h.sessions.RevokeAllForUser(r.Context(), userID, sessions.ReasonPasswordChange); err != nil {
-			h.logger.Error("reset password: revoke sessions failed; password updated but existing sessions remain valid", "error", err, "user_id", userID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": "Password was updated, but we couldn't sign out existing sessions. Please try again or contact your administrator.",
-			})
-			return
-		}
+	if notify != nil {
+		notify()
 	}
 
 	h.logger.Info("password reset succeeded", "user_id", userID)

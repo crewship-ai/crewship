@@ -657,42 +657,68 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 	wsID := strings.TrimSpace(r.PathValue("workspaceId"))
 	userID := strings.TrimSpace(r.PathValue("userId"))
 	ctx := r.Context()
-	var role string
-	err := h.db.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, userID).Scan(&role)
-	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "not a member of this workspace")
-		return
-	}
-	if err != nil {
-		replyInternalError(w, h.logger, "remove membership: lookup", err)
-		return
-	}
-	if role == "OWNER" {
-		tx, err := h.db.BeginTx(ctx, nil)
-		if err != nil {
-			replyInternalError(w, h.logger, "remove membership: begin", err)
-			return
-		}
-		last, err := lastOwnerTx(ctx, tx, wsID, userID)
-		_ = tx.Rollback()
-		if err != nil {
-			replyInternalError(w, h.logger, "remove membership: owner count", err)
-			return
-		}
-		if last {
-			replyError(w, http.StatusConflict, "this is the workspace's only owner; transfer ownership first")
-			return
-		}
-	}
 	actorID := ""
 	if a := UserFromContext(ctx); a != nil {
 		actorID = a.ID
 	}
+	var role string
+	errDenied := errors.New("active instance administrator required")
+	errMissingMember := errors.New("not a member of this workspace")
+	errLastOwner := errors.New("this is the workspace's only owner; transfer ownership first")
+	authorize := func(tx *sql.Tx) error {
+		// Middleware has already performed any one-time bootstrap. Re-read
+		// authority under the departure's writer lock instead of bootstrapping
+		// again or trusting the request's earlier instance-admin admission.
+		if actorID == "" || !canScope(ctx, scopeInstanceAdmin) {
+			return errDenied
+		}
+		var email string
+		var instanceRole sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT email, instance_role FROM users
+			WHERE id=? AND suspended_at IS NULL
+			AND NOT EXISTS (SELECT 1 FROM workspace_members WHERE user_id=users.id AND access_mode='restricted')`, actorID).Scan(&email, &instanceRole)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errDenied
+		}
+		if err != nil {
+			return err
+		}
+		if !backup.IsInstanceOwner(email) && instanceRole.String != "ADMIN" {
+			return errDenied
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, wsID, userID).Scan(&role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errMissingMember
+			}
+			return err
+		}
+		if role == "OWNER" {
+			last, err := lastOwnerTx(ctx, tx, wsID, userID)
+			if err != nil {
+				return err
+			}
+			if last {
+				return errLastOwner
+			}
+		}
+		return nil
+	}
 	audit := func(tx *sql.Tx) error {
 		return auditInstance(ctx, r, tx, "instance.member_removed", "workspace_member", userID, wsID, map[string]any{"role": role})
 	}
-	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID, audit); err != nil {
+	if err := departWorkspaceAuthorized(ctx, h.db, h.journal, actorID, wsID, userID, authorize, audit); err != nil {
+		switch {
+		case errors.Is(err, errDenied):
+			replyError(w, http.StatusForbidden, errDenied.Error())
+			return
+		case errors.Is(err, errMissingMember):
+			replyError(w, http.StatusNotFound, errMissingMember.Error())
+			return
+		case errors.Is(err, errLastOwner):
+			replyError(w, http.StatusConflict, errLastOwner.Error())
+			return
+		}
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
 			if !isInstanceAdmin(r, h.db) {

@@ -327,7 +327,30 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	if actor != nil {
 		actorID = actor.ID
 	}
-	if err := departWorkspace(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
+	authorize := func(tx *sql.Tx) error {
+		if _, err := invitationIssuerRole(r.Context(), tx, actorID, workspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return access.ErrDenied
+			}
+			return err
+		}
+		var currentRole, currentUser string
+		if err := tx.QueryRowContext(r.Context(), `SELECT role,user_id FROM workspace_members WHERE id=? AND workspace_id=?`, memberID, workspaceID).Scan(&currentRole, &currentUser); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return access.ErrDenied
+			}
+			return err
+		}
+		if currentRole == "OWNER" || currentUser != memberUserID {
+			return access.ErrDenied
+		}
+		return nil
+	}
+	if err := departWorkspaceAuthorized(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID, authorize); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, http.StatusForbidden, "current workspace administrator and non-owner member required")
+			return
+		}
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
 			// Middleware admission may be stale after waiting for the writer.
@@ -625,6 +648,10 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 // instance route writes its audit entry there so the removal and its record
 // land together.
 func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, alsoInTx ...func(*sql.Tx) error) error {
+	return departWorkspaceAuthorized(ctx, db, j, actorID, workspaceID, memberUserID, nil, alsoInTx...)
+}
+
+func departWorkspaceAuthorized(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, authorize func(*sql.Tx) error, alsoInTx ...func(*sql.Tx) error) error {
 	// The page transfer comes first, inside the departure's transaction — a
 	// precondition, not a cleanup step, exactly as admin_gdpr.go's erasure
 	// cascade treats it. A refusal must leave the member in place:
@@ -651,6 +678,12 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 		return fmt.Errorf("begin member removal tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	if authorize != nil {
+		if err := authorize(tx); err != nil {
+			return err
+		}
+	}
 
 	// The page transfer runs in the same transaction, first: it reads the
 	// crew rows purged below, and it has to roll back with the rest of the
@@ -708,6 +741,21 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 	})
 	if err != nil {
 		return fmt.Errorf("audit member removal: %w", err)
+	}
+
+	// Audit callbacks run after both deletions and can themselves write.
+	// Check the business keys, not only the original row ID: a callback
+	// must not restore access under a fresh membership ID before commit.
+	var membershipRemains bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?)
+		OR EXISTS(SELECT 1 FROM crew_members cm JOIN crews c ON c.id=cm.crew_id
+			WHERE c.workspace_id=? AND cm.user_id=?)`,
+		workspaceID, memberUserID, workspaceID, memberUserID).Scan(&membershipRemains); err != nil {
+		return fmt.Errorf("verify member removal: %w", err)
+	}
+	if membershipRemains {
+		return errors.New("member removal was not preserved through audit callbacks")
 	}
 
 	if err := tx.Commit(); err != nil {

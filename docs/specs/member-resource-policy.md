@@ -803,3 +803,55 @@ context use the private custodian policy. An active custodian restricted in a
 different workspace retains custody; unrelated grants do not widen private
 audiences. Another current workspace OWNER must produce the existing audit
 before private output is released. Metadata snapshot fences remain in place.
+
+### Atomic password and destructive permission changes
+
+The existing password change and reset endpoints write `auth.password_changed`
+and `auth.password_reset` to the chained instance audit. Password storage,
+reset-proof consumption, session revocation and requested CLI-token revocation
+share the mutation transaction. Audit and revocation failures preserve the old
+password and the reset proof; there is no partial-success response. The current
+browser session is retained on password change, while reset revokes all browser
+sessions. Existing CLI commands use the same endpoints and request fields.
+A concurrent change of the verified password returns 409 instead of overwriting
+the newer password. Only revocation counts and the subject identifier enter the password audit,
+never hashes, passwords, reset proofs or session credentials. Session stores
+default to the handler database when omitted. Custom stores must support
+transaction-scoped revocation; unsupported custom stores fail
+before a password mutation commits. Disconnect notifications run after commit.
+
+Workspace deletion appends `workspace.deleted` to its workspace journal in the
+same transaction as its membership/crew cascade, recording the actor, the number
+of removed workspace members and the affected crew IDs. The current active trusted
+OWNER is checked again after acquiring the writer transaction. Workspace member
+removal similarly rechecks its current active trusted administrator and the
+selected non-OWNER membership before transferring pages or deleting membership.
+
+Folder ACL set/reissue/removal appends the existing `page.folder_acl_changed`
+event through the configured transactional journal writer, together with the
+ACL row and version fence. The canonical event retains old/new ACL snapshots
+and the previous version; public feeds and automation projections remove those
+private fields. Failure rolls back both, and observers are notified
+only after commit. This does not claim completion of the remaining F1 mutation
+inventory or the audit-key rotation/recovery contract.
+
+
+Host-side `crewship admin reset-password --local` retains its local database
+recovery path and appends the same `auth.password_reset` instance event with no
+invented human actor and `source: local_recovery`. Password/session final state
+is checked after the audit, before the same commit. An unavailable or invalid
+audit chain refuses recovery and rolls back the password and lockout changes;
+this does not implement the separate F6 keyring/reseal contract. The separate
+CLI process does not send in-process stream notifications. Existing browser
+streams use the persisted-session checks described above; WS and terminal retain
+their credential liveness polling. This password audit adds no separate stream
+notification mechanism.
+
+Deleting a folder records its ACL removals and `page.folder_changed` deletion
+in the same writer transaction. Current human authority and owning-crew
+membership are reloaded after the writer fence. Final ACL sets/version fences,
+folder/workspace cascade state, membership absence, password hashes, the final
+active session set, selected token revocations and reset-proof consumption are
+checked after the last audit. Folder deletion also compares every audit row it
+created after the final append. Ignored or undone writes roll back without
+observer notifications.
