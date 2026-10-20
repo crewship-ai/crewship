@@ -72,3 +72,18 @@ it("announces a finished message that arrives without a stream, but not one's ow
   settle()
   expect(region()).toHaveTextContent("Ada replied.")
 })
+it("a history that loads into an empty chat is never announced, even a single turn", () => {
+  const teammate = { ...user, id: "t", authorUserId: "teammate" }
+  const { rerender } = render(<ReplyAnnouncer sessionId="s1" isStreaming={false} turns={[]} agentName="Ada" />)
+  rerender(<ReplyAnnouncer sessionId="s1" isStreaming={false} turns={[reply()]} agentName="Ada" historyLoading />)
+  rerender(<ReplyAnnouncer sessionId="s1" isStreaming={false} turns={[reply()]} agentName="Ada" />)
+  settle()
+  expect(region()).toHaveTextContent("")
+  rerender(<ReplyAnnouncer sessionId="s2" isStreaming={false} turns={[]} agentName="Ada" />)
+  rerender(<ReplyAnnouncer sessionId="s2" isStreaming={false} turns={[teammate]} agentName="Ada" />)
+  settle()
+  expect(region()).toHaveTextContent("")
+  rerender(<ReplyAnnouncer sessionId="s2" isStreaming={false} turns={[teammate, { ...teammate, id: "t2" }]} agentName="Ada" />)
+  settle()
+  expect(region()).toHaveTextContent("New message.")
+})

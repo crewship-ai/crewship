@@ -1473,7 +1473,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {artifactLibrary}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
-          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} />
+          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} historyLoading={historyLoading} />
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
@@ -1588,7 +1588,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {artifactLibrary}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
-          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} />
+          <ReplyAnnouncer isStreaming={isStreaming} turns={turns} agentName={agentName} sessionId={sessionId} historyLoading={historyLoading} />
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}

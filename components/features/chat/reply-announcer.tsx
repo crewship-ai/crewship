@@ -26,11 +26,13 @@ function outcomeOf(turns: AnnouncedTurn[], agent: string): string {
  * how, and that a message arrived without a stream (a teammate, a reply
  * recovered after a reconnect). History that loads is not announced.
  */
-export function ReplyAnnouncer({ isStreaming, turns, agentName, sessionId }: {
+export function ReplyAnnouncer({ isStreaming, turns, agentName, sessionId, historyLoading = false }: {
   isStreaming: boolean
   turns: AnnouncedTurn[]
   agentName?: string
   sessionId?: string
+  /** While history loads nothing is an arrival; the list after it is the baseline. */
+  historyLoading?: boolean
 }) {
   const [message, setMessage] = useState({ text: "", n: 0 })
   const agent = agentName ?? "Agent"
@@ -62,12 +64,15 @@ export function ReplyAnnouncer({ isStreaming, turns, agentName, sessionId }: {
     }
   }, [isStreaming, sessionId])
 
-  // A finished message that arrives on its own in this conversation. The first
-  // list seen for a conversation is its history and is never announced.
+  // A finished message that arrives on its own in this conversation. The
+  // first non-empty list seen for a conversation outside a history load is its
+  // history and is never announced (so a teammate's very first message in an
+  // empty chat is not either).
   const ids = turns.map(turn => turn.id).join(" ")
   useEffect(() => {
     const current = latest.current.turns
     const before = seen.current
+    if (historyLoading || current.length === 0) { seen.current = null; return }
     seen.current = { session: sessionId, ids: new Set(current.map(turn => turn.id)) }
     if (!before || before.session !== sessionId || isStreaming || watched.current !== null) return
     const arrived = current.filter(turn => !before.ids.has(turn.id) && !turn.isStreaming)
@@ -75,7 +80,7 @@ export function ReplyAnnouncer({ isStreaming, turns, agentName, sessionId }: {
     const [turn] = arrived
     if (turn.role === "assistant") sayRef.current(outcomeOf(current, latest.current.agent) || `${latest.current.agent} replied.`)
     else if (turn.role === "user" && turn.authorUserId) sayRef.current("New message.")
-  }, [ids, sessionId, isStreaming])
+  }, [ids, sessionId, isStreaming, historyLoading])
 
   return <div role="status" aria-live="polite" className="sr-only"><span key={message.n}>{message.text}</span></div>
 }
