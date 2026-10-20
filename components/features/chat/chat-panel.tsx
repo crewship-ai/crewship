@@ -981,7 +981,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     [sessionId],
   )
 
-  const handleCopy = useCallback((content: string) => copyToClipboard(content), [])
+  const handleCopy = copyToClipboard
 
   // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
   // like a plain send — otherwise the scroll behavior is inconsistent.

@@ -813,9 +813,11 @@ function TurnFeedbackActions({
   // "Copied" is said only after the clipboard confirmed it; a refusal is said too.
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle")
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; clearTimeout(copyTimer.current) } }, [])
   const copyReply = async () => {
     const ok = await onCopy(fullText)
+    if (!mounted.current) return
     clearTimeout(copyTimer.current)
     setCopy(ok ? "copied" : "failed")
     copyTimer.current = setTimeout(() => setCopy("idle"), ok ? 2000 : 6000)
@@ -845,10 +847,10 @@ function TurnFeedbackActions({
       // keyboard entirely.
       className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100", submitted.helpful || submitted.not_helpful || copy !== "idle" ? "opacity-100" : "opacity-0")}
     >
-      <MessageAction tooltip={copy === "copied" ? "Copied" : "Copy"} onClick={() => void copyReply()}>
+      <MessageAction tooltip={copy === "copied" ? "Copied" : "Copy"} label="Copy" onClick={() => void copyReply()}>
         {copy === "copied" ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
       </MessageAction>
-      {copy !== "idle" && <span role="status" className={copy === "failed" ? "text-label text-muted-foreground" : "sr-only"}>
+      {copy !== "idle" && <span role="status" className={copy === "failed" ? "basis-full text-label text-muted-foreground" : "sr-only"}>
         {copy === "copied" ? "Copied to clipboard" : "Copy failed. Select the text and copy it with your keyboard."}
       </span>}
       <MessageAction
