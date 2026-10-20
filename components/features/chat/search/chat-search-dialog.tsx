@@ -147,11 +147,14 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
                 ))}
               </ul>
             )}
+            {scope === "files" && filesOn && files && <p className="mx-2 mb-1 rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">Sample data — file search is not available yet</p>}
             {scope === "files" && filesOn && files && (
               files.items.length === 0 && files.status !== "idle" ? <p className="px-3 py-2 text-xs text-muted-foreground">No matching files among indexed content.</p> :
-              <ul aria-label="File results">{files.items.map((f) => (
-                <li key={f.id}><a href={f.href} className="kit-tap block min-h-11 px-3 py-1.5 text-xs"><span className="block truncate font-medium">{f.name}</span>{f.snippet && <span className="line-clamp-2 text-muted-foreground">{snippetSegments(f.snippet, parsed.text).map((sg, k) => sg.match ? <mark key={k}>{sg.text}</mark> : <span key={k}>{sg.text}</span>)}</span>}</a></li>
-              ))}</ul>
+              <>
+                <ul aria-label="File results">{files.items.map((f) => (
+                  <li key={f.id} aria-disabled="true" title="Sample data, not a real file" className="min-h-11 px-3 py-1.5 text-xs opacity-70"><span className="block truncate font-medium">{f.name}</span>{f.snippet && <span className="line-clamp-2 text-muted-foreground">{snippetSegments(f.snippet, parsed.text).map((sg, k) => sg.match ? <mark key={k}>{sg.text}</mark> : <span key={k}>{sg.text}</span>)}</span>}<span className="sr-only">Sample data, not a real file</span></li>
+                ))}</ul>
+              </>
             )}
             {rows.length >= CHAT_SEARCH_PAGE && <p className="px-3 py-1 text-[11px] text-muted-foreground">Showing the first {CHAT_SEARCH_PAGE} matches. Narrow the search to see others.</p>}
           </div>
@@ -165,5 +168,7 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
 export function useChatSearchHotkey(onOpen: () => void) {
   const ref = useRef(onOpen)
   ref.current = onOpen
-  useHotkeys("mod+shift+f", (e) => { e.preventDefault(); ref.current() }, { enableOnFormTags: true, enableOnContentEditable: true })
+  // Not inside text fields (the shortcut belongs to the browser or OS there) and not with Alt; the
+  // sidebar's search button is the always-available way in.
+  useHotkeys("mod+shift+f", (e) => { e.preventDefault(); ref.current() }, { enableOnFormTags: false, enableOnContentEditable: false, ignoreModifiers: false })
 }

@@ -182,12 +182,14 @@ searchability of a single turn, never the turn itself.
 
 ## Searching from the chat sidebar
 
-The chat sidebar has a search button (also **Ctrl/Cmd+Shift+F**; Ctrl/Cmd+K
-stays the global palette). The dialog has three tabs:
+The chat sidebar has a search button, and **Ctrl/Cmd+Shift+F** opens the same dialog. The shortcut
+is on for everyone (it is not behind a flag): it works only outside text fields, never while Alt is held, and
+it never fires inside the message box, so it does not take over typing. If your browser or operating system
+already uses that combination, use the button instead. Ctrl/Cmd+K stays the global palette. The dialog has three tabs:
 
 - **This chat** — matches inside the open agent session.
 - **All chats** — every agent conversation you can see.
-- **Files** — not available yet; the tab says so rather than showing zero results. (Developers can enable sample data with `NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES=true`; it is not real file search.)
+- **Files** — not available yet; the tab says so rather than showing zero results. (Developers can enable sample data with `NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES=true`; the tab is then labelled "Sample data — file search is not available yet" and its rows are disabled, not links. It is not real file search.)
 
 Type free text plus optional filters: `from:agent` (any agent's replies), `from:ada` (that agent's own replies),
 `in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,

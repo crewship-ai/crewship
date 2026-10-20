@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { ChatSearchDialog } from "../search/chat-search-dialog"
+import { ChatSearchDialog, useChatSearchHotkey } from "../search/chat-search-dialog"
 
 const api = vi.hoisted(() => vi.fn())
 const push = vi.hoisted(() => vi.fn())
@@ -13,7 +13,7 @@ const setup = (props = {}) => render(<ChatSearchDialog open onOpenChange={() => 
 const type = (value: string) => fireEvent.change(screen.getByLabelText("Search query"), { target: { value } })
 
 beforeEach(() => { api.mockReset(); push.mockReset() })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 it("renders a hostile snippet as text and opens the exact message with the keyboard", async () => {
   api.mockResolvedValue(Response.json({ hits: [hit] }))
@@ -97,4 +97,39 @@ it("labels a user-role hit neutrally, never as the viewer", async () => {
   const option = await screen.findByRole("option")
   expect(option).toHaveTextContent("User")
   expect(option).not.toHaveTextContent("You")
+})
+
+it("Files fixtures are labelled sample data and their rows cannot navigate", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES", "true")
+  const { container } = setup()
+  fireEvent.click(screen.getByRole("tab", { name: "Files" }))
+  expect(screen.getByText("Sample data — file search is not available yet")).toBeVisible()
+  type("zzzz-no-match")
+  expect(screen.getByText("Sample data — file search is not available yet")).toBeVisible()
+  type("launch")
+  expect(screen.getByText("Sample data — file search is not available yet")).toBeVisible()
+  const rows = screen.getAllByRole("listitem")
+  expect(rows.length).toBeGreaterThan(0)
+  expect(container.ownerDocument.querySelector("[aria-label='File results'] a")).toBeNull()
+  expect(container.ownerDocument.querySelector("[aria-label='File results'] [href]")).toBeNull()
+  rows.forEach((row) => {
+    expect(row).toHaveAttribute("aria-disabled", "true")
+    expect(row).toHaveTextContent("Sample data, not a real file")
+  })
+})
+
+function HotkeyProbe({ onOpen }: { onOpen: () => void }) { useChatSearchHotkey(onOpen); return <><textarea aria-label="composer" /><button type="button">x</button></> }
+
+it("the shortcut opens search outside text fields, but never inside one and never with Alt", () => {
+  const onOpen = vi.fn()
+  render(<HotkeyProbe onOpen={onOpen} />)
+  const press = (el: Element, init: KeyboardEventInit = {}) => { const e = new KeyboardEvent("keydown", { key: "f", code: "KeyF", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true, ...init }); el.dispatchEvent(e); return e }
+  const inField = press(screen.getByLabelText("composer"))
+  expect(onOpen).not.toHaveBeenCalled()
+  expect(inField.defaultPrevented).toBe(false)
+  press(screen.getByText("x"), { altKey: true })
+  expect(onOpen).not.toHaveBeenCalled()
+  const outside = press(screen.getByText("x"))
+  expect(onOpen).toHaveBeenCalledTimes(1)
+  expect(outside.defaultPrevented).toBe(true)
 })

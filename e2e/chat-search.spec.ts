@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect, devices, type Page } from "@playwright/test"
 import { DatabaseSync } from "node:sqlite"
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -25,8 +25,11 @@ import { randomUUID } from "node:crypto"
 // a workspace that is in that database before anything is written. Run:
 //
 //   scripts/throwaway-server.sh run NAME --binary PATH -- sh -c \
-//     'E2E_CREWSHIP_DATA_DIR=$(jq -r .data_dir "$CREWSHIP_THROWAWAY_MANIFEST") \
-//      PLAYWRIGHT_BASE_URL=$CREWSHIP_SERVER pnpm exec playwright test e2e/chat-search.spec.ts'
+//     'crewship-heavy env E2E_CREWSHIP_DATA_DIR=$(jq -r .data_dir "$CREWSHIP_THROWAWAY_MANIFEST") \
+//      PLAYWRIGHT_BASE_URL=$CREWSHIP_SERVER CREWSHIP_THROWAWAY_MANIFEST=$CREWSHIP_THROWAWAY_MANIFEST \
+//      CREWSHIP_SERVER=$CREWSHIP_SERVER pnpm exec playwright test e2e/chat-search.spec.ts'
+//
+// (crewship-heavy drops the caller's environment; `env NAME=value` passes it on.)
 //
 // (the server's embedded UI must be a build of this checkout: `pnpm build`,
 // `scripts/embed-web-out.sh sync`, `go build ./cmd/crewship`, then pass that
@@ -290,4 +293,29 @@ test("fifty or more hits say the first 50 are shown", async ({ page }) => {
   await dialog.getByRole("combobox", { name: "Search query" }).fill(T.many)
   await expect(options(page)).toHaveCount(50, { timeout: TIMEOUT })
   await expect(dialog.getByText("First 50 results, more may exist.")).toBeVisible()
+})
+
+// A real device profile, not a resized desktop context: the touch sizing keys on `@media (pointer: coarse)`.
+test.describe("phone", () => {
+  const { defaultBrowserType: _browser, ...iphone } = devices["iPhone 13"]
+  test.use(iphone)
+
+  test("search targets are touch sized on a coarse pointer", async ({ page }) => {
+    await page.goto(`/chat/${seed.agents[0].slug}`)
+    await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: TIMEOUT })
+    expect(await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches), "not a coarse pointer").toBe(true)
+    const open = page.getByRole("button", { name: /^Search all chats/ })
+    if (!(await open.isVisible())) await page.getByRole("button", { name: /conversations|menu|sidebar/i }).first().click()
+    const trigger = (await open.boundingBox())!
+    expect(Math.min(trigger.width, trigger.height), "search button is under 44px").toBeGreaterThanOrEqual(44)
+    await open.click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("combobox", { name: "Search query" }).fill(T.general)
+    await expect(options(page).first()).toBeVisible({ timeout: TIMEOUT })
+    const row = (await options(page).first().boundingBox())!
+    expect(row.height, "result row is under 44px").toBeGreaterThanOrEqual(44)
+    const tab = (await dialog.getByRole("tab", { name: "All chats" }).boundingBox())!
+    expect(tab.height, "scope tab is under 44px").toBeGreaterThanOrEqual(44)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1), "page scrolls sideways").toBe(false)
+  })
 })

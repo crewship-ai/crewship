@@ -13,14 +13,15 @@ export interface FileSearchItem {
   /** Server-extracted text only. Binary files carry no snippet. */
   snippet?: string
   indexed: boolean
-  href: string
+  /** Real results only. Fixture rows carry none and are not navigable. */
+  href?: string
   updated_at: string
 }
 
 export const FILE_SEARCH_FIXTURES: FileSearchItem[] = [
-  { id: "f1", name: "Q4 launch plan", kind: "document", snippet: "Launch checklist and owners for the Q4 release", indexed: true, href: "/files/f1", updated_at: "2026-10-12T09:00:00Z" },
-  { id: "f2", name: "Pipeline overview", kind: "slides", snippet: "Deploy pipeline stages", indexed: true, href: "/files/f2", updated_at: "2026-10-08T09:00:00Z" },
-  { id: "f3", name: "screenshot.png", kind: "binary", indexed: false, href: "/files/f3", updated_at: "2026-10-01T09:00:00Z" },
+  { id: "f1", name: "Q4 launch plan", kind: "document", snippet: "Launch checklist and owners for the Q4 release", indexed: true, updated_at: "2026-10-12T09:00:00Z" },
+  { id: "f2", name: "Pipeline overview", kind: "slides", snippet: "Deploy pipeline stages", indexed: true, updated_at: "2026-10-08T09:00:00Z" },
+  { id: "f3", name: "screenshot.png", kind: "binary", indexed: false, updated_at: "2026-10-01T09:00:00Z" },
 ]
 
 export function searchFilesFixtures(text: string): { status: ChatSearchResult["status"]; items: FileSearchItem[]; unindexed: number } {
