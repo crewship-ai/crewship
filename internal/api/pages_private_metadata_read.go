@@ -48,12 +48,27 @@ func (h *PageHandler) beginPageMetadataRead(w http.ResponseWriter, r *http.Reque
 			column, reference = "id", strings.TrimPrefix(reference, "@")
 		}
 		var private bool
-		err = b.tx.QueryRowContext(r.Context(), `SELECT private_audience FROM pages WHERE workspace_id=? AND `+column+`=?`, WorkspaceIDFromContext(r.Context()), reference).Scan(&private)
+		var custodian string
+		err = b.tx.QueryRowContext(r.Context(), `SELECT private_audience,COALESCE(owner_user_id,'') FROM pages WHERE workspace_id=? AND `+column+`=?`, WorkspaceIDFromContext(r.Context()), reference).Scan(&private, &custodian)
 		// Classification chooses a branch only. Authorization and custody are read
 		// again inside the writer transaction; ordinary metadata keeps this snapshot.
 		if err == nil && private {
-			b.tx.Rollback()
-			r, b, err = h.startMetadataRead(r, true)
+			// Refuse an unavailable caller before contending for the writer.
+			// This snapshot grants no disclosure: the writer still reloads the
+			// Page, custody and current authority before actual metadata/audit.
+			var viewer *pageViewer
+			if user := UserFromContext(r.Context()); user != nil {
+				viewer, err = h.livePrivatePageReader(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+			}
+			if err == nil && !privatePageViewer(&pageRecord{OwnerUserID: custodian}, viewer) {
+				b.tx.Rollback()
+				replyError(w, 404, "page not found")
+				return r, nil, false
+			}
+			if err == nil {
+				b.tx.Rollback()
+				r, b, err = h.startMetadataRead(r, true)
+			}
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			err = nil

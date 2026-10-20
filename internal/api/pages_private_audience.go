@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // Private artifacts have an explicit audience; role, folder, crew and ordinary
@@ -119,7 +121,14 @@ func (h *BackupHandler) authorizeWorkspaceBackups(w http.ResponseWriter, r *http
 		return false
 	}
 	var denied bool
-	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p WHERE p.workspace_id=? AND p.private_audience=1 AND NOT EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id=p.workspace_id AND m.user_id=? AND m.role='OWNER' AND m.access_mode='trusted'))`, workspace, privateAudienceActorID(ctx)).Scan(&denied)
+	// Conversation copies outlive a failed creation or the last private Page.
+	// The existing OWNER-only bundle boundary follows retained classification,
+	// rather than opening an indirect read when a result disappears.
+	err := h.db.QueryRowContext(ctx, `SELECT (
+ EXISTS(SELECT 1 FROM pages p WHERE p.workspace_id=? AND p.private_audience=1)
+ OR EXISTS(SELECT 1 FROM chats c WHERE c.workspace_id=? AND NOT (`+chataudience.NoPrivateArtifactContextSQL+`)))
+ AND NOT EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
+ WHERE m.workspace_id=? AND m.user_id=? AND m.role='OWNER' AND m.access_mode='trusted')`, workspace, workspace, workspace, privateAudienceActorID(ctx)).Scan(&denied)
 	if err != nil {
 		replyInternalError(w, h.logger, "authorize workspace backup", err)
 		return false

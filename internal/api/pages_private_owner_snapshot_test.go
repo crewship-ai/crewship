@@ -258,3 +258,42 @@ func TestOrdinaryMetadataReadClassificationSnapshot(t *testing.T) {
 		t.Fatalf("ordinary snapshot mixed later private metadata: %d %s", out.Code, out.Body.String())
 	}
 }
+
+func TestPrivateMetadataAuthorityBeforeWriter(t *testing.T) {
+	for _, who := range []struct {
+		name, user, role string
+		allowed          bool
+	}{
+		{"custodian", "", "MEMBER", true},
+		{"workspace-owner", "ptadmin", "OWNER", true},
+		{"nonowner-admin", "ptadmin", "OWNER", false},
+	} {
+		t.Run(who.name, func(t *testing.T) {
+			h, ws, custodian, _ := privateMetadataFixture(t)
+			user := who.user
+			if user == "" {
+				user = custodian
+			}
+			original := h.db
+			if !who.allowed {
+				// Keep stale OWNER request context: only fresh stored standing counts.
+				execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+			}
+			writerBegins := 0
+			c := &privateMetadataBeginConnector{inner: &reviewHookConnector{inner: original.Driver(), dsn: reviewDBPath(t, original) + "?_pragma=busy_timeout(100)&_pragma=foreign_keys(ON)&_txlock=immediate", hook: &reviewQueryHook{}}}
+			c.before = func() { writerBegins++ }
+			hooked := sql.OpenDB(c)
+			defer hooked.Close()
+			h.db = hooked
+			defer func() { h.db = original }()
+			out := privateMetadataRequest(t, h, privateMetadataRoutes[1], ws, user, who.role, "created-doc", custodian)
+			if who.allowed {
+				if out.Code != 200 || writerBegins != 1 {
+					t.Fatalf("healthy private reader status=%d native writer begins=%d", out.Code, writerBegins)
+				}
+			} else if out.Code != 404 || writerBegins != 0 || strings.Contains(out.Body.String(), "Created report") {
+				t.Fatalf("unauthorized reader must be refused before native writer: status=%d writer begins=%d", out.Code, writerBegins)
+			}
+		})
+	}
+}
