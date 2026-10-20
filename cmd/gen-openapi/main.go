@@ -501,7 +501,9 @@ func buildDocument(routes []route) map[string]any {
 		}
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
-			op["requestBody"] = requestBodyForRoute(rt)
+			if !routeSchemaCatalog()[rt.method+" "+rt.path].NoRequest {
+				op["requestBody"] = requestBodyForRoute(rt)
+			}
 		case "DELETE":
 			// A DELETE gets a body only when its catalog entry declares one:
 			// two handlers read a confirmation body (a draft revision, a
@@ -763,6 +765,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	existing.NoRequest = existing.NoRequest || incoming.NoRequest
 	if incoming.SuccessHeaders != nil {
 		existing.SuccessHeaders = incoming.SuccessHeaders
 	}

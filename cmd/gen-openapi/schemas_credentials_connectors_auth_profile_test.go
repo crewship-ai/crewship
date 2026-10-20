@@ -6,8 +6,9 @@ func TestCredentialsConnectorsAuthProfileCatalogHasConcreteContracts(t *testing.
 	routes, components := credentialsConnectorsAuthProfileSchemaCatalog()
 	for _, domain := range routes {
 		for key, contract := range domain {
-			if contract.Response == nil && contract.Request == nil {
-				t.Fatalf("%s has neither request nor response schema", key)
+			noContent := len(contract.SuccessStatuses) == 1 && contract.SuccessStatuses[0] == "204"
+			if contract.Response == nil && contract.Request == nil && !noContent {
+				t.Fatalf("%s has neither a body schema nor an explicit no-content success", key)
 			}
 			for label, schema := range map[string]map[string]any{"request": contract.Request, "response": contract.Response} {
 				if schema == nil {

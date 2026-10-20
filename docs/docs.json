@@ -430,6 +430,7 @@
               "cli/approvals",
               "cli/policy",
               "cli/hire",
+              "cli/release",
               "cli/persona",
               "cli/hooks",
               "cli/automation",

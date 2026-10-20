@@ -146,6 +146,18 @@ saves a **draft** (nothing is published): test it and publish it from the
 routine page. A definition that could not be saved as a routine is refused at
 `create`. Names are unique per workspace, ignoring case.
 
+### `crewship routine templates create`
+
+Save a workspace template from `--from-routine <slug>` or `--file <definition.json>`.
+`--description` sets its one-line purpose and `--category` its grouping label.
+This creates a template, without running a routine.
+
+### `crewship routine templates use`
+
+Create a draft from a template ID. `--slug` is required; `--name` overrides the
+display name (otherwise the template name is used). `--crew-id` selects the
+owning crew. This does not publish or execute the draft.
+
 ## `crewship routine folders`
 
 Folders organise the Routines panel (Group by Folder). They grant no access.
@@ -172,6 +184,14 @@ subfolders. `list` shows each folder as its path (`Ops / Daily`).
 moving need MANAGER or above.
 
 ---
+
+### `crewship routine folders update`
+
+Update the supplied fields of a folder ID. `--name` changes its name; `--color`
+changes its palette colour (an empty string clears it); `--icon` changes its
+registry icon (an empty string clears it). `--parent` moves it under another
+folder, or to the top level when given an empty string. Folder placement does
+not grant access to routines.
 
 ## `crewship routine get <slug>`
 

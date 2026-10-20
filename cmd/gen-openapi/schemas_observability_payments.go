@@ -190,6 +190,14 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	json := func(properties map[string]any) map[string]any { return object(properties) }
 	ok := object(map[string]any{"ok": boolean()})
 	return map[string]DomainSchema{
+		"GET /api/v1/paymaster/credential-spend": {Response: map[string]any{
+			"type": "object", "required": []string{"rows", "since", "until"},
+			"properties": map[string]any{"rows": array(map[string]any{
+				"type": "object", "required": []string{"credential_id", "cost_usd", "call_count", "input_tokens", "output_tokens", "last_ts"},
+				"properties": map[string]any{"credential_id": str(), "cost_usd": number(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "last_ts": dateTime()},
+			}), "since": dateTime(), "until": dateTime()},
+		}},
+
 		"GET /api/v1/journal":                                {Response: journalList},
 		"GET /api/v1/journal/stream":                         {Response: journalEntry, ResponseMedia: []string{"text/event-stream"}},
 		"GET /api/v1/journal/count":                          {Response: object(map[string]any{"total": integer()})},

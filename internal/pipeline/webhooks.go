@@ -480,7 +480,7 @@ func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string,
 		if stored, _, err = encryption.EncryptAtRest(secret); err != nil {
 			return fmt.Errorf("encrypt previous_signing_secret: %w", err)
 		}
-		exp = expires.UTC().Format(time.RFC3339Nano)
+		exp = expires.UTC().Format(time.RFC3339Nano) // tsformat:allow: grace expiry is parsed and compared as time.Time in Go; SQL only stores and reads it by ID
 	}
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE pipeline_webhooks SET previous_signing_secret = ?, previous_secret_expires_at = ? WHERE id = ? AND deleted_at IS NULL`,

@@ -4993,6 +4993,150 @@
         },
         "type": "array"
       },
+      "CredentialFolder": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "credential_count": {
+            "type": "integer"
+          },
+          "default_security_level": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "min_security_level": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "name",
+          "description",
+          "reveal_policy",
+          "remind_after_days",
+          "min_security_level",
+          "default_security_level",
+          "credential_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "CredentialFolderCreateRequest": {
+        "properties": {
+          "default_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "min_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "enum": [
+              "inherit",
+              "admins",
+              "nobody"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CredentialFolderList": {
+        "items": {
+          "$ref": "#/components/schemas/CredentialFolder"
+        },
+        "type": "array"
+      },
+      "CredentialFolderUpdateRequest": {
+        "properties": {
+          "default_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "min_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "enum": [
+              "inherit",
+              "admins",
+              "nobody"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CredentialList": {
         "items": {
           "$ref": "#/components/schemas/Credential"
@@ -54076,15 +54220,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {
@@ -68723,7 +68858,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialFolderList"
                 }
               }
             },
@@ -68826,27 +68961,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CredentialFolderCreateRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialFolder"
                 }
               }
             },
@@ -68976,16 +69102,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -69114,17 +69230,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CredentialFolderUpdateRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialFolder"
                 }
               }
             },
@@ -134800,6 +134917,56 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "credential_id": {
+                            "type": "string"
+                          },
+                          "input_tokens": {
+                            "type": "integer"
+                          },
+                          "last_ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "output_tokens": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "credential_id",
+                          "cost_usd",
+                          "call_count",
+                          "input_tokens",
+                          "output_tokens",
+                          "last_ts"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "until": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "rows",
+                    "since",
+                    "until"
+                  ],
                   "type": "object"
                 }
               }
@@ -160843,13 +161010,31 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "text/calendar": {
                 "schema": {
-                  "type": "object"
+                  "type": "string"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "private, no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "enum": [
+                    "attachment; filename=\"crewship-calendar.ics\""
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -176452,15 +176637,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {
@@ -176549,15 +176725,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {
