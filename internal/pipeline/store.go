@@ -198,6 +198,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := checkSavedPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
+			return nil, nil, err
+		}
 		if err := bindSaveOrigin(ctx, tx, &in, existingID); err != nil {
 			return nil, nil, err
 		}
@@ -342,6 +345,9 @@ WHERE id = ?`,
 		return nil, nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := checkSavedPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
+		return nil, nil, err
+	}
 	if err := bindSaveOrigin(ctx, tx, &in, ""); err != nil {
 		return nil, nil, err
 	}

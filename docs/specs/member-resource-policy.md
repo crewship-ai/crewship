@@ -894,5 +894,7 @@ The v1 preset catalog is unchanged.
 
 Publication archives retain physical authority across backup/restore. Generic
 Run, nested calls and trigger writers refuse bounded publication authority;
-trusted archives retain their existing behavior. The next slice provides the
-publication endpoint and its restricted manual consumer.
+trusted archives retain their existing behavior. Shared publication captures an
+exact draft ID/revision/base revision and live explicit rights in one writer
+transaction with audit. Validation is structural only; publishing creates no
+run, chat or attempt. The bounded manual runtime remains a separate slice.

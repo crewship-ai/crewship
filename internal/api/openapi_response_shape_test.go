@@ -48,6 +48,8 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},
+	{name: "RestrictedRoutinePublicationValidation", pointer: "/components/schemas/RestrictedRoutinePublicationValidation", value: routinePublicationValidationResponse{}},
+	{name: "RestrictedRoutinePublication", pointer: "/components/schemas/RestrictedRoutinePublication", value: routinePublicationResponse{}},
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
 	{name: "RoutineFolder", pointer: "/components/schemas/RoutineFolder", value: routineFolderResponse{}},
 	{name: "RoutineFolderMoveResult", pointer: "/components/schemas/RoutineFolderMoveResult", value: routineFolderMoveResult{}},
