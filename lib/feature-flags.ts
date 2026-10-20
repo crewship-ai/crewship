@@ -25,3 +25,14 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Gates the static HTML App preview (`StaticAppPreview`).
+ *
+ * Default OFF: no Page endpoint returns publication HTML yet, so nothing
+ * mounts the preview in app routes. A mount site must also pass a freshly
+ * authorized publication; this flag only keeps the component dark until then.
+ */
+export function staticAppPreview(): boolean {
+  return process.env.NEXT_PUBLIC_STATIC_APP_PREVIEW === "true"
+}

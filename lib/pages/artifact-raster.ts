@@ -114,7 +114,7 @@ export function staticRaster(src: string): StaticRaster | null {
  * CSP independently remains the external network boundary. */
 export function staticCSS(css: string): boolean {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, '')
-  if (/\\/.test(text) || /(?:url|image|image-set|cross-fade|paint|src)\s*\(/i.test(text)) return false
+  if (/\\/.test(text) || /(?:url|image|image-set|cross-fade|paint|src|expression)\s*\(/i.test(text) || /javascript\s*:|vbscript\s*:|-moz-binding|behavior\s*:/i.test(text)) return false
   const rules = text.match(/@[a-z-]+/gi) ?? []
   if (text.replace(/@[a-z-]+/gi, '').includes('@')) return false
   return rules.every(rule => ['@media', '@supports', '@layer', '@keyframes', '@-webkit-keyframes'].includes(rule.toLowerCase()))

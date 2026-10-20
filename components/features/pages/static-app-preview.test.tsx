@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
 import { StaticAppPreview } from "./static-app-preview"
 
 vi.mock("@/lib/pages/artifact-static", () => ({ staticArtifactDocument: async (html: string) => html }))
-afterEach(cleanup)
+beforeEach(() => vi.stubEnv("NEXT_PUBLIC_STATIC_APP_PREVIEW", "true"))
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 const publication = { workspaceId: "workspace", pageId: "page-a", revision: 1, profile: "static-html-v1", html: "<h1>Version one</h1>" }
 
 it("T-AX-05: grants no iframe execution, origin, navigation or referrer capability", async () => {
@@ -34,4 +35,16 @@ it("T-AX-05: access loss, identity changes and unsupported profiles remove the o
   expect(screen.queryByTitle("App static preview")).toBeNull()
   rerender(<StaticAppPreview publication={{ ...publication, profile: "interactive-v1" }} />)
   expect(screen.queryByTitle("App static preview")).toBeNull()
+})
+
+it("renders nothing while the flag is off", () => {
+  vi.stubEnv("NEXT_PUBLIC_STATIC_APP_PREVIEW", "")
+  const { container } = render(<StaticAppPreview publication={publication} />)
+  expect(container.innerHTML).toBe("")
+})
+
+it("shows no frame when the preparation fails", async () => {
+  render(<StaticAppPreview publication={{ ...publication, html: "<h1>Version one</h1>", revision: 0 }} />)
+  expect(screen.queryByTitle("App static preview")).toBeNull()
+  expect(screen.getByRole("alert")).toBeTruthy()
 })

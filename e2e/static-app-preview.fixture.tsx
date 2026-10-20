@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { createRoot } from "react-dom/client"
+import { staticArtifactDocument } from "../lib/pages/artifact-static"
 import { StaticAppPreview } from "../components/features/pages/static-app-preview"
 
 const hostile = `<h1>Static calculator</h1><style>h1 { color: rgb(1, 2, 3) }</style>
@@ -26,3 +27,5 @@ function Fixture() {
   </>
 }
 createRoot(document.getElementById("root")!).render(<Fixture />)
+
+;(window as unknown as { prepareStatic: typeof staticArtifactDocument }).prepareStatic = staticArtifactDocument

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { staticAppPreview } from "@/lib/feature-flags"
 import { staticArtifactDocument } from "@/lib/pages/artifact-static"
 
 /** Exact confirmed content supplied by the Page authority, never an ACL grant.
@@ -45,6 +46,7 @@ export function StaticAppPreview({ publication }: { publication: StaticAppPublic
     return () => controller.abort()
   }, [active])
 
+  if (!staticAppPreview()) return null
   if (!publication) return <p role="status">Static App preview unavailable. Verify access before reopening.</p>
   if (!verified || !active) return <p role="alert">Static App preview unavailable for this Page or execution profile. Reopen the Page.</p>
   const ready = rendered?.publication === active

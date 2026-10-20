@@ -30,10 +30,22 @@ Provenance: `lib/pages/artifact-static.ts`, `artifact-raster.ts` and their
 existing unit fixtures were extracted unchanged from the human static HTML
 flow in commit `22022bbfb1b4199cb1f56fec050e6e3932edf6cf` (PR #3267).
 
+Status: not mounted. No endpoint returns publication HTML today (Page content
+descriptors report `html`/`static-html-v1` only), so nothing in `app/` renders
+this component and it stays dark behind `NEXT_PUBLIC_STATIC_APP_PREVIEW=true`
+(`staticAppPreview()` in `lib/feature-flags.ts`).
+
+Privacy: a private App the viewer may not read answers 404. The caller maps
+403/404 to `publication={null}`; the component's message is identical for both
+and names nothing about the Page.
+
+Unit vitest runs under happy-dom, whose parser is not spec-faithful for DOMPurify,
+so DOM-level sanitizer vectors run in real browsers in the harness below.
+
 Focused checks:
 
 ```sh
-crewship-heavy pnpm exec vitest run components/features/pages/static-app-preview.test.tsx lib/pages/__tests__/artifact-static.test.ts lib/pages/__tests__/artifact-raster.test.ts
+crewship-heavy pnpm exec vitest run components/features/pages/static-app-preview.test.tsx lib/pages/__tests__/artifact-static.test.ts lib/pages/__tests__/artifact-raster.test.ts lib/pages/__tests__/artifact-static-vectors.test.ts
 crewship-heavy node e2e/static-app-preview.browser.mjs
 ```
 
