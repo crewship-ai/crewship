@@ -211,12 +211,19 @@ env:
   # gate gets read as dead code and deleted. Listed here, with its real owner
   # named, instead.
   # Credential reveal and provider pools have their own blocking PR configs.
+  # Artifacts + Chat browser flows (2026-10-20): each drives a real seeded
+  # backend started by scripts/throwaway-server.sh and refuses to run without
+  # its manifest (e2e/throwaway-guard.ts) or the feature flag it covers, so
+  # the nightly harness here would only skip them. Their owning PR runs them
+  # and records the evidence; they move to GATE once a throwaway harness runs
+  # in this workflow.
   EXCLUDED_SPECS: >-
     e2e/credential-reveal.spec.ts
     e2e/provider-pools.spec.ts
     e2e/visual.spec.ts
     e2e/onboarding-wizard.spec.ts
     e2e/pr-contract.spec.ts
+    e2e/chat-artifact-context.spec.ts
 
 jobs:
   build-tools:
