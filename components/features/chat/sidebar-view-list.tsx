@@ -54,10 +54,10 @@ export function SidebarViewList({ label, viewId, query, items, activeId, hold, o
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { focusHold.current = false; if (!pointerInside.current) onHold(false) } }}>
     {stable.pending && <div role="status" className="flex items-center gap-2 px-3 py-1 text-[11px] text-muted-foreground">This list changed.<Button type="button" variant="ghost" size="sm" onClick={stable.refresh}>Refresh</Button></div>}
     {stable.items.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nothing in {label} right now.</p>}
-    {stable.items.map((item) => <button key={item.id} type="button" disabled={item.fixture || item.disabled} title={item.disabled ? "Not loaded yet: this agent's chats have not loaded" : undefined} aria-current={item.id === activeId ? "page" : undefined} onClick={() => onOpen(item)} className={cn("kit-tap mx-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-foreground/[0.04] disabled:opacity-70", item.id === activeId && "bg-primary/10")}>
+    {stable.items.map((item) => <button key={item.id} type="button" disabled={item.fixture || item.disabled} title={item.fixture ? "Sample data: not a real conversation" : item.disabled ? "Not loaded yet: this agent's chats have not loaded" : undefined} aria-current={item.id === activeId ? "page" : undefined} onClick={() => onOpen(item)} className={cn("kit-tap mx-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-foreground/[0.04] disabled:opacity-70", item.id === activeId && "bg-primary/10")}>
       <span className="min-w-0 flex-1 truncate">{item.title}</span>
       {item.disabled && <span className="sr-only"> (chats not loaded yet)</span>}
-      {item.fixture && <span className="text-[9px] text-muted-foreground">Preview</span>}{item.kept && <span className="text-[9px] text-muted-foreground">Open chat</span>}
+      {item.fixture && <><span className="text-[9px] text-muted-foreground">Preview</span><span className="sr-only"> (sample data, not a real conversation)</span></>}{item.kept && <span className="text-[9px] text-muted-foreground">Open chat</span>}
       {item.kind === "agent" && <span className="text-[9px] text-muted-foreground">AI</span>}
       {item.unread > 0 && <span className="text-[10px] tabular-nums text-primary">{item.unread}</span>}
     </button>)}

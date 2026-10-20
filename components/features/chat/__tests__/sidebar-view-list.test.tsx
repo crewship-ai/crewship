@@ -83,3 +83,15 @@ it("a disabled agent row says why", () => {
   expect(row).toHaveAttribute("title", expect.stringMatching(/not loaded yet/i))
   expect(row.textContent).toMatch(/chats not loaded yet/i)
 })
+
+it("preview (fixture) rows are disabled buttons with a reason, no link, and never open", () => {
+  const onOpen = vi.fn()
+  const { container } = render(<Harness onOpen={onOpen} items={[item("fx:m1", { fixture: true })]} />)
+  const row = screen.getByRole("button", { name: /fx:m1/ })
+  expect(row).toBeDisabled()
+  expect(row).toHaveAttribute("title", expect.stringMatching(/sample data/i))
+  expect(row.textContent).toMatch(/sample data, not a real conversation/i)
+  expect(container.querySelector("a, [href]")).toBeNull()
+  fireEvent.click(row)
+  expect(onOpen).not.toHaveBeenCalled()
+})
