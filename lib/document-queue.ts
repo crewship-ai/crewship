@@ -114,7 +114,7 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
  * or an identity change delete the rows themselves, not only what is on screen.
  * Best effort: unavailable storage cannot be cleaned and must not block the caller.
  */
-async function purgeRows(range: IDBKeyRange | undefined, owns: (owner: string) => boolean): Promise<void> {
+async function purgeRows(range: () => IDBKeyRange | undefined, owns: (owner: string) => boolean): Promise<void> {
   if (typeof indexedDB === "undefined") return
   try {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -129,7 +129,7 @@ async function purgeRows(range: IDBKeyRange | undefined, owns: (owner: string) =
         const tx = db.transaction("drafts", "readwrite")
         tx.oncomplete = () => resolve()
         tx.onabort = tx.onerror = () => reject(new Error("purge"))
-        const cursor = tx.objectStore("drafts").openCursor(range)
+        const cursor = tx.objectStore("drafts").openCursor(range())
         cursor.onsuccess = () => {
           const row = cursor.result
           if (!row) return
@@ -145,14 +145,14 @@ async function purgeRows(range: IDBKeyRange | undefined, owns: (owner: string) =
 export function purgeDocumentDrafts(human: string, workspace: string, page: string): Promise<void> {
   if (!human || !workspace || !page) return Promise.resolve()
   const owner = JSON.stringify([human, workspace, page])
-  return purgeRows(IDBKeyRange.bound([owner, ""], [owner, "\uffff"]), () => true)
+  return purgeRows(() => IDBKeyRange.bound([owner, ""], [owner, "\uffff"]), () => true)
 }
 /**
  * Deletes every journal row not owned by `userId` (all rows when null: sign-out).
  * A shared browser never keeps one person's private text for the next sign-in.
  */
 export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
-  return purgeRows(undefined, owner => {
+  return purgeRows(() => undefined, owner => {
     try { return !userId || JSON.parse(owner)[0] !== userId } catch { return true }
   })
 }

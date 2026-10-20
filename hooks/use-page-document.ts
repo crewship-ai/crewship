@@ -143,7 +143,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       // After a denial nothing is written (persist and the writer check authorizationLost); the purge runs once
       // a write already in flight has settled, so it cannot bring a row back. Covers recovered and staged rows too.
       dirty.clear()
-      void (flushing ?? Promise.resolve()).catch(() => {}).then(() => purgeDocumentDrafts(human, workspace, pageId))
+      void (flushing ?? Promise.resolve()).catch(() => {}).then(() => purgeDocumentDrafts(human, workspace, pageId)).catch(() => {})
     }
     doc.on("update", local)
     // Mobile browsers and tab closes may skip beforeunload: write what is queued, best effort.
