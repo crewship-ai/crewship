@@ -53,7 +53,6 @@ vi.mock("sonner", () => ({
 }))
 
 import { ChatPanel } from "../chat-panel"
-import { useComposerStore } from "@/stores/composer-store"
 
 const panelProps = {
   agentId: "agent-1",
