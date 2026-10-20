@@ -32,6 +32,16 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependabot integration (2026-10-20): exact registry tarballs inspected,
+  // SHA-512 matched to pnpm-lock.yaml; no package-level license text shipped.
+  "@ai-sdk/provider-utils@5.0.62": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.62.tgz",
+  "@next/env@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/env/-/env-16.4.2.tgz",
+  "@next/swc-linux-x64-gnu@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.4.2.tgz",
+  "@next/swc-linux-x64-musl@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.4.2.tgz",
+  "@rollup/rollup-linux-x64-gnu@4.64.10": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.64.10.tgz",
+  "@rollup/rollup-linux-x64-musl@4.64.10": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.64.10.tgz",
+  "@sentry/server-runtime-injection@11.8.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-runtime-injection/-/server-runtime-injection-11.8.0.tgz",
+  "@sentry/server-utils@11.8.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-utils/-/server-utils-11.8.0.tgz",
   // Dependency recovery (2026-10-16): inspected each exact registry tarball,
   // matched its SHA-512 against pnpm-lock.yaml, and checked package.json.
   // These packages ship no package-level license text; keep explicit notices.

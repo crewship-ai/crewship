@@ -1,5 +1,6 @@
 import { act } from "react"
 import { createRoot } from "react-dom/client"
+import { Window } from "happy-dom"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import AppError from "./error"
@@ -64,9 +65,10 @@ describe("application recovery screens", () => {
   })
 
   it.each([undefined, "fatal-42"])("renders a standalone document after root-layout failure: %s", (digest) => {
-    const frame = document.createElement("iframe")
-    document.body.appendChild(frame)
-    const doc = frame.contentDocument!
+    // A separate window supplies defaultView for accessibility queries without
+    // enabling iframe loading, which happy-dom disables to prevent network access.
+    const recoveryWindow = new Window()
+    const doc = recoveryWindow.document as unknown as Document
     const root = createRoot(doc)
     const error = Object.assign(new Error("private render detail"), { digest })
     const reset = vi.fn()
@@ -83,7 +85,7 @@ describe("application recovery screens", () => {
       expect(doc.body.innerHTML).not.toMatch(/style="[^"]*#[0-9a-f]{3,6}/i)
       fireEvent.click(page.getByRole("button", { name: "Reload" }))
       expect(reset).toHaveBeenCalledTimes(1)
-    } finally { act(() => { root.unmount() }); frame.remove() }
+    } finally { act(() => { root.unmount() }); recoveryWindow.close() }
   })
 
   it("the crash page follows the stored theme, then the system scheme", () => {
