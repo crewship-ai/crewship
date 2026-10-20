@@ -22,6 +22,8 @@ const PROBLEM: Record<WorkProblem, { headline: string; detail: string }> = {
 }
 const UNAVAILABLE = { headline: "Temporarily unavailable", detail: "This could not be refreshed right now. It is not a removal of access; the last known state is shown." }
 
+const RESTRICTED = { headline: "Restricted item", detail: "You cannot see details of this item." }
+
 const ACTIVE: WorkRunState[] = ["queued", "running", "waiting"]
 
 /** Pure projection of a server card into labels and the actions that make sense for it. */
@@ -30,13 +32,15 @@ export function deriveWorkCardView(card: WorkCardModel): WorkCardView {
   const restricted = denied || card.access.status === "restricted"
   const loading = card.load === "loading"
   const unavailable = card.load === "unavailable"
-  const problem = denied ? PROBLEM.revoked : unavailable ? UNAVAILABLE : card.problem ? PROBLEM[card.problem] : null
+  // A restricted item leaks no state at all: not the run state, not the problem, not an action that implies one.
+  const hidden = restricted && !denied
+  const problem = denied ? PROBLEM.revoked : hidden ? RESTRICTED : unavailable ? UNAVAILABLE : card.problem ? PROBLEM[card.problem] : null
   const hasSaved = card.saved.kind === "saved"
   const actions: WorkCardAction[] = []
   const add = (id: WorkCardAction["id"], label: string) => { if (!actions.some(action => action.id === id)) actions.push({ id, label }) }
 
   if (!loading) {
-    if (denied) add("dismiss", "Remove from view")
+    if (restricted) add("dismiss", "Remove from view")
     else {
       if (unavailable) add("refresh", "Try again")
       switch (card.problem) {
@@ -61,7 +65,7 @@ export function deriveWorkCardView(card: WorkCardModel): WorkCardView {
   return {
     title: restricted || card.access.status !== "readable" ? "Restricted item" : card.access.title,
     restricted,
-    live: !denied && (ACTIVE.includes(card.runState) || loading || unavailable || card.problem === "disconnected"),
+    live: !restricted && (ACTIVE.includes(card.runState) || loading || unavailable || card.problem === "disconnected"),
     busy: loading,
     headline: loading ? "Loading" : problem?.headline ?? RUN_LABEL[card.runState],
     runLabel: RUN_LABEL[card.runState],

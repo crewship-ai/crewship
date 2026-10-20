@@ -15,7 +15,7 @@ export function WorkResultCard({ card, onAction }: WorkResultCardProps) {
   if (!enabled) return null
   const view = deriveWorkCardView(card)
   const restricted = view.restricted
-  return <article aria-label={view.title} aria-busy={view.busy || undefined} data-run-state={restricted ? undefined : card.runState} data-problem={card.problem ?? undefined}
+  return <article aria-label={view.title} aria-busy={view.busy || undefined} data-run-state={restricted ? undefined : card.runState} data-problem={restricted ? undefined : card.problem ?? undefined}
     className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4">
     <div className="min-w-0">
       <p className="truncate text-sm font-medium">{view.title}</p>

@@ -108,3 +108,12 @@ it("reports the action with the card and trigger", () => {
   fireEvent.click(screen.getByRole("button", { name: "Open" }))
   expect(onAction).toHaveBeenCalledWith("open", card, expect.any(HTMLButtonElement))
 })
+
+it("a restricted card also masks the problem state and run state attributes", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  const { container } = render(<WorkResultCard card={workCard({ access: { status: "restricted" }, problem: "missing_runtime", runState: "failed" })} onAction={() => {}} />)
+  const card = container.querySelector("article")!
+  expect(card.hasAttribute("data-problem")).toBe(false)
+  expect(card.hasAttribute("data-run-state")).toBe(false)
+  expect(card.textContent).not.toMatch(/executor|runtime/i)
+})
