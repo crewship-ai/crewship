@@ -36,6 +36,8 @@ class GuardTests(unittest.TestCase):
         self.changes = {}; self.calls = []; self.permission = 'admin'; self.live_reads = 0
         self.advance = False; self.bad_content = None
         self.queue = None; self.queue_reads = 0
+        self.main_sha = 'b' * 40; self.main_reads = 0; self.advance_main = False
+        self.compare_mutation = None
         self.tree_mutation = None
 
     def api(self, endpoint, payload=None):
@@ -45,9 +47,19 @@ class GuardTests(unittest.TestCase):
             return {'permission': self.permission, 'user': {'login': actor}}
         if '/git/ref/' in endpoint:
             ref = 'refs/' + endpoint.split('/git/ref/', 1)[1]
-            if ref == 'refs/heads/main': return {'ref': ref, 'object': {'type': 'commit', 'sha': self.env.get('GUARD_TRUSTED_SHA', self.env['GITHUB_SHA'])}}
+            if ref == 'refs/heads/main':
+                self.main_reads += 1
+                return {'ref': ref, 'object': {'type': 'commit', 'sha': 'c' * 40 if self.advance_main and self.main_reads > 1 else self.main_sha}}
             self.queue_reads += 1
             return {'ref': ref, 'object': {'type': 'commit', 'sha': 'c' * 40 if self.advance and self.queue_reads > 1 else self.head}}
+        if '/compare/' in endpoint:
+            self.assertTrue(endpoint.endswith('?per_page=1&page=2'))
+            base, head = endpoint.split('/compare/', 1)[1].split('?')[0].split('...')
+            data = {'url': 'https://api.github.com/' + endpoint.split('?')[0],
+                    'base_commit': {'sha': base}, 'merge_base_commit': {'sha': base},
+                    'status': 'ahead', 'ahead_by': 1, 'behind_by': 0, 'total_commits': 1,
+                    'commits': []}
+            return self.compare_mutation(data) if self.compare_mutation else data
         if '/pulls/' in endpoint:
             self.live_reads += 1
             value = deepcopy(self.pr)
@@ -297,6 +309,17 @@ class GuardTests(unittest.TestCase):
         self.event['merge_group'] = dict(base_ref='refs/heads/main', base_sha='b' * 40,
                                         head_sha=self.head, head_ref=self.queue)
 
+    def test_queue_predecessor_base_uses_actual_trusted_main(self):
+        self.merge_group()
+        # The next group is built on the preceding queued group, while the
+        # privileged source and complete control baseline remain actual main.
+        self.event['merge_group']['base_sha'] = 'c' * 40
+        report = self.inspect()
+        self.assertEqual(report['state'], 'success')
+        self.assertEqual(report['trusted_sha'], 'b' * 40)
+        self.assertEqual(report['queue_base_sha'], 'c' * 40)
+        self.assertEqual(report['head_sha'], self.head)
+
     def test_queue_checks_trusted_main_base_and_attaches_exact_candidate_status(self):
         self.merge_group()
         report = self.inspect()
@@ -330,7 +353,7 @@ class GuardTests(unittest.TestCase):
     def test_queue_wrong_base_ref_branch_or_moving_head_fails_closed(self):
         self.merge_group()
         original = deepcopy(self.event)
-        for field, value in (('base_ref', 'refs/heads/other'), ('base_sha', 'c' * 40),
+        for field, value in (('base_ref', 'refs/heads/other'), ('base_sha', 'not-a-sha'),
                              ('head_ref', 'refs/heads/feature'), ('head_sha', 'c' * 40)):
             self.event = deepcopy(original); self.event['merge_group'][field] = value
             with self.subTest(field=field), self.assertRaises(m.Rejected): self.inspect()
@@ -338,10 +361,58 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
         self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
 
+    def test_queue_rejects_unrelated_or_malformed_ancestry(self):
+        self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
+        invalid = [None, {}, {'status': 'diverged'}, {'behind_by': 1}, {'ahead_by': True},
+                   {'total_commits': 2}, {'base_commit': {'sha': 'd' * 40}},
+                   {'merge_base_commit': {'sha': 'd' * 40}}, {'url': 'https://example.invalid/compare'}]
+        for value in invalid:
+            with self.subTest(value=value):
+                self.compare_mutation = lambda data, value=value: ({**data, **value} if isinstance(value, dict) and value else value)
+                with self.assertRaises(m.Rejected): self.inspect()
+        # The predecessor is valid but the candidate is not its descendant.
+        self.compare_mutation = lambda data: {**data, 'status': 'behind'} if data['base_commit']['sha'] == 'c' * 40 else data
+        with self.assertRaises(m.Rejected): self.inspect()
+
+    def test_predecessor_controls_still_require_exact_head_admin_approval(self):
+        self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
+        path = 'scripts/ci/verdict.py'
+        self.changes[path] = (self.root / path).read_bytes() + b'\n# predecessor change\n'
+        self.refresh_candidate()
+        report = self.inspect()
+        self.assertEqual(report['state'], 'failure')
+        self.assertIn(path, report['changed_control_files'])
+        self.assertFalse(report['approval_requested'])
+
+    def test_predecessor_success_keeps_live_checks_last_and_request_budget(self):
+        self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            report = m.execute(self.event, self.env, self.api, self.root)
+        finally: os.chdir(previous)
+        self.assertEqual(report['state'], 'success')
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'success'])
+        self.assertTrue(self.calls[-2][0].endswith('/git/ref/heads/main'))
+        self.assertIn('/git/ref/heads/gh-readonly-queue/main/', self.calls[-3][0])
+        self.assertEqual(sum('/compare/' in endpoint for endpoint, _ in self.calls), 4)
+        self.assertLessEqual(len(self.calls), 32)
+
+    def test_queue_rechecks_current_main_last_before_status(self):
+        self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
+        self.advance_main = True
+        with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+        self.assertTrue(self.calls[-1][0].endswith('/git/ref/heads/main'))
+        self.assertLessEqual(len(self.calls), 32)
+
     def test_workflow_privilege_boundary_never_checks_out_pr_or_installs_dependencies(self):
         workflow = (ROOT / '.github/workflows/ci-inventory.yml').read_text()
         self.assertIn('pull_request_target:', workflow)
-        self.assertIn("ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.sha }}", workflow)
+        self.assertIn('ref: refs/heads/main', workflow)
+        self.assertIn('GUARD_TRUSTED_SHA="$(git rev-parse HEAD)"', workflow)
+        self.assertNotIn('github.event.merge_group.base_sha', workflow)
         self.assertIn('merge_group:', workflow)
         self.assertIn("if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'", workflow)
         self.assertIn('persist-credentials: false', workflow)

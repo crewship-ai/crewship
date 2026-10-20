@@ -245,10 +245,36 @@ def verify_pr(pr, repo, number, head):
         raise Rejected('PR repository, base, state or expected head changed')
 
 
-def verify_queue(api, repo, ref, head, trusted):
+def ancestor(api, repo, base, head):
+    if base == head:
+        return
+    # A later page omits the first page's changed-file patches; retain the
+    # existing response/request budgets and use only exact comparison metadata.
+    endpoint = 'repos/' + repo + '/compare/' + base + '...' + head
+    data = api(endpoint + '?per_page=1&page=2')
+    if not isinstance(data, dict):
+        raise Rejected('queue ancestry metadata is missing or malformed')
+    base_commit, merge_base = data.get('base_commit'), data.get('merge_base_commit')
+    if (data.get('url') != 'https://api.github.com/' + endpoint
+            or not isinstance(base_commit, dict) or base_commit.get('sha') != base
+            or not isinstance(merge_base, dict) or merge_base.get('sha') != base
+            or data.get('status') != 'ahead'
+            or type(data.get('behind_by')) is not int or data['behind_by'] != 0
+            or type(data.get('ahead_by')) is not int or data['ahead_by'] <= 0
+            or type(data.get('total_commits')) is not int or data['total_commits'] != data['ahead_by']):
+        raise Rejected('queue base and head must descend from the current trusted main')
+
+
+def verify_queue(api, repo, ref, head, trusted, queue_base=None):
     if (not isinstance(ref, str) or not re.fullmatch(r'refs/heads/gh-readonly-queue/main/[A-Za-z0-9_.-]{1,200}', ref)
             or '..' in ref):
         raise Rejected('queue target must be an explicit generated main queue branch')
+    if queue_base is not None:
+        ancestor(api, repo, trusted, queue_base)
+        ancestor(api, repo, queue_base, head)
+    else:
+        ancestor(api, repo, trusted, head)
+    # Live identities are checked last, including immediately before publishing.
     queue = api('repos/' + repo + '/git/ref/' + urllib.parse.quote(ref.removeprefix('refs/'), safe='/'))
     main = api('repos/' + repo + '/git/ref/heads/main')
     if (queue.get('ref') != ref or queue.get('object', {}).get('type') != 'commit'
@@ -265,14 +291,16 @@ def inspect(event, env, api, root=ROOT, on_target=None):
     if event['repository'].get('default_branch') != 'main' or not SHA.fullmatch(trusted):
         raise Rejected('trusted default-branch baseline is unavailable')
     kind = env.get('GITHUB_EVENT_NAME')
-    approved, number, queue_ref = False, None, None
+    approved, number, queue_ref, queue_base = False, None, None, None
     if kind == 'pull_request_target':
         number = event.get('number')
         head = event.get('pull_request', {}).get('head', {}).get('sha')
     elif kind == 'merge_group':
         group = event.get('merge_group', {})
-        if group.get('base_ref') != 'refs/heads/main' or group.get('base_sha') != trusted:
-            raise Rejected('merge group must use the trusted main base')
+        queue_base = group.get('base_sha')
+        if (group.get('base_ref') != 'refs/heads/main'
+                or not isinstance(queue_base, str) or not SHA.fullmatch(queue_base)):
+            raise Rejected('merge group must identify its main queue base')
         head, queue_ref = group.get('head_sha'), group.get('head_ref')
     elif kind == 'workflow_dispatch':
         if env.get('GITHUB_REF') != 'refs/heads/main' or trusted != env.get('GITHUB_SHA'):
@@ -293,7 +321,7 @@ def inspect(event, env, api, root=ROOT, on_target=None):
     if not isinstance(head, str) or not SHA.fullmatch(head):
         raise Rejected('missing or invalid candidate head identity')
     if queue_ref is not None:
-        verify_queue(api, repo, queue_ref, head, trusted)
+        verify_queue(api, repo, queue_ref, head, trusted, queue_base)
         head_repo = repo
     else:
         if type(number) is not int or number <= 0:
@@ -348,7 +376,7 @@ def inspect(event, env, api, root=ROOT, on_target=None):
             changed.append(path)
     candidate_errors = candidate_manifest_errors(snapshot[MANIFEST], snapshot)
     return {'repository': repo, 'pr_number': number, 'head_sha': head,
-            'queue_ref': queue_ref, 'trusted_sha': trusted, 'diff_url': 'https://github.com/' + repo + '/compare/' + trusted + '...' + head, 'event': kind, 'actor': env.get('GITHUB_ACTOR'),
+            'queue_ref': queue_ref, 'queue_base_sha': queue_base, 'trusted_sha': trusted, 'diff_url': 'https://github.com/' + repo + '/compare/' + trusted + '...' + head, 'event': kind, 'actor': env.get('GITHUB_ACTOR'),
             'triggering_actor': env.get('GITHUB_TRIGGERING_ACTOR'), 'approval_requested': approved,
             'changed_control_files': changed, 'baseline': baseline, 'candidate': candidate,
             'candidate_inventory_errors': candidate_errors,
@@ -367,7 +395,7 @@ def execute(event, env, api, root=ROOT):
     report = inspect(event, env, api, root, on_target=pending)
     # Recheck live candidate identity immediately before status publication.
     if report['queue_ref']:
-        verify_queue(api, report['repository'], report['queue_ref'], report['head_sha'], report['trusted_sha'])
+        verify_queue(api, report['repository'], report['queue_ref'], report['head_sha'], report['trusted_sha'], report['queue_base_sha'])
     else:
         latest = api('repos/' + report['repository'] + '/pulls/' + str(report['pr_number']))
         verify_pr(latest, report['repository'], report['pr_number'], report['head_sha'])
