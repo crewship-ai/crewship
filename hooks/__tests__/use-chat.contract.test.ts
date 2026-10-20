@@ -56,6 +56,65 @@ describe("canonical live ingestion", () => {
     expect(hook.result.current.isStreaming).toBe(false)
     expect(hook.result.current.turns[0].turnState).toBe("interrupted")
   })
+  it("shows Stopping until the terminal state and sends one cancel per stop", () => {
+    const hook = setup()
+    send(envelope(1))
+    socket.send.mockClear()
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.stopGeneration())
+    expect(socket.send.mock.calls.filter(([frame]) => frame.type === "cancel_message")).toHaveLength(1)
+    expect(hook.result.current.stopping).toBe(true)
+    send({ ...envelope(2), type: "turn", part_id: undefined, payload: { turn: { state: "cancelled" } } })
+    expect(hook.result.current.stopping).toBe(false)
+    expect(hook.result.current.turns[0].parts[0].content).toBe("same")
+  })
+  it("keeps a stop sent before its turn's first event pending, and the next turn can stop again", () => {
+    const hook = setup()
+    const turnEvent = (seq: number, turn: string, state: string) => ({ ...envelope(seq), turn_id: turn, run_id: `run-${turn}`, type: "turn", part_id: undefined, payload: { turn: { state } } })
+    const text = (seq: number, turn: string) => ({ ...envelope(seq), turn_id: turn, run_id: `run-${turn}`, part_id: `part-${turn}` })
+    send(text(1, "t1")); send(turnEvent(2, "t1", "completed"))
+    const cancels = () => socket.send.mock.calls.filter(([frame]) => frame.type === "cancel_message").length
+    socket.send.mockClear()
+    act(() => { hook.result.current.sendMessage("second") })
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.stopGeneration())
+    expect(cancels()).toBe(1)
+    expect(hook.result.current.stopping).toBe(true)
+    send(text(1, "t2"))
+    expect(hook.result.current.turns.at(-1)?.cancelRequested).toBe(true)
+    send(turnEvent(2, "t2", "cancelled"))
+    expect(hook.result.current.stopping).toBe(false)
+    act(() => { hook.result.current.sendMessage("third") })
+    send(text(1, "t3"))
+    act(() => hook.result.current.stopGeneration())
+    expect(cancels()).toBe(2)
+  })
+  it("a history reload while a stop is pending does not re-arm Stop", () => {
+    const hook = setup()
+    send(envelope(1))
+    socket.send.mockClear()
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.loadHistory([{
+      id: "message-1", role: "assistant", content: "same", timestamp: new Date(), runId: "run-1",
+      checkpoint: { version: 1, run_id: "run-1", turn_id: "turn-1", through_seq: 1, turn_state: "running" },
+      parts: [{ id: "part-a", type: "text", content: "same", run_id: "run-1", turn_id: "turn-1", first_seq: 1, last_seq: 1 }],
+    }]))
+    expect(hook.result.current.isStreaming).toBe(true)
+    expect(hook.result.current.stopping).toBe(true)
+    act(() => hook.result.current.stopGeneration())
+    expect(socket.send.mock.calls.filter(([frame]) => frame.type === "cancel_message")).toHaveLength(1)
+  })
+  it("a history reload that shows nothing running ends a pending stop", () => {
+    const hook = setup()
+    send(envelope(1))
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.loadHistory([{ id: "message-1", role: "assistant", content: "same", timestamp: new Date(), runId: "run-1",
+      checkpoint: { version: 1, run_id: "run-1", turn_id: "turn-1", through_seq: 2, turn_state: "cancelled" },
+      parts: [{ id: "part-a", type: "text", content: "same", run_id: "run-1", turn_id: "turn-1", first_seq: 1, last_seq: 1 }] }]))
+    expect(hook.result.current.stopping).toBe(false)
+    send({ ...envelope(1), turn_id: "turn-2", run_id: "run-2", part_id: "part-2" })
+    expect(hook.result.current.turns.at(-1)?.cancelRequested).toBeUndefined()
+  })
   it("requests authorized history for a gap without skipping to the live tail", () => {
     const hook = setup()
     send(envelope(2, "second"))

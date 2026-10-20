@@ -198,6 +198,28 @@ describe("AssistantTurn dispatch", () => {
     })
   })
 
+  it("says Stopping while a stop waits for the server, without hiding the partial reply", () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Half an answer" })], { isStreaming: true, cancelRequested: true, turnState: "running" })} onCopy={onCopy} onFileClick={onFileClick} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Stopping…")
+    expect(screen.getByTestId("message-response")).toHaveTextContent("Half an answer")
+  })
+  it.each([
+    ["cancelled", "Stopped. The reply above is partial."],
+    ["interrupted", "Interrupted. The reply above is partial."],
+    ["failed", "The run failed. The reply above may be incomplete."],
+  ] as const)("names a %s turn in words", (turnState, text) => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Half" })], { turnState })} onCopy={onCopy} onFileClick={onFileClick} />)
+    expect(screen.getByRole("status")).toHaveTextContent(text)
+  })
+  it("does not call a reply partial when the turn ended before any output", () => {
+    render(<AssistantTurn turn={turn([], { turnState: "cancelled" })} onCopy={onCopy} onFileClick={onFileClick} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped before any reply.")
+  })
+  it("adds no note to a completed turn", () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Done" })], { turnState: "completed" })} onCopy={onCopy} onFileClick={onFileClick} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
   it("renders status part via StatusIndicator", () => {
     render(<AssistantTurn turn={turn([part({ type: "status", content: "Thinking..." })])} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.getByTestId("status-indicator").textContent).toBe("Thinking...")

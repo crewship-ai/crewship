@@ -52,6 +52,8 @@ interface ChatComposerProps {
    *  Send is offered although the socket is not open. */
   draftSendable?: boolean
   stopGeneration: () => void
+  /** Stop was sent and the server has not confirmed it yet. */
+  stopping?: boolean
   /** Make sure this session's `chats` row exists, and report whether it does.
    *  `false` means the message must not go out — see useMessageSubmit.
    *
@@ -147,6 +149,7 @@ export function ChatComposer({
   connectionStatus,
   draftSendable = false,
   stopGeneration,
+  stopping = false,
   ensureSession,
   ensureSessionForUpload,
   sendMessage,
@@ -569,7 +572,7 @@ export function ChatComposer({
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
                 {creationControl}
               </div>
-              <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} onStop={stopGeneration} />
+              <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
             </PromptInputFooter>
           </PromptInput>
         </AttachmentZone>
@@ -603,7 +606,7 @@ export function ChatComposer({
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
               {creationControl}
             </div>
-            <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} onStop={stopGeneration} />
+            <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
           </PromptInputFooter>
         </PromptInput>
       </AttachmentZone>
