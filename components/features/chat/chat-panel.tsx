@@ -27,6 +27,7 @@ import {
   ConversationScrollButton,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation"
+import { MessageAnchorRelease } from "./message-anchor-release"
 import { renderAskTemplate } from "@/lib/ask-template"
 import { playSoundOnce } from "@/lib/notification-sound-coordinator"
 import { useChat, type ChatTurn, type HistoryPart } from "@/hooks/use-chat"
@@ -1344,6 +1345,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     />
   ) : (
     <Conversation>
+      <MessageAnchorRelease sessionId={sessionId} sendNonce={pinNonce} />
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
           agentMeta && canChat ? (

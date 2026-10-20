@@ -791,3 +791,24 @@ Legacy proxy traffic under a hard budget requires the restricted broker even
 when a balance remains; preflight reports that existing constraint.
 
 Changing conversations clears the previous transcript before the new history is loaded, including when the current account and workspace stay the same. Responses from the previous conversation cannot repopulate the new view.
+
+## Sidebar views
+
+Behind `NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS=true` (build time, default off) the chat
+sidebar shows view chips: **All**, **Unreads** and **Agents running**.
+"Agents running" lists agents whose status is running; it does not mean the
+chat you have open is running. The sidebar search applies inside a view; the
+filter menu applies to **All** only. Favorites stay in their own section, so a
+favorite can appear both there and in a view. Your open chat stays in the list,
+marked "Open chat", even when the view would otherwise filter it out; it is not
+counted. An agent row stays disabled until its sessions have loaded, and opens
+the session that has the unread messages.
+
+With the same flag, lists do not move while your pointer or keyboard focus is
+on them: background updates change rows in place, and a **Refresh** button
+appears when the order changed. Your own actions (typing in search, starring,
+opening a row) apply immediately.
+
+Mentions, Threads, Saved, Drafts, Waiting for you and Review are previews on
+sample data, enabled for development only with
+`NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS=true`.

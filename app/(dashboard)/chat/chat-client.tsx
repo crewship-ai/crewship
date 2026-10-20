@@ -40,6 +40,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { parseSessionTimestamp } from "@/components/features/chat/session-sort"
 import { randomUUIDv4 } from "@/lib/random-id"
+import { useMessageAnchor } from "@/hooks/use-message-anchor"
 
 /**
  * The roster row this page needs, which is wider than the one the column does.
@@ -228,6 +229,7 @@ function ChatClientBody() {
   useEffect(() => { setDrawerOpen(false) }, [unified?.selectionVersion])
   const [agentSlug, setAgentSlug] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  useMessageAnchor(sessionId)
   const [draftConversation, setDraftConversation] = useState<{ agent: ChatTreeAgent; id: string } | null>(null)
 
   /**

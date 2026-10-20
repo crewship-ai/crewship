@@ -15,6 +15,8 @@ import { CreateConversation, ConversationThread } from "./workspace-conversation
 import { ConversationIcon, conversationTitle } from "./conversation-identity"
 import { DirectMessagePicker } from "./direct-message-picker"
 import { FavoriteButton } from "@/components/features/chat/chat-favorites"
+import { useStableOrder } from "@/components/features/chat/use-stable-order"
+import { chatSidebarViews } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 
 type Facet = "all" | "agents" | "people" | "rooms"
@@ -136,16 +138,27 @@ export function filterUnifiedConversationRows(
   })
 }
 
+/** True for keyboard focus only; a click focus must not freeze the list. */
+function isKeyboardFocus(target: EventTarget): boolean {
+  try { return target instanceof Element && target.matches(":focus-visible") } catch { return false }
+}
+
 export function UnifiedConversationSection({ query, onSelect, section, showLoadMore = true, favorites, onFavorite, favoritesOnly = false, hideEmpty = false, extraRooms = [] }: { extraRooms?: WorkspaceConversation[]; favorites?: string[]; onFavorite?: (id: string) => void; favoritesOnly?: boolean; hideEmpty?: boolean; query: string; onSelect?: () => void; section?: "people" | "rooms"; showLoadMore?: boolean }) {
   const [showAll, setShowAll] = useState(false)
+  const [hold, setHold] = useState(false)
   const chat = useUnifiedConversations()
+  const live = chat ? filterUnifiedConversationRows([...(chat.list.data?.pages.flatMap((page) => page.conversations) ?? []), ...extraRooms], query, section, chat.facet).filter((room) => !favorites || favorites.includes(`room:${room.id}`) === favoritesOnly) : []
+  // Live (background) reordering must not move a row out from under the pointer or keyboard focus. The user's own
+  // actions (search, facet, favourite, selecting a row) reset the snapshot instead; see useStableOrder.
+  const resetKey = JSON.stringify([query, section, favorites, favoritesOnly, chat?.facet, chat?.selectedId])
+  const stable = useStableOrder(live, (room) => room.id, hold && chatSidebarViews(), resetKey)
   if (!chat || (!section && chat.facet === "agents")) return null
-  const rows = filterUnifiedConversationRows([...(chat.list.data?.pages.flatMap((page) => page.conversations) ?? []), ...extraRooms], query, section, chat.facet).filter((room) => !favorites || favorites.includes(`room:${room.id}`) === favoritesOnly)
+  const rows = stable.items
   const compact = !!section && !favoritesOnly && !query.trim() && !showAll && rows.length > 4
   const firstRows = rows.slice(0, 4)
   const selected = rows.find((room) => room.id === chat.selectedId)
   const visibleRows = compact ? selected && !firstRows.includes(selected) ? [...firstRows.slice(0, 3), selected] : firstRows : rows
-  return <section aria-label={section === "people" ? "Direct messages" : section === "rooms" ? "Groups and channels" : "People and shared conversations"} className={section ? "pb-1" : "border-b pb-2"}>{!section && <h3 className="px-3 py-2 text-xs text-muted-foreground">People, groups &amp; channels</h3>}{chat.list.isPending && <p className="px-3 py-2 text-xs">Loading conversations…</p>}{chat.list.error && <div role="alert" className="p-3 text-xs">Unable to load shared conversations.<Button type="button" variant="ghost" onClick={() => { void chat.list.refetch() }}>Retry</Button></div>}{!chat.list.error && visibleRows.map((room) => {
+  return <section onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={(event) => { if (isKeyboardFocus(event.target)) setHold(true) }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setHold(false) }} aria-label={section === "people" ? "Direct messages" : section === "rooms" ? "Groups and channels" : "People and shared conversations"} className={section ? "pb-1" : "border-b pb-2"}>{!section && <h3 className="px-3 py-2 text-xs text-muted-foreground">People, groups &amp; channels</h3>}{stable.pending && <div role="status" className="flex items-center gap-2 px-3 py-1 text-[11px] text-muted-foreground">This list changed.<Button type="button" variant="ghost" size="sm" onClick={stable.refresh}>Refresh</Button></div>}{chat.list.isPending && <p className="px-3 py-2 text-xs">Loading conversations…</p>}{chat.list.error && <div role="alert" className="p-3 text-xs">Unable to load shared conversations.<Button type="button" variant="ghost" onClick={() => { void chat.list.refetch() }}>Retry</Button></div>}{!chat.list.error && visibleRows.map((room) => {
     const subtitle = room.is_direct ? "Direct message" : room.kind === "channel" ? "Workspace channel" : "Group"
     return <div key={room.id} className="flex min-w-0 items-center"><button type="button" onClick={() => { chat.select(room.id); onSelect?.() }} aria-current={chat.selectedId === room.id ? "page" : undefined} className={cn("kit-tap relative mx-1 flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-xs transition-colors hover:bg-foreground/[0.04]", chat.selectedId === room.id && "bg-primary/10 before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary")}>
       <ConversationIcon conversation={room} className="size-6 shrink-0" /><span className="min-w-0 flex-1 truncate">{conversationTitle(room)}<span className="sr-only"> {subtitle}</span></span>{room.unread_count > 0 && <span className="text-[10px] tabular-nums text-primary">{room.unread_count}</span>}

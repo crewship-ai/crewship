@@ -47,3 +47,31 @@ export function chatArtifactContext(): boolean {
 export function artifactCopyMove(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACT_COPY_MOVE === "true"
 }
+
+/**
+ * Chat search "Files" tab (CH-25). There is no file-search endpoint yet; with
+ * the flag on, the tab runs against a fixture client so the states can be
+ * reviewed. Default OFF: the tab then says plainly that file search is not
+ * available.
+ */
+export function chatSearchFilesFixtures(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES === "true"
+}
+
+/**
+ * Chat sidebar smart sections without a data source yet (CH-26: Mentions,
+ * Threads, Saved, Drafts, Waiting for you, Review). Default OFF; with the flag
+ * on they render from fixtures.
+ */
+export function chatSidebarSmartSections(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS === "true"
+}
+
+/**
+ * Chat sidebar view chips (Unreads, Agents running) and the "hold rows still
+ * under the pointer" behaviour (CH-26). Both change live sidebar behaviour, so
+ * default OFF.
+ */
+export function chatSidebarViews(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS === "true"
+}
