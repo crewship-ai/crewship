@@ -13,7 +13,7 @@ overrides:
   hono: '>=4.12.25'
   esbuild: '>=0.28.1'
   '@babel/core': '>=7.29.6'
-  postcss: ^8.5.30
+  postcss: ^8.5.31
   uuid: '>=11.1.1'
   valibot: '>=1.4.2'
   sharp: '>=0.35.4'
@@ -482,7 +482,7 @@ importers:
         specifier: ^21.0.4
         version: 21.0.4
       postcss:
-        specifier: ^8.5.30
+        specifier: ^8.5.31
         version: 8.5.31
       prisma:
         specifier: ^7.10.1
