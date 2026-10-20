@@ -490,8 +490,12 @@ func TestProviderLoginRefresher_StaleResultDoesNotReplaceNewLogin(t *testing.T) 
 			if err := r.db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = ?`, id).Scan(&access); err != nil {
 				t.Fatal(err)
 			}
-			if access != oldAccess {
-				t.Fatal("stale refresh replaced the access token")
+			wantAccess := oldAccess
+			if revoked {
+				wantAccess = "" // Retirement erases the secret; stale refresh must not restore it.
+			}
+			if access != wantAccess {
+				t.Fatal("stale refresh changed the current or erased access token")
 			}
 		})
 	}

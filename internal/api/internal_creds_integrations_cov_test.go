@@ -730,12 +730,12 @@ func TestCovICIDeleteCrewIntegration_RetiresOAuthCredential(t *testing.T) {
 	if bindCount != 0 {
 		t.Errorf("binding should be deleted, count = %d", bindCount)
 	}
-	// Retirement preserves the identity, ciphertext and forensic history.
+	// Retirement erases ciphertext while preserving identity and forensic history.
 	var deleted, cipher, metadata string
 	if err := db.QueryRow(`SELECT c.deleted_at,c.encrypted_value,a.metadata_json FROM credentials c JOIN credential_audit a ON a.credential_id=c.id WHERE c.id='cred-oauth' AND a.id='covici-history'`).Scan(&deleted, &cipher, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if deleted == "" || cipher != beforeCipher || metadata != `{"retained":true}` {
+	if deleted == "" || beforeCipher == "" || cipher != "" || metadata != `{"retained":true}` {
 		t.Fatal("retirement changed or erased credential history")
 	}
 	for _, table := range []string{"agent_credentials", "credential_bindings", "credential_crews"} {
