@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { Credential } from "../types"
 import { isCredentialRef, deriveCredentialName } from "../lib/credential-helpers"
 import { OAuthForm } from "./oauth-form"

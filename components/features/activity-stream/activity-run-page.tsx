@@ -22,7 +22,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   CircleDot,
   ExternalLink,
@@ -215,7 +215,7 @@ function RunPage({
         <header className="flex flex-wrap items-start gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded border border-foreground/[0.08] px-1.5 py-px text-micro font-semibold text-muted-foreground">
                 <ScrollText className="h-3 w-3" /> Routine run
               </span>
               <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", RUN_TONE_CLASS[tone])}>
@@ -457,14 +457,14 @@ function RunPage({
             </Appear>
           )}
 
-          {/* The Journal is admin-only (lib/nav-sections), so is the way in. */}
+          {/* The technical log is admin-only (lib/journal-redirect), so is the way in. */}
           {roleAtLeast(role, "ADMIN") && (
             <Appear order={6}>
               <Link
-                href={`/journal?trace_id=${encodeURIComponent(runId)}`}
+                href={`/activity?section=log&trace_id=${encodeURIComponent(runId)}`}
                 className="inline-flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                {eventCount != null ? `${eventCount} raw events` : "Raw events"} · Journal
+                {eventCount != null ? `${eventCount} raw events` : "Raw events"} · Technical log
                 <ExternalLink className="h-3 w-3" />
               </Link>
             </Appear>

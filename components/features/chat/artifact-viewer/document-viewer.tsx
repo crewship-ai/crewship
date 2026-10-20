@@ -68,7 +68,7 @@ export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, la
   >
     <header className="flex shrink-0 items-center gap-2 border-b p-3">
       <Button ref={closeButton} type="button" variant="ghost" size={mobile ? "default" : "icon"}
-        className="coarse:min-h-12 coarse:min-w-12" aria-label={mobile ? "Back to chat" : "Close document preview"} onClick={close}>
+        className="coarse:min-h-[44px] coarse:min-w-[44px]" aria-label={mobile ? "Back to chat" : "Close document preview"} onClick={close}>
         <CloseIcon className="size-4" aria-hidden />{mobile && <span>Back to chat</span>}
       </Button>
       <div className="min-w-0 flex-1">
@@ -76,7 +76,7 @@ export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, la
         <p className="text-xs text-muted-foreground">Current saved document</p>
         {headerExtra}
       </div>
-      {!mobile && <Button type="button" variant="ghost" size="icon" className="coarse:min-h-12 coarse:min-w-12"
+      {!mobile && <Button type="button" variant="ghost" size="icon" className="coarse:min-h-[44px] coarse:min-w-[44px]"
         aria-label={expanded ? "Show chat alongside" : "Expand document preview"} aria-pressed={expanded}
         onClick={() => onExpandedChange(!expanded)}>
         {expanded ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}

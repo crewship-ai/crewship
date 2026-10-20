@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 
@@ -16,6 +22,37 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
+
+// Record only backup warning names and error types, never arbitrary attributes,
+// request bodies or credential-bearing CLI output.
+type backupPlanWarningLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (*backupPlanWarningLog) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= slog.LevelWarn
+}
+func (l *backupPlanWarningLog) Handle(_ context.Context, r slog.Record) error {
+	if !strings.HasPrefix(r.Message, "backup ") && !strings.HasPrefix(r.Message, "backup scheduler:") {
+		return nil
+	}
+	line := r.Message
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "error" {
+			line += fmt.Sprintf(" error_type=%T", a.Value.Any())
+		}
+		return true
+	})
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.lines) < 32 {
+		l.lines = append(l.lines, line)
+	}
+	return nil
+}
+func (l *backupPlanWarningLog) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *backupPlanWarningLog) WithGroup(string) slog.Handler      { return l }
 
 // A real CLI process against a real router: backup plans, a manual run that
 // the server finishes after the CLI has returned, the run history and the
@@ -47,7 +84,8 @@ func TestAcceptance_AdminInstanceBackupPlans(t *testing.T) {
 	}
 	key := id.Recipient().String()
 
-	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default())
+	warnings := &backupPlanWarningLog{}
+	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.New(warnings))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +97,35 @@ func TestAcceptance_AdminInstanceBackupPlans(t *testing.T) {
 	}
 	binary := buildCrewshipBinary(t)
 	run := func(args ...string) (string, error) {
-		cmd := exec.Command(binary, args...)
+		// Leave time for diagnostics before the package alarm, including on a
+		// loaded CI host. SIGQUIT targets only this known CLI child.
+		budget := 2 * time.Minute
+		if deadline, ok := t.Deadline(); ok && time.Until(deadline)-15*time.Second < budget {
+			budget = max(time.Millisecond, time.Until(deadline)-15*time.Second)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), budget)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, binary, args...)
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGQUIT) }
+		cmd.WaitDelay = 5 * time.Second
 		cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
 		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			// Go's SIGQUIT dump has function/file frames. Retain those and
+			// goroutine states only; exclude arbitrary child output/registers.
+			stack := false
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(line, "goroutine ") {
+					stack = true
+					t.Log(line)
+					continue
+				}
+				if stack && (strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "created by ") || strings.HasSuffix(line, ")")) {
+					t.Log(line)
+				}
+			}
+			return "", fmt.Errorf("CLI child deadline after %s: %w", budget, ctx.Err())
+		}
 		return string(out), err
 	}
 	must := func(args ...string) string {
@@ -154,7 +218,65 @@ func TestAcceptance_AdminInstanceBackupPlans(t *testing.T) {
 
 	// The same run command with --wait: an ad-hoc workspace run, followed
 	// to the end through GET …/run/{id}, then read back with run-status.
-	raw = must(cli("run", "--scope", "workspaces", "--workspace", "lab", "--recipient", key, "--wait", "--format", "json")...)
+	// Read only this fixture's workspace through the normal API. Unknown
+	// network/JSON results are reported by class/status, never by raw body.
+	type diagnosticRun struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Phase  string `json:"phase"`
+	}
+	readRuns := func() ([]diagnosticRun, error) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/admin/instance/backups/runs?scope=workspaces&ws=lab", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Workspace-ID", "bp-people")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Logf("backup diagnostic HTTP status=%d", resp.StatusCode)
+			return nil, fmt.Errorf("diagnostic HTTP %d", resp.StatusCode)
+		}
+		var result struct {
+			Data []diagnosticRun `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, err
+		}
+		return result.Data, nil
+	}
+	priorRuns, err := readRuns()
+	if err != nil {
+		t.Fatalf("read prior fixture runs: %T", err)
+	}
+	priorIDs := make(map[string]bool)
+	for _, r := range priorRuns {
+		priorIDs[r.ID] = true
+	}
+	raw, err = run(cli("run", "--scope", "workspaces", "--workspace", "lab", "--recipient", key, "--wait", "--timeout", "90s", "--format", "json")...)
+	if err != nil {
+		current, diagnosticErr := readRuns()
+		if diagnosticErr != nil {
+			t.Logf("read own backup diagnostics: %T", diagnosticErr)
+		}
+		for _, r := range current {
+			if !priorIDs[r.ID] {
+				t.Logf("own backup run=%s phase=%s status=%s", r.ID, r.Phase, r.Status)
+			}
+		}
+		warnings.mu.Lock()
+		for _, warning := range warnings.lines {
+			t.Log(warning)
+		}
+		warnings.mu.Unlock()
+		t.Fatalf("workspace backup --wait failed: %v", err)
+	}
 	var waited []struct {
 		ID            string  `json:"id"`
 		Status        string  `json:"status"`

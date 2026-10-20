@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { ConfirmHost } from "@/components/ui/confirm-host"
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react"
 
 // =============================================================================
@@ -215,7 +216,7 @@ describe("ArtifactPane — saving", () => {
     // (and offering to save) the first tab's bytes under the second's path.
     apiFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
 
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
@@ -370,18 +371,20 @@ describe("ArtifactPane — document and table editing", () => {
 })
 
 describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
-  const confirmMock = vi.fn()
-  beforeEach(() => {
-    window.confirm = confirmMock as unknown as typeof window.confirm
-    confirmMock.mockReset()
-  })
+  // The question is the in-page dialog; answer it by its buttons.
+  const discardDialog = () => screen.findByRole("alertdialog", { name: "Discard unsaved artifact changes?" })
+  const answer = async (label: "Discard" | "Keep editing") => {
+    await discardDialog()
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  }
   const openEditorWithEdits = async () => {
     apiFetch.mockImplementation((url: string) =>
       String(url).includes("/files/download")
         ? response({ body: "draft\n", contentType: "application/octet-stream" })
         : response({ body: "{}", contentType: "application/json" }),
     )
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     openTab("t2", "workspace/two.md")
     useArtifactStore.setState({ activeId: "t1" })
@@ -398,40 +401,38 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
 
   it("keeps the current tab when a dirty switch is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    await answer("Keep editing")
 
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
     expect(useArtifactStore.getState().activeId).toBe("t1")
     expect(screen.getByTestId("editor-code")).toHaveTextContent("draft")
   })
 
   it("switches tabs once the discard is confirmed", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(true)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    await answer("Discard")
 
-    expect(useArtifactStore.getState().activeId).toBe("t2")
+    await waitFor(() => expect(useArtifactStore.getState().activeId).toBe("t2"))
   })
 
   it("keeps a dirty tab open when its close is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Close one.md" }))
+    await answer("Keep editing")
 
     expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
   })
 
   it("asks before hiding the pane with unsaved changes", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
+    await answer("Keep editing")
 
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
     expect(useArtifactStore.getState().open).toBe(true)
   })
 })

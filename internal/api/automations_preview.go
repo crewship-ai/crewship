@@ -84,6 +84,9 @@ func (h *AutomationHandler) PreviewMatch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	for i := range entries {
+		entries[i] = journal.PublicFolderMembership(entries[i])
+	}
 	res := automation.Preview(matcher, eventType, entries)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"event_type":    eventType,

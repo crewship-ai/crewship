@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { paletteDestinations } from "@/lib/palette-destinations"
+import { parseIntegrationsRoute, SPACE_VIEWS } from "@/components/features/integrations/spaces"
 import { settingsCardSlug } from "@/components/features/settings/shared"
 
 const owner = paletteDestinations({ role: "OWNER", isInstanceAdmin: true })
@@ -14,14 +15,20 @@ describe("paletteDestinations", () => {
     for (const d of owner) expect(d.href, d.id).toMatch(/^\//)
   })
 
+  it("opens the workspace Calendar, not the Routines tab, for every member", () => {
+    const calendar = member.find((d) => d.id === "calendar")
+    expect(calendar).toMatchObject({ title: "Calendar", href: "/calendar" })
+    expect(owner.some((d) => d.href.includes("tab=calendar"))).toBe(false)
+  })
+
   it("keeps what a role cannot open out of its palette", () => {
     // Danger zone is the owner's, Spend and invites are ADMIN+, Access &
     // Secrets is MANAGER+, the Admin console is instance administrators'.
-    for (const id of ["settings:general:danger-zone", "journal:spend", "act:invite", "settings:access-secrets:value-reveal", "admin:backups", "settings:audit"]) {
+    for (const id of ["settings:general:danger-zone", "journal:spend", "journal:timeline", "journal:runs", "act:invite", "settings:access-secrets:value-reveal", "admin:backups", "settings:audit"]) {
       expect(ids(owner), id).toContain(id)
       expect(ids(member), id).not.toContain(id)
     }
-    expect(ids(member)).toContain("settings:profile:sessions-and-access")
+    expect(ids(member)).toContain("settings:sessions:cli-tokens")
     expect(ids(member)).toContain("act:issue")
   })
 
@@ -37,15 +44,14 @@ describe("paletteDestinations", () => {
     }
   })
 
-  it("only points Integrations rows at sections the page reads", () => {
-    const sections: Record<string, string[]> = {
-      notifications: ["connections", "preferences", "deliveries"],
-      incoming: ["endpoints", "routine", "agent", "page"],
-      tools: ["catalog", "accounts", "agents", "tools", "triggers", "mcp", "crew-tools"],
-    }
+  it("only points Integrations rows at spaces and views the page reads", () => {
     for (const d of owner.filter((x) => x.href.startsWith("/integrations"))) {
-      const q = new URLSearchParams(d.href.split("?")[1])
-      expect(sections[q.get("tab") ?? ""], d.id).toContain(q.get("section"))
+      const search = "?" + (d.href.split("?")[1] ?? "")
+      const q = new URLSearchParams(search)
+      const space = q.get("space") as keyof typeof SPACE_VIEWS
+      expect(Object.keys(SPACE_VIEWS), d.id).toContain(space)
+      if (q.get("view")) expect(SPACE_VIEWS[space] as readonly string[], d.id).toContain(q.get("view"))
+      expect(parseIntegrationsRoute(search).space, d.id).toBe(space)
     }
   })
 })

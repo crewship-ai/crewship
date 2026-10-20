@@ -8,9 +8,19 @@ import { documentRequest } from "@/hooks/use-page-document"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { verifyInitialization } from "@/lib/documents/contracts"
-import { Button } from "@/components/ui/button"
+import { FilePlus2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import {
+  CREATE_SURFACE_INPUT,
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+} from "@/components/layout/create-surface"
+
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:string;onClose:()=>void;onCreated:(slug:string)=>void}) {
   const [name,setName]=useState("")
@@ -50,14 +60,19 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
     await client.invalidateQueries({queryKey:pagesKeys.all(workspaceId)})
     onCreated(saved);onClose()
   }})
-  return <Dialog open onOpenChange={open=>{if(!open && !create.isPending)onClose()}}><DialogContent className="touch-form">
-    <DialogHeader><DialogTitle>New Doc</DialogTitle><DialogDescription>Create a private document owned by you.</DialogDescription></DialogHeader>
-    <form className="space-y-4" onSubmit={event=>{event.preventDefault();create.mutate()}}>
-      <div className="space-y-2"><label htmlFor="document-name">Name</label><Input id="document-name" autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></div>
-      <div className="space-y-2"><label htmlFor="document-slug">Page address</label><Input id="document-slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" disabled={frozen || create.isPending} value={slug} onChange={event=>setSlug(event.target.value)} /><p className="text-xs text-muted-foreground">Lowercase letters, numbers and hyphens.</p></div>
-      {create.error && <p role="alert">{create.error.message}</p>}
-      {availability.data!==true && <p role="status">Document creation is unavailable.</p>}
-      <DialogFooter><Button type="button" variant="ghost" disabled={create.isPending} onClick={onClose}>Cancel</Button><Button type="submit" disabled={!allowed || availability.data!==true || create.isPending || !name.trim() || !slug}>{create.isPending?"Creating…":intent.current?.pageId?"Retry initialization":"Create Doc"}</Button></DialogFooter>
-    </form>
-  </DialogContent></Dialog>
+  const canSubmit=allowed && availability.data===true && !create.isPending && Boolean(name.trim()) && SLUG.test(slug)
+  const submit=()=>{if(canSubmit)create.mutate()}
+  // The kit's create surface (dialogs-through-kit guard): Esc, the overlay
+  // and the header close all go through onOpenChange, which a pending create
+  // refuses so the original intent is not lost mid-request.
+  return <CreateSurface open size="sm" onOpenChange={open=>{if(!open && !create.isPending)onClose()}} onSubmit={submit} className="touch-form">
+    <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title="New Doc" description="Create a private document owned by you." onClose={create.isPending ? undefined : onClose} />
+    <CreateSurfaceBody className="flex flex-col gap-3">
+      <CreateSurfaceField label="Name" htmlFor="document-name"><Input id="document-name" className={CREATE_SURFACE_INPUT} autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></CreateSurfaceField>
+      <CreateSurfaceField label="Page address" htmlFor="document-slug" hint="Lowercase letters, numbers and hyphens."><Input id="document-slug" className={CREATE_SURFACE_INPUT} required pattern="[a-z0-9]+(-[a-z0-9]+)*" disabled={frozen || create.isPending} value={slug} onChange={event=>setSlug(event.target.value)} /></CreateSurfaceField>
+      {availability.data!==true && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
+    </CreateSurfaceBody>
+    <CreateSurfaceRefusal message={create.error ? create.error.message : null} />
+    <CreateSurfaceFooter onCancel={create.isPending ? undefined : onClose} primaryLabel={create.isPending?"Creating…":intent.current?.pageId?"Retry initialization":"Create Doc"} primaryDisabled={!canSubmit} busy={create.isPending} onPrimary={submit} />
+  </CreateSurface>
 }

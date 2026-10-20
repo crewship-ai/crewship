@@ -1,0 +1,43 @@
+---
+title: "Theme packs"
+description: "Afterglow and the theme-pack registry: how a pack is defined, what it may and may not change, and how to add the next one."
+icon: "palette"
+stability: experimental
+tag: Experimental
+---
+
+# Theme packs
+
+A theme pack is a complete look that ships with Crewship. Packs appear in **Settings → Appearance → Style** under their category (the first is **Gaming**), can be picked per person, and can be set as the workspace default look. They use the same mechanism as the built-in styles, so Harbor and every other style keep working unchanged.
+
+## Afterglow
+
+Afterglow is a dark theme on a night-indigo ground with a sunset gradient and neon pink. The primary action is amber with dark ink, and page titles and big numbers use Big Shoulders Display in capitals. Everything else is set in Manrope. Both fonts are bundled with the app and the browser downloads them only while Afterglow is in use.
+
+- **Dark only.** A person on Light or System who picks Afterglow is moved to Dark, and Light and System are off while it is the style (the page says why and offers *Switch to Harbor*). Someone who is on Light in a workspace whose default is Afterglow sees Harbor until they switch to Dark.
+- **The Crewship sail stays blue.** No pack sets a brand, logo or sail token, and Afterglow suggests the Blue accent. A test fails if a pack tries.
+- **Contrast.** Every text colour is at least 4.5:1 on every surface it can sit on; icons, control borders, the focus ring and chart series are at least 3:1. `lib/theme-packs/__tests__/contrast.test.ts` holds every pack to this.
+- **Glow is decoration.** A glow or gradient is never the only sign of a state: status is always also a word, an icon or a shape. The optional glow pulse stops under *Reduce motion* (the setting, and the operating system's preference).
+- **Postcard tilt** applies to overview cards only (the Dashboard's attention tiles), never to rows in a list.
+- **Avatar.** Afterglow names `voxel-bot` as its default avatar style. A build that does not have that style ignores the request (`packAvatarStyle` in `lib/theme-packs`).
+
+## Workspace default
+
+An owner or admin can make the current look, including a pack, the workspace default under Settings → Appearance. Members who have not chosen their own style get it. The backend stores the style id as text and does not list styles, so adding a pack needs no backend release; a client that does not know the id shows Harbor.
+
+## Adding a pack
+
+One new file and one registry line.
+
+1. Create `lib/theme-packs/<id>.ts` exporting a `ThemePack` (copy `afterglow.ts`). A pack declares:
+   - `id` (lowercase letters, digits, dashes, up to 32), `name`, `category`, `blurb`;
+   - `schemes`: the schemes it has a legible palette for. Define a `light` token set only if it stays legible; otherwise leave the pack dark-only (or light-only);
+   - `tokens` per scheme: the same custom properties the built-in styles set (surfaces, text, lines, primary action, chips, charts). A token a pack leaves out is Harbor's;
+   - `accent`: the accent suggested when it is picked (use `blue` to keep the Crewship blue);
+   - optional `displayFont` and `textFont`: files under `public/fonts/<family>/` with their OFL licence;
+   - optional `avatarStyle` slug, and `motion` (flavour, glow pulse, postcard tilt).
+2. Add it to `PACKS` in `lib/theme-packs/index.ts`. A new category goes in `PACK_CATEGORIES` in `types.ts` and `STYLE_CATEGORIES` in `lib/theme/appearance-style.ts`.
+3. Regenerate the stylesheet: `UPDATE_PACKS_CSS=1 pnpm vitest run lib/theme-packs`. This rewrites `app/styles/packs.generated.css`; commit it. The test suite fails if it is out of date.
+4. Run the tests. The registry test checks ids, the generated CSS, that the pack sets no brand, logo or sail token, and that its names carry no third-party trademark. The contrast test checks every token pair.
+
+Packs must not use third-party trademarks, game names or logos in their id, name, description, tokens or artwork. Name a pack for a mood, not for a product.

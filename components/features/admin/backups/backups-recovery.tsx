@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   Archive, Cloud, FlaskConical, History, KeyRound, ListChecks, ListTodo, MapPin, PauseCircle, ShieldCheck, Terminal, TriangleAlert, CircleCheck,
 } from "lucide-react"
@@ -17,6 +17,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 type StatusTone = NonNullable<React.ComponentProps<typeof StatusPill>["tone"]>
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Gate, Unavailable } from "./backups-kit"
+import { ImageAgeCheck } from "./backups-image-age"
 import {
   formatSize, formatSourceDate, formatWhen, proofLabel, runPlanLabel, shortDate,
   type BackupRun, type RestoreChecks, type RestoreRecord, type RestoreTarget,
@@ -29,7 +30,7 @@ import {
 } from "./use-backup-recovery"
 import { saveBackupSettings, useBackupSettings, useDestinations, useVaultKeys } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 import { BackupsUpload, type UploadReceipt } from "./backups-upload"
 
@@ -167,6 +168,9 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const picked = pool.find((r) => r.bundle_path === path) ?? null
   // The workspace a workspace/crew restore acts on, named explicitly.
   const restoreWs = workspaceFor(ctx, picked?.workspace_id)
+  // What a Replace asks to be typed back: the slug of the workspace it
+  // overwrites, or its id when the list does not name it.
+  const replaceSlug = ctx.workspaces.find((w) => w.id === restoreWs)?.slug ?? restoreWs ?? "replace"
   const steps = cliOnly ? CLI_STEPS : STEPS
   const current = cliOnly && held ? 6 : step
 
@@ -319,7 +323,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 4 && !cliOnly && (
         <>
-          <ChecksCard checks={checks} />
+          <ChecksCard checks={checks} workspaceId={ctx.demo ? null : (restoreWs ?? ctx.currentWorkspaceId)} />
           {!report && <div><Button size="sm" className="h-7 text-xs" onClick={dryRun} disabled={busy}>{busy ? "Running…" : "Run the dry run"}</Button></div>}
           {report && (
             <>
@@ -332,6 +336,8 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
                   ...report.warnings.map((w) => ({ tone: "warn" as const, text: w })),
                   ...(target !== "replace" ? [{ tone: "kept" as const, text: "Nothing that exists on this server is overwritten." }] : []),
                 ]}
+                // The most destructive restore: the workspace's slug typed back (POP-02).
+                typeToConfirm={target === "replace" ? replaceSlug : undefined}
                 confirmLabel="Restore" onConfirm={doRestore} />
             </>
           )}
@@ -340,7 +346,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 5 && cliOnly && !held && (
         <>
-          <ChecksCard checks={checks} />
+          <ChecksCard checks={checks} workspaceId={ctx.demo ? null : (restoreWs ?? ctx.currentWorkspaceId)} />
           <OfflineCard target={target as RestoreTarget} bundle={path} onNext={() => setHeld(true)} />
         </>
       )}
@@ -519,7 +525,7 @@ function Check({ ok }: { ok: boolean }) {
   return <StatusPill tone={ok ? "success" : "danger"} label={ok ? "ok" : "no"} />
 }
 
-function ChecksCard({ checks }: { checks: RestoreChecks | "unavailable" | null }) {
+function ChecksCard({ checks, workspaceId }: { checks: RestoreChecks | "unavailable" | null; workspaceId?: string | null }) {
   if (checks === "unavailable" || checks === null) return <Unavailable what="checks before a restore" />
   return (
     <SettingsCard icon={ListChecks} title="Before anything changes">
@@ -530,6 +536,14 @@ function ChecksCard({ checks }: { checks: RestoreChecks | "unavailable" | null }
         <SettingsRow label="Not carried over for safety" description={checks.unsafe.join(" · ")}><StatusPill tone="warn" label="off" /></SettingsRow>
       )}
       <SettingsRow label="Conflicts" description={checks.conflicts.detail}>{checks.conflicts.ok ? <Check ok /> : <StatusPill tone="warn" label="review" />}</SettingsRow>
+      {/* The archive's own images are compared by the server when it pinned
+          them; only otherwise the crews on this server stand in. */}
+      {(checks.runtime.images_checked ?? 0) > 0 ? (
+        <SettingsRow
+          label="Crew images"
+          description={`${checks.runtime.images_older ?? 0} of ${checks.runtime.images_checked} crews in the archive were built on an older image than this server's`}
+        ><StatusPill tone={(checks.runtime.images_older ?? 0) > 0 ? "warn" : "success"} label={(checks.runtime.images_older ?? 0) > 0 ? "older" : "ok"} /></SettingsRow>
+      ) : workspaceId && <ImageAgeCheck workspaceId={workspaceId} />}
     </SettingsCard>
   )
 }

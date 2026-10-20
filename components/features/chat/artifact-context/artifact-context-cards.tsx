@@ -1,6 +1,6 @@
 "use client"
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { postWorkCardCommand, type WorkCardCommand } from "./client"
 import type { LinkedViewerTarget } from "./linked-viewer-targets"
@@ -24,7 +24,7 @@ export function ArtifactContextCards({ workspaceId, chatId, currentUserId, onOpe
   if (result.status === "error" && cards.length === 0) return <section aria-label="Agent work results" className="mx-auto my-4 w-full max-w-3xl">
     <div role="alert" className="space-y-2 rounded-xl border p-4 text-sm">
       <p>Temporarily unavailable. Agent work results could not be refreshed. This is not a removal of access.</p>
-      <Button type="button" size="sm" variant="outline" className="coarse:min-h-12" onClick={() => void refetch()}>Try again</Button>
+      <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={() => void refetch()}>Try again</Button>
     </div></section>
   const visible = cards.filter(entry => !dismissed.has(entry.model.id))
   if (visible.length === 0) return null

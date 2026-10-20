@@ -66,7 +66,7 @@ func TestBuildOpenURL(t *testing.T) {
 // `[id]` segment, no `agents/_.html` placeholder. StaticFileHandler's last
 // resort is the SPA fallback, so the URL served the DASHBOARD under a path
 // that says agents. That is the dead-link class already repaired twice on
-// this branch (app/(dashboard)/agents/page.tsx documents the last one).
+// this branch (app/(legacy)/agents/page.tsx documents the last one).
 //
 // The live convention is /crews?agent=<slug>. Three things are pinned:
 //
@@ -102,7 +102,7 @@ func TestBuildOpenURL_AgentTargetsTheCrewsCanvas(t *testing.T) {
 			"http://localhost:8080/crews?agent=customersuccessemea42",
 		},
 		// The roster is a separate resource and keeps its own route — /agents
-		// exists solely to redirect there (app/(dashboard)/agents/page.tsx).
+		// exists solely to redirect there (app/(legacy)/agents/page.tsx).
 		{"roster unchanged", []string{"agents"}, "http://localhost:8080/agents"},
 	}
 	for _, c := range cases {

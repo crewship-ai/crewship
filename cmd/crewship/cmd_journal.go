@@ -331,12 +331,12 @@ func init() {
 //     resolve the surrounding crew/agent/mission context without
 //     scrolling the timeline.
 //
-// The endpoint returns workspace-scoped crews/agents/missions; it does
+// The endpoint returns workspace-scoped crews/agents/missions/people; it does
 // NOT take a --trace filter (the trace-id filter lives on
 // `crewship journal --trace-id <id>` which narrows the entry list).
 var journalLookupCmd = &cobra.Command{
 	Use:   "lookup",
-	Short: "Fetch the workspace crew/agent/mission lookup table",
+	Short: "Fetch the workspace crew/agent/mission/people lookup table",
 	Long: `Return the same reference table the web timeline uses to render journal
 cards with human-readable crew/agent/mission names. Useful for joining
 journal output against names in shell pipelines.
@@ -383,6 +383,11 @@ Tip: to narrow journal entries to a specific run/trace, use
 				Title  string `json:"title" yaml:"title"`
 				Status string `json:"status" yaml:"status"`
 			} `json:"missions" yaml:"missions"`
+			// People names who made a change (actor_id on user entries).
+			People []struct {
+				ID   string `json:"id" yaml:"id"`
+				Name string `json:"name" yaml:"name"`
+			} `json:"people" yaml:"people"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -420,6 +425,14 @@ Tip: to narrow journal entries to a specific run/trace, use
 					break
 				}
 				fmt.Printf("  %-24s  %-10s  %s\n", truncateString(m.ID, 24), truncateString(m.Status, 10), m.Title)
+			}
+			fmt.Printf("\n%sPeople (%d)%s\n", cli.Bold, len(body.People), cli.Reset)
+			for i, p := range body.People {
+				if i >= 50 {
+					fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.People)-i, cli.Reset)
+					break
+				}
+				fmt.Printf("  %-24s  %s\n", truncateString(p.ID, 24), p.Name)
 			}
 		})
 	},

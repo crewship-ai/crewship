@@ -8,6 +8,10 @@ vi.mock("@/lib/agent-avatar", () => ({
   // static no-op store so the hook renders without the real module.
   subscribeAvatarStyles: () => () => {},
   avatarStylesVersion: () => 0,
+  // AgentAvatar decides whether a voxel avatar animates (#3789).
+  resolveAvatarStyle: (s?: string | null) => s || "voxel-bot",
+  isAnimatableAvatarStyle: () => false,
+  shouldAnimateAvatar: () => false,
 }))
 
 import { IssueCard } from "../issue-card"

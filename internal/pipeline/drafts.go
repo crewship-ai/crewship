@@ -40,6 +40,9 @@ type Draft struct {
 	UpdatedBy      string          `json:"updated_by"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
+	// TestResult is the latest Test run of exactly this definition, set on
+	// read (never stored with the draft); absent when it was not tested.
+	TestResult *TestResult `json:"test_result,omitempty"`
 }
 
 // DraftPublication is internal to the validated publication path. The document

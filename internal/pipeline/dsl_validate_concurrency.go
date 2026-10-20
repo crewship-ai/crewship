@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -102,4 +104,41 @@ func isEmptyDefault(def any) bool {
 		return s == ""
 	}
 	return false
+}
+
+// Concurrency policies (ODCH-RT-25).
+const (
+	ConcurrencyPolicyQueue = "queue"
+	ConcurrencyPolicySkip  = "skip"
+)
+
+// validateConcurrencyPolicy accepts "", "queue" and "skip". "skip" drops a
+// start that finds the slot taken, so it needs a concurrency_key to define
+// the slot.
+func validateConcurrencyPolicy(dsl *DSL) error {
+	switch dsl.ConcurrencyPolicy {
+	case "", ConcurrencyPolicyQueue:
+		return nil
+	case ConcurrencyPolicySkip:
+		if dsl.ConcurrencyKey == "" {
+			return fmt.Errorf("pipeline: concurrency_policy %q needs a concurrency_key — without one no run is ever busy", ConcurrencyPolicySkip)
+		}
+		return nil
+	default:
+		return fmt.Errorf("pipeline: concurrency_policy %q is not one of \"queue\", \"skip\"", dsl.ConcurrencyPolicy)
+	}
+}
+
+// SkipsStartWhenBusy reports whether a start that was refused with err should
+// be dropped quietly: err is the concurrency refusal and the routine's
+// definition says concurrency_policy "skip". An unreadable definition never
+// skips — the refusal is then handled as it always was.
+func SkipsStartWhenBusy(definitionJSON string, err error) bool {
+	if !errors.Is(err, ErrConcurrencyLimitReached) || definitionJSON == "" {
+		return false
+	}
+	var d struct {
+		Policy string `json:"concurrency_policy"`
+	}
+	return json.Unmarshal([]byte(definitionJSON), &d) == nil && d.Policy == ConcurrencyPolicySkip
 }

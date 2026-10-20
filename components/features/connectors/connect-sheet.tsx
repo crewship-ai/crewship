@@ -21,7 +21,7 @@
 // body. Errors are surfaced via the `sonner` toast helper.
 
 import { useState, type ReactElement } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"

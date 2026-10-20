@@ -3,50 +3,21 @@
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
-import { LogOut, Search, X } from "lucide-react"
+import { ChevronRight, PanelLeft, Search } from "lucide-react"
 
-import { navSections, isHiddenForRole } from "@/lib/nav-sections"
-import { useRealtime } from "@/hooks/use-realtime"
-import { UserAvatar } from "@/components/ui/user-avatar"
+import { areaOf } from "@/lib/nav-sections"
+import { SAIL_PATH } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { useEngineStatus } from "@/hooks/use-engine-status"
-import { useCrewsStatus } from "@/hooks/use-crews-status"
-import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
-import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
-import { useInboxUnreadCount } from "@/hooks/use-inbox"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useAbilities } from "@/hooks/use-abilities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
+import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 
-import { ProvisioningBadge } from "./app-toolbar-provisioning"
-import { SystemStatusPill } from "./status-pill"
-import { UserMenu } from "./user-menu"
-import { MobileWorkspaceSwitcher } from "./workspace-switcher"
-
-/**
- * The phone sheet carries the same unread count the desktop rail does — it was
- * the one live signal in the product with no mobile home at all, since the
- * bell that shows it sits inside `hidden md:flex` (#2483).
- *
- * It is a leaf rather than a hook in AppToolbar so the query only runs while
- * the sheet is actually open: the toolbar renders on every route at every
- * width, and the badge is never visible outside the sheet.
- */
-function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
-  const unread = useInboxUnreadCount(workspaceId)
-  if (!unread) return null
-  return (
-    <span className="ml-auto rounded-full bg-primary px-1.5 text-micro font-semibold text-primary-foreground">
-      {unread > 99 ? "99+" : unread}
-    </span>
-  )
-}
+import { useIsTabletPanel } from "./secondary-panel"
+import { MobileMoreSheet } from "./mobile-more-sheet"
 
 // The top bar is the product's identity strip, not a page label — it says
 // "Crewship" and nothing else. There used to be a route -> title map here
@@ -85,27 +56,49 @@ function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
 // The agent detail surface is now /crews?agent=<slug> on the /crews canvas,
 // which carries its own sub-bar, and the one deep page that still needs a way
 // back — chat — has the breadcrumb below pointing exactly there.
+/**
+ * Phone pilot (MOBIL-DOPORUCENI 2a, PILOT-TELEFON-STAV row 1): a phone list
+ * header starts with the Crewship sail, not the area tile. Only the pilot
+ * areas for now; the rest follow once the pilot has been evaluated.
+ */
+const SAIL_AREAS = ["/inbox", "/settings"]
+function pilotSail(pathname: string): boolean {
+  return SAIL_AREAS.some((a) => pathname === a || pathname.startsWith(`${a}/`))
+}
+
+function PhoneSail() {
+  return (
+    <span data-slot="area-sail" aria-hidden className="grid size-7 shrink-0 place-items-center text-primary">
+      <svg viewBox="0 0 1024 1024" className="size-[22px]" fill="currentColor">
+        <g transform="translate(194.6 234.9) scale(0.79360 0.79360)"><path d={SAIL_PATH} /></g>
+      </svg>
+    </span>
+  )
+}
+
 export function AppToolbar() {
   const pathname = usePathname()
-  // Engine, crews, provisioning, inbox and runs are not on the restricted
-  // allowlist. Their hooks idle on a null workspace, and their widgets are not
-  // rendered unless the session is trusted.
+  // Inbox and runs are not on the restricted allowlist: their bells are not
+  // rendered unless the session is trusted. (The connection, fleet and build
+  // status are inside the Activity bell's panel.)
   const trusted = useAccessMode() === "trusted"
-  const surfaces = useRestrictedSurfaces()
-  const workspaceId = useTrustedWorkspaceId()
-  const { status: engineStatus } = useEngineStatus(workspaceId)
-  const crewsStatus = useCrewsStatus(workspaceId)
-  const provisioning = useProvisioningStatus(workspaceId)
-  const { session, signOut } = useAuth()
-  const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
-  // Shared with the phone tab bar's "More", which is a sibling of this
-  // component rather than a child, so the state cannot be local to either.
-  const mobileNavOpen = useAppStore((st) => st.mobileNavOpen)
-  const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
-  const [cmdkOpen, setCmdkOpen] = useState(false)
-  const { role } = useAbilities()
-  const instanceAdmin = useIsInstanceAdmin()
+  const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
+  const secondaryPanel = useAppStore((st) => st.secondaryPanel)
+  const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
+  const secondaryPanelOpen = useAppStore((st) => st.secondaryPanelOpen)
+  const tabletPanel = useIsTabletPanel() && !isMobile
+  // The palette's open state lives in the app store so the sidebar's search
+  // field can open it; a local fallback keeps the toolbar working where a
+  // test or an embed provides a store without it.
+  const [localCmdk, setLocalCmdk] = useState(false)
+  const storeCmdk = useAppStore((st) => st.commandPaletteOpen)
+  const storeSetCmdk = useAppStore((st) => st.setCommandPaletteOpen)
+  const paletteQuery = useAppStore((st) => st.commandPaletteQuery)
+  // Typed as always present, but a partial store (tests, embeds) may lack it.
+  const hasStorePalette = typeof (storeSetCmdk as unknown) === "function"
+  const cmdkOpen = hasStorePalette ? Boolean(storeCmdk) : localCmdk
+  const setCmdkOpen = hasStorePalette ? storeSetCmdk : setLocalCmdk
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   // ⌘K opens the global palette, on every route, and it is the ONLY listener
@@ -136,15 +129,14 @@ export function AppToolbar() {
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [setCmdkOpen])
 
-  const userName = session?.user?.name ?? "User"
-  const userEmail = session?.user?.email ?? ""
-  const userAvatar = session?.user?.avatar_url ?? ""
 
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
+
+  const area = areaOf(pathname)
 
   function renderBreadcrumbs() {
     // Chat page: a path back out of the conversation — Crews / <crew> /
@@ -177,11 +169,22 @@ export function AppToolbar() {
     }
 
     return (
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-sm font-semibold truncate">Crewship</span>
+      <div className="flex items-center gap-1.5 min-w-0" data-slot="area-crumb">
+        {area ? (
+          <>
+            {isMobile && pilotSail(pathname) ? <PhoneSail /> : <span className="area-tile" aria-hidden><area.icon /></span>}
+            {breadcrumbs.length > 0 ? (
+              <Link href={area.href} className="truncate text-sm text-muted-foreground transition-colors hover:text-foreground">{area.title}</Link>
+            ) : (
+              <span className="truncate text-sm font-semibold">{area.title}</span>
+            )}
+          </>
+        ) : (
+          <span className="text-sm font-semibold truncate">Crewship</span>
+        )}
         {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5 min-w-0">
-            <span className="text-muted-foreground/30 text-xs">/</span>
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
             {item.href ? (
               <Link href={item.href} className="max-w-[160px] truncate text-xs text-muted-foreground transition-colors hover:text-foreground/90">
                 {item.label}
@@ -204,53 +207,42 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-foreground/[0.1]">
-      {/* Left: breadcrumb only */}
-      <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-background px-3 sm:pl-4 sm:pr-3 border-b border-border">
+      {/* Left: the area and its breadcrumbs, then the page's own header —
+          title, live description and actions — which SubBar renders into
+          this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
+        {/* On a phone the slot holds the page's primary action (icon-only) and
+            its explorer toggle, between the title and the search (v67). */}
+        <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className="flex min-w-0 flex-1 items-center gap-2" />
       </div>
 
       {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* One status pill: connection on the left, fleet on the right.
-          *
-          * These were two — "Online" and "Crews idle" — and the second was
-          * losing an argument it should not have been in. Its busy state
-          * repeated the Activity panel's live count without the routine name,
-          * elapsed time, cost or Cancel that panel carries; its quiet state
-          * asserted "idle" from `agents.status`, a column that flips for the
-          * six seconds an agent takes to answer, so the word was wrong about
-          * as often as it was right.
-          *
-          * Merged rather than merely reworded, because two pills could state a
-          * contradiction side by side: "Offline" next to "7 agents", where the
-          * second is last-known and nobody can currently know it. One pill
-          * drops the fleet half while the link is down. See status-pill.tsx.
-          *
-          * The provisioning badge stays separate and stays to the LEFT, so the
-          * status pill never reflows when a build appears. */}
-        {trusted && (
-          <div className="hidden lg:flex items-center gap-1.5 mr-1">
-            <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
-            <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} workspaceId={workspaceId} />
-          </div>
+        {/* Search lives in the sidebar on desktop and tablet (Harbor 2); the
+            phone has no sidebar, so it keeps an icon here. ⌘K is still owned
+            by the listener above. */}
+        {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3).
+            Tablet: it floats over the content and this button toggles it
+            (v67 panelBtn, COM-05). */}
+        {/* A tablet's list panel (Inbox, Settings, Admin) is docked, so it has
+            no button (v67 panelBtn is for filter panels only). */}
+        {(isMobile || (tabletPanel && secondaryPanel?.kind !== "list")) && secondaryPanel && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={secondaryPanel.label}
+            aria-expanded={tabletPanel ? secondaryPanelOpen : undefined}
+            data-testid="secondary-panel-button"
+            onClick={() => setSecondaryPanelOpen(tabletPanel ? !secondaryPanelOpen : true)}
+          >
+            <PanelLeft className="h-4 w-4" />
+          </Button>
         )}
 
-        {/* Desktop: search button. Same pill geometry as the System / Crews
-            status pills it sits beside, and the same .type-meta register as
-            everything else in the strip — it had been the one control here
-            wearing a hardcoded text-xs label and a text-xs ⌘ inside a
-            text-[10px] key cap. */}
-        <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
-          <Search className="h-3.5 w-3.5" />
-          <span className="type-meta hidden sm:inline">Search...</span>
-          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
-            &#8984;K
-          </kbd>
-        </Button>
-
         {/* Mobile: search icon only */}
-        <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-12 coarse:w-12" aria-label="Search" onClick={() => setCmdkOpen(true)}>
+        <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-[44px] coarse:w-[44px]" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
         </Button>
 
@@ -277,125 +269,24 @@ export function AppToolbar() {
           * RealtimeStatusBanner — because a notice nobody can afford to miss
           * does not belong behind a closed dropdown. */}
         {trusted && (
-          <div className="hidden md:flex items-center gap-0.5">
-            {/* The strip reads in two halves: the system (status, search) and
-                you (what is running for you, what is asked of you, your
-                account). The rule marks where one ends. */}
-            <span className="mx-1 h-5 w-px bg-foreground/[0.1]" aria-hidden />
+          <div className="flex items-center gap-0.5">
+            {/* The strip reads in two halves: the page's actions and search,
+                then the two bells. The rule marks where one ends. On a phone
+                it is the activity bell only: Inbox is a tab, and the account
+                is a row in the More sheet. */}
+            <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />
             <ActivityBell />
-            <InboxBell />
+            <div className="hidden md:flex">
+              <InboxBell />
+            </div>
           </div>
         )}
-
-
-        {/* Personal settings live in the profile menu on every screen size. */}
-        <UserMenu />
-
       </div>
 
-      {/* Mobile: main navigation bottom sheet */}
-      {isMobile && (
-        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl max-h-[85dvh] p-0">
-            <div className="w-12 h-1.5 rounded-full bg-border mx-auto mt-3 mb-1" />
-            <SheetHeader className="px-4 py-2 border-b">
-              <div className="flex items-center justify-between">
-                {/* The workspace switcher — the phone has no rail, so this is
-                    its only home. This slot used to print a hardcoded
-                    placeholder ("Unify Technology") for every workspace. */}
-                <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <MobileWorkspaceSwitcher onNavigate={() => setMobileNavOpen(false)} />
-                <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto py-2">
-              {navSections.map((section) => (
-                <div key={section.label}>
-                  <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
-                  {section.items
-                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
-                    .map((item) => {
-                      const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-                      // FUTURE is announced, not built — the row reads as a
-                      // destination but must not navigate anywhere.
-                      const disabled = item.badge === "FUTURE"
-                      const rowClass = `w-full flex items-center gap-3 px-4 min-h-12 py-2.5 text-sm transition-colors ${
-                        disabled
-                          ? "text-muted-foreground-soft"
-                          : isActive
-                            ? "bg-accent text-foreground font-medium"
-                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                      }`
-                      const body = (
-                        <>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{item.title}</span>
-                          {item.href === "/inbox" && <InboxUnreadBadge workspaceId={workspaceId} />}
-                          {disabled && <span className="text-micro bg-muted px-1.5 rounded ml-auto">FUTURE</span>}
-                        </>
-                      )
-                      // A FUTURE row announces something that does not exist
-                      // yet, so it must not be a link. `pointer-events-none`
-                      // only stops a mouse: the row stayed in the tab order,
-                      // Enter still followed href="#", and a screen reader
-                      // still called it a link to somewhere.
-                      return disabled ? (
-                        <div key={item.href} aria-disabled="true" className={rowClass}>
-                          {body}
-                        </div>
-                      ) : (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          onClick={() => setMobileNavOpen(false)}
-                          className={rowClass}
-                        >
-                          {body}
-                        </Link>
-                      )
-                    })}
-                </div>
-              ))}
-            </div>
-            <div className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <div className="flex items-center gap-3">
-                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-8 w-8" textClassName="text-micro" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{userName}</div>
-                  <div className="text-micro text-muted-foreground">{userEmail}</div>
-                </div>
-                <button
-                  onClick={() => { signOut().then(() => window.location.href = "/login") }}
-                  className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground"
-                  aria-label="Log out"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
+      {/* Mobile: the More sheet (v67 pop-more) */}
+      {isMobile && <MobileMoreSheet />}
 
-      <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} />
+      <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} initialQuery={paletteQuery || undefined} />
     </header>
   )
 }
-
-/**
- * Toolbar provisioning badge — single source of UI truth for "an image
- * somewhere needs work".
- *
- * Sits at the LEFT edge of the status group so the fixed Online / Crews
- * pills don't reflow when it appears. Click opens a popover whose rows
- * are state-aware:
- *   - needs_provision → Build now button
- *   - running         → live step/total progress bar + last message
- *   - failed          → error + Retry button
- *
- * Crew name is a Link to the canvas (where the user can edit config or
- * see the full provisioning banner); action buttons live on the row
- * itself so the user never has to navigate away to act.
- */

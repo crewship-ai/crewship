@@ -19,7 +19,10 @@ import { ArrowLeft, Clock, Coins, GitBranch, Layers, ListTree } from "lucide-rea
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { Appear, FieldLabel, Pill } from "@/components/ui/detail"
+import { Appear, FieldLabel } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus } from "@/lib/format-status"
+import { toStatusTone } from "@/lib/status-tone"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useTrace } from "@/hooks/use-trace"
@@ -196,13 +199,13 @@ export function ActivityDetail({
 
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"
+              className="rounded border border-foreground/[0.08] px-1.5 py-px text-micro font-semibold"
               style={{ color: `var(${meta.token})` }}
             >
               {meta.label}
             </span>
             <h1 className="min-w-0 text-lg font-semibold tracking-tight">{entry.summary}</h1>
-            {tone !== "default" && <Pill tone={tone}>{String(entry.severity)}</Pill>}
+            {tone !== "default" && <StatusPill size="md" tone={toStatusTone(tone)} label={formatStatus(String(entry.severity)).label} />}
           </div>
 
           <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -235,7 +238,7 @@ export function ActivityDetail({
                     onClick={() => onSpineClick(l)}
                     className="rounded bg-foreground/[0.05] px-1.5 py-px text-[11px] text-foreground/85 transition-colors hover:bg-foreground/[0.1]"
                   >
-                    <span className="mr-1 font-mono text-[9.5px] uppercase text-muted-foreground-soft">
+                    <span className="mr-1 text-micro capitalize text-muted-foreground-soft">
                       {l.kind}
                     </span>
                     {l.label}

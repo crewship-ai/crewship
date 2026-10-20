@@ -354,6 +354,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range providerLoginComponents {
 		schemas[name] = schema
 	}
+	_, routineOrganisationComponents := routineOrganisationSchemaCatalog()
+	for name, schema := range routineOrganisationComponents {
+		schemas[name] = schema
+	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
 		"chatShareBearer":     map[string]any{"type": "http", "scheme": "bearer", "bearerFormat": "cshr_ share token", "description": "Dedicated, revocable token for reading one shared chat transcript. A workspace session or ordinary API bearer token does not satisfy this scheme."},
@@ -497,7 +501,9 @@ func buildDocument(routes []route) map[string]any {
 		}
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
-			op["requestBody"] = requestBodyForRoute(rt)
+			if !routeSchemaCatalog()[rt.method+" "+rt.path].NoRequest {
+				op["requestBody"] = requestBodyForRoute(rt)
+			}
 		case "DELETE":
 			// A DELETE gets a body only when its catalog entry declares one:
 			// two handlers read a confirmation body (a draft revision, a
@@ -672,6 +678,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range providerLoginRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	routineOrganisationRoutes, _ := routineOrganisationSchemaCatalog()
+	for key, schema := range routineOrganisationRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
 	for key, schema := range coreResourceRequestsV2 {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -755,6 +765,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	existing.NoRequest = existing.NoRequest || incoming.NoRequest
 	if incoming.SuccessHeaders != nil {
 		existing.SuccessHeaders = incoming.SuccessHeaders
 	}
@@ -927,7 +938,7 @@ func responseComponents() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
-		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(),
+		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(), "appearance_default": appearanceDefaultSchema(),
 		"created_at": scalar("string"), "updated_at": scalar("string"),
 		"currentUserRole": nullable("string"), "currentUserCapabilities": array(scalar("string")),
 		"allow_privileged_credentials": scalar("boolean"), "run_retention_days": nullable("integer"),

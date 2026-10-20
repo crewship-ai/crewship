@@ -23,6 +23,30 @@ interface AppState {
    */
   mobileNavOpen: boolean
   setMobileNavOpen: (open: boolean) => void
+  /** The ⌘K palette. Opened by the key (AppToolbar), the sidebar's search
+   *  field and the phone top bar's search button. */
+  /** Where a page's header (SubBar) renders its identity and actions: a slot
+   *  inside the top bar (Harbor 2), registered by AppToolbar. Null on phones
+   *  and outside the app shell, where SubBar renders in place. */
+  pageBarSlot: HTMLElement | null
+  setPageBarSlot: (el: HTMLElement | null) => void
+  /** The page's secondary panel (Harbor 2 SecondaryPanel), registered while
+   *  it is mounted so the phone top bar can offer it as a sheet. */
+  /** The page's SecondaryPanel. `kind`: "list" panels (Inbox, Settings,
+   *  Admin) stay docked on a tablet; "filter" panels float from a button. */
+  secondaryPanel: { id: string; label: string; kind: "list" | "filter" } | null
+  setSecondaryPanel: (panel: { id: string; label: string; kind: "list" | "filter" } | null) => void
+  /** The layout's panel column, beside the column with the top bar. */
+  panelSlot: HTMLElement | null
+  setPanelSlot: (el: HTMLElement | null) => void
+  secondaryPanelOpen: boolean
+  setSecondaryPanelOpen: (open: boolean) => void
+  commandPaletteOpen: boolean
+  setCommandPaletteOpen: (open: boolean | ((prev: boolean) => boolean)) => void
+  /** Text the palette opens with (the not-found page's missing path); cleared on close. */
+  commandPaletteQuery: string
+  /** Opens the palette with `query` typed in (CHR-03). */
+  openCommandPalette: (query?: string) => void
   setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
@@ -34,8 +58,24 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarOpen: true,
   breadcrumbs: [],
   mobileNavOpen: false,
+  commandPaletteOpen: false,
+  secondaryPanel: null,
+  setSecondaryPanel: (panel) => set({ secondaryPanel: panel }),
+  secondaryPanelOpen: false,
+  setSecondaryPanelOpen: (open) => set({ secondaryPanelOpen: open }),
+  panelSlot: null,
+  setPanelSlot: (el) => set({ panelSlot: el }),
+  pageBarSlot: null,
+  setPageBarSlot: (el) => set({ pageBarSlot: el }),
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setBreadcrumbs: (items) => set({ breadcrumbs: items }),
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
+  setCommandPaletteOpen: (open) =>
+    set((s) => {
+      const next = typeof open === "function" ? open(s.commandPaletteOpen) : open
+      return next ? { commandPaletteOpen: true } : { commandPaletteOpen: false, commandPaletteQuery: "" }
+    }),
+  commandPaletteQuery: "",
+  openCommandPalette: (query = "") => set({ commandPaletteOpen: true, commandPaletteQuery: query }),
 }))

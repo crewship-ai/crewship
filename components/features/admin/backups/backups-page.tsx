@@ -14,7 +14,7 @@ import { TimeRangePicker, type TimeRange } from "@/components/features/logs/time
 import type { JournalEntry } from "@/lib/types/journal"
 import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import { initialBackupsSection, type BackupsSection } from "@/app/(dashboard)/admin/navigation"
-import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-console"
+import { useBackupsScope, type RunFilter, type RunQuery, type SectionCtx } from "./backups-scope"
 import { describePlanWhen, formatAgo } from "./backups-model"
 import { useBackupRuns } from "./use-backup-runs"
 import { useBackupPlans } from "./use-backup-plans"
@@ -116,12 +116,12 @@ function FilterMenu<T extends string>({ label, value, options, onChange, any = "
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel className="font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground">{label}</DropdownMenuLabel>
+        <DropdownMenuLabel className=" text-micro text-muted-foreground">{label}</DropdownMenuLabel>
         {options.map((o) => (
           <DropdownMenuItem key={o.key} onSelect={() => onChange(o.key)} className="gap-2 text-xs">
             <Check className={cn("h-3.5 w-3.5", o.key === value ? "opacity-100" : "opacity-0")} />
             <span className="flex-1">{o.label}</span>
-            {o.count !== undefined && <span className="font-mono text-micro text-muted-foreground">{o.count}</span>}
+            {o.count !== undefined && <span className="text-micro tabular-nums text-muted-foreground">{o.count}</span>}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -292,7 +292,7 @@ export function BackupsPage() {
             className={cn("flex h-7 min-w-0 items-center justify-center rounded-md px-1 text-label font-medium transition-colors",
               segView === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
             <span className="truncate">{v.label}</span>
-            {v.key === "overview" && attention > 0 && <span className="ml-1 font-mono text-micro text-destructive">{attention}</span>}
+            {v.key === "overview" && attention > 0 && <span className="ml-1 text-micro tabular-nums text-destructive">{attention}</span>}
           </button>
         ))}
       </div>
@@ -437,6 +437,7 @@ export function BackupsPage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-backups"
       title="Backups"
       icon={Database}
       description="What is kept, where, and whether a restore really works"
@@ -450,7 +451,7 @@ export function BackupsPage() {
             <TimeRangePicker value={range} onChange={(r) => { setSlice(null); setQuery({ period: RANGE_PERIOD[r] ?? "" }) }}
               presets={["24h", "7d", "30d", "90d", "all"]} triggerClassName="h-7" />
           )}
-          {/* Icons only on a phone, so the sub-bar keeps room for Filters. */}
+          {/* Icons only on a phone, so the actions fit the sub-bar. */}
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New plan" onClick={newPlan}><Plus /><span className="max-md:hidden">New plan</span></Button>
           <Button size="sm" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="Back up now"
             title={scope === "instance" ? "Back up the whole instance now" : `Back up ${selected.size === 1 ? workspaces.find((w) => selected.has(w.id))?.name ?? "1 workspace" : `${selected.size} workspaces`} now`}

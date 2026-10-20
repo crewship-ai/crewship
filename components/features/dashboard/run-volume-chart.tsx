@@ -40,15 +40,13 @@ export function RunVolumeChart({
 
   if (buckets.length === 0 || series.length === 0) {
     return (
-      <div className="flex items-center justify-center rounded-xl border border-dashed border-border bg-surface-subtle py-4 text-label text-muted-foreground">
-        No run activity in this window
-      </div>
+      <p className="py-1 text-body text-muted-foreground">No run activity in this window</p>
     )
   }
 
   return (
     <div>
-      <ChartContainer config={config} className="h-[160px] w-full aspect-auto">
+      <ChartContainer config={config} className="h-[150px] w-full aspect-auto">
         <BarChart accessibilityLayer data={buckets} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="2 4" stroke="var(--chart-grid)" />
           <XAxis
@@ -57,7 +55,7 @@ export function RunVolumeChart({
             axisLine={false}
             tickMargin={8}
             minTickGap={window === "24h" ? 28 : 18}
-            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)" }}
             tickFormatter={(value) => {
               const date = new Date(value)
               if (window === "24h") return `${String(date.getHours()).padStart(2, "0")}h`
@@ -69,7 +67,7 @@ export function RunVolumeChart({
             tickLine={false}
             axisLine={false}
             width={32}
-            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)" }}
           />
           <ChartTooltip
             cursor={{ fill: "var(--chart-cursor)" }}
@@ -103,7 +101,7 @@ export function RunVolumeChart({
         </BarChart>
       </ChartContainer>
 
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
         {series.map((item) => (
           <span key={item.key} className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: item.color }} />

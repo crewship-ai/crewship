@@ -33,6 +33,7 @@ import (
 type EntryType string
 
 const (
+	EntryMemberOwnerCreated        EntryType = "member.owner_created"
 	EntryMemberAccessChanged       EntryType = "member.access_changed"
 	EntryMemberCapabilitiesChanged EntryType = "member.capabilities_changed"
 	EntryMemberRemoved             EntryType = "member.removed"
@@ -551,6 +552,11 @@ const (
 	EntrySkillDeleted    EntryType = "skill.deleted"
 	EntrySkillAssigned   EntryType = "skill.assigned"
 	EntrySkillUnassigned EntryType = "skill.unassigned"
+	// EntrySkillArchived / EntrySkillRestored fire when a person moves a
+	// skill into or out of the Archived view by hand (the keeper sweep
+	// archives unused skills on its own and does not emit these).
+	EntrySkillArchived EntryType = "skill.archived"
+	EntrySkillRestored EntryType = "skill.restored"
 	// EntrySkillInvoked fires when an agent actually calls one of its
 	// assigned skills (matched on the orchestrator tool-call hot path).
 	// Payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`,

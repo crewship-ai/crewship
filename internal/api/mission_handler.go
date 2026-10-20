@@ -108,7 +108,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []missionResponse{}
 	}
 	writeListMeta(w, total, limit, offset)
-	writeJSON(w, http.StatusOK, result)
+	writeCostAwareJSON(w, r, http.StatusOK, result)
 }
 
 // ListAll handles GET /api/v1/missions
@@ -205,7 +205,7 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		result = []missionResponse{}
 	}
 	writeListMeta(w, total, limit, offset)
-	writeJSON(w, http.StatusOK, result)
+	writeCostAwareJSON(w, r, http.StatusOK, result)
 }
 
 // Get handles GET /api/v1/crews/{crewId}/missions/{missionId}
@@ -240,7 +240,7 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	m.TaskStats = stats
 
-	writeJSON(w, http.StatusOK, m)
+	writeCostAwareJSON(w, r, http.StatusOK, m)
 }
 
 // Update handles PATCH /api/v1/crews/{crewId}/missions/{missionId}
@@ -422,5 +422,5 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("mission metrics: task stats query failed", "error", err)
 	}
 
-	writeJSON(w, http.StatusOK, m)
+	writeCostAwareJSON(w, r, http.StatusOK, m)
 }

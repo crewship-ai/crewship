@@ -48,17 +48,17 @@ export function HistoryActions({ checkpointId, revision, headRev, hasLocalDraft,
   }
   const retrying = result?.status === "unknown"
   return <div className="space-y-3" aria-label={`Actions for revision ${revision}`} role="group">
-    <Button type="button" variant="outline" className="coarse:min-h-12" disabled={busy} aria-expanded={open} onClick={() => { setResult(undefined); setReviewedRev(headRev); setOpen(true) }}>Revert this change</Button>
+    <Button type="button" variant="outline" className="coarse:min-h-[44px]" disabled={busy} aria-expanded={open} onClick={() => { setResult(undefined); setReviewedRev(headRev); setOpen(true) }}>Revert this change</Button>
     {open && <div role="group" aria-label="Confirm revert" className="space-y-2 rounded-md border p-3" onKeyDown={event => { if (event.key === "Escape") close() }}>
       <p>Undo only the change recorded at this checkpoint (revision {revision}). Work saved after it is kept. If later work touches the same blocks, nothing changes and the conflict is shown.</p>
       {hasLocalDraft && <div role="status" className="space-y-2">
         <p>You have unsent edits. Reverting reloads the document, so wait until they are confirmed, or download them first.</p>
-        <Button type="button" variant="outline" className="coarse:min-h-12" onClick={onDownloadDraft}>Download unsent edits</Button>
+        <Button type="button" variant="outline" className="coarse:min-h-[44px]" onClick={onDownloadDraft}>Download unsent edits</Button>
       </div>}
       {moved && <p role="status">The document changed after you opened this confirmation (revision {reviewedRev} to {headRev}). The request names revision {reviewedRev}, so the server refuses it if it no longer matches.</p>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" className="coarse:min-h-12" disabled={busy || hasLocalDraft} onClick={() => void confirm()}>{busy ? "Working…" : retrying ? "Try again (same request)" : "Revert this change"}</Button>
-        <Button type="button" variant="ghost" className="coarse:min-h-12" disabled={busy} onClick={close}>Cancel</Button>
+        <Button type="button" className="coarse:min-h-[44px]" disabled={busy || hasLocalDraft} onClick={() => void confirm()}>{busy ? "Working…" : retrying ? "Try again (same request)" : "Revert this change"}</Button>
+        <Button type="button" variant="ghost" className="coarse:min-h-[44px]" disabled={busy} onClick={close}>Cancel</Button>
       </div>
     </div>}
     {result && result.status !== "done" && <p role="alert">{FAILURE[result.status]}{result.status === "conflict" && result.blocks.length > 0 ? ` (${result.blocks.length} block${result.blocks.length === 1 ? "" : "s"})` : ""}</p>}

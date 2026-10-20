@@ -110,6 +110,10 @@ const (
 	// the gdpr_actions id and the custodian; never the erased subject.
 	// See admin_gdpr_erase_identity.go, "Credentials".
 	AuditEventReattributed CredentialAuditEvent = "REATTRIBUTED"
+
+	// AuditEventMoved: the credential was filed in, moved between or taken out
+	// of a Vault folder. Metadata carries the two folder ids; never the value.
+	AuditEventMoved CredentialAuditEvent = "MOVED"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -126,6 +130,7 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventRefresh:  {},
 
 	AuditEventReattributed: {},
+	AuditEventMoved:        {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call

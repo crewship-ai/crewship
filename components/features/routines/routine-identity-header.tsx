@@ -4,14 +4,15 @@ import { useEffect, useState, type ReactNode, type Ref } from "react"
 import Link from "next/link"
 import { Pencil, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { RoutineAgentLink } from "./routine-agent-link"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { isRoutineTestFixture } from "@/lib/routine-filters"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -90,8 +91,8 @@ export function RoutineIdentityHeader({
       <div className="flex min-w-0 items-start gap-3">
         {manager && published ? <div aria-busy={saving} className={saving ? "pointer-events-none opacity-70" : ""}><CrewIconPopover {...appearance} size="lg" onIconChange={icon => void save({ icon })} onColorChange={color => void save({ color })} /></div> : <CrewIcon {...appearance} size="lg" />}
         <div className="min-w-0"><h1 className="break-words text-lg font-semibold tracking-tight">{routine.name || routine.slug}</h1><div data-testid="routine-state-line" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          {published ? <Pill tone="success">Published v{routine.head_version}</Pill> : <Pill tone="default">Not published</Pill>}
-          {draft && <Pill tone="purple" data-testid="routine-draft-pill">Draft r{draft.revision} · {draftAuthorLabel(draft.updated_by, session?.user?.id)} · {relTime(draft.updated_at)}</Pill>}
+          {published ? <StatusPill size="md" tone="success" label={`Published v${routine.head_version}`} /> : <StatusPill size="md" tone="muted" label="Not published" />}
+          {draft && <StatusPill size="md" tone="purple" data-testid="routine-draft-pill" label={`Draft r${draft.revision} · ${draftAuthorLabel(draft.updated_by, session?.user?.id)} · ${relTime(draft.updated_at)}`} />}
           {runUses && (published
             ? <span>Run uses <b className="font-medium text-foreground/85">v{routine.head_version}</b></span>
             : <span>Run uses <b className="font-medium text-foreground/85">nothing yet</b> — publish first</span>)}

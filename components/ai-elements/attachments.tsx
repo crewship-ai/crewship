@@ -116,7 +116,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       data-status={attachment.status ?? "ready"}
       title={failed ? attachment.failureLabel : undefined}
       className={cn(
-        "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
+        "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-card border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
         inFlight && "opacity-70",
         cancelled && "border-dashed text-muted-foreground",
         failed && "border-destructive bg-destructive/10 text-destructive",
@@ -129,18 +129,18 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       {failed ? (
         // Not a colour, not an icon: the sentence. This is the one thing on
         // screen that stops a refused upload from reading as an attachment.
-        <span className="min-w-0 break-words text-[10px] font-medium">
+        <span className="min-w-0 break-words text-label font-medium">
           Upload failed — not attached
           {attachment.failureLabel ? ` (${attachment.failureLabel})` : ""}
         </span>
       ) : cancelled ? (
-        <span className="text-[10px] font-medium">Cancelled — not attached</span>
+        <span className="text-label font-medium">Cancelled — not attached</span>
       ) : waiting ? (
-        <span className="text-[10px] text-muted-foreground">Waiting…</span>
+        <span className="text-label text-muted-foreground">Waiting…</span>
       ) : uploading ? (
-        <span className="text-[10px] text-muted-foreground">Uploading…</span>
+        <span className="text-label text-muted-foreground">Uploading…</span>
       ) : (
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           {formatBytes(attachment.size)}
         </span>
       )}
@@ -148,7 +148,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onCancel(attachment.id)}
-          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-muted coarse:min-h-11 coarse:min-w-11"
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-micro font-medium underline underline-offset-2 hover:bg-muted coarse:min-h-[44px] coarse:min-w-[44px]"
           aria-label={`Cancel ${attachment.name}`}
         >
           Cancel
@@ -158,7 +158,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onRetry(attachment.id)}
-          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-destructive/15 coarse:min-h-11 coarse:min-w-11"
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-micro font-medium underline underline-offset-2 hover:bg-destructive/15 coarse:min-h-[44px] coarse:min-w-[44px]"
           aria-label={`Retry ${attachment.name}`}
         >
           Retry
@@ -168,7 +168,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
         <button
           type="button"
           onClick={() => onRemove(attachment.id)}
-          className="ml-0.5 rounded-full p-0.5 hover:bg-muted coarse:min-h-11 coarse:min-w-11 coarse:inline-flex coarse:items-center coarse:justify-center"
+          className="ml-0.5 rounded-full p-0.5 hover:bg-muted coarse:min-h-[44px] coarse:min-w-[44px] coarse:inline-flex coarse:items-center coarse:justify-center"
           aria-label={`Remove ${attachment.name}`}
         >
           <X className="h-3 w-3" />

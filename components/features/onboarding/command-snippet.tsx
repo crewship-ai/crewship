@@ -73,8 +73,8 @@ export function CommandSnippet({ command, caption, className = "" }: CommandSnip
   }, [command])
 
   return (
-    <div className={`rounded-lg border border-border bg-card/70 px-3 py-2 font-mono text-[11px] leading-relaxed ${className}`}>
-      {caption && <div className="mb-1 font-sans text-[11px] text-muted-foreground">{caption}</div>}
+    <div className={`rounded-lg border border-border bg-card/70 px-3 py-2 font-mono text-micro leading-relaxed ${className}`}>
+      {caption && <div className="mb-1 font-sans text-micro text-muted-foreground">{caption}</div>}
       <div className="flex items-center justify-between gap-2">
         <code className="select-all text-success">
           <span className="text-muted-foreground">$ </span>
@@ -84,7 +84,7 @@ export function CommandSnippet({ command, caption, className = "" }: CommandSnip
           type="button"
           onClick={onCopy}
           aria-label={`Copy "${command}"`}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2 font-sans text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2 font-sans text-micro font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <AnimatePresence mode="wait" initial={false}>
             {copied ? (

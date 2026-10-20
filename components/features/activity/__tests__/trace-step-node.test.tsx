@@ -159,7 +159,7 @@ describe("<TraceStepNode> waitpoint actions", () => {
     renderWaitNode("waiting")
     fireEvent.click(approveBtn()!)
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("internal error")
+      expect(toast.error).toHaveBeenCalledWith("internal error", { duration: Infinity })
     })
     expect(approveBtn()).toBeInTheDocument()
     expect(denyBtn()).toBeInTheDocument()

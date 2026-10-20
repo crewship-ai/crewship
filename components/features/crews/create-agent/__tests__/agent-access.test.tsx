@@ -16,8 +16,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
+import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { CreateAgentDialog } from "../create-agent-dialog"
 import { channelLabel } from "../agent-access"
+
+/** New agent is a wizard: Create agent lives on its last step. */
+function createButton() {
+  const jump = screen.queryByRole("button", { name: "Step 4: Instructions" })
+  if (jump) fireEvent.click(jump)
+  return screen.getByRole("button", { name: /create agent/i })
+}
+
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -85,9 +94,9 @@ function renderDialog() {
       onCreated={vi.fn()}
     />,
   )
-  fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+  fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
   fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
-  fireEvent.click(screen.getByRole("button", { name: "Permissions" }))
+  fireEvent.click(screen.getByRole("button", { name: "Step 3: Access" }))
   return result
 }
 
@@ -97,11 +106,21 @@ async function createWith(grants: RegExp[]) {
   for (const g of grants) {
     fireEvent.click(await screen.findByRole("switch", { name: g }))
   }
-  fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+  fireEvent.click(createButton())
 }
 
-beforeEach(() => {
+// The dialog's Pays with row reads the workspace store (abilities); load it
+// the way the dashboard does so the catalogue requests are not fenced off.
+beforeEach(async () => {
   vi.restoreAllMocks()
+  _resetWorkspaceStoreForTests()
+  const boot = vi.spyOn(global, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/v1/workspaces"
+      ? new Response(JSON.stringify([{ id: "ws-1", name: "Test workspace", slug: "test-workspace", currentUserRole: "OWNER", currentUserCapabilities: [] }]))
+      : new Response("{}", { status: 404 }),
+  )
+  await refreshWorkspaceSettings()
+  boot.mockRestore()
 })
 
 describe("channelLabel", () => {
@@ -189,7 +208,7 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     const { calls } = setupFetch()
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
 
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
     // The avatar render stored after create (#2876) is not a grant.
@@ -208,7 +227,7 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     expect(headline).toMatch(/2 grants did not apply/)
     expect(opts.description).toMatch(/GitHub/)
     expect(opts.description).toMatch(/ops@example\.com/)
-    expect(opts.description).toMatch(/agent's canvas/)
+    expect(opts.description).toMatch(/Tools and access/)
   })
 
   it("still creates the agent when the catalogues cannot be read", async () => {
@@ -230,7 +249,7 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     expect(screen.queryByRole("alert")).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
   })
 })

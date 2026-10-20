@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ComposioStatus } from "../composio-integrations"
 import type { Inventory, ComposioSettings, ToolkitInfo, ConnectedAccount } from "../composio/types"
@@ -102,6 +102,9 @@ describe("managed integration lifecycle", () => {
   render(<ComposioIntegrations />)
   await screen.findByRole("region", { name: "Catalog content" }); fireEvent.click(screen.getByRole("button", { name: "API key" }))
   fireEvent.click(screen.getByRole("button", { name: "Remove key" }))
+  const confirm = await screen.findByRole("alertdialog")
+  expect(confirm).toHaveTextContent("Connected apps stop working for every agent")
+  fireEvent.click(within(confirm).getByRole("button", { name: "Remove key" }))
   if (outcome === "success") await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   else await screen.findByText(outcome === "http" ? "Failed (503)" : "Failed to remove")
  })

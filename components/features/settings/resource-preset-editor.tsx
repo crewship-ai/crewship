@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
@@ -82,17 +82,17 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
       <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{item.level.level} v{item.entry.definition.version} · {item.level.operations.join(" + ")}</option>)}
     </select></label>
     {catalog.isPending&&<p role="status">Loading preset definitions…</p>}
-    {catalog.isError&&<div role="alert"><p>Preset catalog unavailable.</p><Button size="sm" variant="outline" className="coarse:h-12" disabled={busy||disabled} onClick={()=>{clearPreview();setSelected("");setReissue([]);void catalog.refetch()}}>Retry catalog</Button></div>}
+    {catalog.isError&&<div role="alert"><p>Preset catalog unavailable.</p><Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={busy||disabled} onClick={()=>{clearPreview();setSelected("");setReissue([]);void catalog.refetch()}}>Retry catalog</Button></div>}
     {disabled&&<p>Save or discard manual changes before previewing a saved policy.</p>}
-    {retained.map(right=><label key={right.operation} className="flex min-h-9 items-center gap-2 coarse:min-h-12"><input type="checkbox" disabled={blocked} checked={reissue.includes(right.operation)} onChange={event=>{setReissue(event.target.checked?[...reissue,right.operation]:reissue.filter(op=>op!==right.operation));clearPreview()}}/>Reissue {right.operation} as me · {right.live?"active":"inactive"} · original issuer {right.issuer_name||right.issuer_id}</label>)}
-    <Button variant="outline" size="sm" className="coarse:h-12" disabled={blocked||!choice} onClick={()=>void requestPreview()}>Preview preset</Button>
+    {retained.map(right=><label key={right.operation} className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={blocked} checked={reissue.includes(right.operation)} onChange={event=>{setReissue(event.target.checked?[...reissue,right.operation]:reissue.filter(op=>op!==right.operation));clearPreview()}}/>Reissue {right.operation} as me · {right.live?"active":"inactive"} · original issuer {right.issuer_name||right.issuer_id}</label>)}
+    <Button variant="outline" size="sm" className="coarse:h-[44px]" disabled={blocked||!choice} onClick={()=>void requestPreview()}>Preview preset</Button>
     {preview&&<div className="space-y-2" aria-label="Preset consequences">
       <p>Review exact changes. Retained inactive grants remain inactive unless explicitly reissued. Other authority and privacy gates still apply.</p>
       <ul>{preview.changes.map(change=><li key={`${change.right.kind}:${change.right.id}:${change.right.operation}`}>{change.action} {change.right.operation} · issuer {change.issuer_id} · {change.created_at||"created only on successful apply"} · {change.live?"active":"inactive"}</li>)}</ul>
       <p>Other rights preserved unchanged:</p><ul>{preview.orthogonal_rights.map(right=><li key={`${right.kind}:${right.id}:${right.operation}`}>{right.kind} {right.id} · {right.operation} · issuer {right.issuer_id} · {right.created_at} · {right.live?"active":"inactive"}</li>)}</ul>
       {preview.warnings.map(warning=><p key={warning.code}>{warning.message}{warning.before_eligible!==undefined&&warning.after_eligible!==undefined?` Eligibility ${warning.before_eligible} → ${warning.after_eligible}.`:""}</p>)}
-      <label className="flex min-h-9 items-center gap-2 coarse:min-h-12"><input type="checkbox" disabled={blocked} checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>I reviewed these exact changes and consequences</label>
-      <Button size="sm" className="coarse:h-12" disabled={blocked||!confirmed} onClick={()=>void apply()}>Apply confirmed preset</Button>
+      <label className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={blocked} checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>I reviewed these exact changes and consequences</label>
+      <Button size="sm" className="coarse:h-[44px]" disabled={blocked||!confirmed} onClick={()=>void apply()}>Apply confirmed preset</Button>
     </div>}
     {error&&<p role="alert">{error}</p>}
   </section>

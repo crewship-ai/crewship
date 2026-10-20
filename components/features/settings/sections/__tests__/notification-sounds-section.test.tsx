@@ -131,3 +131,12 @@ describe("Personal notification sounds", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
   })
 })
+describe("Notification sounds — Harbor 2 card", () => {
+  it("leads each row with its icon and points to Integrations › Channels for the other channels", () => {
+    render(<NotificationSoundSettings />)
+    const region = screen.getByRole("region", { name: "Notification sounds" })
+    expect(region.querySelectorAll("[data-slot=settings-row-icon]")).toHaveLength(5)
+    expect(region.querySelector("[data-slot=settings-card-footer]")).toHaveTextContent(/Notification sounds are off/)
+    expect(screen.getByRole("link", { name: "Integrations › Channels" })).toHaveAttribute("href", "/integrations?tab=notifications&section=connections")
+  })
+})

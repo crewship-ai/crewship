@@ -1302,6 +1302,25 @@
         },
         "type": "array"
       },
+      "AgentReleasedV1": {
+        "properties": {
+          "expired_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "released": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "expired_at",
+          "released"
+        ],
+        "type": "object"
+      },
       "AgentSubSpan": {
         "properties": {
           "detail": {
@@ -2711,9 +2730,6 @@
                 "scope",
                 "window",
                 "mode",
-                "limit_usd",
-                "spent_usd",
-                "remaining_usd",
                 "state"
               ],
               "type": "object"
@@ -2802,7 +2818,6 @@
           "payer",
           "budgets",
           "gate",
-          "estimate_usd",
           "estimate_state",
           "constraints"
         ],
@@ -4136,6 +4151,10 @@
             "nullable": true,
             "type": "string"
           },
+          "delegate_agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
           "description": {
             "nullable": true,
             "type": "string"
@@ -4155,6 +4174,10 @@
             "type": "array"
           },
           "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner_user_id": {
             "nullable": true,
             "type": "string"
           },
@@ -4541,6 +4564,38 @@
           "allow_privileged_credentials": {
             "nullable": true,
             "type": "boolean"
+          },
+          "appearance_default": {
+            "additionalProperties": false,
+            "description": "Workspace default look (OWNER/ADMIN), at most 2 KiB. Members inherit each value they have not chosen themselves. An empty object resets it.",
+            "maxProperties": 4,
+            "properties": {
+              "accent": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "knobs": {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 16,
+                "type": "object"
+              },
+              "style": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "theme": {
+                "enum": [
+                  "dark",
+                  "light",
+                  "system"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
           },
           "approvals_retention_days": {
             "nullable": true,
@@ -4938,6 +4993,150 @@
         },
         "type": "array"
       },
+      "CredentialFolder": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "credential_count": {
+            "type": "integer"
+          },
+          "default_security_level": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "min_security_level": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "name",
+          "description",
+          "reveal_policy",
+          "remind_after_days",
+          "min_security_level",
+          "default_security_level",
+          "credential_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "CredentialFolderCreateRequest": {
+        "properties": {
+          "default_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "min_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "enum": [
+              "inherit",
+              "admins",
+              "nobody"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CredentialFolderList": {
+        "items": {
+          "$ref": "#/components/schemas/CredentialFolder"
+        },
+        "type": "array"
+      },
+      "CredentialFolderUpdateRequest": {
+        "properties": {
+          "default_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "min_security_level": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "remind_after_days": {
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reveal_policy": {
+            "enum": [
+              "inherit",
+              "admins",
+              "nobody"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CredentialList": {
         "items": {
           "$ref": "#/components/schemas/Credential"
@@ -5276,6 +5475,57 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "CrewBudgetRequestV1": {
+        "properties": {
+          "limit_usd": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "mode": {
+            "enum": [
+              "soft",
+              "hard",
+              "tiered"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit_usd"
+        ],
+        "type": "object"
+      },
+      "CrewBudgetV1": {
+        "properties": {
+          "crew_id": {
+            "type": "string"
+          },
+          "limit_usd": {
+            "nullable": true,
+            "type": "number"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "spent_usd": {
+            "type": "number"
+          },
+          "state": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "crew_id",
+          "window",
+          "limit_usd",
+          "spent_usd",
+          "state"
+        ],
+        "type": "object"
       },
       "CrewCapabilitiesResponseV1": {
         "properties": {
@@ -5699,6 +5949,69 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "CrewProvisioningSummaryV1": {
+        "properties": {
+          "failed": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "slug",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "needs_provision": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "slug",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failed",
+          "needs_provision",
+          "total"
+        ],
         "type": "object"
       },
       "CrewServicesResponseV1": {
@@ -9086,6 +9399,9 @@
           },
           "has_more": {
             "type": "boolean"
+          },
+          "next_cursor": {
+            "type": "string"
           },
           "rows": {
             "items": {
@@ -15471,6 +15787,28 @@
       },
       "RoutineCalendarEvent": {
         "properties": {
+          "agents": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "slug",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "at": {
             "type": "string"
           },
@@ -15539,6 +15877,76 @@
         ],
         "type": "object"
       },
+      "RoutineCheckup": {
+        "properties": {
+          "checked_at": {
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineCheckupCheck"
+            },
+            "type": "array"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "warned": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slug",
+          "checked_at",
+          "passed",
+          "warned",
+          "failed",
+          "total",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "RoutineCheckupCheck": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "ok",
+              "warn",
+              "bad"
+            ],
+            "type": "string"
+          },
+          "tab": {
+            "description": "The tab of the routine page that fixes it, when one does.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "level",
+          "title",
+          "detail"
+        ],
+        "type": "object"
+      },
       "RoutineDraft": {
         "properties": {
           "base_pipeline_id": {
@@ -15562,6 +15970,9 @@
           },
           "slug": {
             "type": "string"
+          },
+          "test_result": {
+            "$ref": "#/components/schemas/RoutineTestResult"
           },
           "updated_at": {
             "type": "string"
@@ -15702,6 +16113,202 @@
           "valid",
           "validation_declared",
           "limitations"
+        ],
+        "type": "object"
+      },
+      "RoutineFolder": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "icon": {
+            "description": "A name from the crew icon registry; absent draws the plain folder.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "The folder this one sits in; absent at the top level.",
+            "type": "string"
+          },
+          "routine_count": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "routine_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "RoutineFolderCreateRequest": {
+        "properties": {
+          "color": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "icon": {
+            "description": "A name from the crew icon registry (the page folders' set); 400 for any other.",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "Create inside this folder; null or empty at the top level. 404 for an unknown folder, 400 past three levels.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RoutineFolderList": {
+        "items": {
+          "$ref": "#/components/schemas/RoutineFolder"
+        },
+        "type": "array"
+      },
+      "RoutineFolderMoveRequest": {
+        "properties": {
+          "folder_id": {
+            "description": "The folder to file the routines in; null or empty takes them out of any folder.",
+            "nullable": true,
+            "type": "string"
+          },
+          "slugs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "slugs"
+        ],
+        "type": "object"
+      },
+      "RoutineFolderMoveResult": {
+        "properties": {
+          "folder_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "moved": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "moved",
+          "folder_id"
+        ],
+        "type": "object"
+      },
+      "RoutineFolderUpdateRequest": {
+        "properties": {
+          "color": {
+            "description": "Omit to keep the colour; \"\" clears it.",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "icon": {
+            "description": "Omit to keep the icon; \"\" clears it. A name from the crew icon registry.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Omit to keep the name.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "Omit to keep the place; null or \"\" moves the folder to the top level. 400 for itself, one of its subfolders or past three levels; 404 for an unknown folder.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RoutineHealth": {
+        "properties": {
+          "routines": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineHealthRow"
+            },
+            "type": "array"
+          },
+          "window_days": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_days",
+          "routines"
+        ],
+        "type": "object"
+      },
+      "RoutineHealthRow": {
+        "properties": {
+          "finished": {
+            "type": "integer"
+          },
+          "last_outcomes": {
+            "description": "The newest runs, oldest first.",
+            "items": {
+              "enum": [
+                "completed",
+                "failed",
+                "stopped",
+                "waiting",
+                "running"
+              ],
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "spend_usd": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "integer"
+          },
+          "success_pct": {
+            "description": "Over the finished runs among last_outcomes; absent when none finished.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slug",
+          "last_outcomes",
+          "finished",
+          "succeeded",
+          "runs"
         ],
         "type": "object"
       },
@@ -16021,6 +16628,119 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "RoutineTemplate": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "description": "The routine definition; present on get and create, absent from the list.",
+            "type": "object"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "step_count": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "step_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "RoutineTemplateCreateRequest": {
+        "properties": {
+          "category": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "from_routine": {
+            "description": "Slug of a routine whose definition becomes the template. Exactly one of definition and from_routine.",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RoutineTemplateList": {
+        "items": {
+          "$ref": "#/components/schemas/RoutineTemplate"
+        },
+        "type": "array"
+      },
+      "RoutineTemplateUseRequest": {
+        "properties": {
+          "author_crew_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "type": "object"
+      },
+      "RoutineTestResult": {
+        "properties": {
+          "passed": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tested_at": {
+            "type": "string"
+          },
+          "tested_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "passed",
+          "status",
+          "tested_at"
+        ],
         "type": "object"
       },
       "RoutineWebhookReceipt": {
@@ -16485,8 +17205,7 @@
           "status",
           "output",
           "step_outputs",
-          "duration_ms",
-          "cost_usd"
+          "duration_ms"
         ],
         "type": "object"
       },
@@ -16642,6 +17361,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "phrase": {
+            "type": "string"
           },
           "timezone": {
             "type": "string"
@@ -17081,12 +17803,18 @@
       },
       "SkillUsage": {
         "properties": {
+          "errors_30d": {
+            "type": "integer"
+          },
           "errors_7d": {
             "type": "integer"
           },
           "last_used_at": {
             "nullable": true,
             "type": "string"
+          },
+          "uses_30d": {
+            "type": "integer"
           },
           "uses_7d": {
             "type": "integer"
@@ -17097,7 +17825,9 @@
         },
         "required": [
           "uses_7d",
+          "uses_30d",
           "errors_7d",
+          "errors_30d",
           "uses_total",
           "last_used_at"
         ],
@@ -17460,8 +18190,7 @@
           "start_reason",
           "ended_at",
           "end_reason",
-          "exit_evidence",
-          "cost_usd"
+          "exit_evidence"
         ],
         "type": "object"
       },
@@ -17719,8 +18448,7 @@
           "agent",
           "crew",
           "event_type",
-          "duration_ms",
-          "cost_usd"
+          "duration_ms"
         ],
         "type": "object"
       },
@@ -17895,7 +18623,6 @@
           "crew",
           "event_type",
           "duration_ms",
-          "cost_usd",
           "attempts",
           "events"
         ],
@@ -18908,6 +19635,38 @@
           "allow_privileged_credentials": {
             "type": "boolean"
           },
+          "appearance_default": {
+            "additionalProperties": false,
+            "description": "Workspace default look (OWNER/ADMIN), at most 2 KiB. Members inherit each value they have not chosen themselves. An empty object resets it.",
+            "maxProperties": 4,
+            "properties": {
+              "accent": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "knobs": {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 16,
+                "type": "object"
+              },
+              "style": {
+                "pattern": "^[a-z0-9-]{1,32}$",
+                "type": "string"
+              },
+              "theme": {
+                "enum": [
+                  "dark",
+                  "light",
+                  "system"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "approvals_retention_days": {
             "format": "int32",
             "nullable": true,
@@ -19014,6 +19773,7 @@
           "logo_url",
           "preferred_language",
           "pages_theme",
+          "appearance_default",
           "run_retention_days",
           "credential_audit_retention_days",
           "audit_log_retention_days",
@@ -29367,6 +30127,12 @@
                         "detail": {
                           "type": "string"
                         },
+                        "images_checked": {
+                          "type": "integer"
+                        },
+                        "images_older": {
+                          "type": "integer"
+                        },
                         "ok": {
                           "type": "boolean"
                         },
@@ -29380,7 +30146,9 @@
                       "required": [
                         "ok",
                         "detail",
-                        "warnings"
+                        "warnings",
+                        "images_checked",
+                        "images_older"
                       ],
                       "type": "object"
                     },
@@ -53438,6 +54206,140 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/agents/{agentId}/release": {
+      "post": {
+        "description": "Submit agent release (POST /api/v1/agents/{agentId}/release).",
+        "operationId": "post_api_v1_agents_agentId_release",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentReleasedV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit agent release",
+        "tags": [
+          "agents"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/agents/{agentId}/restricted-cli-chats": {
       "post": {
         "description": "Create agent restricted cli chats (POST /api/v1/agents/{agentId}/restricted-cli-chats).",
@@ -59026,6 +59928,29 @@
                           },
                           "runs": {
                             "type": "integer"
+                          },
+                          "skill_count": {
+                            "type": "integer"
+                          },
+                          "skills": {
+                            "items": {
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                },
+                                "uses": {
+                                  "type": "integer"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
                           },
                           "started_by": {
                             "type": "string"
@@ -67913,6 +68838,542 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/credential-folders": {
+      "get": {
+        "description": "List credential folders (GET /api/v1/credential-folders).",
+        "operationId": "get_api_v1_credential-folders",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialFolderList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List credential folders",
+        "tags": [
+          "credential-folders"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Create credential folders (POST /api/v1/credential-folders).",
+        "operationId": "post_api_v1_credential-folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialFolderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialFolder"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create credential folders",
+        "tags": [
+          "credential-folders"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/credential-folders/{folderId}": {
+      "delete": {
+        "description": "Delete credential folder (DELETE /api/v1/credential-folders/{folderId}).",
+        "operationId": "delete_api_v1_credential-folders_folderId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folderId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete credential folder",
+        "tags": [
+          "credential-folders"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update credential folder (PATCH /api/v1/credential-folders/{folderId}).",
+        "operationId": "patch_api_v1_credential-folders_folderId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folderId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialFolderUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialFolder"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update credential folder",
+        "tags": [
+          "credential-folders"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/credential-rotations/{rotationId}": {
       "delete": {
         "description": "Delete credential rotation (DELETE /api/v1/credential-rotations/{rotationId}).",
@@ -68039,6 +69500,14 @@
         "description": "List credentials (GET /api/v1/credentials).",
         "operationId": "get_api_v1_credentials",
         "parameters": [
+          {
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "query",
             "name": "kind",
@@ -74008,6 +75477,123 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/crews/provisioning-summary": {
+      "get": {
+        "description": "Get crews provisioning summary (GET /api/v1/crews/provisioning-summary).",
+        "operationId": "get_api_v1_crews_provisioning-summary",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrewProvisioningSummaryV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get crews provisioning summary",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/crews/{crewId}": {
       "delete": {
         "description": "Delete crew (DELETE /api/v1/crews/{crewId}).",
@@ -74867,6 +76453,350 @@
           "crews"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/crews/{crewId}/budget": {
+      "delete": {
+        "description": "Delete crew budget (DELETE /api/v1/crews/{crewId}/budget).",
+        "operationId": "delete_api_v1_crews_crewId_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrewBudgetV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete crew budget",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": false
+      },
+      "get": {
+        "description": "Get crew budget (GET /api/v1/crews/{crewId}/budget).",
+        "operationId": "get_api_v1_crews_crewId_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrewBudgetV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get crew budget",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": true
+      },
+      "put": {
+        "description": "Update crew budget (PUT /api/v1/crews/{crewId}/budget).",
+        "operationId": "put_api_v1_crews_crewId_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrewBudgetRequestV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrewBudgetV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update crew budget",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/crews/{crewId}/capabilities": {
@@ -96957,6 +98887,54 @@
         "parameters": [
           {
             "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attention",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crew",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "day_end",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deadline",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
@@ -96973,6 +98951,14 @@
           },
           {
             "in": "query",
+            "name": "now",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
@@ -96981,10 +98967,34 @@
           },
           {
             "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "state",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -97330,6 +99340,237 @@
           }
         ],
         "summary": "Get inbox count",
+        "tags": [
+          "inbox"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/inbox/counts": {
+      "get": {
+        "description": "List inbox counts (GET /api/v1/inbox/counts).",
+        "operationId": "get_api_v1_inbox_counts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attention",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crew",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "day_end",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deadline",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "now",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "by_attention": {
+                      "properties": {},
+                      "type": "object"
+                    },
+                    "by_deadline": {
+                      "properties": {},
+                      "type": "object"
+                    },
+                    "by_kind": {
+                      "properties": {},
+                      "type": "object"
+                    },
+                    "spaces": {
+                      "properties": {
+                        "action": {
+                          "type": "integer"
+                        },
+                        "history": {
+                          "type": "integer"
+                        },
+                        "updates": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "unread": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List inbox counts",
         "tags": [
           "inbox"
         ],
@@ -102009,6 +104250,14 @@
           },
           {
             "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "counts",
             "required": false,
             "schema": {
@@ -102018,6 +104267,14 @@
           {
             "in": "query",
             "name": "crew_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delegate_id",
             "required": false,
             "schema": {
               "type": "string"
@@ -102041,7 +104298,23 @@
           },
           {
             "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "mission_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needs",
             "required": false,
             "schema": {
               "type": "string"
@@ -102053,6 +104326,14 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -102098,6 +104379,22 @@
           {
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_mode",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "working",
             "required": false,
             "schema": {
               "type": "string"
@@ -107836,7 +110133,9 @@
                         "issues_closed",
                         "cost_usd",
                         "runs_count",
-                        "active_missions"
+                        "active_missions",
+                        "success_rate",
+                        "p95_duration_ms"
                       ],
                       "type": "string"
                     },
@@ -132574,6 +134873,197 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/paymaster/credential-spend": {
+      "get": {
+        "description": "Get paymaster credential spend (GET /api/v1/paymaster/credential-spend).",
+        "operationId": "get_api_v1_paymaster_credential-spend",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "credential_id": {
+                            "type": "string"
+                          },
+                          "input_tokens": {
+                            "type": "integer"
+                          },
+                          "last_ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "output_tokens": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "credential_id",
+                          "cost_usd",
+                          "call_count",
+                          "input_tokens",
+                          "output_tokens",
+                          "last_ts"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "until": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "rows",
+                    "since",
+                    "until"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get paymaster credential spend",
+        "tags": [
+          "paymaster"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/paymaster/spend/by-agent/{crewId}": {
       "get": {
         "description": "Get paymaster spend by agent (GET /api/v1/paymaster/spend/by-agent/{crewId}).",
@@ -152293,6 +154783,859 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipeline-folders": {
+      "get": {
+        "description": "List workspace pipeline folders (GET /api/v1/workspaces/{workspaceId}/pipeline-folders).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-folders",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineFolderList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List workspace pipeline folders",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Create workspace pipeline folders (POST /api/v1/workspaces/{workspaceId}/pipeline-folders).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipeline-folders",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineFolderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineFolder"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create workspace pipeline folders",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipeline-folders/move": {
+      "post": {
+        "description": "Submit workspace pipeline folders move (POST /api/v1/workspaces/{workspaceId}/pipeline-folders/move).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipeline-folders_move",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineFolderMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineFolderMoveResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace pipeline folders move",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}": {
+      "delete": {
+        "description": "Delete workspace pipeline folder (DELETE /api/v1/workspaces/{workspaceId}/pipeline-folders/{id}).",
+        "operationId": "delete_api_v1_workspaces_workspaceId_pipeline-folders_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete workspace pipeline folder",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update workspace pipeline folder (PATCH /api/v1/workspaces/{workspaceId}/pipeline-folders/{id}).",
+        "operationId": "patch_api_v1_workspaces_workspaceId_pipeline-folders_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineFolderUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineFolder"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update workspace pipeline folder",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipeline-health": {
+      "get": {
+        "description": "Get workspace pipeline health (GET /api/v1/workspaces/{workspaceId}/pipeline-health).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-health",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineHealth"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline health",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}": {
       "get": {
         "description": "Get workspace pipeline pending (GET /api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}).",
@@ -154509,9 +157852,16 @@
           {
             "in": "query",
             "name": "cron_expr",
-            "required": true,
+            "required": false,
             "schema": {
-              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "phrase",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           },
@@ -155344,6 +158694,768 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipeline-templates": {
+      "get": {
+        "description": "List workspace pipeline templates (GET /api/v1/workspaces/{workspaceId}/pipeline-templates).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-templates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineTemplateList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List workspace pipeline templates",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Create workspace pipeline templates (POST /api/v1/workspaces/{workspaceId}/pipeline-templates).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipeline-templates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineTemplateCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineTemplate"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create workspace pipeline templates",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}": {
+      "delete": {
+        "description": "Delete workspace pipeline template (DELETE /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}).",
+        "operationId": "delete_api_v1_workspaces_workspaceId_pipeline-templates_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete workspace pipeline template",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      },
+      "get": {
+        "description": "Get workspace pipeline template (GET /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipeline-templates_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineTemplate"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline template",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use": {
+      "post": {
+        "description": "Submit workspace pipeline template use (POST /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipeline-templates_id_use",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineTemplateUseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineDraft"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace pipeline template use",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipeline-webhooks": {
       "get": {
         "description": "List workspace pipeline webhooks (GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks).",
@@ -155551,6 +159663,9 @@
                     "name": {
                       "type": "string"
                     },
+                    "previous_secret_expires_at": {
+                      "type": "string"
+                    },
                     "rate_limit_per_min": {
                       "type": "integer"
                     },
@@ -155625,6 +159740,9 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "previous_secret_expires_at": {
                       "type": "string"
                     },
                     "rate_limit_per_min": {
@@ -155975,6 +160093,15 @@
                   "rate_limit_per_min": {
                     "type": "integer"
                   },
+                  "rotate_grace_seconds": {
+                    "enum": [
+                      0,
+                      3600,
+                      86400,
+                      604800
+                    ],
+                    "type": "integer"
+                  },
                   "rotate_secret": {
                     "type": "boolean"
                   },
@@ -156034,6 +160161,9 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "previous_secret_expires_at": {
                       "type": "string"
                     },
                     "rate_limit_per_min": {
@@ -156199,6 +160329,211 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test": {
+      "post": {
+        "description": "Test workspace pipeline webhook (POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test).",
+        "operationId": "post_api_v1_workspaces_workspaceId_pipeline-webhooks_webhookId_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhookId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "headers": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "sample": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ignored_template_keys": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "inputs": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "problem": {
+                      "type": "string"
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "inputs",
+                    "ignored_template_keys",
+                    "valid"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Test workspace pipeline webhook",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipelines": {
       "get": {
         "description": "List saved pipeline definitions (routines) in the selected workspace.",
@@ -156255,6 +160590,14 @@
           {
             "in": "query",
             "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
             "required": false,
             "schema": {
               "type": "string"
@@ -156547,22 +160890,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -156636,8 +160963,80 @@
               }
             },
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
           },
-          "500": {
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipelines calendar",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/calendar.ics": {
+      "get": {
+        "description": "List workspace pipelines calendar.ics (GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_calendar.ics",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "private, no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "enum": [
+                    "attachment; filename=\"crewship-calendar.ics\""
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
@@ -156653,7 +161052,43 @@
                 }
               }
             },
-            "description": "Internal Server Error"
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -156667,7 +161102,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get workspace pipelines calendar",
+        "summary": "List workspace pipelines calendar.ics",
         "tags": [
           "workspaces",
           "routines"
@@ -159836,6 +164271,158 @@
           "routines"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup": {
+      "get": {
+        "description": "Get workspace pipeline checkup (GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup).",
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_checkup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineCheckup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace pipeline checkup",
+        "tags": [
+          "workspaces",
+          "routines"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff": {
@@ -172028,6 +176615,182 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": {
+      "post": {
+        "description": "Submit workspace skill archive (POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive).",
+        "operationId": "post_api_v1_workspaces_workspaceId_skills_skillId_archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace skill archive",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": {
+      "post": {
+        "description": "Restore workspace skill (POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore).",
+        "operationId": "post_api_v1_workspaces_workspaceId_skills_skillId_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Restore workspace skill",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/webhook-deliveries": {
       "get": {
         "description": "List workspace webhook deliveries (GET /api/v1/workspaces/{workspaceId}/webhook-deliveries).",
@@ -172195,6 +176958,178 @@
           }
         ],
         "summary": "List workspace webhook deliveries",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/webhook-deliveries/summary": {
+      "get": {
+        "description": "Get workspace webhook deliveries summary (GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/summary).",
+        "operationId": "get_api_v1_workspaces_workspaceId_webhook-deliveries_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "accepted": {
+                            "type": "integer"
+                          },
+                          "calls": {
+                            "type": "integer"
+                          },
+                          "endpoint_id": {
+                            "type": "string"
+                          },
+                          "endpoint_kind": {
+                            "type": "string"
+                          },
+                          "ignored": {
+                            "type": "integer"
+                          },
+                          "last_received_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "endpoint_id",
+                          "endpoint_kind",
+                          "calls",
+                          "accepted",
+                          "ignored",
+                          "last_received_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace webhook deliveries summary",
         "tags": [
           "workspaces"
         ],

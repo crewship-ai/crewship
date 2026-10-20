@@ -502,7 +502,10 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		if alt, altErr := r.Cookie("authjs.refresh-token"); altErr == nil && alt.Value != "" {
 			cookie = alt
 		} else {
-			writeAuthError(w, http.StatusUnauthorized, reasonSessionExpired)
+			// No refresh cookie at all: a visitor who never signed in (or
+			// cleared the cookies) — nothing expired, so the frontend must
+			// not say it did.
+			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
 			return
 		}
 	}

@@ -73,7 +73,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { shortId } from "@/lib/activity-stream"
 import { Button } from "@/components/ui/button"
-import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
+import { StatusDot } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import {
   Select,
   SelectContent,
@@ -694,7 +695,7 @@ export function RunsView({
                         : run.status === "CANCELLED"
                           ? XCircle
                           : Play
-                const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
+                const traceHref = `/activity?section=log&trace_id=${encodeURIComponent(run.id)}`
                 return (
                   <div
                     key={run.id}
@@ -755,19 +756,11 @@ export function RunsView({
                       <span className="text-[11px] text-muted-foreground/40">—</span>
                     )}
                     <div>
-                      <StatusBadge
+                      <StatusPill
                         status={canonicalStatus}
-                        label={
-                          <span className="inline-flex items-center gap-1">
-                            {isRunning ? (
-                              <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
-                            ) : (
-                              <StatusIcon className="h-2.5 w-2.5" />
-                            )}
-                            {statusLabel(run.status)}
-                          </span>
-                        }
-                        className="text-[10px]"
+                        live={isRunning}
+                        icon={isRunning ? undefined : <StatusIcon className="h-2.5 w-2.5" />}
+                        label={statusLabel(run.status)}
                       />
                     </div>
                     <span className="hidden text-[11px] text-muted-foreground truncate md:block">
@@ -875,7 +868,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
       </div>
       <ul className="divide-y divide-border/40">
         {runs.map((run) => {
-          const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
+          const traceHref = `/activity?section=log&trace_id=${encodeURIComponent(run.id)}`
           return (
             <li
               key={run.id}

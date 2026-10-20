@@ -37,7 +37,7 @@ export function DocumentProposals({ client, headRev, canDecide, hasLocalDraft, o
     {view.status === "loading" && <p role="status">Loading proposals…</p>}
     {view.status === "error" && <p role="alert">Proposals could not be loaded.</p>}
     {view.status === "ready" && (view.items.length === 0 ? <p>No proposals.</p> : <ul className="space-y-2">{view.items.map(item => <li key={item.id}>
-      <button type="button" className="min-h-11 w-full rounded-md border p-2 text-left" onClick={() => open(item.id)}>{item.author} · {item.status} · revision {item.baseRev}</button>
+      <button type="button" className="min-h-11 coarse:min-h-[44px] w-full rounded-md border p-2 text-left" onClick={() => open(item.id)}>{item.author} · {item.status} · revision {item.baseRev}</button>
     </li>)}</ul>)}
     {detail?.status === "loading" && <p role="status">Loading proposal…</p>}
     {detail?.status === "error" && <p role="alert">This proposal could not be loaded.</p>}

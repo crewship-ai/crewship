@@ -181,6 +181,7 @@ var BackupTables = []string{
 	"issue_work",
 	"issue_executions",
 	"crew_templates",
+	"credential_folders", // credentials.folder_id → credential_folders, so folders land first (ODCH-VLT-01)
 	"credentials",
 	// Depth 2: workspace via crews
 	"crew_members",
@@ -218,7 +219,11 @@ var BackupTables = []string{
 	"agent_session_checkpoints",
 	"assignments",
 	"approvals_queue",
+	"routine_folders", // pipelines.folder_id → routine_folders, so folders land first (ODCH-RT-01)
 	"pipelines",
+	"routine_folder_members",   // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
+	"routine_templates",        // saved routine definitions (ODCH-RT-22); FK workspace only
+	"routine_test_results",     // latest Test run per definition hash (ODCH-RT-13); FK workspace only
 	"access_preset_selections", // informational choice; after membership and typed resource parents
 	"pipeline_versions",
 	"pipeline_drafts",

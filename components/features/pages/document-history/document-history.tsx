@@ -44,7 +44,7 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
   return <section aria-label="Document history" className="min-w-0 space-y-4 rounded-lg border p-4">
     <div className="flex items-center justify-between gap-3">
       <h2 className="font-semibold">Document history</h2>
-      <Button type="button" variant="ghost" className="coarse:min-h-12" disabled={busy} onClick={onClose}>Close history</Button>
+      <Button type="button" variant="ghost" className="coarse:min-h-[44px]" disabled={busy} onClick={onClose}>Close history</Button>
     </div>
     <p className="text-sm text-muted-foreground">Read-only confirmed checkpoints. Browsing does not change your current draft.</p>
     {restore?.status === "pending" && <p role="status">Waiting for restore confirmation…</p>}
@@ -61,7 +61,7 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
       {checkpoints.length === 0 ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
         {checkpoints.map(checkpoint => <li key={checkpoint.id}>
           <Button type="button" variant="outline" aria-pressed={checkpoint.id === selectedId}
-            className="h-auto min-h-12 w-full flex-wrap justify-start whitespace-normal break-all p-3 text-left"
+            className="h-auto coarse:min-h-[44px] w-full flex-wrap justify-start whitespace-normal break-all p-3 text-left"
             onClick={() => onSelect(checkpoint.id)}>
             <span>Revision {checkpoint.rev}</span>
             <span className="font-normal">{checkpoint.actor}</span>
@@ -72,7 +72,7 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
       </ul>}
       {selectedId && <div className="space-y-2">
         {exact && review && <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" className="coarse:min-h-12" aria-pressed={comparing === selectedId} disabled={review.currentContent === undefined} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with saved version</Button>
+          <Button type="button" variant="outline" className="coarse:min-h-[44px]" aria-pressed={comparing === selectedId} disabled={review.currentContent === undefined} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with saved version</Button>
           {review.currentContent === undefined && <p role="status" className="text-sm">Loading current document…</p>}
         </div>}
         {exact && review && review.currentContent !== undefined && comparing === selectedId && <>

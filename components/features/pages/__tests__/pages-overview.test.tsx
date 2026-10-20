@@ -77,14 +77,14 @@ describe("PagesOverview", () => {
 
   it("renders the band of four §9b.2 names, in order", () => {
     renderOverview()
-    for (const label of ["Pages", "Stale now", "Updated today", "Needs attention"]) {
+    for (const label of ["Artifacts", "Stale now", "Updated today", "Needs attention"]) {
       expect(tile(label)).toBeTruthy()
     }
   })
 
   it("reports measured counts when the wire carried freshness", () => {
     renderOverview()
-    expect(tile("Pages").textContent).toContain("2")
+    expect(tile("Artifacts").textContent).toContain("2")
     expect(tile("Stale now").textContent).toContain("1 panel past SLA")
     expect(tile("Updated today").textContent).toContain("received a payload")
     expect(tile("Needs attention").textContent).toContain("1 failed")
@@ -98,7 +98,7 @@ describe("PagesOverview", () => {
     expect(tile("Stale now").textContent).toContain("freshness not reported")
     expect(tile("Needs attention").textContent).toContain(EM_DASH)
     // The count of pages is measured either way — it is not freshness.
-    expect(tile("Pages").textContent).toContain("1")
+    expect(tile("Artifacts").textContent).toContain("1")
   })
 
   it("keeps a measured zero a zero", () => {

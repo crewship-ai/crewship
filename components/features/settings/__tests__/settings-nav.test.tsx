@@ -222,18 +222,35 @@ vi.mock("../sections/crew-audit-section", () => ({
 describe("SettingsLayout deep-link into a hidden section", () => {
   beforeEach(() => cleanup())
 
-  it("falls back to Profile when a MEMBER opens ?tab=audit", async () => {
+  it("falls back to Profile when a MEMBER opens a hidden section that has no page of its own", async () => {
     h.role = "MEMBER"
-    window.history.replaceState(null, "", "/settings?tab=audit")
+    window.history.replaceState(null, "", "/settings?tab=access-secrets")
     const { SettingsLayout } = await import("../settings-layout")
     render(<SettingsLayout />)
 
-    // Not a blank pane, and not the audit pane either.
+    // Not a blank pane, and not the section either.
     await waitFor(() => expect(screen.getByTestId("profile-section")).toBeTruthy())
-    expect(screen.queryByTestId("audit-section")).toBeNull()
+    expect(screen.queryByTestId("access-secrets-section")).toBeNull()
     // The sub-bar names the section you actually landed on.
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings / Profile")
   })
+
+  // ODCH-SET-10: Audit log is a page of its own that explains who may read
+  // it. A MEMBER or MANAGER following ?tab=audit gets that sentence, the same
+  // as typing /settings/audit, not a silent landing on Profile.
+  for (const role of ["MEMBER", "MANAGER"]) {
+    it(`forwards ${role}'s ?tab=audit to the Audit log page, which says who may read it`, async () => {
+      h.role = role
+      h.replace.mockClear()
+      window.history.replaceState(null, "", "/settings?tab=audit")
+      const { SettingsLayout } = await import("../settings-layout")
+      render(<SettingsLayout />)
+
+      await waitFor(() => expect(h.replace).toHaveBeenCalledWith("/settings/audit"))
+      expect(screen.queryByTestId("profile-section")).toBeNull()
+      expect(screen.queryByTestId("audit-section")).toBeNull()
+    })
+  }
 
   // The Audit log is a nested page now (/settings/audit); an old ?tab=audit
   // link from a role that can read it lands there.

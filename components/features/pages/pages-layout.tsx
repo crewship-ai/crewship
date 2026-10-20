@@ -321,7 +321,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
-        className="coarse:[&>div]:min-h-12"
+        className="coarse:[&>div]:min-h-[44px]"
         icon={CONCEPT_ICON.pages}
         title="Artifacts"
         section={editing ? "Edit" : undefined}
@@ -332,7 +332,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {!selectedSlug && documentAvailability.data === true && <SubBarSecondary
               icon={FolderUser}
               aria-pressed={personalSpace}
-              className="coarse:min-h-12"
+              className="coarse:min-h-[44px]"
               onClick={() => setPersonalSpace(value => !value)}
               title="Show your private Documents in this workspace"
             >My space</SubBarSecondary>}
@@ -347,7 +347,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   aria-pressed={!showPanels}
                   onClick={() => setShowPanels(false)}
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     !showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
@@ -361,7 +361,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   onClick={() => setShowPanels(true)}
                   title="Show this Page's panels instead; the application is closed in this tab and keeps running for everyone else"
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
@@ -402,7 +402,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-12" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}

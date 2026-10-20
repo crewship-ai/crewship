@@ -132,7 +132,7 @@ describe("Provisioning toolbar controls", () => {
     const label = action === "restart" ? "Restart agents" : "Retry"
     for (const text of ["refused", "offline", "disconnected"]) {
       fireEvent.click(screen.getByRole("button", { name: label }))
-      await waitFor(() => expect(notices.error).toHaveBeenLastCalledWith(expect.stringContaining(text)))
+      await waitFor(() => expect(notices.error).toHaveBeenLastCalledWith(expect.stringContaining(text), { duration: Infinity }))
       expect(screen.getByRole("button", { name: label })).toBeEnabled()
     }
   })

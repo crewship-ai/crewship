@@ -129,6 +129,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	// === Credentials & secrets (round-trip; cipher preserved) ========
 	"credentials":          IntentInclude,
+	"credential_folders":   IntentInclude, // Vault folders and their reveal policy (ODCH-VLT-01)
 	"agent_credentials":    IntentInclude,
 	"credential_audit":     IntentInclude,
 	"credential_rotations": IntentInclude,
@@ -627,6 +628,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"pipeline_waitpoints": IntentInclude,
 	"pipeline_webhooks":   IntentInclude,
 	"pipelines":           IntentInclude,
+	// routine_folders / routine_templates / routine_test_results are routine
+	// organisation and authoring data a restored workspace is expected to
+	// keep: folders group the routines, templates are saved definitions, and a
+	// test result is the proof a draft or version was tested.
+	"routine_folders":        IntentInclude,
+	"routine_folder_members": IntentInclude,
+	"routine_templates":      IntentInclude,
+	"routine_test_results":   IntentInclude,
 	// waitpoint_trust_grants = standing "stop asking me" decisions an
 	// operator made on a specific gate. Durable governance state, not
 	// runtime: dropping these on restore silently re-arms every gate the

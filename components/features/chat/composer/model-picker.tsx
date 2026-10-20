@@ -70,7 +70,7 @@ function ModelPanel({ workspaceId, userId, preflight }: {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button type="button" variant="ghost" size="sm" aria-label={label}
-          className="h-7 max-w-full gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground coarse:min-h-12">
+          className="h-7 max-w-full gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground coarse:min-h-[44px]">
           <Sparkles className="h-3 w-3" />
           <span className="truncate font-mono">{configured || (modelUnset ? "Model not set" : "Model unknown")}</span>
           <ChevronDown className="h-3 w-3" />

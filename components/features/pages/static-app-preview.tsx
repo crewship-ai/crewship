@@ -59,7 +59,7 @@ export function StaticAppPreview({ publication }: { publication: StaticAppPublic
     <p className="text-sm text-muted-foreground">Static preview · version {active.revision}. Scripts, navigation and external resources are disabled.</p>
     {publication.revision !== active.revision && <div className="flex flex-wrap items-center gap-2">
       <p>Version {publication.revision} is available. Loading it resets temporary preview state.</p>
-      <button type="button" className="rounded border px-3 py-2 coarse:min-h-12" onClick={() => setOpened(publication)}>Load version {publication.revision}</button>
+      <button type="button" className="rounded border px-3 py-2 coarse:min-h-[44px]" onClick={() => setOpened(publication)}>Load version {publication.revision}</button>
     </div>}
     {failed === active ? <p role="alert">Static preview could not be prepared. Reopen the Page to retry.</p> : <>
       {!ready && <p role="status">Preparing static preview…</p>}

@@ -35,18 +35,18 @@ export function ComposerArtifactContextStrip({ context, onModeChange, onUpdateTa
       {context.attachments.map(item => <li key={item.id} className="flex items-center gap-1 rounded border px-2 py-1">
         {item.access === "lost" ? <span className="text-muted-foreground">Unavailable item</span>
           : <><span className="truncate">{item.title}</span><span className="text-xs text-muted-foreground">{targetLabel(item.target)}</span></>}
-        <Button type="button" size="icon" variant="ghost" className="size-6 coarse:min-h-12 coarse:min-w-12" aria-label={item.access === "lost" ? "Remove unavailable item" : `Remove ${item.title}`} onClick={() => onDetach(item.id)}><X className="size-3" aria-hidden /></Button>
+        <Button type="button" size="icon" variant="ghost" className="size-6 coarse:min-h-[44px] coarse:min-w-[44px]" aria-label={item.access === "lost" ? "Remove unavailable item" : `Remove ${item.title}`} onClick={() => onDetach(item.id)}><X className="size-3" aria-hidden /></Button>
       </li>)}
     </ul>
     <fieldset className="flex flex-wrap gap-3">
       <legend className="sr-only">What should the agent do</legend>
-      {MODES.map(mode => <label key={mode.id} className="flex items-center gap-1 coarse:min-h-12">
+      {MODES.map(mode => <label key={mode.id} className="flex items-center gap-1 coarse:min-h-[44px]">
         <input type="radio" name="artifact-edit-mode" checked={context.mode === mode.id} disabled={mode.id === "update" && editUnavailable} aria-describedby={mode.id === "update" && editUnavailable ? "artifact-edit-unavailable" : undefined} onChange={() => onModeChange(mode.id)} />{mode.label}
       </label>)}
     </fieldset>
     {editUnavailable && <p id="artifact-edit-unavailable" className="text-xs text-muted-foreground">{!context.serverConfirmedPrivate ? BLOCK_TEXT.server_unconfirmed : context.chatPrivacy !== "private" ? BLOCK_TEXT[context.chatPrivacy === "checking" ? "chat_checking" : context.chatPrivacy === "unverified" ? "chat_unverified" : "chat_not_private"] : "Editing an item in a shared folder needs a proposal, which is not available yet."}</p>}
     {context.mode === "update" && context.attachments.length > 1 && <label className="flex items-center gap-2 text-xs">Item to update
-      <select className="rounded border bg-background p-1 coarse:min-h-12" value={context.updateTargetId ?? ""} onChange={event => { if (event.target.value) onUpdateTargetChange(event.target.value) }}>
+      <select className="rounded border bg-background p-1 coarse:min-h-[44px]" value={context.updateTargetId ?? ""} onChange={event => { if (event.target.value) onUpdateTargetChange(event.target.value) }}>
         {!target && <option value="" disabled>Select an item</option>}
         {context.attachments.filter(item => item.access === "readable").map(item => <option key={item.id} value={item.id}>{item.title} · {targetLabel(item.target)}</option>)}
       </select></label>}

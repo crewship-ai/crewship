@@ -4,14 +4,15 @@ import * as React from "react"
 import Link from "next/link"
 import { useReducedMotion } from "motion/react"
 import { useSearchParams } from "next/navigation"
-import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, Webhook, X } from "lucide-react"
-import { toast } from "sonner"
+import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, TriangleAlert, Webhook, X } from "lucide-react"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { isAdminTier } from "@/lib/permissions/tiers"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -50,7 +51,7 @@ const KIND: Record<string, { label: string; tag: string; icon: React.ElementType
 const TONE_DOT = { ok: "bg-success", warn: "bg-warn", bad: "bg-destructive", none: "bg-muted-foreground/40" } as const
 const TONE_TEXT = { ok: "text-success", warn: "text-warn", bad: "text-destructive", none: "text-muted-foreground" } as const
 /** `.eyebrow` without its colour, so a heading can be amber or red. */
-const EYEBROW = "font-mono text-[11px] font-medium uppercase leading-4 tracking-[0.08em]"
+const EYEBROW = "text-micro font-semibold leading-4"
 
 const STATES: { key: HookFilters["state"]; label: string }[] = [
   { key: "", label: "All" },
@@ -190,7 +191,7 @@ export function HooksPage() {
   const failing = all.filter((h) => outcomeTone(runs[h.id]?.[0]?.outcome) === "bad").length
 
   const newButton = canWrite && (
-    <Button size="sm" className="h-7 gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
+    <Button size="sm" className="gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
   )
   const slotProps = { inSlot, runs, canWrite, filtering, onOpen: (h: HookRow) => setOpenId(h.id), onAdd: openNew }
 
@@ -220,9 +221,9 @@ export function HooksPage() {
             </div>
 
             {loadError && (
-              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                The hooks could not be loaded. <button type="button" className="underline" onClick={() => setReload((n) => n + 1)}>Retry</button>
-              </p>
+              <PageBanner tone="bad" icon={TriangleAlert} action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Retry</Button>}>
+                The hooks could not be loaded.
+              </PageBanner>
             )}
 
             <Toolbar filters={filters} setFilters={setFilters} view={view} setView={setView} hasHooks={all.length > 0} />
@@ -272,7 +273,7 @@ export function HooksPage() {
 }
 
 function Stat({ n, one, many, className }: { n: number; one: string; many: string; className?: string }) {
-  return <span className={className}><span className="font-mono tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
+  return <span className={className}><span className="tabular-nums text-foreground">{n}</span> {n === 1 ? one : many}</span>
 }
 
 function Toolbar({ filters, setFilters, view, setView, hasHooks }: {
@@ -328,7 +329,7 @@ function FlowStrip({ reduce }: { reduce: boolean }) {
           <li key={s.id} className="flex items-center gap-1.5">
             <button type="button" onClick={() => go(s.id)}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2.5 text-xs hover:border-primary/40 hover:text-foreground">
-              <span className="font-mono text-micro text-primary-hover">{i + 1}</span>{s.label}
+              <span className="text-micro tabular-nums text-primary-hover">{i + 1}</span>{s.label}
             </button>
             {i < LIFECYCLE_STEPS.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground-soft" aria-hidden />}
           </li>
@@ -419,7 +420,7 @@ function MapStack(p: SlotProps) {
 function StepCell({ n, label, sub, className }: { n: number; label: string; sub: string; className?: string }) {
   return (
     <div role="rowheader" className={cn("flex items-start gap-3 px-4 py-3", className)}>
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 font-mono text-micro text-primary-hover">{n}</span>
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 text-micro tabular-nums text-primary-hover">{n}</span>
       <span className="min-w-0">
         <span className="block text-control font-medium">{label}</span>
         <span className="block text-label text-muted-foreground">{sub}</span>
@@ -565,7 +566,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
             {hook.enabled ? "On" : "Off"}
           </label>
           {blockingLive && <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warn">STOPS THE ACTION</span>}
-          {canChange && <Button variant="outline" size="sm" className="ml-auto h-7 gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
+          {canChange && <Button variant="outline" size="sm" className="ml-auto gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
         </div>
       </section>
 
@@ -615,7 +616,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
             })}
           </ul>
         )}
-        <Link href="/journal?q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Journal →</Link>
+        <Link href="/activity?section=log&q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Activity →</Link>
       </section>
 
       {canChange && (

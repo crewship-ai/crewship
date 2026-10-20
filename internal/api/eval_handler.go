@@ -312,7 +312,7 @@ func (h *EvalHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeCostAwareJSON(w, r, http.StatusOK, map[string]any{
 		"rows":  runs,
 		"count": len(runs),
 		"limit": limit,
@@ -351,7 +351,7 @@ func (h *EvalHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "get run failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeCostAwareJSON(w, r, http.StatusOK, run)
 }
 
 // updateRun is a thin wrapper around quartermaster.UpdateRunStatus that

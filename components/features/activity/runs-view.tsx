@@ -20,9 +20,11 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
 import { SourcePill } from "@/components/features/activity/source-pill"
+import { StatusPill } from "@/components/ui/status-pill"
 import { useTrace } from "@/hooks/use-trace"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
+import { isCostShown } from "@/lib/cost-visibility"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -218,7 +220,7 @@ function RunCard({
                 <span>{formatDurationDecimal(run.duration_ms)}</span>
               </>
             )}
-            {run.cost_usd > 0 && (
+            {isCostShown(run.cost_usd) && run.cost_usd > 0 && (
               <>
                 <span>·</span>
                 <span>${run.cost_usd.toFixed(4)}</span>
@@ -247,15 +249,6 @@ function RunCard({
         )}
       </AnimatePresence>
     </li>
-  )
-}
-
-function StatusPill({ status }: { status: string }) {
-  const tint = statusTint(status)
-  return (
-    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium capitalize", tint.bg, tint.text)}>
-      {status}
-    </span>
   )
 }
 

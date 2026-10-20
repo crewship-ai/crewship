@@ -699,3 +699,60 @@ describe("the sheet grabber", () => {
     expect(onOpenChange, "a cancelled drag dismissed the sheet").not.toHaveBeenCalled()
   })
 })
+
+describe("CreateSurfaceFooter inside a form", () => {
+  beforeEach(() => cleanup())
+
+  it("Cancel closes without submitting the form", () => {
+    const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault())
+    const onCancel = vi.fn()
+    render(
+      <form onSubmit={onSubmit}>
+        <CreateSurfaceFooter onCancel={onCancel} guardCancel={false} primaryLabel="Save" onPrimary={vi.fn()} />
+      </form>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("CreateSurface — blocking, full-height phone sheet, header without ×, footer without Cancel", () => {
+  it("a blocking surface ignores Esc and outside clicks, has no grabber and an opaque overlay", () => {
+    const onOpenChange = vi.fn()
+    render(
+      <CreateSurface open onOpenChange={onOpenChange} blocking phoneHeight="full" size="sm">
+        <CreateSurfaceHeader title="Acme is unavailable" />
+        <CreateSurfaceFooter hint={null} primaryLabel="Retry" onPrimary={() => {}} />
+      </CreateSurface>,
+    )
+    const dialog = screen.getByRole("dialog", { name: "Acme is unavailable" })
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    fireEvent.pointerDown(document.body)
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(dialog).toHaveAttribute("data-blocking")
+    expect(dialog.className).toMatch(/max-sm:h-dvh/)
+    expect(dialog.querySelector(".cursor-grab")).toBeNull()
+    expect(document.querySelector('[data-slot="dialog-overlay"]')?.className).toMatch(/\bbg-background\b/)
+    // Header without onClose: no ×. Footer without onCancel: no Cancel.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
+  it("by default the surface is dismissible, keeps its grabber and grows with the content", () => {
+    const onOpenChange = vi.fn()
+    render(
+      <CreateSurface open onOpenChange={onOpenChange}>
+        <CreateSurfaceHeader title="New thing" onClose={() => onOpenChange(false)} />
+      </CreateSurface>,
+    )
+    const dialog = screen.getByRole("dialog", { name: "New thing" })
+    expect(dialog).not.toHaveAttribute("data-blocking")
+    expect(dialog.className).not.toMatch(/max-sm:h-dvh/)
+    expect(dialog.querySelector(".cursor-grab")).not.toBeNull()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})

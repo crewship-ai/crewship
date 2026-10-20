@@ -3,7 +3,7 @@
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, ClipboardList, X } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import {

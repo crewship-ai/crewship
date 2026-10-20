@@ -12,6 +12,7 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
+import { noteUnsentDraft } from "@/lib/signed-out"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -190,6 +191,12 @@ export function ChatComposer({
     setInput(text)
     if (draftKey) setDraft(draftKey, text)
   }, [draftKey, setDraft, setInput])
+  // If the session ends while this is unsent, the signed-out screen says the
+  // message to this agent is kept (#3787, lib/signed-out.ts). The draft itself
+  // stays where it is — persisted per user and session above.
+  useEffect(() => {
+    if (draftKey) noteUnsentDraft(draftKey, agentName, input)
+  }, [draftKey, agentName, input])
 
   const appliedContext = useRef<string | null>(null)
   useEffect(() => {
@@ -517,7 +524,7 @@ export function ChatComposer({
       aria-pressed={createDocument}
       title="Create document / Vytvořit dokument"
       disabled={isStreaming || !canSend}
-      className="coarse:min-h-12"
+      className="coarse:min-h-[44px]"
       onClick={() => {
         setCreationSelection(createDocument ? null : creationScope)
         creationPacket.current = null

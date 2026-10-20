@@ -103,7 +103,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
       ) : (
         <TooltipProvider delayDuration={150}>
           <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden" data-testid="fleet-roster">
-            <div className={cn("hidden px-4 py-2.5 border-b border-foreground/8 text-[10px] uppercase tracking-wide text-muted-foreground", GRID)}>
+            <div className={cn("hidden px-4 py-2.5 border-b border-foreground/8 text-label font-medium text-muted-foreground", GRID)}>
               <span>Agent</span>
               <span>Crew</span>
               <span>Role</span>
@@ -134,7 +134,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                       type="button"
                       onClick={() => onAgentSelect(a.slug)}
                       className={cn(
-                        "w-full min-h-11 px-4 py-2.5 hover:bg-foreground/[0.03] text-left",
+                        "w-full min-h-11 coarse:min-h-[44px] px-4 py-2.5 hover:bg-foreground/[0.03] text-left",
                         "flex items-center gap-3",
                         GRID,
                       )}
@@ -185,7 +185,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                       <span className="hidden md:block text-muted-foreground truncate">{a.role_title || "—"}</span>
                       <span className="hidden md:block text-muted-foreground text-xs">{timeSince(a.last_active_at)}</span>
                       <span className="shrink-0">
-                        <StatusPill status={statusKey} label={statusLabel} live={a.status === "RUNNING" && !ghost} />
+                        <StatusPill className="font-sans" status={statusKey} label={statusLabel} live={a.status === "RUNNING" && !ghost} />
                       </span>
                     </button>
 

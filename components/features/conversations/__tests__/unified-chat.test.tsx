@@ -125,6 +125,20 @@ describe("unified Chat", () => {
     expect(screen.getByRole("region", { name: "Agents" })).toBeInTheDocument()
   })
 
+  // e2e/a11y.spec.ts › Chat page: on Harbor 2's solid white surface the
+  // section headers measured 3.54:1 (text-foreground/50 at 10 px), under the
+  // WCAG AA 4.5:1 the scan enforces. The muted token is the contrast-checked
+  // colour for secondary text (globals.css); an alpha of foreground is not.
+  it("section headers use the contrast-checked muted token, not an alpha of foreground", async () => {
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    for (const name of ["Team spaces", "People", "Agents"]) {
+      const region = await screen.findByRole("region", { name })
+      const label = within(region).getAllByText(name, { selector: "span" })[0]
+      expect(label.className, name).toMatch(/(^|\s)text-muted-foreground(\s|$)/)
+      expect(label.className, name).not.toMatch(/text-foreground\/\d+/)
+    }
+  })
+
   it("filters agents with a crew picker that shows each crew's icon and restores All crews", async () => {
     fixtures.api.mockImplementation(async (url: string, options?: RequestInit) => {
       if (options?.method === "PUT" || url.includes("/read")) return new Response(null, { status: 204 })

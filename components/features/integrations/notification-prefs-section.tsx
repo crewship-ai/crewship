@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { Bell, BellOff, Check, Globe, Mail, MessageSquare, Send, VolumeX } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -219,7 +219,7 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
                   <tr key={`group:${group.key}`} className="border-b border-border/30">
                     <td
                       colSpan={usableChannels.length + 1}
-                      className="px-3 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sticky left-0 bg-card"
+                      className="px-3 pt-3 pb-1 text-micro font-medium text-muted-foreground sticky left-0 bg-card"
                     >
                       {group.label}
                     </td>

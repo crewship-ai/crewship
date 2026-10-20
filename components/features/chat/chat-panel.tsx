@@ -8,8 +8,6 @@ import {
   Bot,
   Command,
   Link2,
-  Wifi,
-  WifiOff,
   Users,
   Search,
   Download,
@@ -17,7 +15,6 @@ import {
 } from "lucide-react"
 import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
-import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 
@@ -425,7 +422,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
@@ -452,7 +449,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   useEffect(() => {
     const waiters = connectionWaitersRef.current
     if (!waiters.length) return
-    const failed = connectionStatus === "error" || connectionStatus === "unavailable"
+    // "offline": the fast retries are spent, so a send waiting on the socket
+    // is told now rather than at its timeout. The socket keeps retrying.
+    const failed = connectionStatus === "error" || connectionStatus === "unavailable" || connectionStatus === "offline"
     if (connectionStatus !== "connected" && !failed) return
     connectionWaitersRef.current = []
     for (const w of waiters) w.resolve(!failed && w.session === currentSessionRef.current)
@@ -923,7 +922,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {pageContextError ? "This Page is no longer accessible; it will not be included" :
           pageContext ? `Page: ${pageContext.name} · access rechecked when sent` : "Checking Page…"}
       </span>
-      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-11" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
+      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-[44px]" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
     </div>
   ) : null
 
@@ -1282,10 +1281,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </div>
   }
   const proposalPanel = selectedProposal && proposals.state !== "unavailable" ? <section aria-label="Proposal detail" className="min-w-0 space-y-3 p-3">
-    <Button ref={proposalPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeProposal}>Back to Work</Button>{renderProposal(selectedProposal, "panel")}
+    <Button ref={proposalPanelStart} variant="outline" className="coarse:min-h-[44px]" onClick={closeProposal}>Back to Work</Button>{renderProposal(selectedProposal, "panel")}
   </section> : null
   const decisionPanel = selectedDecision && !decisions.unavailable ? <section aria-label="Decision detail" className="min-w-0 space-y-3 p-3">
-    <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
+    <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-[44px]" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
   </section> : null
   const actionableDecisions = decisionRefs.filter(ref => ref.decision.status === "pending" && ref.decision.allowed_actions.some(action => action !== "view"))
   const waitingForYou = actionableDecisions.length
@@ -1407,7 +1406,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
     <div className="px-4 pb-2">
-      <Button variant="outline" size="sm" className="coarse:min-h-12" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
+      <Button variant="outline" size="sm" className="coarse:min-h-[44px]" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
         setPreparingProjectInputs(true)
         try { await ensureSessionForSend() } finally { setPreparingProjectInputs(false) }
       }}>
@@ -1444,10 +1443,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-        <ReconnectBanner status={connectionStatus} />
+        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
-          <ConnectionBadge status={connectionStatus} />
           {isGroupChat && (
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
               <Users className="h-3 w-3" />
@@ -1550,12 +1548,14 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   return (
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", (viewerOpen ? documentExpanded : executionProfile === "trusted" && artifactFocus && artifactOpen) ? "hidden" : "flex-1")}>
-        <ReconnectBanner status={connectionStatus} />
+        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
-            agent (face, status, role, crew, model, skills, credentials); the
-            connection badge still appears when the socket is not connected,
-            and the origin chip says where a machine-started chat came from.
+            agent (face, status, role, crew, model, skills, credentials), and
+            the origin chip says where a machine-started chat came from. A
+            lost connection is the reconnect banner's alone (#3783): a header
+            pill said "Disconnected" a second time, in red, from the first
+            second of every restart.
             The session id left the header: it is the URL, and "Copy link"
             hands it over in the form a person can use. */}
         <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
@@ -1565,7 +1565,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
               className="min-w-0 flex-1"
               trailing={
                 <>
-                  <ConnectionBadge status={connectionStatus} />
                   <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
                   {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
@@ -1575,7 +1574,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
             />
           ) : (
             <>
-              <ConnectionBadge status={connectionStatus} />
               <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
               <div className="ml-auto flex items-center gap-2">
                 {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
@@ -1762,7 +1760,7 @@ function MobileChatAction({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="inline-flex h-8 w-8 coarse:h-12 coarse:w-12 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+      className="inline-flex h-8 w-8 coarse:h-[44px] coarse:w-[44px] items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
     >
       {children}
     </button>
@@ -1786,38 +1784,6 @@ function CommandsButton({ onClick }: { onClick: () => void }) {
         {CHAT_PALETTE_SHORTCUT}
       </kbd>
     </button>
-  )
-}
-
-/**
- * The socket, but only when it is worth saying something about.
- *
- * A permanently-green "Connected" pill is a status light for a state that is
- * true ~100% of the time, in the top-left corner of the thing the reader came
- * to read. What the badge is genuinely FOR is the other two states: typing
- * into a chat whose socket has gone is typing into a void, and that is worth
- * a lot of pixels. So it shows up exactly then, and says nothing otherwise.
- */
-function ConnectionBadge({ status }: { status: string }) {
-  if (status === "connected") return null
-  return (
-    <div className={cn(
-      "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-micro font-medium",
-      status === "connected"
-        ? "bg-success/10 text-success dark:bg-success/30 dark:text-success"
-        : status === "connecting"
-          ? "bg-warn/10 text-warn dark:bg-warn/30 dark:text-warn"
-          : "bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive"
-    )}>
-      {status === "connected" ? (
-        <Wifi className="h-3 w-3" />
-      ) : status === "connecting" ? (
-        <Spinner className="h-3 w-3" />
-      ) : (
-        <WifiOff className="h-3 w-3" />
-      )}
-      <span className="capitalize">{status}</span>
-    </div>
   )
 }
 

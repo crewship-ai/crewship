@@ -1,14 +1,9 @@
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect } from "@playwright/test"
 
-// The rail's mode menu: pin the panel open (the old cycling "Sidebar: hover"
-// button landed on pinned from the default hover mode).
-async function pinSidebar(page: Page) {
-  await page.getByRole("button", { name: /^Sidebar: / }).click()
-  await page.getByRole("menuitemradio", { name: /^Expanded/ }).click()
-}
-
+// Isolated static-export fixture: every API response is synthetic. Harbor
+// account groups are full pages in the OWNER/ADMIN AI providers space.
 for (const width of [1280, 390]) {
-  test(`account group editing at ${width}px`, async ({ page }) => {
+  test(`account group editing at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const pool = { id: "pool", name: "Team group", provider: "OPENAI", mode: "api_key", revision: 3, member_count: 1, allow_cross_owner: false, members: [{ credential_id: "account", priority: 1 }] }
     const account = { id: "account", name: "Team OpenAI", type: "API_KEY", provider: "OPENAI", status: "ACTIVE", tags: [], crew_ids: [], agent_names: [], last_used_ips: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", security_level: 1, login: { mode: "api_key", provider: "OPENAI", owner_email: "fixture@example.test", owner_user_id: "user", plan: null, expires_at: null, refresh: { supported: false, status: "none" }, quota: null, delivery: { kind: "env", target: "OPENAI_API_KEY" }, pays_for: { agents: 0, crews: 0 } } }
@@ -25,6 +20,8 @@ for (const width of [1280, 390]) {
           expect(route.request().headers()["if-match"]).toBe('"3"')
           expect(route.request().headers()["x-workspace-id"]).toBe("ws")
           expect(route.request().postDataJSON()).not.toHaveProperty("provider")
+          expect(route.request().postDataJSON()).toMatchObject({ name: "Updated group", allow_cross_owner: false, members: [{ credential_id: "account", priority: 0 }] })
+          Object.assign(pool, route.request().postDataJSON(), { revision: 4 })
           updated = true
           return route.fulfill({ status: 204 })
         }
@@ -32,23 +29,21 @@ for (const width of [1280, 390]) {
       } else if (/settings|config|health/.test(path)) body = {}
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
-    await page.goto("/credentials")
-    if (width > 640) await pinSidebar(page)
-    const titleBox = await page.getByRole("heading", { name: "Credentials", exact: true }).boundingBox()
-    const actionBox = await page.getByRole("button", { name: "Account groups", exact: true }).boundingBox()
-    expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(actionBox!.x)
-    await page.getByRole("button", { name: "Account groups", exact: true }).click()
-    await page.getByRole("button", { name: "Edit Team group" }).click()
-    await expect(page.getByRole("heading", { name: "Edit account group" })).toBeVisible()
-    await page.getByLabel("Group name", { exact: true }).fill("Updated group")
-    const dialog = page.getByRole("dialog")
-    const box = await dialog.boundingBox()
+    await page.goto("/credentials?space=providers&pool=pool")
+    const group = page.locator("[data-slot=account-group-page]")
+    await expect(group.getByRole("heading", { name: "Team group", exact: true })).toBeVisible()
+    await expect(group.getByText("Team OpenAI", { exact: true })).toBeVisible()
+    await group.getByRole("tab", { name: "Settings", exact: true }).click()
+    await expect(page).toHaveURL((url) => url.searchParams.get("pool") === "pool" && url.searchParams.get("tab") === "settings")
+    await group.getByLabel("Name", { exact: true }).fill("Updated group")
+    const box = await group.boundingBox()
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1)
-    await page.screenshot({ path: `/tmp/provider-pool-editor-${width}.png` })
-    await page.getByRole("button", { name: "Save changes", exact: true }).click()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`provider-pool-editor-${width}.png`) })
+    await page.getByRole("region", { name: "Unsaved changes", exact: true }).getByRole("button", { name: "Save", exact: true }).click()
     await expect.poll(() => updated).toBe(true)
-    await expect(page.getByRole("heading", { name: "Account groups", exact: true })).toBeVisible()
+    await expect(group.getByRole("heading", { name: "Updated group", exact: true })).toBeVisible()
   })
 }
 
@@ -64,9 +59,11 @@ for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
       if (path.includes("provider-logins/pools")) reads++
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
-    await page.goto("/credentials")
-    await expect(page.getByText("No credentials yet", { exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Account groups" })).toHaveCount(0)
+    await page.goto("/credentials?space=providers&pool=pool")
+    await expect(page.getByRole("heading", { name: "The vault is empty", exact: true })).toBeVisible()
+    await expect(page.getByText("AI provider accounts are managed by owners and admins.", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "New account group", exact: true })).toHaveCount(0)
+    await expect(page.locator("[data-slot=account-group-page]")).toHaveCount(0)
     expect(reads).toBe(0)
   })
 }

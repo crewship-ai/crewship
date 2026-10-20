@@ -12,7 +12,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { stopAgent } from "@/lib/agent-stop"
 
 // Role label tone — neutral semantic tokens, no hardcoded palette shades.

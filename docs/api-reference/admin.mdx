@@ -1958,7 +1958,11 @@ directory (an instance bundle records exactly what it lands). `format`: the
 bundle's format version, and whether this server reads it directly or through
 a converter. `runtime`: whether Docker answers; a crew built on another
 architecture gets a warning that its environment is rebuilt from the crew
-image. `unsafe`: host settings in the crews' devcontainer configuration that a
+image. `runtime.images_checked` / `runtime.images_older`: how many of the
+archive's crews pinned a runtime image digest this server could compare with
+the image it holds now, and how many of those were built on a different one
+(each also a runtime warning); `0` checked says nothing either way, e.g. the
+archive predates digest pinning or the image is not pulled here. `unsafe`: host settings in the crews' devcontainer configuration that a
 restore does not switch back on by itself — Docker socket mounts, privileged
 mode, host path binds; read only when a key is given, otherwise a runtime
 warning says they were not checked. `conflicts`: what the `target`
@@ -4197,13 +4201,13 @@ The handler imposes a 4 s upper bound on top of the update package's 5 s interna
 
 Bucketed time-series metrics for the dashboard charts. Returns zero-filled bucket sequences so the client never has to patch visual gaps. Reads `workspace_id` from the request context, never from a query param.
 
-**Auth:** required + workspace context.
+**Auth:** required + workspace context. `metric=cost_usd` additionally requires `OWNER` or `ADMIN` and answers `403` ("Spend requires OWNER or ADMIN") to every other role; the other metrics are open to every member. See [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
 
 #### Query parameters
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `metric` | string | -- | Required. One of `issues_closed`, `cost_usd`, `runs_count`, `active_missions`. |
+| `metric` | string | -- | Required. One of `issues_closed`, `cost_usd`, `runs_count`, `active_missions`, `success_rate`, `p95_duration_ms`. `success_rate` is the percentage of finished runs that succeeded and `p95_duration_ms` the nearest-rank p95 run duration, both per bucket by the run's start, from the same rules as `GET /api/v1/runs/insights` (cancelled and running runs are not counted as success or failure). A bucket in which nothing finished has no `total` value instead of a zero. These two accept only `group_by=none`. |
 | `window` | string | `"24h"` | One of `24h`, `7d`, `30d`. |
 | `bucket` | string | `"1h"` | One of `15m`, `1h`, `1d`. Combinations producing &gt;200 buckets are rejected. |
 | `group_by` | string | `"none"` | One of `none`, `crew`, `model`, `status`. Some group-by values are metric-specific (see error matrix). |

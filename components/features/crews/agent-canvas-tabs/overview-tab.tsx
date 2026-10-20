@@ -7,8 +7,8 @@ import {
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { entityHref } from "@/lib/entity-links"
@@ -17,6 +17,7 @@ import { withReturnTo } from "@/lib/return-to"
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
 import { AppearStack } from "@/components/ui/detail"
 import { SkillsManager } from "../agent-canvas-managers"
+import { AgentSkillsPicker } from "../agent-skills-picker"
 import { AgentChannelsCard } from "../agent-channels-card"
 import { BlockingNotice, NowRunning } from "../canvas/detail-blocks"
 import { deriveTriggers, useAgentRelations } from "../canvas/use-agent-relations"
@@ -84,6 +85,7 @@ export function OverviewTab({
   // right-hand drawer: the drawer had to be 420px for a list and 760px for an
   // editor, which is how one pattern ended up with two widths.
   const [manager, setManager] = useState<"skills" | "tools" | "channels" | null>(null)
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const { issues, credentials, skills, pipelines, readiness, loading, error, refresh } = useAgentRelations(workspaceId, agent.id)
   const { toolkits, channels, error: reachError, refresh: refreshReach } = useAgentReach(workspaceId, agent.id)
 
@@ -255,7 +257,7 @@ export function OverviewTab({
           ]}
           items={issueItems}
           footerLabel={`Open filtered by ${agent.slug}`}
-          footerHref={entityHref({ kind: "issues", assigneeSlug: agent.slug })}
+          footerHref={entityHref({ kind: "issues", assigneeId: agent.id })}
         />
         <DetailCell
           order={1}
@@ -319,6 +321,7 @@ export function OverviewTab({
           items={skillItems}
           footerLabel="Manage skills"
           footerOnClick={() => setManager("skills")}
+          addAction={{ label: "Add skill", onClick: () => setSkillPickerOpen(true) }}
         />
         <DetailCell
           order={5}
@@ -357,8 +360,8 @@ export function OverviewTab({
             { id: "run", label: "Running" },
           ]}
           items={runItems}
-          footerLabel="Open in Journal"
-          footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
+          footerLabel="Open in Activity"
+          footerHref={`/activity?what=work&agent=${encodeURIComponent(agent.id)}`}
         />
 
         <DetailCell
@@ -415,9 +418,20 @@ export function OverviewTab({
         </p>
       )}
 
+      <AgentSkillsPicker
+        open={skillPickerOpen}
+        agentId={agent.id}
+        agentName={agent.name}
+        workspaceId={workspaceId}
+        assigned={skills}
+        onClose={() => setSkillPickerOpen(false)}
+        onApplied={() => { refresh(); onAgentChanged() }}
+      />
+
       <ManagerDialog
         open={manager !== null}
         onClose={() => setManager(null)}
+        concept={manager ?? undefined}
         title={
           manager === "skills" ? "Skills"
             : manager === "tools" ? "Tools and connectors"
@@ -433,6 +447,7 @@ export function OverviewTab({
           <SkillsManager
             agentId={agent.id}
             agentSlug={agent.slug}
+            agentName={agent.name}
             workspaceId={workspaceId}
             onChange={() => { refresh(); onAgentChanged() }}
           />
@@ -480,23 +495,22 @@ function RowGroup({ title, note, children }: { title: string; note: string; chil
  * detour, and the same width suits every one of them.
  */
 function ManagerDialog({
-  open, onClose, title, description, children,
+  open, onClose, title, description, concept, children,
 }: {
   open: boolean
   onClose: () => void
   title: string
   description: string
+  concept?: string
   children: React.ReactNode
 }) {
+  // Every manager applies its own changes as they are made, so there is no
+  // draft to commit: Done is the only way out and nothing needs a guard.
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-[720px]">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        {children}
-      </DialogContent>
-    </Dialog>
+    <CreateSurface open={open} onOpenChange={(next) => { if (!next) onClose() }} size="lg" restoreOpenerFocus>
+      <CreateSurfaceHeader concept={concept} title={title} description={description} onClose={onClose} />
+      <CreateSurfaceBody>{children}</CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={onClose} cancelLabel="Done" />
+    </CreateSurface>
   )
 }

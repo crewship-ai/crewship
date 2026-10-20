@@ -58,7 +58,7 @@ import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 
 import * as React from "react"
 import { AlertCircle, Loader2, Save } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { linter, type Diagnostic } from "@codemirror/lint"
 import type { Extension } from "@codemirror/state"
 import type { EditorView } from "@codemirror/view"

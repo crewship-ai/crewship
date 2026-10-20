@@ -462,7 +462,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to start pipeline run")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeCostAwareJSON(w, r, http.StatusOK, res)
 }
 
 // A retry after an uncertain response must recover the original run even if
@@ -699,7 +699,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	// so the UI can still render "this routine's definition no longer parses".
 	if perr != nil {
 		h.logger.Warn("pipeline dry_run: stored definition unparseable", "slug", slug, "error", perr)
-		writeJSON(w, http.StatusOK, dryRunResponse{
+		writeCostAwareJSON(w, r, http.StatusOK, dryRunResponse{
 			RunResult: &pipeline.RunResult{
 				PipelineID:   p.ID,
 				PipelineSlug: p.Slug,
@@ -724,7 +724,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to dry-run pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
+	writeCostAwareJSON(w, r, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
 }
 
 // TestRun is the PUBLIC, JWT-authed draft-validation gate behind the UI's
@@ -826,11 +826,23 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		defHash := definitionHashHex(body.Definition)
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
+	// Keep the outcome against the tested definition, so the draft and the
+	// versions holding it can say "Test run passed" truthfully (ODCH-RT-13).
+	if res != nil {
+		testedBy := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			testedBy = user.ID
+		}
+		passed := res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED"
+		if err := h.store.RecordTestResult(r.Context(), workspaceID, definitionHashHex(body.Definition), passed, res.Status, testedBy); err != nil {
+			h.logger.Warn("pipeline test_run: record result", "error", err)
+		}
+	}
 	type testRunResponse struct {
 		*pipeline.RunResult
 		SaveToken string `json:"save_token,omitempty"`
 	}
-	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+	writeCostAwareJSON(w, r, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
 }
 
 // InternalTestRun is the X-Internal-Token save gate used by the sidecar
@@ -1091,7 +1103,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		}
 		out = append(out, dto)
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeCostAwareJSON(w, r, http.StatusOK, out)
 }
 
 // ListRuns returns the journal entries for the named pipeline,
@@ -1202,7 +1214,7 @@ LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 	if err := rows.Err(); err != nil {
 		h.logger.Warn("pipeline list runs: rows iteration", "error", err)
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeCostAwareJSON(w, r, http.StatusOK, out)
 }
 
 // ApproveWaitpoint completes a pending wait-step approval. POST

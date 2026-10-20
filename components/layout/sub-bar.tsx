@@ -3,9 +3,14 @@
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Slot } from "radix-ui"
+import { createPortal } from "react-dom"
+import { ArrowLeft, ChevronRight, MoreHorizontal, Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { MenuSheet } from "@/components/ui/menu-sheet"
+import { useAppStore } from "@/lib/store"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 /**
  * SubBar — the canonical page sub-bar (the strip directly under the global
@@ -65,6 +70,14 @@ export interface SubBarProps<T extends string = string> {
   leading?: React.ReactNode
   /** Row-1 right side. Compose with SubBarPrimary/Secondary/IconButton. */
   actions?: React.ReactNode
+  /**
+   * Secondary actions behind ⋯ (phone pilot): MenuSheetItem rows. A popover
+   * on a tablet or desktop, a bottom sheet on a phone (MenuSheet). Rendered
+   * after `actions`; omit it and there is no ⋯.
+   */
+  menu?: React.ReactNode
+  /** The ⋯ button's and the sheet's name. */
+  menuLabel?: string
 
   /** Row-2 tabs. Presence (or `tools`) is what makes the second row render. */
   tabs?: SubBarTab<T>[]
@@ -74,7 +87,85 @@ export interface SubBarProps<T extends string = string> {
   tools?: React.ReactNode
 
   ariaLabel?: string
+  /**
+   * The title is the page's h1 (default). A page that shows its own visible
+   * h1 (Dashboard greeting, Activity view title) passes false so the page
+   * keeps exactly one.
+   */
+  heading?: boolean
   className?: string
+}
+
+/* ---------------------------------------------------------------------------
+ * Page actions slot (COM-12). A page rendered below its layout's SubBar (the
+ * routine page under the Routines layout) puts its actions in the bar with
+ * <SubBarActions>, which portals them after the bar's own `actions`. The bar
+ * on screen owns the slot; with none, SubBarActions renders nothing.
+ * ------------------------------------------------------------------------ */
+let actionsSlot: HTMLElement | null = null
+const slotListeners = new Set<() => void>()
+function setActionsSlot(el: HTMLElement | null) {
+  if (actionsSlot === el) return
+  actionsSlot = el
+  for (const l of slotListeners) l()
+}
+function subscribeActionsSlot(l: () => void) {
+  slotListeners.add(l)
+  return () => {
+    slotListeners.delete(l)
+  }
+}
+
+/** The SubBar's actions container; registers itself as the page actions slot. */
+function ActionsSlot({ className, children }: { className?: string; children?: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement | null>(null)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    setActionsSlot(el)
+    return () => {
+      if (actionsSlot === el) setActionsSlot(null)
+    }
+  }, [])
+  return (
+    <div ref={ref} data-slot="sub-bar-actions" className={cn("flex shrink-0 items-center gap-1.5 empty:hidden", className)}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Actions for the page's SubBar from anywhere below it, instead of a portal
+ * target handed down by a layout. They render after the bar's own actions.
+ */
+export function SubBarActions({ children }: { children: React.ReactNode }) {
+  const slot = React.useSyncExternalStore(subscribeActionsSlot, () => actionsSlot, () => null)
+  return slot ? createPortal(children, slot) : null
+}
+
+/**
+ * Whether anything in the row's actions is displayed. A page may hide an
+ * action on a phone (Dashboard's window control below md); a row left with
+ * only the hidden heading would be an empty 36 px strip (COM-06).
+ */
+function useActionsShown(row: React.RefObject<HTMLDivElement | null>, active: boolean): boolean {
+  const [shown, setShown] = React.useState(true)
+  React.useLayoutEffect(() => {
+    const box = row.current?.querySelector<HTMLElement>("[data-slot=sub-bar-actions]")
+    if (!active || !box) {
+      setShown(true)
+      return
+    }
+    const measure = () => setShown(Array.from(box.children).some((k) => getComputedStyle(k).display !== "none"))
+    measure()
+    const mo = new MutationObserver(measure)
+    mo.observe(box, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] })
+    window.addEventListener("resize", measure)
+    return () => {
+      mo.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [row, active])
+  return shown
 }
 
 const ROW = "shrink-0 flex items-center h-9 bg-card border-b border-foreground/[0.08] px-2 sm:px-3"
@@ -88,27 +179,154 @@ export function SubBar<T extends string = string>({
   meta,
   leading,
   actions,
+  menu,
+  menuLabel = "More actions",
   tabs,
   activeTab,
   onTabChange,
   tools,
   ariaLabel,
+  heading = true,
   className,
 }: SubBarProps<T>) {
+  const more = menu != null ? <SubBarMenu label={menuLabel}>{menu}</SubBarMenu> : null
   const hasRow2 = (tabs != null && tabs.length > 0) || tools != null
+  const Heading = heading ? "h1" : "div"
+  const slot = useAppStore((s) => s.pageBarSlot)
+  const isMobile = useIsMobile()
+
+  // Harbor 2: on desktop and tablet the identity and the actions join the top
+  // bar after the area's breadcrumb; a title that only repeats the area's name
+  // stays as the page's accessible heading but is not shown twice.
+  // AppToolbar writes the area it names onto the slot.
+  const areaTitle = slot?.dataset.areaTitle ?? ""
+  const repeatsArea = areaTitle !== "" && areaTitle.toLowerCase() === title.toLowerCase()
+  // On a phone the top bar already names the area: a title that only repeats
+  // it is hidden, and then the row is only worth drawing while an action in
+  // it is displayed.
+  const identityHidden = isMobile && repeatsArea && section == null && !leading && meta == null
+  const rowRef = React.useRef<HTMLDivElement | null>(null)
+  const actionsShown = useActionsShown(rowRef, identityHidden)
+  const rowEmpty = identityHidden && !actionsShown
+  if (slot && !isMobile) {
+    return (
+      <>
+        {createPortal(
+          <div className="flex min-w-0 flex-1 items-center gap-2" role="group" aria-label={ariaLabel} data-slot="sub-bar">
+            {leading && <div className="flex shrink-0 items-center">{leading}</div>}
+            <Heading className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm", repeatsArea && section == null && "sr-only")}>
+              {!repeatsArea && (
+                <>
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+                  <span className={section != null ? "text-muted-foreground" : "font-semibold text-foreground"}>{title}</span>
+                </>
+              )}
+              {repeatsArea && section == null && <span>{title}</span>}
+              {section != null && (
+                <>
+                  {repeatsArea && <span className="sr-only">{title}</span>}
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+                  <span className="font-semibold text-foreground">{section}</span>
+                </>
+              )}
+            </Heading>
+            {description != null && (
+              <span className="hidden min-w-0 truncate text-label text-muted-foreground lg:block">{description}</span>
+            )}
+            {meta}
+            <div className="flex-1" />
+            {/* Keeps the primary action off the status icons that follow. */}
+            <ActionsSlot className="pr-2">{actions}{more}</ActionsSlot>
+          </div>,
+          slot,
+        )}
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} className={className} />}
+      </>
+    )
+  }
+
+  // v67 phone: ONE header row — area tile, title, the page's primary action
+  // as an icon button, search, bell — and no second row for the breadcrumb or
+  // the page's buttons. The leading control and the actions join the top bar's
+  // slot; what stays under it is the page's views and filters, as chips.
+  if (slot && isMobile) {
+    // v67 names only the area in a phone header: a title that repeats it
+    // draws no row, even with the area's current view as its section or a
+    // leading control (that one sits in the top bar). Meta still needs a row.
+    const showIdentity = !repeatsArea || meta != null
+    return (
+      <div className={cn("shrink-0", className)}>
+        {createPortal(
+          <div className="flex min-w-0 flex-1 items-center gap-1.5" data-slot="sub-bar" role="group" aria-label={ariaLabel}>
+            {/* v67 phone detail: the way back first, then what is open — the
+                area's name in the top bar gives way (globals.css :has rule). */}
+            {leading && <div className="flex shrink-0 items-center" data-phone-back>{leading}</div>}
+            {/* Phone pilot: the open item's whole name, in at most two lines
+                (and as a tooltip); the content repeats it in full. */}
+            {leading && (
+              <span
+                data-slot="sub-bar-detail-title"
+                title={typeof (section ?? title) === "string" ? String(section ?? title) : undefined}
+                className="line-clamp-2 min-w-0 flex-1 whitespace-normal break-words text-control font-semibold leading-tight text-foreground [overflow-wrap:anywhere]"
+              >
+                {section ?? title}
+              </span>
+            )}
+            {!leading && <div className="flex-1" />}
+            <ActionsSlot>{actions}{more}</ActionsSlot>
+          </div>,
+          slot,
+        )}
+        {/* A title that only repeats the area stays the page's heading for
+            assistive technology; one that names something else (a section, a
+            sub-page) is drawn as the chip row's lead, not as a bar. */}
+        {!showIdentity && heading && <h1 className="sr-only">{section != null ? `${title} / ${section}` : title}</h1>}
+        {showIdentity && (
+          <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} role="group" aria-label={ariaLabel}>
+            <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
+              <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.005em] text-foreground"}>{title}</span>
+              {section != null && (
+                <>
+                  <span className="text-muted-foreground-soft whitespace-pre"> / </span>
+                  <span className="font-medium text-foreground">{section}</span>
+                </>
+              )}
+            </Heading>
+            {meta}
+          </div>
+        )}
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+      </div>
+    )
+  }
 
   return (
     <div className={cn("shrink-0", className)}>
+      {/* A row with nothing displayed in it is not drawn (an empty 36 px
+          strip on a phone); its heading stays for assistive technology,
+          outside the hidden row. The actions stay mounted, so one that
+          shows again brings the row back. */}
+      {rowEmpty && heading && <h1 className="sr-only">{title}</h1>}
       {/* ---- Row 1: identity + actions ---- */}
-      <div className={cn(ROW, "gap-2", SCROLL_X)} aria-label={ariaLabel}>
+      {/* min-h, not h: with a coarse pointer the actions are 44 px tall. */}
+      <div
+        ref={rowRef}
+        data-slot="sub-bar-row"
+        data-empty={rowEmpty || undefined}
+        className={cn(ROW, "h-auto gap-2 data-[empty]:hidden", !rowEmpty && "min-h-9", SCROLL_X)}
+        role="group"
+        aria-label={ariaLabel}
+      >
         {leading && <div className="flex items-center shrink-0">{leading}</div>}
 
-        <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
-          {Icon && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
+        {/* On a phone the top bar already names the area; a title that only
+            repeats it stays the page's heading for assistive technology. */}
+        {!rowEmpty && <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
+          {Icon && !(repeatsArea && section == null) && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
           {/* One <h1> spanning the whole path, so the accessible name of the
               page is "Admin Console / Users" rather than a bare section label
               floating next to an unrelated heading. */}
-          <h1 className="text-body whitespace-nowrap shrink-0">
+          <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
             <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.01em] text-foreground"}>
               {title}
             </span>
@@ -121,7 +339,7 @@ export function SubBar<T extends string = string>({
                 <span className="font-medium text-foreground">{section}</span>
               </>
             )}
-          </h1>
+          </Heading>
           {description != null && (
             <>
               <span className="text-muted-foreground-soft shrink-0 hidden sm:inline">·</span>
@@ -131,32 +349,43 @@ export function SubBar<T extends string = string>({
             </>
           )}
           {meta}
-        </div>
+        </div>}
 
         <div className="flex-1" />
 
-        {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
+        <ActionsSlot>{actions}{more}</ActionsSlot>
       </div>
 
-      {/* ---- Row 2: tabs + tools (only when present) ---- */}
-      {hasRow2 && (
-        <div className={cn(ROW, "gap-0", SCROLL_X)}>
-          {tabs && tabs.length > 0 && (
-            <div role="tablist" aria-label={ariaLabel ? `${ariaLabel} views` : "Views"} className="flex items-center h-full">
-              {tabs.map((tab) => (
-                <SubBarTabButton
-                  key={tab.id}
-                  tab={tab}
-                  active={tab.id === activeTab}
-                  onSelect={() => !tab.locked && !tab.disabled && onTabChange?.(tab.id)}
-                />
-              ))}
-            </div>
-          )}
-          <div className="flex-1" />
-          {tools && <div className="flex items-center gap-1.5 shrink-0">{tools}</div>}
+      {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+    </div>
+  )
+}
+
+/** Row 2: view tabs and tools. Stays on the page under the top bar. */
+function SubBarRow2<T extends string>({ tabs, activeTab, onTabChange, tools, ariaLabel, className }: {
+  tabs?: SubBarTab<T>[]
+  activeTab?: T
+  onTabChange?: (id: T) => void
+  tools?: React.ReactNode
+  ariaLabel?: string
+  className?: string
+}) {
+  return (
+    <div className={cn(ROW, "gap-0", SCROLL_X, className)}>
+      {tabs && tabs.length > 0 && (
+        <div role="tablist" aria-label={ariaLabel ? `${ariaLabel} views` : "Views"} className="flex items-center h-full">
+          {tabs.map((tab) => (
+            <SubBarTabButton
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTab}
+              onSelect={() => !tab.locked && !tab.disabled && onTabChange?.(tab.id)}
+            />
+          ))}
         </div>
       )}
+      <div className="flex-1" />
+      {tools && <div className="flex items-center gap-1.5 shrink-0">{tools}</div>}
     </div>
   )
 }
@@ -190,9 +419,9 @@ function SubBarTabButton<T extends string>({
     >
       {Icon && <Icon className="h-3 w-3 opacity-75" />}
       {tab.label}
-      {tab.badge != null && <span className="text-[11px] text-muted-foreground/70">{tab.badge}</span>}
+      {tab.badge != null && <span className="text-micro text-muted-foreground/70">{tab.badge}</span>}
       {tab.locked && (
-        <span className="text-[9px] uppercase tracking-wider text-warn/70 font-mono">
+        <span className="text-micro text-warn/70">
           {tab.lockedLabel ?? "soon"}
         </span>
       )}
@@ -202,29 +431,71 @@ function SubBarTabButton<T extends string>({
 
 /* --------------------------------------------------------------------------
  * Action helpers — the ONLY sanctioned way to render sub-bar buttons.
- * They bake in the h-7 toolbar sizing + Style-B variants so every page's
- * actions look identical.
+ * They bake in the Harbor 2 28 px toolbar size (Button size sm) and the
+ * variants, so every page's actions look identical.
  * ------------------------------------------------------------------------ */
 
 type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 
+const PHONE_SQUARE =
+  "max-md:size-8 max-md:min-w-8 max-md:p-0 max-md:rounded-lg coarse:max-md:min-h-0 max-md:relative max-md:after:absolute max-md:after:-inset-1.5 max-md:after:content-['']"
+
 /** Primary CTA — soft/tinted. At most one per page. */
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
+  // On a phone (v67) the primary action is an icon button — the blue "+" — and
+  // its label stays for assistive technology. A create action with no icon of
+  // its own gets the plus; any other label stays text.
+  const creates = typeof children === "string" && /^(new|add|create|invite)\b/i.test(children)
+  const phoneIcon = !Icon && creates
   return (
     // Harbor: the page's one primary action is the solid brand button.
-    <Button asChild={asChild} variant="default" size="sm" className={cn("h-7 gap-1.5 rounded-md px-3 text-xs", className)} {...props}>
+    <Button
+      asChild={asChild}
+      variant="default"
+      size="sm"
+      // Tablet (v67 index.html:275): an action with an icon is an icon square
+      // below 1280 too, so the path, actions and bells fit one 48 px row.
+      className={cn(
+        "gap-1.5 px-3",
+        Icon && "max-xl:min-w-8 max-xl:px-2 md:coarse:max-xl:min-w-[44px]",
+        // Phone (v67 top bar): a 32 px blue square. Its 44 px touch target is
+        // an invisible ring around it, so the button does not fill the bar.
+        (Icon || phoneIcon) && PHONE_SQUARE,
+        className,
+      )}
+      title={Icon && typeof children === "string" ? children : undefined}
+      {...props}
+    >
       {Icon && <Icon className="h-3 w-3" />}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
+      {phoneIcon && <Plus className="h-3 w-3 md:hidden" aria-hidden />}
+      {asChild ? (
+        <Slot.Slottable>{children}</Slot.Slottable>
+      ) : Icon ? (
+        <span className="max-xl:sr-only">{children}</span>
+      ) : phoneIcon ? (
+        <span className="max-md:sr-only">{children}</span>
+      ) : (
+        children
+      )}
     </Button>
   )
 }
 
 /** Secondary / neutral action (Import, secondary create). */
 export function SubBarSecondary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
+  // On a phone a secondary action is an icon, or — with no icon — is left for
+  // the page's own menus: v67's phone bar carries the primary action only.
   return (
-    <Button asChild={asChild} variant="ghost" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
+    <Button
+      asChild={asChild}
+      variant="ghost"
+      size="sm"
+      className={cn("gap-1.5", Icon ? "max-xl:min-w-8 max-xl:px-2" : "max-md:hidden", className)}
+      title={Icon && typeof children === "string" ? children : undefined}
+      {...props}
+    >
       {Icon && <Icon className="h-3 w-3" />}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
+      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : Icon ? <span className="max-xl:sr-only">{children}</span> : children}
     </Button>
   )
 }
@@ -232,8 +503,44 @@ export function SubBarSecondary({ icon: Icon, className, children, asChild, ...p
 /** Utility icon button (settings gear, panel toggles…). */
 export function SubBarIconButton({ icon: Icon, className, children, ...props }: ActionProps) {
   return (
-    <Button variant="ghost" size="icon-sm" className={cn("h-7 w-7", className)} {...props}>
+    <Button variant="ghost" size="icon-sm" className={className} {...props}>
       {Icon ? <Icon className="h-3.5 w-3.5" /> : children}
+    </Button>
+  )
+}
+
+/**
+ * ⋯ — the page's secondary actions (phone pilot, MOBIL-DOPORUCENI 2a): a
+ * popover on a tablet or desktop, a bottom sheet on a phone. A 44 × 44 tap
+ * target on a coarse pointer with a 32 px drawn button.
+ */
+function SubBarMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <MenuSheet
+      open={open}
+      onOpenChange={setOpen}
+      label={label}
+      trigger={
+        <Button tap variant="ghost" size="icon-sm" aria-label={label} title={label} data-slot="sub-bar-menu">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      }
+    >
+      {children}
+    </MenuSheet>
+  )
+}
+
+/**
+ * The way back in a detail header (phone pilot): a 44 × 44 tap target with a
+ * 32 px drawn button. Pass it as SubBar `leading`; `onClick` is usually
+ * usePhoneListDetail's `back`, which restores the list it came from.
+ */
+export function SubBarBack({ label, onClick, className }: { label: string; onClick: () => void; className?: string }) {
+  return (
+    <Button tap variant="ghost" size="icon-sm" aria-label={label} title={label} onClick={onClick} className={className} data-slot="sub-bar-back">
+      <ArrowLeft className="h-4 w-4" />
     </Button>
   )
 }

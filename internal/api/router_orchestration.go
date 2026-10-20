@@ -459,6 +459,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
+	// openapi: query range:string since:string until:string
+	r.mux.Handle("GET /api/v1/paymaster/credential-spend", authed(wsCtx(http.HandlerFunc(ph.CredentialSpend))))
 
 	// Chains: the causal graph around one anchor (issue identifier, issue id,
 	// run id, routine id or slug, assignment id, inbox item id) in a single
@@ -522,9 +524,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// one query instead of fanning out to four.
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
 	ih.SetJournal(r.Journal())
-	// openapi: query limit:integer offset:integer
+	// openapi: query limit:integer offset:integer cursor:string q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	// openapi: query q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string kind:string
+	r.mux.Handle("GET /api/v1/inbox/counts", authed(wsCtx(http.HandlerFunc(ih.Counts))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.authedMut("PATCH", "/api/v1/inbox/{id}", roleSelf, ih.PatchState)
 	// Acting on a run_needs_human card (B15, #2389): answer resumes the

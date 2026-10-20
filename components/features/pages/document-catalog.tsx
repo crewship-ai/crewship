@@ -39,7 +39,7 @@ export function DocumentCatalog({ pages, onSelect, immutableTargets = false, fil
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{documents.map(page => {
       const target = immutableTargets ? (page.immutablePageId ? `@${page.immutablePageId}` : undefined) : page.slug
       return <div key={page.id} className="flex items-start gap-2">
-        {onShare && artifactCopyMove() && <label className="flex h-11 w-8 shrink-0 items-center justify-center self-start">
+        {onShare && artifactCopyMove() && <label className="flex h-11 coarse:h-[44px] w-8 shrink-0 items-center justify-center self-start">
           <Checkbox aria-label={`Select ${page.name}`} disabled={page.canMove === false || !page.immutablePageId} checked={picked.includes(page.id)} onCheckedChange={() => setPicked(toggle(picked, page.id))} />
         </label>}
         <Button variant="outline" className="h-auto min-h-24 flex-1 items-start justify-start whitespace-normal p-4 text-left" disabled={!target} onClick={() => { if (target) onSelect(target) }}><span><span className="block font-medium">{page.name}</span>{page.description && <span className="mt-1 block text-sm font-normal text-muted-foreground">{page.description}</span>}<span className="mt-2 block text-xs font-normal text-muted-foreground">Doc</span></span></Button>

@@ -229,7 +229,7 @@ export function WaitpointRunDetail({
         * failed = rose. */}
       <div
         className={cn(
-          "flex items-center justify-between rounded-md border px-3 py-2",
+          "flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2",
           isCompleted && "border-success/30 bg-success/5",
           isFailed && "border-destructive/30 bg-destructive/5",
           isLive && !isCompleted && !isFailed && "border-foreground/[0.06] bg-card/30",
@@ -351,25 +351,28 @@ function StepRow({
           status === "paused" && "bg-warn/5",
         )}
       >
-        <StatusBadge status={status} />
+        <StepMarker status={status} />
         <span className="font-mono text-[10px] text-muted-foreground/60">{index}.</span>
+        {/* Name and kind on one line that never squeezes them (owner,
+            19. 10.: "approve" wrapped letter by letter, the chip stood on
+            end); what the step does is a line of its own below. */}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium">{step.id}</span>
-            <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 whitespace-nowrap text-xs font-medium">{step.id}</span>
+            <span className="shrink-0 whitespace-nowrap rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
               {step.type}
             </span>
-            {step.type === "wait" && step.wait?.approval_prompt && (
-              <span className="truncate text-[10px] text-muted-foreground">
-                — {step.wait.approval_prompt}
-              </span>
-            )}
-            {step.type === "agent_run" && step.agent_slug && (
-              <span className="truncate text-[10px] text-muted-foreground">
-                — {step.agent_slug}
-              </span>
-            )}
           </div>
+          {step.type === "wait" && step.wait?.approval_prompt && (
+            <span data-slot="step-description" className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+              {step.wait.approval_prompt}
+            </span>
+          )}
+          {step.type === "agent_run" && step.agent_slug && (
+            <span data-slot="step-description" className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+              {step.agent_slug}
+            </span>
+          )}
         </div>
         {output != null && (
           <span className="text-muted-foreground/40">
@@ -388,7 +391,9 @@ function StepRow({
   )
 }
 
-function StatusBadge({ status }: { status: "done" | "paused" | "pending" }) {
+// A step-progress glyph (check, clock, empty ring) with no word: a marker in
+// a list of steps, not a status pill.
+function StepMarker({ status }: { status: "done" | "paused" | "pending" }) {
   if (status === "done") {
     return (
       <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
