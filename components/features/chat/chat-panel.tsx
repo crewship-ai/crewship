@@ -422,7 +422,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
+  const { turns, sendMessage, stopGeneration, stopping, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
@@ -1341,7 +1341,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
-      footer={<>{entityStatus}{documentResultCards}{artifactContextCards}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
+      footer={<>{entityStatus}{documentResultCards}{artifactContextCards}<StreamingIndicator isStreaming={isStreaming} stopping={stopping} turns={turns} agentName={agentName} /></>}
     />
   ) : (
     <Conversation>
@@ -1397,7 +1397,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {entityStatus}
         {documentResultCards}
         {artifactContextCards}
-        <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+        <StreamingIndicator isStreaming={isStreaming} stopping={stopping} turns={turns} agentName={agentName} />
         <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
       </ConversationContent>
       <ConversationScrollButton />
@@ -1504,6 +1504,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           connectionStatus={connectionStatus}
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
+          stopping={stopping}
           ensureSession={ensureSessionForSend}
           ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendFromComposer}
@@ -1640,6 +1641,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           connectionStatus={connectionStatus}
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
+          stopping={stopping}
           ensureSession={ensureSessionForSend}
           ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendFromComposer}
@@ -1812,14 +1814,16 @@ function OriginChip({ origin, kind }: { origin?: string | null; kind?: ChatKind 
 
 interface StreamingIndicatorProps {
   isStreaming: boolean
+  /** The stopped turn says "Stopping…" itself; a second, animated "working" line would contradict it. */
+  stopping?: boolean
   turns: Pick<ChatTurn, "role" | "parts">[]
   agentName?: string
 }
 
 /** Show progress until the first actual assistant reply, including after
  *  session-start metadata arrives. CLI startup text is not a reply. */
-function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicatorProps) {
-  if (!isStreaming || turns.length === 0) return null
+function StreamingIndicator({ isStreaming, stopping, turns, agentName }: StreamingIndicatorProps) {
+  if (!isStreaming || stopping || turns.length === 0) return null
   const lastUserIndex = turns.findLastIndex((turn) => turn.role === "user")
   const hasReply = turns.slice(lastUserIndex + 1).some((turn) =>
     turn.role === "assistant" && turn.parts.some((part) =>

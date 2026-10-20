@@ -56,6 +56,18 @@ describe("canonical live ingestion", () => {
     expect(hook.result.current.isStreaming).toBe(false)
     expect(hook.result.current.turns[0].turnState).toBe("interrupted")
   })
+  it("shows Stopping until the terminal state and sends one cancel per stop", () => {
+    const hook = setup()
+    send(envelope(1))
+    socket.send.mockClear()
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.stopGeneration())
+    expect(socket.send.mock.calls.filter(([frame]) => frame.type === "cancel_message")).toHaveLength(1)
+    expect(hook.result.current.stopping).toBe(true)
+    send({ ...envelope(2), type: "turn", part_id: undefined, payload: { turn: { state: "cancelled" } } })
+    expect(hook.result.current.stopping).toBe(false)
+    expect(hook.result.current.turns[0].parts[0].content).toBe("same")
+  })
   it("requests authorized history for a gap without skipping to the live tail", () => {
     const hook = setup()
     send(envelope(2, "second"))

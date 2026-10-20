@@ -1684,8 +1684,15 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority],
   )
 
+  // Stop sent, terminal state not yet confirmed by the server. One cancel per
+  // stop: pressing Stop again while it is pending sends nothing.
+  const stopping = isStreaming && turns.some(turn => turn.isStreaming && turn.cancelRequested)
+  const stoppingRef = useRef(false)
+  useEffect(() => { stoppingRef.current = stopping }, [stopping])
+
   const stopGeneration = useCallback(() => {
     if (!isCurrentAuthority()) return
+    if (stoppingRef.current) return
     restrictedAbortRef.current?.abort()
     restrictedAbortRef.current = null
     send({
@@ -1693,6 +1700,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       payload: JSON.stringify({ session_id: sessionId }),
     })
     if (canonicalActiveRef.current) {
+      stoppingRef.current = true
       setTurns(previous => previous.map(turn => turn.isStreaming ? { ...turn, cancelRequested: true } : turn))
       return // A Stop request is not a server terminal acknowledgement.
     }
@@ -1963,6 +1971,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     messages,
     sendMessage,
     stopGeneration,
+    /** Stop was requested and the server has not confirmed a terminal state yet. */
+    stopping,
     regenerateLastTurn,
     editAndResend,
     loadHistory,
