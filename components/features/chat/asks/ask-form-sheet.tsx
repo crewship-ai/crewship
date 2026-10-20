@@ -1,5 +1,6 @@
 "use client"
 
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, ClipboardList, X } from "lucide-react"
 import { toast } from "sonner"
@@ -158,7 +159,8 @@ function Sheet({
   const [submitting, setSubmitting] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const attachments = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
+  const attachments = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
   const clearFormAttachments = useComposerStore((s) => s.clearFormAttachments)
 
   // Every upload field's own list, keyed by field name. This is the fix: the
@@ -422,8 +424,8 @@ function Sheet({
   // along in a session it was never meant for. The message's own attachments
   // are untouched: nobody asked this sheet about them.
   useEffect(
-    () => () => clearFormAttachments(sessionId, form.id),
-    [clearFormAttachments, sessionId, form.id],
+    () => () => clearFormAttachments(attachmentKey, form.id),
+    [clearFormAttachments, attachmentKey, form.id],
   )
 
   // Focus lands on the first control, so a keyboard user who clicked a chip is

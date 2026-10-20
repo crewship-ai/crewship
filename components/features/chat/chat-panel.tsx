@@ -1,5 +1,6 @@
 "use client"
 
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
@@ -195,6 +196,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
+  // Identity unknown (session or workspace being re-read): nothing sends from
+  // here (chips, auto-send, proposal comments) until it is confirmed again.
+  const { waitingForSignIn } = useAttachmentScope(sessionId)
   const chatAgent = useChatAgent()
   const [pageContext, setPageContext] = useState<{ name: string; slug: string } | null>(null)
   const [pageContextError, setPageContextError] = useState(false)
@@ -227,8 +231,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // `messageOwnAttachments` rather than the raw list: an attachment with an
   // `owner` belongs to an ask-form field, not to the message being typed, and
   // filling in a form is not a reason to take the follow-up chips away.
+  const { key: attachmentKey } = useAttachmentScope(sessionId)
   const hasStagedAttachment = useComposerStore(
-    (s) => messageOwnAttachments(s.attachments[sessionId] ?? []).length > 0,
+    (s) => messageOwnAttachments(s.attachments[attachmentKey] ?? []).length > 0,
   )
 
   // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed
@@ -462,7 +467,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }, [projectInputScope])
   useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
-    if (!canChat) return false
+    if (!canChat || waitingForSignIn) return false
     if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
@@ -482,7 +487,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
       return sent
     }
-  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
+  }, [canChat, waitingForSignIn, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -761,7 +766,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
    *  (toastUploadFailure), and the send path leaves the draft in the box where
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
-    if (!canChat) return false
+    if (!canChat || waitingForSignIn) return false
     const sid = sessionId
     let ok = await ensureSession()
     if (ok) {
@@ -788,7 +793,16 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [canChat,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
+  }, [canChat,waitingForSignIn,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
+
+  /** The chat row, and nothing else, for an upload. Unlike the send path it
+   *  neither probes the execution profile nor waits for the socket, and it does
+   *  not give up when the person has moved to another chat: an upload queued
+   *  here finishes in the background and must still reach THIS chat. */
+  const ensureSessionForUpload = useCallback(async (): Promise<boolean> => {
+    if (!canChat) return false
+    return ensureSession()
+  }, [canChat, ensureSession])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
@@ -836,7 +850,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const autoSentRef = useRef(false)
   const [autoSendRejected, setAutoSendRejected] = useState(false)
   useEffect(() => {
-    if (!autoSendInitial || autoSentRef.current) return
+    if (!autoSendInitial || autoSentRef.current || waitingForSignIn) return
     const text = (initialInput ?? "").trim()
     if (!text) return
     if ((connectionStatus !== "connected" && !draftSendable) || isStreaming) return
@@ -850,7 +864,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       if (sendMessageWithPage(text) === false) { setAutoSendRejected(true); return }
       onSend?.(sessionId, text)
     })()
-  }, [autoSendInitial, initialInput, connectionStatus, draftSendable, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
+  }, [autoSendInitial, waitingForSignIn, initialInput, connectionStatus, draftSendable, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
 
   const composerInitialInput = autoSendInitial && !autoSendRejected ? undefined : initialInput
   const pageContextChip = pageContextSlug && !pageContextRemoved ? (
@@ -1161,7 +1175,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     onSnapshot={snapshot => { void proposals.applySnapshot(snapshot); entities.reconcile() }}
     onAccessLost={() => { closeProposal(); proposals.evictSource(ref.entity.id); entities.reconcile() }}
     onComment={async comment => {
-      if (proposals.state !== "ready" || isStreaming || !canChat) return false
+      if (proposals.state !== "ready" || isStreaming || !canChat || waitingForSignIn) return false
       const target = agentSlug?.trim()
       if (!target) return false
       const text = `@${target} Regarding proposal ${ref.entity.id}:\n${comment}`
@@ -1411,6 +1425,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
+          ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}
@@ -1543,6 +1558,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
+          ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}

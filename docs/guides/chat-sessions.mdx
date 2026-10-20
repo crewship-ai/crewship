@@ -601,6 +601,10 @@ A reasoning block is collapsed by default. Its header shows the first line of th
 
 Subagent steps nest under their parent when the server correlates them, and approval requests stay outside the group.
 
+## Attachments
+
+Files you pick, drop, paste or photograph go into one upload queue per conversation and upload one at a time, in the order you added them. Each file shows its state in words: **Waiting**, **Uploading**, **Failed** or **Cancelled**; none of them counts as attached until it is ready. **Cancel** stops a waiting or running upload and keeps the chip so **Retry** can queue it again; the remove button deletes it. For now a message takes at most 10 files of 25 MB each; these are provisional client limits, not server-approved ones, and will follow the server's stated limits once it provides them. Anything beyond that is refused with the reason. Sending is blocked while a file is waiting or uploading, and while a failed or cancelled file is still in the composer: retry or remove it first. When a pasted clipboard holds both text and a file, the file is attached and the text is still inserted. Pasting plain text behaves as usual; pasting a file attaches it.
+
 ## Message reactions
 
 An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.
