@@ -22,6 +22,18 @@ describe("http slides client", () => {
     expect(result).toMatchObject({ rev: 3, orderVersion: 1 })
     expect(request.mock.calls[0][0]).toBe("/api/v1/pages/%40fixture_page/slides?workspace_id=ws1")
   })
+  it("reads the backend branch shape: `revision`, no page_id, extra hash fields", async () => {
+    request.mockResolvedValue(Response.json({ schema_version: 1, revision: 5, order_version: 2, content_hash: "a".repeat(64), deck: deck() }))
+    expect(await client.load(PAGE)).toMatchObject({ rev: 5, orderVersion: 2 })
+  })
+  it("refuses an inconsistent revision or a page_id for another Page", async () => {
+    request.mockResolvedValueOnce(Response.json({ ...head, rev: 3, revision: 4 }))
+    expect(await client.load(PAGE)).toMatchObject({ status: "error", retryable: false })
+    request.mockResolvedValueOnce(Response.json({ ...head, page_id: "someone_else" }))
+    expect(await client.load(PAGE)).toEqual({ status: "error", retryable: false, message: "The presentation does not belong to this Page." })
+    request.mockResolvedValueOnce(Response.json({ ...head, page_id: PAGE }))
+    expect(await client.load(PAGE)).toMatchObject({ rev: 3 })
+  })
   it("reports a missing route as not implemented, and a JSON 404 as not found", async () => {
     request.mockResolvedValueOnce(text404())
     expect(await client.load(PAGE)).toEqual({ status: "unavailable", reason: "not_implemented" })
