@@ -75,3 +75,15 @@ export function chatSidebarSmartSections(): boolean {
 export function chatSidebarViews(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS === "true"
 }
+
+/**
+ * Mounts the native Slides editor on `/pages/<slug>` for a Page the server
+ * reports as `has_slides`. Default OFF: the page then behaves exactly as before.
+ *
+ * Mounting alone never writes. The server has Slides Read and Initialize only
+ * (behind CREWSHIP_SLIDES_ENABLED); there is no save route, so editing stays a
+ * local draft (coord FE-REQ-F5-1).
+ */
+export function slidesEditorMount(): boolean {
+  return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
+}
