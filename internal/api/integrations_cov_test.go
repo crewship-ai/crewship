@@ -679,7 +679,7 @@ func TestCovIntDeleteCrewIntegration(t *testing.T) {
 	if err := db.QueryRow(`SELECT c.deleted_at,c.encrypted_value,a.metadata_json FROM credentials c JOIN credential_audit a ON a.credential_id=c.id WHERE c.id=? AND a.id='cov-int-history'`, credID).Scan(&deleted, &cipher, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if deleted == "" || cipher != beforeCipher || metadata != `{"retained":true}` {
+	if deleted == "" || beforeCipher == "" || cipher != "" || metadata != `{"retained":true}` {
 		t.Fatal("retirement changed or erased credential history")
 	}
 }

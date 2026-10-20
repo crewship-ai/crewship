@@ -75,10 +75,6 @@ func TestCredentialTombstoneReplacementRollback(t *testing.T) {
 			user := seedTestUser(t, db)
 			ws := seedTestWorkspace(t, db, user)
 			seedCredentialEnc(t, db, ws, user, "retired", "TOKEN", "cipher-source")
-			var beforeCipher string
-			if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id='retired'`).Scan(&beforeCipher); err != nil {
-				t.Fatal(err)
-			}
 			execOrFatal(t, db, `UPDATE credentials SET deleted_at='2026-01-01' WHERE id='retired'`)
 			if collision {
 				seedCredentialEnc(t, db, ws, user, "collision", "TOKEN [retired:retired]", "other")
@@ -99,8 +95,8 @@ func TestCredentialTombstoneReplacementRollback(t *testing.T) {
 			if name != "TOKEN" {
 				t.Fatalf("failed replacement changed original name: %s", name)
 			}
-			if cipher != beforeCipher {
-				t.Fatal("tombstone ciphertext changed")
+			if cipher != "" {
+				t.Fatal("failed replacement restored erased tombstone ciphertext")
 			}
 		})
 	}

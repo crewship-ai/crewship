@@ -62,6 +62,7 @@ function part(p: Partial<TurnPart> = {}): TurnPart {
     type: p.type ?? "text",
     content: p.content ?? "",
     metadata: p.metadata,
+    thinking: p.thinking,
     isStreaming: p.isStreaming,
     timestamp: p.timestamp ?? new Date("2026-08-26T12:00:00Z"),
   }
@@ -71,7 +72,7 @@ function thinkingTurn(streaming: boolean): ChatTurn {
   return {
     id: "a1",
     role: "assistant",
-    parts: [part({ id: "th", type: "thinking", content: "weighing options", isStreaming: streaming })],
+    parts: [part({ id: "th", type: "thinking", content: "Authorized progress summary", isStreaming: streaming, thinking: { visibility: "summary", state: streaming ? "running" : "completed", summary: "Authorized progress summary" } })],
     isStreaming: streaming,
     timestamp: new Date("2026-08-26T12:00:00Z"),
   }
@@ -97,11 +98,8 @@ const noop = () => {}
 
 describe("reasoning is never auto-opened", () => {
   it("leaves the block closed while it streams", () => {
-    // The defect the whole transcript rewrite starts from: a streaming
-    // reasoning block dumped the model's private deliberation into the middle
-    // of the conversation and then took it away a second later. The chevron
-    // still opens it on request — a wrong answer is exactly when you want to
-    // read the reasoning.
+    // An authorized progress summary remains collapsed until the user opens it.
+    // Stream state comes from the explicit safe projection, never raw legacy text.
     reasoningCalls.length = 0
     renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: true, defaultOpen: false })
@@ -113,6 +111,16 @@ describe("reasoning is never auto-opened", () => {
     reasoningCalls.length = 0
     renderWithAgent(<AssistantTurn turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: false, defaultOpen: false })
+    cleanup()
+  })
+
+  it("keeps legacy private thinking unavailable even when its old part streams", () => {
+    const turn = thinkingTurn(true)
+    turn.parts[0] = { ...turn.parts[0], content: "Private legacy reasoning", thinking: undefined }
+    reasoningCalls.length = 0
+    renderWithAgent(<AssistantTurn turn={turn} onCopy={noop} onFileClick={noop} />)
+    expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: false, defaultOpen: false })
+    expect(screen.queryByText("Private legacy reasoning")).toBeNull()
     cleanup()
   })
 

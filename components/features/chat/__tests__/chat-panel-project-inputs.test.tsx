@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const state = vi.hoisted(() => ({ user: "h1", workspace: "w1", send: vi.fn(), fetch: vi.fn(), documents: false }))
-vi.mock("@/hooks/use-chat", () => ({ useChat: () => ({ turns: [], sendMessage: state.send, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected" }) }))
+vi.mock("@/hooks/use-chat", () => ({ useChat: () => ({ turns: [], sendMessage: state.send, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected" }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: state.user } } }), useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
 vi.mock("@/lib/api-fetch", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/api-fetch")>(), apiFetch: state.fetch }))

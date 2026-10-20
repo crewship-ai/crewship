@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -318,7 +319,9 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	HasDocument bool `json:"has_document"`
+	// Explicit audience classification; unfiled human ownership is not privacy.
+	PrivateAudience bool `json:"private_audience"`
+	HasDocument     bool `json:"has_document"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -473,6 +476,7 @@ func (p *panelRecord) ownerRef() string    { return "crew/" + p.OwnerCrew }
 // viewer will never be shown is a leak of that panel's existence and its
 // health.
 func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -490,10 +494,19 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "list pages", err)
 		return
 	}
-	out := make([]pageListWire, 0, len(index.rows))
-	for i := range index.rows {
-		out = append(out, h.pageListRow(&index.rows[i], index.folders, viewer))
+	rows, total, err := pageCatalogRows(r, index, user.ID)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	out := make([]pageListWire, 0, len(rows))
+	for i := range rows {
+		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
+			return
+		}
+		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -654,7 +667,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		PrivateAudience: rec.PrivateAudience,
+		HasDocument:     rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,

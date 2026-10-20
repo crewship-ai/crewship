@@ -9,7 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: GDPR erasure anonymizes retired credential creators.** Retired credentials no longer require a live custodian; their creator attribution becomes NULL while IDs and audit history remain. Active credentials retain the existing custody requirement, and creatorless tombstones cannot be reactivated. Workspace restore/fork preserves nullable retired creators.
+
+- ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
+- Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
+- Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
+
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
+- Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
@@ -23,7 +30,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- Audit OWNER reads of another human’s private Page export, version history and access report atomically before disclosure; ignored or removed audit rows withhold the response. Ordinary Page reads retain a read-only snapshot without taking the SQLite writer lock.
+- Preserve captured run completion timestamps across retained-output recovery and terminal replay; legacy records retain their original replay identity.
+- Restore a confirmed Document checkpoint as a new version after explicit human confirmation; exact retries preserve the receipt and older write mandates remain fenced.
 
 - Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
 
@@ -41,10 +49,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
 
 - Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
+- Keep private Page grant administration and production limited to the custodian and workspace OWNER, including when legacy grants exist.
 
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
+- Audit OWNER reads of another human’s private Page export, version history and access report atomically before disclosure; ignored or removed audit rows withhold the response. Ordinary Page reads retain a read-only snapshot without taking the SQLite writer lock.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+- Rate-limited shared issue searches no longer fill workspace capacity with unused project buckets or refresh their idle lifetime.
 - Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
 - Isolate stream admission revocation epochs by credential and user, so another user's logout cannot reject valid requests; repeated signout of an already revoked session no longer sends another revocation notification.
 
@@ -61,16 +72,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+- Prepare scoped native Slides initialization with atomic receipts and caller-owned transactions; API and editor activation follow separately.
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
 - Added scoped, read-only resolution of saved Documents for the chat preview; panel integration remains separate.
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
 - Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
+- Browse retained Document checkpoints in a separate read-only history view without replacing the live draft or editor. Every API and CLI history read rechecks current human access.
 
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
 - Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
+- Read retained Document checkpoint lists and exact saved bodies through the API and `doc checkpoints` / `doc checkpoint`, without restoring or changing the current draft.
 
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
@@ -81,6 +95,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
+- Render versioned chat progress with stable replay identities, explicit partial and tool outcomes, permitted reasoning summaries and persisted timing. Keep provider accounting separate from confirmed completion and clear protected transcript state on identity changes.
+- Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
 
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
 

@@ -13,6 +13,28 @@ import (
 	"time"
 )
 
+// Retired material is checked after the audit append as well as by the
+// native scrub triggers. Keep the runtime column predicate in one place.
+const retiredCredentialErasedMaterialSQL = `COALESCE(encrypted_value,'')='' AND
+            COALESCE(oauth_resource,'')='' AND
+            COALESCE(oauth_issuer,'')='' AND
+            COALESCE(encrypted_refresh_token,'')='' AND
+            COALESCE(oauth_client_secret_enc,'')='' AND
+            COALESCE(oauth_refresh_token_enc,'')='' AND
+            COALESCE(username,'')='' AND
+            COALESCE(account_email,'')='' AND
+            COALESCE(account_label,'')='' AND
+            COALESCE(description,'')='' AND
+            COALESCE(last_error,'')='' AND
+            COALESCE(last_used_ips,'')='' AND
+            COALESCE(tags,'')='' AND
+            COALESCE(oauth_client_id,'')='' AND
+            COALESCE(oauth_auth_url,'')='' AND
+            COALESCE(oauth_token_url,'')='' AND
+            COALESCE(oauth_scopes,'')='' AND
+            COALESCE(oauth_token_expires_at,'')='' AND
+            COALESCE(token_expires_at,'')=''`
+
 // Credential audit & last-used signal — backs the row-level "is this
 // credential still in use?" affordance plus the inline Audit tab in
 // the detail Sheet (CONNECTIONS.md §4.2, §4.3).
@@ -184,11 +206,31 @@ func RecordCredentialEventTx(
 	// denormalised tenant column invites. See the migration
 	// 20260810153104_credential_audit_workspace_scope for why the column
 	// exists at all.
-	if _, err := tx.ExecContext(ctx, `
+	var workspace sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM credentials WHERE id=?`, credentialID).Scan(&workspace); err != nil {
+		return fmt.Errorf("insert audit row: read credential workspace: %w", err)
+	}
+	eventID := generateCUID()
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO credential_audit (id, credential_id, workspace_id, event_type, agent_id, ip_address, metadata_json, occurred_at)
 		VALUES (?, ?, (SELECT workspace_id FROM credentials WHERE id = ?), ?, ?, ?, ?, ?)`,
-		generateCUID(), credentialID, credentialID, string(event), agentArg, ipArg, metaJSON, now); err != nil {
+		eventID, credentialID, credentialID, string(event), agentArg, ipArg, metaJSON, now)
+	if err != nil {
 		return fmt.Errorf("insert audit row: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("insert audit row not acknowledged: affected=%d error=%v", n, err)
+	}
+
+	var acknowledged bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM credential_audit
+	 WHERE id=? AND credential_id=? AND workspace_id IS ? AND event_type=?
+	 AND agent_id IS ? AND ip_address IS ? AND metadata_json IS ? AND occurred_at=?)`,
+		eventID, credentialID, workspace, string(event), agentArg, ipArg, metaJSON, now).Scan(&acknowledged); err != nil {
+		return fmt.Errorf("verify audit row: %w", err)
+	}
+	if !acknowledged {
+		return errors.New("audit row was removed or changed before acknowledgement")
 	}
 
 	// USE events refresh the denormalised snapshot. ROTATE/TEST/etc.

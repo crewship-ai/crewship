@@ -18,6 +18,7 @@ var ErrRunResultUnstored = errors.New("run result persistence unconfirmed")
 // RunResult is captured output, not an authority to mark execution terminal.
 // Its final status comes only from the fenced dispatcher transition.
 type RunResult struct {
+	CompletedAt  string         `json:"completed_at,omitempty"`
 	ExitCode     *int           `json:"exit_code,omitempty"`
 	ErrorMessage *string        `json:"error_message,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`

@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { activitySchema, checkpointSchema, outputSchema, parseChatEvent, safeThinking, terminalTurn, type CanonicalPartFields, type ChatEvent, type TurnCheckpoint, type TurnState } from "@/lib/chat-event-contract"
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
-import { apiFetch } from "@/lib/api-fetch"
+import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { randomUUIDv4 } from "@/lib/random-id"
 
@@ -32,6 +34,8 @@ const uuid = randomUUIDv4
 export type TurnPartType =
   | "text"
   | "thinking"
+  | "activity"
+  | "output"
   | "tool_call"
   | "tool_result"
   | "status"
@@ -42,7 +46,7 @@ export type TurnPartType =
   | "crew_provisioning"
 
 /** A single content block within a chat turn (e.g. a text fragment, tool call, or thinking block). */
-export interface TurnPart {
+export interface TurnPart extends CanonicalPartFields {
   id: string
   type: TurnPartType
   content: string
@@ -51,8 +55,28 @@ export interface TurnPart {
   timestamp: Date
 }
 
+interface PendingControls {
+  turnId: string
+  parts: Map<"system_init" | "result", Record<string, unknown>>
+}
+function foldControls(parts: TurnPart[], controls: PendingControls | undefined, runId: string, timestamp: Date): TurnPart[] {
+  if (!controls) return parts
+  const merged = [...parts]
+  for (const [type, metadata] of controls.parts) {
+    const part: TurnPart = { id: `control:${runId}:${type}`, type, content: "", run_id: runId, turn_id: controls.turnId, metadata, timestamp }
+    const at = merged.findIndex(value => value.id === part.id)
+    if (at < 0) merged.push(part)
+    else merged[at] = part
+  }
+  return merged
+}
+
 /** A complete turn in the conversation (user message or multi-part assistant response). */
 export interface ChatTurn {
+  turnState?: TurnState
+  cancelRequested?: boolean
+  /** A missing canonical event or truncated replay has not been recovered. */
+  streamIncomplete?: boolean
   runId?: string
   id: string
   role: "user" | "assistant" | "system"
@@ -133,7 +157,7 @@ export function assignmentField(v: unknown): string {
  *  history API (`conversation.Part` on the Go side). The same canonical schema
  *  the live WebSocket stream carries, so reloaded turns render identically to
  *  streamed ones. */
-export interface HistoryPart {
+export interface HistoryPart extends CanonicalPartFields {
   type: TurnPartType | string
   content: string
   tool_name?: string
@@ -143,6 +167,7 @@ export interface HistoryPart {
 
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
+  checkpoint?: TurnCheckpoint
   runId?: string
   id: string
   role: MessageRole
@@ -176,6 +201,8 @@ function stripStatusParts(parts: TurnPart[], finalizeStreaming = true): TurnPart
 const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
   "text",
   "thinking",
+  "activity",
+  "output",
   "tool_call",
   "tool_result",
   "error",
@@ -224,10 +251,16 @@ function historyPartToTurnPart(part: HistoryPart, id: string, timestamp: Date): 
   const metadata: Record<string, unknown> = { ...(part.metadata ?? {}) }
   if (part.tool_name !== undefined) metadata.tool_name = part.tool_name
   if (part.tool_id !== undefined) metadata.tool_id = part.tool_id
+  const activity = activitySchema.safeParse(part.activity)
+  const output = outputSchema.safeParse(part.output)
   return {
-    id,
+    ...part,
+    activity: activity.success ? activity.data : undefined,
+    output: output.success ? output.data : undefined,
+    id: part.id || id,
     type,
-    content: part.content,
+    content: type === "thinking" ? (safeThinking(part.thinking).visibility === "summary" ? safeThinking(part.thinking).summary ?? "" : "") : part.content,
+    thinking: type === "thinking" ? safeThinking(part.thinking) : undefined,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     timestamp,
   }
@@ -267,7 +300,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
       // bubble the live stream showed, instead of downgrading to plain text.
       const parts: TurnPart[] = msg.parts && msg.parts.length > 0
         ? msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp))
-        : [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }]
+        : [historyPartToTurnPart({ type: msg.eventType === "thinking" ? "thinking" : msg.eventType === "error" ? "error" : "text", content: msg.content }, msg.id, msg.timestamp)]
       turns.push({
         id: msg.id,
         role: "system",
@@ -286,7 +319,8 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         id: msg.id,
         role: "assistant",
         parts: msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp)),
-        isStreaming: false,
+        turnState: msg.checkpoint?.turn_state,
+        isStreaming: msg.checkpoint ? !terminalTurn(msg.checkpoint.turn_state) : false,
         timestamp: msg.timestamp,
         metadata: msg.metadata,
         runId: msg.runId,
@@ -302,7 +336,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         lastTurn.parts.push({
           id: msg.id,
           type: partType,
-          content: msg.content,
+          content: partType === "thinking" ? "" : msg.content,
           metadata: msg.metadata,
           timestamp: msg.timestamp,
         })
@@ -314,7 +348,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
           parts: [{
             id: msg.id,
             type: partType,
-            content: msg.content,
+            content: partType === "thinking" ? "" : msg.content,
             metadata: msg.metadata,
             timestamp: msg.timestamp,
           }],
@@ -341,8 +375,29 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   const replyHasTextRef = useRef(false)
   const restrictedAbortRef = useRef<AbortController | null>(null)
   useEffect(() => () => {restrictedAbortRef.current?.abort()}, [sessionId])
-  const [turns, setTurns] = useState<ChatTurn[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
+  const principalKey = JSON.stringify([currentUserId ?? null, workspaceId ?? null])
+  const authorityKey = JSON.stringify([principalKey, sessionId ?? null])
+  const authorityRef = useRef(authorityKey)
+  const knownHumanRef = useRef(!!currentUserId)
+  const knownWorkspaceRef = useRef(!!workspaceId)
+  if (currentUserId) knownHumanRef.current = true
+  if (workspaceId) knownWorkspaceRef.current = true
+  const [deniedConversation, setDeniedConversation] = useState<string | null>(null)
+  const deniedConversationRef = useRef(deniedConversation)
+  deniedConversationRef.current = deniedConversation
+  const [deniedScope, setDeniedScope] = useState<string | null>(null)
+  const deniedScopeRef = useRef(deniedScope)
+  deniedScopeRef.current = deniedScope
+  const historyDenied = deniedScope === principalKey || deniedConversation === authorityKey
+  const authorityReadable = authorityRef.current === authorityKey && !historyDenied
+    && (!knownHumanRef.current || !!currentUserId) && (!knownWorkspaceRef.current || !!workspaceId)
+  const isCurrentAuthority = useCallback(() => authorityRef.current === authorityKey
+    && deniedScopeRef.current !== principalKey && deniedConversationRef.current !== authorityKey && authorityReadable, [authorityKey, principalKey, authorityReadable])
+  const [storedTurns, setTurns] = useState<ChatTurn[]>([])
+  // Mask before passive effects: a new/unknown human cannot paint old parts.
+  const turns = useMemo(() => authorityReadable ? storedTurns : [], [authorityReadable, storedTurns])
+  const [streaming, setIsStreaming] = useState(false)
+  const isStreaming = authorityReadable && streaming
   // Mirror of isStreaming for the (deps: []) event handlers — lets
   // handleDoneEvent tell "a local send is pending" apart from an
   // unsolicited done (another tab's run) without being re-created.
@@ -378,12 +433,23 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // until their predecessors arrive. This guarantees every event is applied
   // exactly once, in order — the core "never lose (or double) text" invariant.
   const lastSeqRef = useRef(0)
-  const pendingRef = useRef<Map<number, { eventType?: StreamEventType; content: string; metadata?: Record<string, unknown> }>>(new Map())
+  const pendingRef = useRef<Map<number, { eventType?: StreamEventType; content: string; metadata?: Record<string, unknown>; canonical?: boolean }>>(new Map())
   // Live/replayed events are held until the session's history has loaded, so a
   // late-resolving history fetch can't clobber an already-rendered in-flight
   // run (the mount race). loadHistory flips this true and drains.
   const historyLoadedRef = useRef(false)
   const activeRunIdRef = useRef<string | undefined>(undefined)
+  const canonicalRef = useRef(new Map<string, { turnId: string; through: number; pending: Map<number, ChatEvent>; seen: Set<string>; refreshes: number; resetThrough?: number; state?: TurnState }>())
+  const pendingControlsRef = useRef(new Map<string, PendingControls>())
+  const canonicalActiveRef = useRef(false)
+  const requestCanonicalHistory = useCallback((runId: string) => {
+    const cursor = canonicalRef.current.get(runId)
+    if (cursor && cursor.refreshes < 2) {
+      cursor.refreshes++
+      onStreamResetRef.current?.()
+    }
+  }, [])
+
   // Refs so the stable onConnect callback (passed to useWebSocket before `send`
   // exists) can resubscribe/resume without being re-created.
   const sendRef = useRef<((msg: WSMessage) => void) | null>(null)
@@ -403,33 +469,40 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // middle is unrecoverable; we resync to the live tail).
   const adoptNextSeqRef = useRef(false)
 
-  // Reset stream-side state when session changes. We deliberately do NOT
-  // reset turns here — that would cause a blank-canvas flash between the
-  // old session and the new one's history fetch. The chat-panel calls
-  // loadHistory() once the new session's messages arrive, which performs
-  // an atomic replace (including the empty-array case for fresh sessions).
-  useEffect(() => {
+  const clearStreamState = useCallback(() => {
+    restrictedAbortRef.current?.abort()
+    restrictedAbortRef.current = null
     activeRunIdRef.current = undefined
+    canonicalRef.current.clear()
+    pendingControlsRef.current.clear()
+    canonicalActiveRef.current = false
     replySoundSinceRef.current = Date.now()
     replyHasTextRef.current = false
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
-    replyHasTextRef.current = false
-    // Drop any text buffered for the previous session and cancel its
-    // pending frame so it can't commit into the new session's turns.
     pendingTextRef.current = ""
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
-    // Reset resumable-stream reassembly for the new session.
     lastSeqRef.current = 0
     pendingRef.current.clear()
     historyLoadedRef.current = false
     adoptNextSeqRef.current = false
-  }, [sessionId])
+  }, [])
+
+  useEffect(() => {
+    const changedScope = authorityRef.current !== authorityKey
+    authorityRef.current = authorityKey
+    clearStreamState()
+    // A conversation change invalidates the visible transcript even for the same human.
+    if (changedScope) {
+      setTurns([])
+      setDeniedConversation(null)
+    }
+  }, [sessionId, authorityKey, clearStreamState])
 
   // Cancel any in-flight frame on unmount so the scheduled callback never
   // runs against a torn-down component.
@@ -1102,7 +1175,29 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // followed on the wire.
   const applyChatEvent = useCallback(
     (eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
-      if (typeof metadata?.run_id === "string") activeRunIdRef.current = metadata.run_id
+      const controlRun = typeof metadata?.run_id === "string" ? metadata.run_id : undefined
+      if (((eventType === "result" || eventType === "done") && (canonicalActiveRef.current || metadata?.event_contract_version === 1))
+        || (eventType === "system" && (metadata?.event_contract_version === 1 || (controlRun && canonicalRef.current.has(controlRun))))) {
+        // Controls carry provenance/accounting, never sequence or completion.
+        const turnId = typeof metadata?.turn_id === "string" ? metadata.turn_id : controlRun ? canonicalRef.current.get(controlRun)?.turnId : undefined
+        if (eventType !== "done" && controlRun && controlRun.length <= 256 && turnId && turnId.length <= 256 && !content
+          && (eventType !== "system" || metadata?.subtype === "init")) {
+          canonicalActiveRef.current = true
+          let controls = pendingControlsRef.current.get(controlRun)
+          if (!controls && pendingControlsRef.current.size < MAX_PENDING_EVENTS) {
+            controls = { turnId, parts: new Map() }
+            pendingControlsRef.current.set(controlRun, controls)
+          }
+          if (controls?.turnId !== turnId) return
+          const type = eventType === "system" ? "system_init" : "result"
+          controls.parts.set(type, metadata ?? {})
+          const captured = controls
+          setTurns(previous => previous.map(turn => turn.role === "assistant" && turn.runId === controlRun && turn.id === turnId
+            ? { ...turn, parts: foldControls(turn.parts, captured, controlRun, turn.timestamp) } : turn))
+        }
+        return
+      }
+      if (controlRun) activeRunIdRef.current = controlRun
       if (eventType === "text" && content.trim()) replyHasTextRef.current = true
       if (eventType === "error" || eventType === "agent_busy") replyHasTextRef.current = false
       if (eventType === "text") {
@@ -1113,7 +1208,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       flushPendingText()
       switch (eventType) {
         case "status": handleStatusEvent(content); break
-        case "thinking": handleThinkingEvent(content); break
+        case "thinking": handleThinkingEvent(""); break
         case "tool_call": handleToolCallEvent(content, metadata); break
         case "tool_result": handleToolResultEvent(content, metadata); break
         case "image": handleImageEvent(content, metadata); break
@@ -1155,7 +1250,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       if (next === undefined) break
       p.delete(lastSeqRef.current + 1)
       lastSeqRef.current += 1
-      applyChatEvent(next.eventType, next.content, next.metadata)
+      if (!next.canonical) applyChatEvent(next.eventType, next.content, next.metadata)
     }
   }, [applyChatEvent])
 
@@ -1190,8 +1285,70 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [applyChatEvent, drainPending],
   )
 
+  const ingestCanonicalEvent = useCallback((event: ChatEvent) => {
+    canonicalActiveRef.current = true
+    let cursor = canonicalRef.current.get(event.run_id)
+    if (!cursor) {
+      if (canonicalRef.current.size >= MAX_PENDING_EVENTS) { requestCanonicalHistory(event.run_id); return false }
+      cursor = { turnId: event.turn_id, through: 0, pending: new Map(), seen: new Set(), refreshes: 0 }
+      canonicalRef.current.set(event.run_id, cursor)
+    }
+    if (cursor.turnId !== event.turn_id) return false
+    if (event.seq <= cursor.through || cursor.seen.has(event.event_id)) return true
+    const existing = cursor.pending.get(event.seq)
+    if (existing && existing.event_id !== event.event_id) { requestCanonicalHistory(event.run_id); return false }
+    const queued = [...canonicalRef.current.values()].reduce((count, value) => count + value.pending.size, 0)
+    if (!existing && queued >= MAX_PENDING_EVENTS) { requestCanonicalHistory(event.run_id); return false }
+    cursor.pending.set(event.seq, event)
+    if (!historyLoadedRef.current) return true
+    for (;;) {
+      const next = cursor.pending.get(cursor.through + 1)
+      if (!next) break
+      cursor.pending.delete(next.seq)
+      cursor.through = next.seq
+      if (cursor.seen.has(next.event_id)) continue
+      cursor.seen.add(next.event_id)
+      // Seq remains the durable replay boundary; event IDs only need a bounded
+      // recent window once earlier seqs have been folded into the turn.
+      if (cursor.seen.size > MAX_PENDING_EVENTS) cursor.seen.delete(cursor.seen.values().next().value!)
+      activeRunIdRef.current = next.run_id
+      if (next.type === "turn") cursor.state = next.payload.turn.state
+      else cursor.state ??= "running"
+      const controls = pendingControlsRef.current.get(next.run_id)
+      if (controls?.turnId === next.turn_id) pendingControlsRef.current.delete(next.run_id)
+      setTurns(previous => {
+        const at = previous.findIndex(turn => turn.role === "assistant" && (turn.id === next.turn_id || (turn.runId === next.run_id && turn.parts.some(part => part.turn_id === next.turn_id))))
+        const prior = at >= 0 ? previous[at] : undefined
+        const state = next.type === "turn" ? next.payload.turn.state : prior?.turnState ?? "running"
+        const terminal = terminalTurn(state)
+        let parts = foldControls(prior?.parts ?? [], controls?.turnId === next.turn_id ? controls : undefined, next.run_id, prior?.timestamp ?? new Date(next.occurred_at))
+        if (next.type !== "turn") {
+          const old = parts.find(part => part.id === next.part_id)
+          const common = { id: next.part_id!, run_id: next.run_id, turn_id: next.turn_id, first_seq: old?.first_seq ?? next.seq, last_seq: next.seq, tool_call_id: next.tool_call_id, parent_tool_call_id: next.parent_tool_call_id, timestamp: old?.timestamp ?? new Date(next.occurred_at), isStreaming: !terminal }
+          let part: TurnPart
+          if (next.type === "text") part = { ...common, type: "text", content: next.payload.text.operation === "delta" ? (old?.content ?? "") + next.payload.text.content : next.payload.text.content }
+          else if (next.type === "thinking") part = { ...common, type: "thinking", content: next.payload.thinking.visibility === "summary" ? next.payload.thinking.summary ?? "" : "", thinking: next.payload.thinking, isStreaming: next.payload.thinking.state === "running" }
+          else if (next.type === "activity") part = { ...common, type: "activity", content: next.payload.activity.name ?? next.payload.activity.kind, activity: next.payload.activity, metadata: { tool_name: next.payload.activity.name ?? next.payload.activity.kind, tool_id: next.tool_call_id } }
+          else part = { ...common, type: "output", content: next.payload.output.label ?? next.payload.output.state, output: next.payload.output }
+          parts = old ? parts.map(value => value.id === part.id ? part : value) : [...parts, part]
+        }
+        if (terminal) parts = parts.map(part => ({ ...part, isStreaming: false }))
+        const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal }
+        return at < 0 ? [...previous, turn] : previous.map((value, index) => index === at ? turn : value)
+      })
+      setIsStreaming(!terminalTurn(cursor.state))
+    }
+    if (cursor.resetThrough !== undefined && cursor.through >= cursor.resetThrough) cursor.resetThrough = undefined
+    const incomplete = cursor.pending.size > 0 || cursor.resetThrough !== undefined
+    setTurns(previous => previous.map(turn => turn.runId === event.run_id ? { ...turn, streamIncomplete: incomplete } : turn))
+    if (cursor.pending.size) requestCanonicalHistory(event.run_id)
+    else cursor.refreshes = 0
+    return true
+  }, [requestCanonicalHistory])
+
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
+      if (!isCurrentAuthority()) return
       const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       const envSeq = typeof msg.seq === "number" ? (msg.seq as number) : 0
 
@@ -1234,9 +1391,19 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         if (channelSessionId && channelSessionId !== sessionId) return
         replySoundSinceRef.current = Date.now()
         replyHasTextRef.current = false
-        lastSeqRef.current = 0
-        pendingRef.current.clear()
-        adoptNextSeqRef.current = true
+        if (canonicalActiveRef.current) {
+          // No transport watermark is supplied: retain only the proven cursor.
+          // A history checkpoint must cover the known per-run gap before the
+          // UI can stop describing this turn as partial.
+          for (const cursor of canonicalRef.current.values()) {
+            if (cursor.state === undefined || !terminalTurn(cursor.state)) cursor.resetThrough = Math.max(cursor.through + 1, ...cursor.pending.keys())
+          }
+          setTurns(previous => previous.map(turn => turn.runId && canonicalRef.current.get(turn.runId)?.resetThrough !== undefined ? { ...turn, streamIncomplete: true } : turn))
+        } else {
+          lastSeqRef.current = 0
+          pendingRef.current.clear()
+          adoptNextSeqRef.current = true
+        }
         historyLoadedRef.current = false
         onStreamResetRef.current?.()
         return
@@ -1284,6 +1451,25 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       }
 
       if (msg.type !== "chat_event") return
+      const data = typeof msg.payload === "object" && msg.payload !== null ? msg.payload as Record<string, unknown> : {}
+      if ("event" in data) {
+        if (channelSessionId !== sessionId) return
+        const event = parseChatEvent(data.event)
+        if (event) {
+          // Session receipt bookkeeping is independent of GoEvent.seq. Never
+          // acknowledge a refused frame or skip a missing transport sequence.
+          const validSeq = Number.isSafeInteger(envSeq) && envSeq > 0
+          if (validSeq && envSeq > lastSeqRef.current && !pendingRef.current.has(envSeq) && pendingRef.current.size >= MAX_PENDING_EVENTS) {
+            requestCanonicalHistory(event.run_id)
+            return
+          }
+          if (ingestCanonicalEvent(event) && validSeq && envSeq > lastSeqRef.current) {
+            pendingRef.current.set(envSeq, { content: "", canonical: true })
+            drainPending()
+          }
+        }
+        return // Never fall back to the legacy/raw body for an invalid v1 frame.
+      }
       // Drop deltas arriving after a local cancel so the cancelled stream
       // can't resurrect itself. The server's cancel ack races against
       // in-flight packets — without this gate, those late deltas re-open
@@ -1307,9 +1493,12 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     },
     [
       sessionId,
+      isCurrentAuthority,
       handleAssignmentEvent,
       flushPendingText,
       ingestChatEvent,
+      ingestCanonicalEvent,
+      requestCanonicalHistory,
       drainPending,
       handleErrorEvent,
     ],
@@ -1334,9 +1523,11 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     replySoundSinceRef.current = Date.now()
     replyHasTextRef.current = false
     if (hasConnectedRef.current) {
-      lastSeqRef.current = 0
-      pendingRef.current.clear()
-      adoptNextSeqRef.current = false
+      if (!canonicalActiveRef.current) {
+        lastSeqRef.current = 0
+        pendingRef.current.clear()
+        adoptNextSeqRef.current = false
+      }
       historyLoadedRef.current = false
       onStreamResetRef.current?.()
     }
@@ -1345,7 +1536,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   }, [subscribeAndResume])
 
   const { status, send } = useWebSocket({
-    enabled: realtimeEnabled && executionProfile !== "restricted" && executionProfile !== "pending",
+    enabled: authorityReadable && realtimeEnabled && executionProfile !== "restricted" && executionProfile !== "pending",
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
@@ -1408,7 +1599,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
    *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
     (content: string, metadata?: Record<string, unknown>) => {
-      if (!canSend) return false
+      if (!canSend || !isCurrentAuthority()) return false
       const profile = getExecutionProfile?.() ?? executionProfile
       if (!content.trim() || isStreaming || profile === "pending") return false
       if (profile === "restricted") {
@@ -1426,12 +1617,14 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
           let done = false
           try {
             const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
+            if (controller.signal.aborted || !isCurrentAuthority() || sessionIdRef.current !== sessionId) return
             if (!response.ok || !response.body) throw new Error("Restricted text run denied or unavailable")
             const reader = response.body.getReader()
             const decoder = new TextDecoder()
             let pending = ""
             while (true) {
               const next = await reader.read()
+              if (controller.signal.aborted || !isCurrentAuthority() || sessionIdRef.current !== sessionId) return
               if (next.done) break
               pending += decoder.decode(next.value,{stream:true})
               if (pending.length > 256*1024) throw new Error("Restricted output exceeds limit")
@@ -1448,7 +1641,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
             }
             if (!done) throw new Error("Restricted response incomplete or revoked")
           } catch (error) {
-            if (!controller.signal.aborted) applyChatEvent("error",error instanceof Error ? error.message : "Restricted text run failed")
+            if (!controller.signal.aborted && isCurrentAuthority() && sessionIdRef.current === sessionId) applyChatEvent("error",error instanceof Error ? error.message : "Restricted text run failed")
           } finally {
             controller.abort()
             if (restrictedAbortRef.current === controller) restrictedAbortRef.current = null
@@ -1488,16 +1681,21 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
 
       return true
     },
-    [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent],
+    [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority],
   )
 
   const stopGeneration = useCallback(() => {
+    if (!isCurrentAuthority()) return
     restrictedAbortRef.current?.abort()
     restrictedAbortRef.current = null
     send({
       type: "cancel_message",
       payload: JSON.stringify({ session_id: sessionId }),
     })
+    if (canonicalActiveRef.current) {
+      setTurns(previous => previous.map(turn => turn.isStreaming ? { ...turn, cancelRequested: true } : turn))
+      return // A Stop request is not a server terminal acknowledgement.
+    }
     // Flip local streaming state immediately so the UI returns to the
     // input-ready state even if the WS is dropped before the server's
     // cancel ack arrives. Closing assistant turns mark them no longer
@@ -1529,10 +1727,11 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       // (same as handleDoneEvent's orphaned status-only turn cleanup).
       .filter((t) => !(t.role === "assistant" && t.parts.length === 0)),
     )
-  }, [send, sessionId])
+  }, [send, sessionId, isCurrentAuthority])
 
   // Regenerate the last assistant response by re-sending the last user message.
   const regenerateLastTurn = useCallback(() => {
+    if (!isCurrentAuthority()) return
     if (!canSend || isStreaming) return
     // Find the last user turn
     const lastUserIdx = turns.map((t) => t.role).lastIndexOf("user")
@@ -1598,12 +1797,12 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     cancelledRef.current = false
     replyHasTextRef.current = false
 
-  }, [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage])
+  }, [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage, isCurrentAuthority])
 
   // Edit a user message and resend — removes all subsequent turns.
   const editAndResend = useCallback(
     (turnId: string, newContent: string) => {
-      if (!canSend || isStreaming || !newContent.trim()) return
+      if (!canSend || !isCurrentAuthority() || isStreaming || !newContent.trim()) return
       const turnIdx = turns.findIndex((t) => t.id === turnId)
       if (turnIdx === -1 || turns[turnIdx].role !== "user") return
 
@@ -1654,29 +1853,97 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         }),
       })
     },
-    [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile],
+    [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, isCurrentAuthority],
   )
 
-  const loadHistory = useCallback((history: ChatMessage[]) => {
-    setTurns(messagesToTurns(history))
-    setIsStreaming(false)
+  const loadHistory = useCallback((history: ChatMessage[], options: { reset?: boolean } = {}) => {
+    if (!isCurrentAuthority() || sessionIdRef.current !== sessionId) return
+    if (options.reset) { clearStreamState(); setTurns([]) }
+    const loaded = messagesToTurns(history).map(turn => {
+      const controls = turn.runId ? pendingControlsRef.current.get(turn.runId) : undefined
+      if (!turn.runId || controls?.turnId !== turn.id || turn.role !== "assistant") return turn
+      pendingControlsRef.current.delete(turn.runId)
+      return { ...turn, parts: foldControls(turn.parts, controls, turn.runId, turn.timestamp) }
+    })
+    const stale = new Set<string>()
+    for (const message of history) {
+      const parsed = checkpointSchema.safeParse(message.checkpoint)
+      if (!parsed.success) continue
+      const cp = parsed.data
+      canonicalActiveRef.current = true
+      let cursor = canonicalRef.current.get(cp.run_id)
+      if (!cursor) {
+        cursor = { turnId: cp.turn_id, through: cp.through_seq, pending: new Map(), seen: new Set(), refreshes: 0 }
+        canonicalRef.current.set(cp.run_id, cursor)
+      }
+      if (cursor.turnId !== cp.turn_id) continue
+      if (cp.through_seq >= cursor.through) cursor.state = cp.turn_state
+      if (cursor.through > cp.through_seq) stale.add(cp.run_id)
+      cursor.through = Math.max(cursor.through, cp.through_seq)
+      if (cursor.resetThrough !== undefined && cp.through_seq >= cursor.resetThrough) cursor.resetThrough = undefined
+      for (const n of cursor.pending.keys()) if (n <= cursor.through) cursor.pending.delete(n)
+    }
+    setTurns(previous => {
+      const merged = loaded.map(turn => {
+        if (!turn.runId || !stale.has(turn.runId)) return turn
+        return previous.find(old => old.runId === turn.runId && old.role === "assistant") ?? turn
+      })
+      if (!options.reset) for (const turn of previous) {
+        if (turn.isStreaming && turn.runId && canonicalRef.current.has(turn.runId)
+          && !merged.some(value => value.runId === turn.runId)) merged.push(turn)
+      }
+      return merged.map(turn => {
+        const cursor = turn.runId ? canonicalRef.current.get(turn.runId) : undefined
+        return cursor ? { ...turn, streamIncomplete: cursor.pending.size > 0 || cursor.resetThrough !== undefined } : turn
+      })
+    })
+    setIsStreaming(loaded.some(turn => turn.isStreaming) || [...canonicalRef.current.values()].some(cursor => cursor.state !== undefined && !terminalTurn(cursor.state)))
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     // History is now the base. Release any in-flight run events that arrived via
     // resume/live before the history fetch resolved, applying them ON TOP so a
     // late history load can't wipe an already-streaming reply (the mount race).
     historyLoadedRef.current = true
+    for (const cursor of canonicalRef.current.values()) {
+      const next = cursor.pending.get(cursor.through + 1)
+      if (next) { cursor.pending.delete(next.seq); ingestCanonicalEvent(next) }
+    }
     drainPending()
-  }, [drainPending])
+  }, [drainPending, ingestCanonicalEvent, clearStreamState, isCurrentAuthority, sessionId])
 
   // markHistoryUnavailable opens the streaming gate WITHOUT replacing turns, for
   // when the history fetch fails outright. Without this a transient history 5xx
   // would leave the gate shut forever and every subsequent streamed event would
   // buffer unseen — a frozen chat. The existing turns are left intact.
   const markHistoryUnavailable = useCallback(() => {
+    if (!isCurrentAuthority() || sessionIdRef.current !== sessionId) return
     historyLoadedRef.current = true
+    for (const cursor of canonicalRef.current.values()) {
+      const next = cursor.pending.get(cursor.through + 1)
+      if (next) { cursor.pending.delete(next.seq); ingestCanonicalEvent(next) }
+    }
     drainPending()
-  }, [drainPending])
+  }, [drainPending, ingestCanonicalEvent, isCurrentAuthority, sessionId])
+
+  /** A definitive source-read refusal clears protected state until the source is reopened. */
+  const markHistoryDenied = useCallback(() => {
+    if (!isCurrentAuthority() || sessionIdRef.current !== sessionId) return
+    deniedConversationRef.current = authorityKey
+    setDeniedConversation(authorityKey)
+    clearStreamState()
+    setTurns([])
+  }, [isCurrentAuthority, sessionId, authorityKey, clearStreamState])
+
+  useEffect(() => {
+    const revoke = () => {
+      deniedScopeRef.current = principalKey
+      setDeniedScope(principalKey)
+      clearStreamState()
+      setTurns([])
+    }
+    window.addEventListener(AUTH_EVENT, revoke)
+    return () => window.removeEventListener(AUTH_EVENT, revoke)
+  }, [clearStreamState, principalKey])
 
   // Derive flat messages for backwards compat (used by history loading)
   const messages: ChatMessage[] = turns.flatMap((turn) =>
@@ -1700,6 +1967,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     editAndResend,
     loadHistory,
     markHistoryUnavailable,
+    markHistoryDenied,
+    historyDenied,
     resubscribeSession,
     isStreaming,
     connectionStatus: (executionProfile === "restricted" ? "connected" : realtimeEnabled ? status : "unavailable") as WSStatus,

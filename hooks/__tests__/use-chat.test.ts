@@ -174,7 +174,7 @@ describe("useChat", () => {
     expect(result.current.turns[0].role).toBe("assistant")
     expect(result.current.turns[0].parts).toHaveLength(2)
     expect(result.current.turns[0].parts[0].type).toBe("thinking")
-    expect(result.current.turns[0].parts[0].content).toBe("Let me analyze...")
+    expect(result.current.turns[0].parts[0].content).toBe("")
     expect(result.current.turns[0].parts[1].type).toBe("text")
     expect(result.current.turns[0].parts[1].content).toBe("Here is the answer")
   })
@@ -202,7 +202,7 @@ describe("useChat", () => {
     expect(result.current.turns).toHaveLength(1)
     const thinkingParts = result.current.turns[0].parts.filter((p) => p.type === "thinking")
     expect(thinkingParts).toHaveLength(1)
-    expect(thinkingParts[0].content).toBe("The user is asking in Czech what to do.")
+    expect(thinkingParts[0].content).toBe("")
   })
 
   // Regression: text arriving AFTER a tool_result must open a NEW text part in
@@ -550,9 +550,7 @@ describe("useChat", () => {
     expect(result.current.turns).toHaveLength(1)
     expect(result.current.turns[0].parts).toHaveLength(1)
     expect(result.current.turns[0].parts[0].type).toBe("thinking")
-    expect(result.current.turns[0].parts[0].content).toBe(
-      "First thinking block. Second thinking block.",
-    )
+    expect(result.current.turns[0].parts[0].content).toBe("")
   })
 
   it("accumulates streaming thinking deltas into one part", () => {
@@ -581,7 +579,7 @@ describe("useChat", () => {
     // Should be ONE part with accumulated content
     expect(result.current.turns).toHaveLength(1)
     expect(result.current.turns[0].parts).toHaveLength(1)
-    expect(result.current.turns[0].parts[0].content).toBe("analyzing the code")
+    expect(result.current.turns[0].parts[0].content).toBe("")
   })
 
   it("handles tool_call + tool_result parts in one turn", () => {

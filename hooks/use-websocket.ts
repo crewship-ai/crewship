@@ -122,6 +122,7 @@ export function useWebSocket({
 }: UseWebSocketOptions) {
   const [status, setStatus] = useState<WSStatus>("disconnected")
   const wsRef = useRef<WebSocket | null>(null)
+  const connectionEpochRef = useRef(0)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const disconnectingRef = useRef(false)
@@ -203,6 +204,7 @@ export function useWebSocket({
     // caught by the post-await guard below.
     if (terminatedRef.current) return
     disconnectingRef.current = false
+    const epoch = ++connectionEpochRef.current
 
     // Refresh-fetch the ticket on every (re)connect. A stale token
     // from before a backend restart would 401 the upgrade and trip
@@ -221,7 +223,7 @@ export function useWebSocket({
     try {
       token = await getTokenRef.current()
     } catch (err) {
-      if (terminatedRef.current || disconnectingRef.current) return
+      if (epoch !== connectionEpochRef.current || terminatedRef.current || disconnectingRef.current) return
       if (err instanceof WsUnavailableError) {
         terminateUnavailable()
         return
@@ -243,7 +245,7 @@ export function useWebSocket({
     // would clobber disconnectingRef back to false and open a leaked
     // connection that then wouldn't be closed by the original
     // disconnect call.
-    if (terminatedRef.current || disconnectingRef.current) return
+    if (epoch !== connectionEpochRef.current || terminatedRef.current || disconnectingRef.current) return
 
     if (!token) {
       // /ws-token returned null → apiFetch already emitted the auth
@@ -272,6 +274,7 @@ export function useWebSocket({
     updateStatus("connecting")
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       ws.send(JSON.stringify({ type: "auth", token }))
       reconnectAttemptsRef.current = 0
       updateStatus("connected")
@@ -281,6 +284,7 @@ export function useWebSocket({
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       try {
         const parsed = JSON.parse(event.data)
         const result = wsMessageSchema.safeParse(parsed)
@@ -299,10 +303,12 @@ export function useWebSocket({
     }
 
     ws.onerror = () => {
+      if (wsRef.current !== ws) return
       updateStatus("error")
     }
 
     ws.onclose = (event) => {
+      if (wsRef.current !== ws) return
       wsRef.current = null
       updateStatus("disconnected")
 
@@ -329,6 +335,7 @@ export function useWebSocket({
   }, [url, enabled, updateStatus, terminateAuth, terminateTransport, terminateUnavailable])
 
   const disconnect = useCallback(() => {
+    connectionEpochRef.current++
     disconnectingRef.current = true
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
