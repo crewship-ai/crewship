@@ -136,6 +136,9 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 				decision.State = "denied"
 				decision.Reason = "Editing the collaborative draft also requires a current View share."
 			}
+		} else if right.Kind == "routine" && right.Operation == "publish" {
+			decision.State = "conditional"
+			decision.Reason = "Explicit Publish requires current Edit and View shares. Publication admission is a separate operation; this grant neither publishes nor executes a routine."
 		} else if right.Kind == "routine" && !authorized[right.ID] {
 			decision.State = "denied"
 			decision.Reason = "Requires current agent run/delegate grants, provider authority and a supported active definition."

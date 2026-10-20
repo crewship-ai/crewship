@@ -884,3 +884,20 @@ same transaction as onboarding creation, using current crew-creation authority
 and the configured chain key. Audit failure leaves Setup retryable; observers
 run after commit. This boundary covers blank Setup, with proposal/template
 application governed by their existing separate contracts.
+## Routine Publish right
+
+`routine.publish` is an explicit resource right, valid only together with
+`routine.edit` on the same routine in the complete policy. It implies neither
+View nor Run. Effective Publish additionally requires a live View share, an
+active restricted membership, and active grant issuers. Trusted membership
+alone does not grant this explicit right.
+
+Policy replacement, invitation creation and member provisioning reject Publish
+without Edit with HTTP 422 before writing. Preset preview and apply validate
+the complete resulting policy too: removing Edit while retaining Publish is
+refused without changing grants, revision, selection or audit. Immutable v1
+preset definitions remain unchanged.
+
+The existing CLI member policy, invitation and provisioning commands accept
+the same rights documents; no publication endpoint or execution is activated
+by storing this right.

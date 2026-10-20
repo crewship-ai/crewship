@@ -63,7 +63,7 @@ func memberAccessSchemaComponents() map[string]any {
 	return map[string]any{
 		"MemberAccessAgentRight":   memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"}),
 		"MemberAccessProjectRight": memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
-		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit"}),
+		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit", "publish"}),
 		"MemberAccessRight":        memberAccessRightSchema(),
 		"MemberAccessGrant":        memberAccessGrantSchema(),
 		"MemberAccessPolicy":       memberAccessPolicySchema(),
