@@ -52,6 +52,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Upgrade and recovery notes
 
+- Preserve the configured v1 audit/journal root in encrypted instance recovery kits after secret re-encryption; successful envelope conversion does not authorize retiring that root. ⚠️ **Behaviour change:** Instance backup now rejects an invalid `ENCRYPTION_KEY` instead of producing a recovery kit with an unusable audit root.
+
 - Before downgrading across the durable routine-start migration, stop incoming triggers and drain queued and in-flight starts. Otherwise use a forward fix; downgrading with outstanding work and upgrading again can repeat accepted work.
 - Resuming a routine body provides at-least-once execution: an interrupted step can repeat external effects. This is not an exactly-once guarantee. An uncertain interrupted setup hook remains visible as interrupted rather than being automatically repeated.
 - If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
