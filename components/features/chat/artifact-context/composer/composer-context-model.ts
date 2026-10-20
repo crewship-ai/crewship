@@ -36,7 +36,7 @@ export interface ComposerArtifactContext {
   online: boolean
 }
 
-export type SendBlock = "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
+export type SendBlock = "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
 
 export const attachmentId = (target: LinkedViewerTarget) => targetKey(target)
 
@@ -65,6 +65,8 @@ export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
     if (ctx.attachments.length === 0) return "need_attachment"
     const target = updateTarget(ctx)
     if (!target) return "choose_target"
+    // Only the author's personal Document can be edited directly; a shared folder needs a proposal, which has no path yet.
+    if (target.audience.kind === "folder") return "shared_folder"
     if (!target.expected) return "state_unknown"
     if (!ctx.executor) return "no_executor"
     return target.audience.kind === "unknown" ? "audience_unknown" : null
@@ -74,6 +76,7 @@ export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
 }
 
 export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
+  shared_folder: "This item is in a shared folder. Editing it needs a proposal, which is not available yet, so nothing was sent.",
   attachment_lost: "You no longer have access to an attached item. Remove it to continue.",
   offline: "You are offline. Reconnect to send.",
   state_unknown: "The current version of the item to update is not confirmed yet. Wait or reattach it.",
@@ -87,7 +90,7 @@ export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
 export function audienceText(audience: Audience, mode: EditMode | null): string {
   if (mode === "reply_only") return "No item is changed. Only the reply appears in this chat."
   if (audience.kind === "personal") return "Saved to My space. Only you can see it."
-  if (audience.kind === "folder") return `Saved to ${audience.name}. ${audience.people} ${audience.people === 1 ? "person" : "people"} can see it. The agent prepares a proposal for you to accept.`
+  if (audience.kind === "folder") return `Saved to ${audience.name}. ${audience.people} ${audience.people === 1 ? "person" : "people"} can see it.${mode === "update" ? " Editing an item in a shared folder is not available yet." : ""}`
   return "Audience unknown."
 }
 
@@ -97,27 +100,33 @@ export function pinnedUpdateWarning(ctx: ComposerArtifactContext): string | null
   return target?.target.mode === "revision" ? `You attached revision ${target.target.revision}. The update applies to the latest revision and may conflict with newer changes.` : null
 }
 
-/** Wire shape proposed to the backend (FE-REQ-F2-5). Ids and expected state only: no titles, no model-supplied tokens. */
-export interface ArtifactSubmission {
+/**
+ * Targeted edit, exactly as the backend's prepared contract takes it as
+ * `metadata.document_iteration_intent` on the websocket send_message
+ * (feat/document-targeted-chat-iteration@88c2d91a2): five flat fields, the
+ * immutable page id and the schema, revision and generation of the originally
+ * readable Document. No principal, no mode and no titles travel with it.
+ * Kept here, not in the shared document contracts, until the backend agrees it.
+ */
+export interface DocumentIterationIntent {
   submission_id: string
-  edit_mode: EditMode
-  /** Attached context items, in order. */
-  context: { page_id: string; expected: ExpectedState | null; checkpoint_id?: string }[]
-  /** The page to update; present only for update. */
-  update_page_id?: string
+  page_id: string
+  schema: 3
+  rev: number
+  generation: number
 }
 
 /** One id per send intent. Reuse it when retrying so the server can deduplicate. */
 export const newSubmissionId = () => crypto.randomUUID()
 
-/** Null while sending is blocked, so nothing can be dispatched without the explicit choices. */
-export function buildSubmission(ctx: ComposerArtifactContext, submissionId: string): ArtifactSubmission | null {
-  if (!ctx.mode || sendBlock(ctx) || !submissionId) return null
-  const target = ctx.mode === "update" ? updateTarget(ctx) : null
-  return {
-    submission_id: submissionId,
-    edit_mode: ctx.mode,
-    context: ctx.attachments.map(item => ({ page_id: item.target.pageId, expected: item.expected, ...(item.target.mode === "revision" ? { checkpoint_id: item.target.checkpointId } : {}) })),
-    ...(target ? { update_page_id: target.target.pageId } : {}),
-  }
+/**
+ * The intent for the next send, or null when the message carries none: only an
+ * explicit update of one chosen, unblocked target with confirmed schema-3
+ * state is a mandate. Create, reply-only and plain page context are not.
+ */
+export function buildIterationIntent(ctx: ComposerArtifactContext, submissionId: string): DocumentIterationIntent | null {
+  if (ctx.mode !== "update" || sendBlock(ctx) || !submissionId) return null
+  const target = updateTarget(ctx)
+  if (!target?.expected || target.expected.schema !== 3) return null
+  return { submission_id: submissionId, page_id: target.target.pageId, schema: 3, rev: target.expected.rev, generation: target.expected.generation }
 }

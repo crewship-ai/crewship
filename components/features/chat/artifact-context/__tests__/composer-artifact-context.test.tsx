@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { ComposerArtifactContextStrip } from "../composer/composer-artifact-context"
-import { addAttachment, attachmentId, buildSubmission, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
+import { addAttachment, attachmentId, buildIterationIntent, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
 
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -71,7 +71,8 @@ it("shows the audience of the chosen item, not one shared value", () => {
   const folder: Audience = { kind: "folder", name: "Finance", people: 5 }
   const two = [item("a", undefined, { audience: { kind: "personal" } }), item("b", undefined, { audience: folder, resultType: "Sheet" })]
   strip(ctx({ attachments: two, mode: "update", updateTargetId: two[1].id }))
-  expect(screen.getByText(/Saved to Finance\. 5 people can see it\. The agent prepares a proposal/)).toBeTruthy()
+  expect(screen.getByText(/Saved to Finance\. 5 people can see it\. Editing an item in a shared folder is not available yet/)).toBeTruthy()
+  expect(screen.getByRole("alert").textContent).toMatch(/shared folder/)
   expect(screen.queryByText(/Only you can see it/)).toBeNull()
   expect(screen.getByText("Sheet")).toBeTruthy()
 })
@@ -98,20 +99,33 @@ it("renders nothing with the flag off", () => {
 it("an update needs the confirmed schema, revision and generation", () => {
   expect(sendBlock(ctx({ mode: "update", attachments: [item("a", 1, { expected: null })] }))).toBe("state_unknown")
 })
-it("builds the submission from ids and expected state only, once the choices are made", () => {
+it("builds the intent as exactly the five flat fields, only for an explicit update of one personal target", () => {
   const two = [item("a", 1), item("b")]
-  expect(buildSubmission(ctx({ attachments: two }), "sub-1")).toBeNull()
-  expect(buildSubmission(ctx({ attachments: two, mode: "update" }), "sub-1")).toBeNull()
-  const submission = buildSubmission(ctx({ attachments: two, mode: "update", updateTargetId: two[1].id }), "sub-1")
-  expect(submission).toEqual({
-    submission_id: "sub-1", edit_mode: "update", update_page_id: "b",
-    context: [{ page_id: "a", expected: { schema: 3, rev: 1, generation: 2 }, checkpoint_id: "cp-a-1" }, { page_id: "b", expected: { schema: 3, rev: 5, generation: 2 } }],
-  })
-  expect(JSON.stringify(submission)).not.toMatch(/"A"|"B"|title/)
-  expect(buildSubmission(ctx({ mode: "reply_only" }), "")).toBeNull()
-  expect(buildSubmission(ctx({ mode: "reply_only" }), "sub-2")?.update_page_id).toBeUndefined()
+  expect(buildIterationIntent(ctx({ attachments: two }), "sub-1")).toBeNull()
+  expect(buildIterationIntent(ctx({ attachments: two, mode: "update" }), "sub-1")).toBeNull()
+  const intent = buildIterationIntent(ctx({ attachments: two, mode: "update", updateTargetId: two[1].id }), "sub-1")
+  expect(intent).toEqual({ submission_id: "sub-1", page_id: "b", schema: 3, rev: 5, generation: 2 })
+  expect(Object.keys(intent!).sort()).toEqual(["generation", "page_id", "rev", "schema", "submission_id"])
+  expect(JSON.stringify(intent)).not.toMatch(/"A"|"B"|title|mode|principal/)
+  // Create, reply-only and plain context are never a mandate.
+  expect(buildIterationIntent(ctx({ mode: "create" }), "sub-2")).toBeNull()
+  expect(buildIterationIntent(ctx({ mode: "reply_only" }), "sub-2")).toBeNull()
+  expect(buildIterationIntent(ctx({ mode: "update" }), "")).toBeNull()
 })
-it("building the submission twice with the same id gives the same id", () => {
-  const c = ctx({ mode: "create" })
-  expect(buildSubmission(c, "sub-3")?.submission_id).toBe(buildSubmission(c, "sub-3")?.submission_id)
+it("takes the values of the originally readable target, not the pinned revision number", () => {
+  const pinned = item("a", 1, { expected: { schema: 3, rev: 9, generation: 4 } })
+  expect(buildIterationIntent(ctx({ attachments: [pinned], mode: "update" }), "s")).toMatchObject({ page_id: "a", rev: 9, generation: 4 })
+})
+it("only schema 3 can be targeted, and an item in a shared folder cannot be edited", () => {
+  expect(buildIterationIntent(ctx({ mode: "update", attachments: [item("a", 1, { expected: { schema: 2, rev: 1, generation: 0 } })] }), "s")).toBeNull()
+  const shared = item("a", undefined, { audience: { kind: "folder", name: "Finance", people: 3 } })
+  expect(sendBlock(ctx({ mode: "update", attachments: [shared] }))).toBe("shared_folder")
+  expect(buildIterationIntent(ctx({ mode: "update", attachments: [shared] }), "s")).toBeNull()
+  strip(ctx({ attachments: [shared] }))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+  expect(screen.getByText(/needs a proposal, which is not available yet/)).toBeTruthy()
+})
+it("the same id gives the same intent when sending again", () => {
+  const c = ctx({ mode: "update" })
+  expect(buildIterationIntent(c, "sub-3")).toEqual(buildIterationIntent(c, "sub-3"))
 })

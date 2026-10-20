@@ -496,7 +496,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
     const prepared = prepareArtifactSend(metadata)
     if (!prepared.ok) { toast.error(prepared.message); return false }
-    const carriesArtifact = Boolean(prepared.metadata && "artifact_submission" in prepared.metadata)
+    const carriesArtifact = Boolean(prepared.metadata && "document_iteration_intent" in prepared.metadata)
     const sent = sendMessageWithPage(text, prepared.metadata)
     if (sent !== false && carriesArtifact) artifactSubmissionSent()
     return sent
