@@ -375,7 +375,14 @@ for (const width of [1280, 390]) {
     await page.reload()
     await card.getByRole("button", { name: "Comment", exact: true }).click()
     await expect(card.getByText("The outcome is unknown. Your draft is kept.")).toBeVisible()
-    await card.getByRole("button", { name: "Check and retry the same operation" }).click()
+    const retry = card.getByRole("button", { name: "Check and retry the same operation" })
+    // The pointer is left at the edge of this button by the previous click. A
+    // hover lift would move the hit area from under it, so Playwright would
+    // see two alternating positions and never find the element stable.
+    await retry.hover()
+    await retry.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
+    expect(await retry.evaluate(el => getComputedStyle(el).translate)).toMatch(/^(none|0px)( 0px){0,2}$/)
+    await retry.click()
     await expect(card.getByRole("textbox", { name: "Comment", exact: true })).toHaveCount(0)
     expect(commentKeys.size).toBe(1)
     const opener = card.getByRole("button", { name: "Open on right" })
