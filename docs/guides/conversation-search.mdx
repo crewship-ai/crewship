@@ -189,9 +189,12 @@ stays the global palette). The dialog has three tabs:
 - **All chats** — every agent conversation you can see.
 - **Files** — not available yet; the tab says so rather than showing zero results. (Developers can enable sample data with `NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES=true`; it is not real file search.)
 
-Type free text plus optional filters: `from:agent` (any agent's replies) or `from:ada` (that agent's own replies, never your messages in her chat). `from:me` is not supported yet: group agent chats are searched too and a hit does not say which person wrote it, so the dialog says it needs the message author from the server instead of guessing. An agent's name wins over the words `agent`, so an agent called Agent is selectable. `in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,
+Type free text plus optional filters: `from:agent` (any agent's replies), `from:ada` (that agent's own replies),
+`in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,
 `before:2026-10-31`. An unknown filter is reported, not ignored. Use the arrow
 keys to move through results (Left/Right switches tabs) and Enter to open the exact message; Escape closes.
+
+`from:` matches a hit only when it is an agent reply, so `from:ada` never returns your own messages in Ada's chat. `from:me` (also `user` and `you`) is not supported yet: group agent chats are searched too and a hit does not say which person wrote it, so the dialog says it needs the message author from the server instead of guessing. An agent's name or slug wins over all the keywords (`agent`, `assistant`, `user`, `you`, `me`), so an agent called Agent or User can be selected.
 
 Only `in:` is applied by the server. `from:`, `has:`, the date filters and
 **This chat** are applied to the server's 50 best matches, so when that page
