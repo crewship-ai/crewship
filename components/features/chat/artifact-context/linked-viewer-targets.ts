@@ -15,9 +15,12 @@ export interface ConversationLink {
 export const targetKey = (target: LinkedViewerTarget) =>
   JSON.stringify([target.workspaceId, target.pageId, target.mode === "revision" ? [target.revision, target.checkpointId] : "latest"])
 
+/** The backend's bounded id shape for pages and checkpoints (openapi DocumentCheckpoint.id). */
+const BOUNDED_ID = /^[A-Za-z0-9_-]{1,128}$/
+
 export function validLinkedTarget(target: LinkedViewerTarget): boolean {
   if (!target.workspaceId || !target.pageId) return false
-  return target.mode === "latest" || (target.mode === "revision" && Number.isSafeInteger(target.revision) && target.revision >= 0 && Boolean(target.checkpointId))
+  return target.mode === "latest" || (target.mode === "revision" && Number.isSafeInteger(target.revision) && target.revision >= 0 && BOUNDED_ID.test(target.checkpointId))
 }
 
 /** The header may switch only between accessible, valid links of this conversation, each once. */
