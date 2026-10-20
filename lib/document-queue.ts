@@ -37,10 +37,11 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     const wait = new AbortController()
     const timer = setTimeout(() => wait.abort(), STORAGE_LOCK_WAIT_MS)
     const outcome = await new Promise<{ release: () => void } | "busy" | "none">(resolve => {
-      navigator.locks.request(`crewship-document-drafts:${owner}`, { signal: wait.signal }, () => new Promise<void>(release => resolve({ release }))).catch(cause => {
+      const refused = (cause: unknown) => {
         // A refused request (SecurityError, ...) means no lock is available, not that another tab holds one.
         resolve(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
-      })
+      }
+      try { navigator.locks.request(`crewship-document-drafts:${owner}`, { signal: wait.signal }, () => new Promise<void>(release => resolve({ release }))).catch(refused) } catch (cause) { refused(cause) }
     })
     clearTimeout(timer)
     if (outcome === "busy") throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")

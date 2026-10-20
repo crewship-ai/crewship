@@ -80,7 +80,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     let requiredRev = 0
     let active = true, epoch: string | undefined, polling = false, blocked = false
     let storage: DocumentDraftStore | undefined, schema = 0, durableOff = false
-    let unverifiedStaged: DocumentDraft[] | undefined, blockedOther = false, opening: Promise<void> | undefined, retryAt = 0, retryDelay = 5000, tried = false
+    let journalBroken = false, unverifiedStaged: DocumentDraft[] | undefined, blockedOther = false, opening: Promise<void> | undefined, retryAt = 0, retryDelay = 5000, tried = false
     const stored = new Set<string>()
     let restored: DocumentDraft[] = []
     // Bounded journal: one writer loop, one pending row per draft. Edits made
@@ -94,19 +94,20 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     let flushTimer: ReturnType<typeof setTimeout> | undefined
     const run = () => flushing = Promise.resolve().then(async () => {
       try {
-        const rows = [...dirty.values()]; dirty.clear(); inflight = rows.length; countWrites()
+        // Frozen at batch start: a row attempted while an earlier one is writing is written by the next batch, once.
+        const rows = [...dirty.values()].map(draft => structuredClone(draft)); dirty.clear(); inflight = rows.length; countWrites()
         let snapshot: string | undefined
         for (const draft of rows) {
           if (!storage) throw new DocumentStorageError("Private document storage is unavailable.")
           // The packet (update, request) of an attempted draft is never rewritten; only the recovery baseline is taken here.
           if (!draft.attempted || !draft.snapshot) draft.snapshot = snapshot ??= encodeUpdate(Y.encodeStateAsUpdate(doc))
-          await storage.put(structuredClone(draft))
+          await storage.put(draft)
           inflight--
         }
       } catch (cause) {
         dirty.clear()
         if (!active) return
-        blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
+        journalBroken = true;blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
         setError(cause instanceof Error ? cause.message : "Could not retain draft.")
         throw cause
       } finally { inflight = 0; flushing = undefined; countWrites(); if (dirty.size) schedule() }
@@ -134,6 +135,9 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       setPending(total()); setStatus("Saving…")
     }
     doc.on("update", local)
+    // Mobile browsers and tab closes may skip beforeunload: write what is queued, best effort.
+    const hide = (event: Event) => { if (event.type === "pagehide" || document.visibilityState === "hidden") void flushAll().catch(() => {}) }
+    window.addEventListener("pagehide", hide); document.addEventListener("visibilitychange", hide)
     const total = () => queue.length + restored.length
     function accept(next: DocumentState): boolean {
         if (!active || authorizationLost.current) return false
@@ -257,7 +261,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       } catch (cause) {
         if (!active) return
         setPending(total())
-        if (cause instanceof DocumentStorageError) {
+        if (cause instanceof DocumentStorageError || journalBroken) {
           blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (cause instanceof UnconfirmedReceipt) {
           blocked = blockedOther = true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
@@ -278,6 +282,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     const timer = setInterval(() => void poll(), 500)
     return () => {
       active = false; clearInterval(timer); controller.abort()
+      window.removeEventListener("pagehide", hide); document.removeEventListener("visibilitychange", hide)
       void client.cancelQueries({queryKey,exact:true})
       client.removeQueries({queryKey,exact:true})
       doc.off("update", local); doc.destroy()

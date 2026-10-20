@@ -63,3 +63,11 @@ it("reports the journal as non-exclusive when Web Locks do not exist", async () 
   expect(store.exclusive).toBe(false)
   store.close()
 })
+
+it("treats a synchronous throw from the lock request as no lock available", async () => {
+  fakeBrowser()
+  vi.stubGlobal("navigator", { locks: { request: () => { throw new TypeError("not allowed") } } })
+  const store = await openDocumentDrafts("h", "w", "p")
+  expect(store.exclusive).toBe(false)
+  store.close()
+})

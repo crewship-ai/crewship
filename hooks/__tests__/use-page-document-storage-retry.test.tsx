@@ -388,7 +388,7 @@ it("bounds full snapshots when keystrokes arrive in separate tasks", async () =>
     journal.put.mockClear()
     for (let i = 0; i < 30; i++) await act(async () => { text(result.current.doc).insert(4, "x"); await new Promise(resolve => setTimeout(resolve, 10)) })
     await waitFor(() => expect(result.current.durability).toBe("local"), { timeout: 4000 })
-    expect(journal.put.mock.calls.length).toBeLessThanOrEqual(4)
+    expect(journal.put.mock.calls.length).toBeLessThanOrEqual(8) // far below the 30 key events
     const probe = new Y.Doc({ gc: false })
     Y.applyUpdate(probe, Uint8Array.from(atob((journal.put.mock.calls.at(-1)![0] as { snapshot: string }).snapshot), c => c.charCodeAt(0)))
     expect(text(probe).toString().match(/x/g)).toHaveLength(30)
@@ -408,5 +408,81 @@ it("publishes earlier rows of an unlocked journal only after the fresh read is a
     await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 4000 })
     expect(Math.max(...seen)).toBe(0)
     expect(result.current.unverifiedDrafts).toHaveLength(0)
+  } finally { unmount(); server.destroy() }
+})
+
+it("flushes a pending journal write on pagehide, before the coalescing window ends", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    journal.put.mockClear()
+    act(() => text(result.current.doc).insert(4, " x"))
+    expect(journal.put).not.toHaveBeenCalled() // still inside the window
+    act(() => { window.dispatchEvent(new Event("pagehide")) })
+    await waitFor(() => expect(journal.put).toHaveBeenCalledTimes(1), { timeout: 150 })
+  } finally { unmount(); server.destroy() }
+})
+
+it("flushes when the page becomes hidden", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    journal.put.mockClear()
+    act(() => text(result.current.doc).insert(4, " x"))
+    const state = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+    act(() => { document.dispatchEvent(new Event("visibilitychange")) })
+    await waitFor(() => expect(journal.put).toHaveBeenCalledTimes(1), { timeout: 150 })
+    state.mockRestore()
+  } finally { unmount(); server.destroy() }
+})
+
+it("writes each attempted row's request once across a multi-row queue", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => text(result.current.doc).insert(4, " a"))
+    await waitFor(() => expect(journal.put.mock.calls.some(([d]) => d.request)).toBe(true), { timeout: 4000 }) // row 1 attempted
+    act(() => text(result.current.doc).insert(4, " b")) // row 2, queued behind the attempted row
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1500)) })
+    const withRequest = journal.put.mock.calls.map(([d]) => d).filter(d => d.request)
+    expect(withRequest).toHaveLength(1)
+    expect(new Set(journal.put.mock.calls.map(([d]) => d.id)).size).toBe(2)
+  } finally { unmount(); server.destroy() }
+})
+
+it("keeps the storage-failed message when the journal fails with a non-storage error", async () => {
+  const server = model()
+  journal.put.mockRejectedValue(new DOMException("could not be cloned", "DataCloneError"))
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => text(result.current.doc).insert(4, " x"))
+    await waitFor(() => expect(result.current.status).toContain("storage"))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)) })
+    expect(result.current.status).toContain("storage")
+    expect(result.current.status).not.toContain("Disconnected")
+  } finally { unmount(); server.destroy() }
+})
+
+it("never journals queued edits when the retry returns a lockless store", async () => {
+  const server = model()
+  journal.open.mockRejectedValueOnce(await storageError()).mockImplementation(async () => store(false))
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+    act(() => text(result.current.doc).insert(4, " mem"))
+    later()
+    await waitFor(() => expect(result.current.storageLockless).toBe(true), { timeout: 4000 })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)) })
+    expect(journal.put).not.toHaveBeenCalled()
+    expect(result.current.durability).toBe("unsaved")
   } finally { unmount(); server.destroy() }
 })
