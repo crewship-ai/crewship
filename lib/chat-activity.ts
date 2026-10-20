@@ -56,7 +56,11 @@ export function parentToolIdOf(p: TurnPart): string | undefined {
  *  the paired result (is_error / denied), then whether the turn is still live. */
 export function toolState(step: Pick<ToolStep, "call" | "result">, turnStreaming: boolean): ActivityState {
   const typed = step.call.activity?.state
-  if (typed) return typed === "input_streaming" ? "running" : typed
+  if (typed) {
+    if (typed === "input_streaming") return "running"
+    // A token this build does not know must not read as success or failure.
+    return typed in ACTIVITY_STATE_LABEL ? typed : "unknown"
+  }
   // A result with no call in this turn classifies itself.
   if (step.call.type === "tool_result" && !step.result) {
     const m = step.call.metadata

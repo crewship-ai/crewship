@@ -28,6 +28,14 @@ describe("toolState", () => {
     expect(toolState({ call: typed("input_streaming") }, true)).toBe("running")
     expect(toolState({ call: typed("failed"), result: p("tool_result") }, false)).toBe("failed")
   })
+  it("degrades a state token it does not know to unknown, never to success", () => {
+    const typed = (state: string) => ({ ...p("activity"), activity: { kind: "shell", state } }) as never
+    for (const state of ["paused", "SUCCEEDED"]) {
+      expect(toolState({ call: typed(state), result: p("tool_result") }, false)).toBe("unknown")
+      expect(toolState({ call: typed(state) }, true)).toBe("unknown")
+    }
+    expect(summarizeGroup(["succeeded", toolState({ call: typed("paused") }, false)]).title).not.toBe("Worked")
+  })
   it("flags approvals", () => {
     expect(needsAttention({ ...p("activity"), activity: { kind: "shell", state: "awaiting_approval" } } as never)).toBe(true)
     expect(needsAttention(p("tool_call"))).toBe(false)

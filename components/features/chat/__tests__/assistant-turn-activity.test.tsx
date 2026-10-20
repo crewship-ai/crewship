@@ -228,4 +228,25 @@ describe("typed events from the stream consumer", () => {
     renderTurn(turn([typed("a", "unknown")]))
     expect(screen.getByText("Outcome unknown")).toBeTruthy()
   })
+  it("an input_streaming step reads as in progress, never Worked", () => {
+    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "input_streaming")], true))
+    expect(container.querySelector("details[data-activity-tone]")!.getAttribute("data-activity-tone")).toBe("running")
+    expect(screen.queryByText("Worked")).toBeNull()
+  })
+
+  it("an unrecognised state token degrades to Outcome unknown, never Worked", () => {
+    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "paused")]))
+    expect(screen.queryByText("Worked")).toBeNull()
+    expect(container.textContent).toContain("Outcome unknown")
+  })
+
+  it("every thinking state renders without claiming a finished summary", () => {
+    for (const state of ["running", "completed", "cut_off", "unavailable", "nonsense"]) {
+      cleanup()
+      const p = { ...part("thinking", {}, "private"), thinking: { visibility: "summary", state, summary: "Checked sources" } } as TurnPart
+      const { container } = renderTurn(turn([p]))
+      expect(container.textContent).not.toContain("private")
+      if (state === "cut_off") expect(container.textContent).toContain("interrupted")
+    }
+  })
 })
