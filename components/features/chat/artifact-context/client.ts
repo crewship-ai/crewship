@@ -165,7 +165,7 @@ function parseAudience(value: unknown): Audience {
 }
 function parseExpected(value: unknown): ExpectedState | null {
   // The backend contract carries schema 3 only; anything else cannot become a targeted edit.
-  return object(value) && value.schema === 3 && Number.isSafeInteger(value.rev) && Number.isSafeInteger(value.generation)
+  return object(value) && value.schema === 3 && Number.isSafeInteger(value.rev) && (value.rev as number) >= 0 && Number.isSafeInteger(value.generation) && (value.generation as number) >= 0
     ? { schema: value.schema as number, rev: value.rev as number, generation: value.generation as number } : null
 }
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 // Mounting of the artifact-context surfaces in the real ChatPanel. Endpoints are
 // the proposed contract and are not served by any backend, so fetch is faked.
@@ -12,7 +12,8 @@ const chat = vi.hoisted(() => ({
   isStreaming: false, connectionStatus: "connected",
 }))
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }))
-vi.mock("@/hooks/use-chat", () => ({ useChat: () => chat }))
+const chatOptions = vi.hoisted(() => ({ current: undefined as undefined | { onOwnMessageSaved?: (content: string, metadata?: Record<string, unknown>) => void } }))
+vi.mock("@/hooks/use-chat", () => ({ useChat: (options: typeof chatOptions.current) => { chatOptions.current = options; return chat } }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("../right-rail", () => ({ RightRail: () => null }))
@@ -69,7 +70,8 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 /** Entry animations are time-driven; compare structure, not the frame. */
 const settled = (container: HTMLElement, html = container.innerHTML) => html.replace(/ style="[^"]*"/g, "")
-const mount = () => render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} />)
+const mount = (kind?: "direct" | "issue") => render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind={kind} />)
+const echo = (content: string) => act(() => chatOptions.current?.onOwnMessageSaved?.(content, { author_user_id: "user-1" }))
 const surfaceCalls = () => calls.filter(path => /work-cards|\/links|\/library|artifact-context/.test(path))
 
 it("flag off: no artifact surface and no request, whatever the endpoints serve", async () => {
@@ -128,8 +130,14 @@ it("flag on: result card opens the exact revision through the checkpoint reader 
   expect(text).toBe("Please update it")
   expect(metadata.document_iteration_intent).toEqual({ submission_id: expect.any(String), page_id: "page-a", schema: 3, rev: 5, generation: 1 })
   expect(typeof metadata.document_iteration_intent.submission_id).toBe("string")
-  // Sent: the context is consumed, the next message is a new intent.
+  // Handing the frame to the socket is not confirmation: the intent stays until the server echoes the message.
+  expect(screen.getByRole("region", { name: "Artifact context" })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  expect(chat.sendMessage.mock.calls[1][1].document_iteration_intent.submission_id).toBe(metadata.document_iteration_intent.submission_id)
+  echo("Please update it")
   await waitFor(() => expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull())
+  // A new intent after the confirmed send.
+  expect(chat.sendMessage).toHaveBeenCalledTimes(2)
 })
 
 it("flag on: a missing revision is unavailable, never the latest", async () => {
@@ -215,4 +223,30 @@ it("flag on: an item in a shared folder cannot be edited and nothing is sent", a
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
   // Reply-only is a plain message: no mandate.
   expect(chat.sendMessage.mock.calls[0]).toEqual(["Please update it"])
+})
+
+it("flag on: a reply-only send resets the context too, once the message is echoed", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
+  await screen.findByRole("region", { name: "Artifact context" })
+  fireEvent.click(screen.getByLabelText("Reply only"))
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  expect(chat.sendMessage.mock.calls[0]).toEqual(["Please update it"])
+  expect(screen.getByRole("region", { name: "Artifact context" })).toBeInTheDocument()
+  echo("an unrelated echo")
+  expect(screen.getByRole("region", { name: "Artifact context" })).toBeInTheDocument()
+  echo("Please update it")
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull())
+})
+
+it("flag on: editing is not offered in a conversation that is not a private chat", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  mount("issue")
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
+  const strip = await screen.findByRole("region", { name: "Artifact context" })
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+  expect(strip).toHaveTextContent("needs a private chat")
 })

@@ -28,7 +28,8 @@ export function ComposerArtifactContextStrip({ context, onModeChange, onUpdateTa
   const warning = pinnedUpdateWarning(context)
   // Direct edits are for the author's personal Document only; when every attached item sits in a shared folder, editing is not offered.
   const readable = context.attachments.filter(item => item.access === "readable")
-  const editUnavailable = readable.length > 0 && readable.every(item => item.audience.kind === "folder")
+  const sharedOnly = readable.length > 0 && readable.every(item => item.audience.kind === "folder")
+  const editUnavailable = sharedOnly || !context.privateChat
   return <section aria-label="Artifact context" className="space-y-2 border-b p-2 text-sm">
     <ul className="flex flex-wrap gap-2">
       {context.attachments.map(item => <li key={item.id} className="flex items-center gap-1 rounded border px-2 py-1">
@@ -43,7 +44,7 @@ export function ComposerArtifactContextStrip({ context, onModeChange, onUpdateTa
         <input type="radio" name="artifact-edit-mode" checked={context.mode === mode.id} disabled={mode.id === "update" && editUnavailable} aria-describedby={mode.id === "update" && editUnavailable ? "artifact-edit-unavailable" : undefined} onChange={() => onModeChange(mode.id)} />{mode.label}
       </label>)}
     </fieldset>
-    {editUnavailable && <p id="artifact-edit-unavailable" className="text-xs text-muted-foreground">Editing an item in a shared folder needs a proposal, which is not available yet.</p>}
+    {editUnavailable && <p id="artifact-edit-unavailable" className="text-xs text-muted-foreground">{!context.privateChat ? "Editing an item needs a private chat, and this conversation is not one." : "Editing an item in a shared folder needs a proposal, which is not available yet."}</p>}
     {context.mode === "update" && context.attachments.length > 1 && <label className="flex items-center gap-2 text-xs">Item to update
       <select className="rounded border bg-background p-1 coarse:min-h-12" value={context.updateTargetId ?? ""} onChange={event => { if (event.target.value) onUpdateTargetChange(event.target.value) }}>
         {!target && <option value="" disabled>Select an item</option>}

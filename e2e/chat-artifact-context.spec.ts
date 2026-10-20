@@ -77,18 +77,22 @@ async function mockContract(page: Page, options: Partial<Mock> = {}): Promise<Mo
 /** A real chat row for the demo agent, so the panel verifies read scope as it does for any existing conversation. */
 async function openChat(page: Page) {
   await page.goto("/")
-  const target = await page.evaluate(async () => {
+  // The desktop and the phone run each use their own agent: a send starts a real run, and an agent that is still busy
+  // with the previous test's run refuses the next message (no echo), which would hide what this spec checks.
+  const slot = (page.viewportSize()?.width ?? 1280) < 600 ? 1 : 0
+  const target = await page.evaluate(async slot => {
     const workspaces = await (await fetch("/api/v1/workspaces")).json()
     for (const workspace of Array.isArray(workspaces) ? workspaces : []) {
       const agents = await (await fetch(`/api/v1/agents?workspace_id=${workspace.id}`)).json()
-      const agent = (Array.isArray(agents) ? agents : []).find((item: { slug?: string; id?: string }) => item?.slug && item?.id)
+      const usable = (Array.isArray(agents) ? agents : []).filter((item: { slug?: string; id?: string }) => item?.slug && item?.id)
+      const agent = usable[slot] ?? usable[0]
       if (!agent) continue
       const sessionId = crypto.randomUUID()
       const created = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspace.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) })
       if (created.ok) return { workspaceId: workspace.id as string, slug: agent.slug as string, sessionId }
     }
     return null
-  })
+  }, slot)
   expect(target, "no workspace with an agent on this instance; seed one first").not.toBeNull()
   await page.evaluate(id => window.localStorage.setItem("crewship.workspaceId", id), target!.workspaceId)
   await page.goto(`/chat/${target!.slug}?session=${target!.sessionId}`)
@@ -160,7 +164,8 @@ for (const width of [1280, 390]) {
       // Exactly the backend's five flat fields; no mode, principal or title travels with it.
       expect(sent[0].metadata?.document_iteration_intent).toEqual({ submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/), page_id: "page-b", schema: 3, rev: 7, generation: 3 })
       expect(Object.keys(sent[0].metadata ?? {})).not.toContain("artifact_submission")
-      await expect(page.getByRole("region", { name: "Artifact context" })).toHaveCount(0)
+      // The context is spent only when the server echoes the saved message.
+      await expect(page.getByRole("region", { name: "Artifact context" })).toHaveCount(0, { timeout: TIMEOUT })
 
       // 6. The library lists what is linked, a restricted link without a name.
       await page.getByRole("button", { name: "Library", exact: true }).click()

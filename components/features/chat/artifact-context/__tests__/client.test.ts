@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { checkpointPath } from "../exact-revision"
-import { checkpointFetcher, fetchArtifactPreview, fetchLinks, fetchWorkCards, parseLibrary, parseLinks, parseWorkCards } from "../client"
+import { parsePreview, checkpointFetcher, fetchArtifactPreview, fetchLinks, fetchWorkCards, parseLibrary, parseLinks, parseWorkCards } from "../client"
 
 afterEach(() => vi.restoreAllMocks())
 const respond = (status: number, body?: unknown, type = "application/json") =>
@@ -57,4 +57,11 @@ it("the checkpoint reader is called with the workspace and without a revision qu
   const target = { workspaceId: "w", pageId: "p", mode: "revision" as const, revision: 1, checkpointId: "cp-1" }
   await checkpointFetcher(checkpointPath(target))
   expect(String(spy.mock.calls[0][0])).toBe("/api/v1/pages/%40p/document/checkpoints/cp-1?workspace_id=w")
+})
+
+it("a preview with a negative revision or generation confirms no expected state", () => {
+  const body = (expected: unknown) => ({ create: { audience: { kind: "personal" } }, update: { audience: { kind: "personal" }, expected } })
+  expect(parsePreview(body({ schema: 3, rev: 4, generation: 0 }))!.update!.expected).toEqual({ schema: 3, rev: 4, generation: 0 })
+  expect(parsePreview(body({ schema: 3, rev: -1, generation: 0 }))!.update!.expected).toBeNull()
+  expect(parsePreview(body({ schema: 3, rev: 1, generation: -2 }))!.update!.expected).toBeNull()
 })

@@ -34,9 +34,11 @@ export interface ComposerArtifactContext {
   createAudience: Audience
   createResultType: string
   online: boolean
+  /** Targeted edits are accepted only in a private chat. Derived by the host; false when unsure. */
+  privateChat: boolean
 }
 
-export type SendBlock = "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
+export type SendBlock = "chat_not_private" | "need_instruction" | "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
 
 export const attachmentId = (target: LinkedViewerTarget) => targetKey(target)
 
@@ -55,18 +57,21 @@ export function updateTarget(ctx: ComposerArtifactContext): AttachedArtifact | n
 }
 
 /** Nothing runs on an artifact without an explicit choice. */
-export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
+export function sendBlock(ctx: ComposerArtifactContext, instruction?: string): SendBlock {
   if (ctx.attachments.length === 0 && ctx.mode === null) return null
   if (ctx.attachments.some(item => item.access === "lost")) return "attachment_lost"
   if (!ctx.online && ctx.mode !== null) return "offline"
   if (ctx.mode === null) return "choose_mode"
   if (ctx.mode === "reply_only") return null
   if (ctx.mode === "update") {
+    if (!ctx.privateChat) return "chat_not_private"
     if (ctx.attachments.length === 0) return "need_attachment"
     const target = updateTarget(ctx)
     if (!target) return "choose_target"
     // Only the author's personal Document can be edited directly; a shared folder needs a proposal, which has no path yet.
     if (target.audience.kind === "folder") return "shared_folder"
+    // The backend refuses an update with a blank instruction.
+    if (instruction !== undefined && !instruction.trim()) return "need_instruction"
     if (!target.expected) return "state_unknown"
     if (!ctx.executor) return "no_executor"
     return target.audience.kind === "unknown" ? "audience_unknown" : null
@@ -76,6 +81,8 @@ export function sendBlock(ctx: ComposerArtifactContext): SendBlock {
 }
 
 export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
+  chat_not_private: "Editing an item needs a private chat, and this conversation is not one.",
+  need_instruction: "Write what should change before sending an update.",
   shared_folder: "This item is in a shared folder. Editing it needs a proposal, which is not available yet, so nothing was sent.",
   attachment_lost: "You no longer have access to an attached item. Remove it to continue.",
   offline: "You are offline. Reconnect to send.",
