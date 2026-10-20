@@ -5,7 +5,7 @@ import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { apiFetch } from "@/lib/api-fetch"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { openDocumentDrafts, DocumentStorageError, DocumentStorageBusy, type DocumentDraft, type DocumentDraftStore } from "@/lib/document-queue"
+import { openDocumentDrafts, DocumentStorageError, DocumentStorageBusy, purgeDocumentDrafts, type DocumentDraft, type DocumentDraftStore } from "@/lib/document-queue"
 
 import { useQueryClient } from "@tanstack/react-query"
 import { verifyMutationReceipt, type DocumentState } from "@/lib/documents/contracts"
@@ -66,12 +66,15 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const discardRecovery = useRef<() => Promise<void>>(async () => {})
   const discardRecoveredDrafts = useCallback(() => discardRecovery.current(), [])
   const authorizationLost=useRef(false)
-  const deny=useCallback(()=>{authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
+  // Deletes this Page's journal rows once any write in flight has settled; set by the active effect.
+  const purgeJournal = useRef<() => void>(() => {})
+  const deny=useCallback(()=>{authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
     setStorageReady(false); setStorageOff(false); setStorageBusy(false); setStorageLockless(false); setUnverified([]); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
     discardRecovery.current = async () => {};
+    purgeJournal.current = () => {}
     authorizationLost.current=false
     setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
     if (!human) return () => { doc.destroy() }
@@ -98,6 +101,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         const rows = [...dirty.values()].map(draft => structuredClone(draft)); dirty.clear(); inflight = rows.length; countWrites()
         let snapshot: string | undefined
         for (const draft of rows) {
+          if (authorizationLost.current) break
           if (!storage) throw new DocumentStorageError("Private document storage is unavailable.")
           // The packet (update, request) of an attempted draft is never rewritten; only the recovery baseline is taken here.
           if (!draft.attempted || !draft.snapshot) draft.snapshot = snapshot ??= encodeUpdate(Y.encodeStateAsUpdate(doc))
@@ -120,7 +124,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       while (flushing || dirty.size) await (flushing ?? run())
     }
     const persist = (batch: DocumentDraft) => {
-      if (durableOff) return
+      if (durableOff || authorizationLost.current) return
       stored.add(batch.id)
       dirty.set(batch.id, batch)
       countWrites()
@@ -134,6 +138,12 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       const draft = queue.at(-1)!
       persist(draft)
       setPending(total()); setStatus("Saving…")
+    }
+    purgeJournal.current = () => {
+      // After a denial nothing is written (persist and the writer check authorizationLost); the purge runs once
+      // a write already in flight has settled, so it cannot bring a row back. Covers recovered and staged rows too.
+      dirty.clear()
+      void (flushing ?? Promise.resolve()).catch(() => {}).then(() => purgeDocumentDrafts(human, workspace, pageId))
     }
     doc.on("update", local)
     // Mobile browsers and tab closes may skip beforeunload: write what is queued, best effort.
@@ -270,7 +280,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         setPending(total())
         // Authority decides first: a denial must not be masked by a storage failure, whatever the journal state.
         if (authorizationLost.current || (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status))) {
-          authorizationLost.current=true;setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
+          authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
           blocked = blockedOther = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentStorageError || journalBroken) {
           blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")

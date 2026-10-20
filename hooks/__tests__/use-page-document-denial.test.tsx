@@ -8,14 +8,15 @@ import { DocumentStorageError } from "@/lib/document-queue"
 import { usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
-const journal = vi.hoisted(() => ({ exclusive: true, rows: [] as unknown[], put: vi.fn(), remove: vi.fn() }))
+const journal = vi.hoisted(() => ({ purge: vi.fn(), exclusive: true, rows: [] as unknown[], put: vi.fn(), remove: vi.fn() }))
 vi.mock("@/lib/document-queue", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/document-queue")>(),
+  purgeDocumentDrafts: journal.purge,
   openDocumentDrafts: async () => ({ load: async () => journal.rows, put: journal.put, remove: journal.remove, close: () => {}, exclusive: journal.exclusive }),
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
-beforeEach(() => { journal.exclusive = true; journal.rows = []; journal.put.mockReset().mockResolvedValue(undefined); journal.remove.mockReset().mockResolvedValue(undefined) })
+beforeEach(() => { journal.purge.mockReset().mockResolvedValue(undefined); journal.exclusive = true; journal.rows = []; journal.put.mockReset().mockResolvedValue(undefined); journal.remove.mockReset().mockResolvedValue(undefined) })
 afterEach(() => { vi.restoreAllMocks(); fetchMock.mockReset() })
 
 const renderHook: typeof baseRenderHook = (callback, options) => {
@@ -139,5 +140,79 @@ it("a 200 while blocked neither resumes editing nor journals nor sends", async (
     expect(result.current.editable).toBe(false)
     expect(result.current.denied).toBe(false)
     expect(result.current.durability).toBe("unsaved")
+  } finally { unmount(); server.destroy() }
+})
+
+it.each([401, 403, 404])("a %i deletes this Page's journal rows from storage, not only from memory", async status => {
+  const server = model()
+  let deny = false
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : deny ? response({ error: "gone" }, status) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    expect(journal.purge).not.toHaveBeenCalled()
+    deny = true
+    await waitFor(() => expect(result.current.denied).toBe(true))
+    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+  } finally { unmount(); server.destroy() }
+})
+
+it("an external deny() purges the journal too", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => result.current.deny())
+    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+  } finally { unmount(); server.destroy() }
+})
+
+it("rows exposed as recovered or staged are purged on denial, and a write in flight cannot resurrect them", async () => {
+  const server = model()
+  journal.exclusive = false
+  journal.rows = [{ id: "d1", update: "", attempted: false, schema: 3, epoch: "epoch", snapshot: documentSchema.snapshot(server) }]
+  let deny = false
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : deny ? response({ error: "gone" }, 404) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.unverifiedDrafts).toHaveLength(1))
+    deny = true
+    await waitFor(() => expect(result.current.denied).toBe(true))
+    expect(result.current.unverifiedDrafts).toHaveLength(0)
+    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+  } finally { unmount(); server.destroy() }
+})
+
+it("the purge waits for a journal write already in flight and no write follows the denial", async () => {
+  const server = model()
+  let hold = false, started = false
+  let resolveRead: (() => void) | undefined
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => {
+    if (init?.method === "POST") return response({ error: "offline" }, 503)
+    if (!hold) return response(head(server))
+    started = true
+    return new Promise(resolve => { resolveRead = () => resolve({ ok: false, status: 403, json: async () => ({ error: "gone" }) }) })
+  })
+  const order: string[] = []
+  let finishPut: (() => void) | undefined
+  journal.put.mockImplementation(() => new Promise<void>(resolve => { finishPut = () => { order.push("put"); resolve() } }))
+  journal.purge.mockImplementation(async () => { order.push("purge") })
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    hold = true
+    await waitFor(() => expect(started).toBe(true))
+    act(() => text(result.current.doc).insert(7, " x"))
+    await waitFor(() => expect(finishPut).toBeDefined())
+    act(() => resolveRead!())
+    await waitFor(() => expect(result.current.denied).toBe(true))
+    expect(journal.purge).not.toHaveBeenCalled()
+    act(() => finishPut!())
+    await waitFor(() => expect(journal.purge).toHaveBeenCalled())
+    expect(order).toEqual(["put", "purge"])
+    act(() => text(result.current.doc).insert(7, " y"))
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(journal.put).toHaveBeenCalledTimes(1)
   } finally { unmount(); server.destroy() }
 })

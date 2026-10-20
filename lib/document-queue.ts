@@ -107,3 +107,52 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     close() { db.close(); releaseLock?.() },
   }
 }
+
+/**
+ * Privacy purge, independent of any open store or Page lock. The journal holds
+ * snapshots of private Documents, so access loss (a Page denial) and sign-out
+ * or an identity change delete the rows themselves, not only what is on screen.
+ * Best effort: unavailable storage cannot be cleaned and must not block the caller.
+ */
+async function purgeRows(range: IDBKeyRange | undefined, owns: (owner: string) => boolean): Promise<void> {
+  if (typeof indexedDB === "undefined") return
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), STORAGE_OPEN_TIMEOUT_MS)
+      const request = indexedDB.open("crewship-document-drafts", 1)
+      request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
+      request.onerror = request.onblocked = () => { clearTimeout(timer); reject(new Error("open")) }
+      request.onsuccess = () => { clearTimeout(timer); resolve(request.result) }
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("drafts", "readwrite")
+        tx.oncomplete = () => resolve()
+        tx.onabort = tx.onerror = () => reject(new Error("purge"))
+        const cursor = tx.objectStore("drafts").openCursor(range)
+        cursor.onsuccess = () => {
+          const row = cursor.result
+          if (!row) return
+          const key = row.key as [string, string]
+          if (owns(key[0])) row.delete()
+          row.continue()
+        }
+      })
+    } finally { db.close() }
+  } catch { /* Nothing more can be done for rows the browser will not let us delete. */ }
+}
+/** Deletes this Page's journal rows for one human and workspace. Best effort; never throws. */
+export function purgeDocumentDrafts(human: string, workspace: string, page: string): Promise<void> {
+  if (!human || !workspace || !page) return Promise.resolve()
+  const owner = JSON.stringify([human, workspace, page])
+  return purgeRows(IDBKeyRange.bound([owner, ""], [owner, "\uffff"]), () => true)
+}
+/**
+ * Deletes every journal row not owned by `userId` (all rows when null: sign-out).
+ * A shared browser never keeps one person's private text for the next sign-in.
+ */
+export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
+  return purgeRows(undefined, owner => {
+    try { return !userId || JSON.parse(owner)[0] !== userId } catch { return true }
+  })
+}

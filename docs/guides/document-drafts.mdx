@@ -17,3 +17,10 @@ The Document header shows one status line with two parts.
 | An earlier unsent draft is held in this browser and was not restored | A draft from an earlier session was found. Download or discard it from the recovery panel. |
 
 Only a server confirmation turns the line to **Confirmed by server**.
+
+## When the browser copy is deleted
+
+The browser copy holds private text, so it is deleted rather than kept for later:
+
+- **Access lost.** When the server answers 401, 403 or 404 for the document, the copy of that document (for you, in that workspace) is deleted from the browser together with what is on screen. Download an unsent draft before closing the tab if you still need it; after this point it cannot be recovered.
+- **Sign-out, session expiry or a different user signing in.** Copies of other users are deleted, and every copy is deleted on sign-out or when the session ends. Unsent edits that were only stored in this browser are lost, so confirm that the status line says **Confirmed by server** before you sign out on a shared computer.
