@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 
+// The app's motion choice (MotionConfig) and the OS setting both arrive through motion's hook.
+const motion = vi.hoisted(() => ({ reduce: false as boolean | null }))
+vi.mock("motion/react", async (importOriginal) => ({ ...(await importOriginal<typeof import("motion/react")>()), useReducedMotionConfig: () => motion.reduce }))
+
 // The streaming text renderer must decouple network chunk arrival from the
 // visual reveal: raw WS bursts pop whole sentences in at once, while modern
 // chats (Claude.ai / ChatGPT) reveal at a smooth, roughly constant character
@@ -13,6 +17,7 @@ describe("useSmoothText", () => {
   let now: number
 
   beforeEach(() => {
+    motion.reduce = false
     rafQueue = []
     now = 0
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
@@ -91,6 +96,27 @@ describe("useSmoothText", () => {
     rerender({ text: full, streaming: false })
     for (let i = 0; i < 300 && result.current.length < full.length; i++) frame()
     expect(result.current).toBe(full)
+  })
+
+  it("never holds back finished content: the end of the stream shows the whole reply", () => {
+    const full = "x".repeat(2000)
+    const { result, rerender } = renderHook(
+      ({ text, streaming }) => useSmoothText(text, streaming),
+      { initialProps: { text: full, streaming: true } },
+    )
+    frame()
+    expect(result.current.length).toBeLessThan(full.length)
+    rerender({ text: full, streaming: false })
+    expect(result.current).toBe(full)
+  })
+
+  it("reduced motion shows streamed text as it arrives, without a reveal", () => {
+    motion.reduce = true
+    const { result, rerender } = renderHook(({ text }) => useSmoothText(text, true), { initialProps: { text: "first chunk. " } })
+    expect(result.current).toBe("first chunk. ")
+    rerender({ text: "first chunk. second chunk." })
+    expect(result.current).toBe("first chunk. second chunk.")
+    expect(rafQueue.filter(Boolean)).toHaveLength(0)
   })
 
   it("snaps when the text is replaced rather than appended", () => {

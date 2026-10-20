@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Search, X, ChevronUp, ChevronDown } from "lucide-react"
-import { motion, AnimatePresence } from "motion/react"
+import { motion, AnimatePresence, useReducedMotionConfig } from "motion/react"
 import { useHotkeys } from "react-hotkeys-hook"
 
 import { Button } from "@/components/ui/button"
@@ -34,6 +34,7 @@ export function ConversationSearch({ turns, open: openProp, onOpenChange }: Conv
   }
   const [query, setQuery] = useState("")
   const [cursor, setCursor] = useState(0)
+  const reduce = useReducedMotionConfig()
 
   useHotkeys(
     "mod+f",
@@ -93,8 +94,8 @@ export function ConversationSearch({ turns, open: openProp, onOpenChange }: Conv
     if (cursor < 0 || cursor >= hits.length) return
     const hit = hits[cursor]
     const node = document.querySelector(`[data-turn-id="${hit.turnId}"]`)
-    node?.scrollIntoView({ behavior: "smooth", block: "center" })
-  }, [open, hits, cursor])
+    node?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" })
+  }, [open, hits, cursor, reduce])
 
   return (
     <AnimatePresence>

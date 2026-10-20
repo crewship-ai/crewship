@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useReducedMotionConfig } from "motion/react"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { MESSAGE_ANCHOR_EVENT } from "@/hooks/use-message-anchor"
 
@@ -24,11 +25,12 @@ export function MessageAnchorRelease({ sessionId, sendNonce }: { sessionId: stri
     window.addEventListener(MESSAGE_ANCHOR_EVENT, release)
     return () => window.removeEventListener(MESSAGE_ANCHOR_EVENT, release)
   }, [sessionId, stopScroll])
+  const reduce = useReducedMotionConfig()
   const seen = useRef(sendNonce)
   useEffect(() => {
     if (sendNonce === seen.current) return
     seen.current = sendNonce
-    void scrollToBottom()
-  }, [sendNonce, scrollToBottom])
+    void (reduce ? scrollToBottom("instant") : scrollToBottom())
+  }, [sendNonce, scrollToBottom, reduce])
   return null
 }

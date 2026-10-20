@@ -5,7 +5,9 @@ import { MessageAnchorRelease } from "../message-anchor-release"
 
 const ctx = vi.hoisted(() => ({ stopScroll: vi.fn(), scrollToBottom: vi.fn() }))
 vi.mock("use-stick-to-bottom", () => ({ useStickToBottomContext: () => ctx }))
-afterEach(() => { cleanup(); ctx.stopScroll.mockReset(); ctx.scrollToBottom.mockReset() })
+const motion = vi.hoisted(() => ({ reduce: false }))
+vi.mock("motion/react", async (importOriginal) => ({ ...(await importOriginal<typeof import("motion/react")>()), useReducedMotionConfig: () => motion.reduce }))
+afterEach(() => { motion.reduce = false; cleanup(); ctx.stopScroll.mockReset(); ctx.scrollToBottom.mockReset() })
 
 const anchor = (sessionId: string) => window.dispatchEvent(new CustomEvent(MESSAGE_ANCHOR_EVENT, { detail: { sessionId } }))
 
@@ -32,4 +34,11 @@ it("release, then the reader sends: the lock is re-armed so the reply is followe
   expect(ctx.scrollToBottom).toHaveBeenCalledTimes(1)
   rerender(<MessageAnchorRelease sessionId="s1" sendNonce={4} />)
   expect(ctx.scrollToBottom).toHaveBeenCalledTimes(1)
+})
+
+it("with reduced motion the re-armed follow jumps instead of animating", () => {
+  motion.reduce = true
+  const { rerender } = render(<MessageAnchorRelease sessionId="s1" sendNonce={1} />)
+  rerender(<MessageAnchorRelease sessionId="s1" sendNonce={2} />)
+  expect(ctx.scrollToBottom).toHaveBeenCalledWith("instant")
 })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useReducedMotionConfig } from "motion/react"
 
 /** Baseline reveal rate. ~160 chars/s reads as a calm, deliberate stream —
  *  fast enough to never feel throttled on short replies. */
@@ -18,17 +19,18 @@ const CATCHUP_PER_CHAR = 2.5
  * the prefix to render, advanced every animation frame at a smoothed,
  * backlog-adaptive character rate, the modern chat streaming feel.
  *
- * - `streaming=false` from the start (history load) returns the text as-is.
- * - When streaming ends mid-reveal, the tail finishes animating — no snap.
+ * - `streaming=false` returns the text as-is: history never animates, and
+ *   the end of a stream shows the whole reply at once — the reveal never
+ *   holds back finished content.
+ * - Reduced motion (the app's choice through MotionConfig, else the OS)
+ *   turns the reveal off: text shows as it arrives.
  * - A non-append change (session swap, part replaced) snaps to the new text.
  */
 export function useSmoothText(text: string, streaming: boolean): string {
+  const reduce = useReducedMotionConfig() ?? false
   // Non-browser / no-rAF environments render immediately.
-  const canAnimate = typeof requestAnimationFrame === "function"
-  // A part that mounts already-complete (history) never animates; a part that
-  // has ever streamed keeps animating through its final catch-up.
-  const everStreamedRef = useRef(streaming)
-  if (streaming) everStreamedRef.current = true
+  const canAnimate = typeof requestAnimationFrame === "function" && !reduce
+  const revealing = streaming && canAnimate
 
   // Render reads stateRef (the source of truth); this state exists only to
   // trigger a re-render when the reveal advances. It is a monotonic counter,
@@ -37,7 +39,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
   // equal (stale) value and React would bail out of the re-render, freezing
   // the reveal on a truncated prefix.
   const [, bumpRender] = useState(0)
-  const stateRef = useRef({ visible: streaming && canAnimate ? 0 : text.length, lastTs: 0, carry: 0 })
+  const stateRef = useRef({ visible: revealing ? 0 : text.length, lastTs: 0, carry: 0 })
   const textRef = useRef(text)
   const rafIdRef = useRef<number | null>(null)
 
@@ -50,7 +52,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
   textRef.current = text
 
   useEffect(() => {
-    if (!canAnimate || !everStreamedRef.current) return
+    if (!revealing) return
     if (stateRef.current.visible >= textRef.current.length) return
     if (rafIdRef.current !== null) return
 
@@ -89,9 +91,13 @@ export function useSmoothText(text: string, streaming: boolean): string {
         rafIdRef.current = null
       }
     }
-  }, [text, streaming, canAnimate])
+  }, [text, revealing])
 
-  if (!canAnimate || !everStreamedRef.current) return text
+  if (!revealing) {
+    // Whatever is shown now stays shown if the stream resumes.
+    stateRef.current.visible = text.length
+    return text
+  }
   const shown = stateRef.current.visible
   return shown >= text.length ? text : text.slice(0, shown)
 }

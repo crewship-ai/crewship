@@ -6,19 +6,25 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import { useCallback } from "react";
+import { useReducedMotionConfig } from "motion/react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
-export const Conversation = ({ className, ...props }: ConversationProps) => (
-  <StickToBottom
-    className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial="smooth"
-    resize="smooth"
-    role="log"
-    {...props}
-  />
-);
+// Reduced motion (the app's choice, else the OS) jumps instead of animating
+// the scroll; CSS cannot reach this JavaScript-driven spring.
+export const Conversation = ({ className, ...props }: ConversationProps) => {
+  const follow = useReducedMotionConfig() ? "instant" : "smooth";
+  return (
+    <StickToBottom
+      className={cn("relative flex-1 overflow-y-hidden", className)}
+      initial={follow}
+      resize={follow}
+      role="log"
+      {...props}
+    />
+  );
+};
 
 export type ConversationContentProps = ComponentProps<
   typeof StickToBottom.Content
@@ -76,10 +82,12 @@ export const ConversationScrollButton = ({
   ...props
 }: ConversationScrollButtonProps) => {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  const reduce = useReducedMotionConfig();
 
   const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
+    if (reduce) scrollToBottom("instant");
+    else scrollToBottom();
+  }, [scrollToBottom, reduce]);
 
   return (
     !isAtBottom && (

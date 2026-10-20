@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
+import { useReducedMotionConfig } from "motion/react"
 import { ArrowDownIcon, Bot } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -95,6 +96,7 @@ export function VirtualConversation({
   footer,
 }: VirtualConversationProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const reduce = useReducedMotionConfig()
   const [atBottom, setAtBottom] = useState(true)
 
   // Key rows by turn id so session swaps and history reloads never recycle
@@ -126,7 +128,7 @@ export function VirtualConversation({
         computeItemKey={computeItemKey}
         // Keep following new output only when already at the bottom; smooth
         // while streaming so token growth doesn't judder.
-        followOutput={(isAtBottom) => (isAtBottom ? (isStreaming ? "smooth" : "auto") : false)}
+        followOutput={(isAtBottom) => (isAtBottom ? (isStreaming && !reduce ? "smooth" : "auto") : false)}
         atBottomStateChange={setAtBottom}
         initialTopMostItemIndex={Math.max(0, turns.length - 1)}
         increaseViewportBy={{ top: 600, bottom: 600 }}
@@ -156,7 +158,7 @@ export function VirtualConversation({
       {!atBottom && (
         <Button
           className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full"
-          onClick={() => virtuosoRef.current?.scrollToIndex({ index: turns.length - 1, align: "end", behavior: "smooth" })}
+          onClick={() => virtuosoRef.current?.scrollToIndex({ index: turns.length - 1, align: "end", behavior: reduce ? "auto" : "smooth" })}
           size="icon"
           type="button"
           variant="outline"
