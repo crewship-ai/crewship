@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // Real binary/flag/HTTP contract; the HTTP stub is not engine or ACL evidence.
 func TestAcceptance_DocumentRestoreOriginalPacket(t *testing.T) {
 	packet := `{"page_id":"page-one","id":"restore-one","schema":3,"epoch":"captured-epoch","ifRev":8,"checkpoint":"pin-one"}`
+	var mu sync.Mutex
 	calls := 0
 	status := 200
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,15 +25,18 @@ func TestAcceptance_DocumentRestoreOriginalPacket(t *testing.T) {
 			w.WriteHeader(404)
 			return
 		}
+		mu.Lock()
 		calls++
+		responseStatus := status
+		mu.Unlock()
 		body, err := io.ReadAll(r.Body)
 		var got, want any
 		if err != nil || json.Unmarshal(body, &got) != nil || json.Unmarshal([]byte(packet), &want) != nil || !reflect.DeepEqual(got, want) {
 			t.Error("binary changed original restore packet")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		if status == 200 {
+		w.WriteHeader(responseStatus)
+		if responseStatus == 200 {
 			_, _ = io.WriteString(w, `{"page_id":"page-one","id":"restore-one","rev":9,"schema":2,"epoch":"restored-epoch","kind":"restore"}`)
 		} else {
 			_, _ = io.WriteString(w, `{"error":"original revision changed"}`)
@@ -46,8 +51,10 @@ func TestAcceptance_DocumentRestoreOriginalPacket(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, code := range []int{200, 200, 409} {
+		mu.Lock()
 		status = code
 		before := calls
+		mu.Unlock()
 		out, err := runCrewship(t, binary, config, server.URL, "doc", "restore", "@page-one", "--file", file, "-f", "json")
 		if code == 200 && (err != nil || !strings.Contains(out, `"restore-one"`)) {
 			t.Fatalf("restore command unavailable or unconfirmed: %v %s", err, out)
@@ -55,7 +62,10 @@ func TestAcceptance_DocumentRestoreOriginalPacket(t *testing.T) {
 		if code != 200 && err == nil {
 			t.Fatal("conflicting restore succeeded")
 		}
-		if calls != before+1 {
+		mu.Lock()
+		after := calls
+		mu.Unlock()
+		if after != before+1 {
 			t.Fatal("restore silently retried or made an extra read")
 		}
 	}
