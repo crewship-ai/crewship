@@ -178,20 +178,20 @@ describe("a rejected upload never reads as an attached file", () => {
       // disk and re-picking it is three screens on a phone.
       expect(within(c1).getByRole("button", { name: /retry invoice\.pdf/i })).toBeInTheDocument()
 
-      // One toast, naming the file, saying the reason and what to do next.
-      await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
-      const [title, opts] = toastError.mock.calls[0]
-      const said = `${title} ${JSON.stringify(opts ?? {})}`
-      expect(said).toContain("invoice.pdf")
-      expect(said).toMatch(c.reason)
-      expect(said).toMatch(/retry/i)
+      // No toast (it would sit over the chip row and cover Retry). The reason
+      // is the chip's tooltip, and the inline notice names the file and the way out.
+      expect(toastError).not.toHaveBeenCalled()
+      expect(c1.getAttribute("title") ?? "").toMatch(c.reason)
+      const note = screen.getByRole("note").textContent ?? ""
+      expect(note).toContain("invoice.pdf")
+      expect(note).toMatch(/Retry or Remove/)
 
       // And the message that would go out says nothing about it.
       expect(composeMessageWithAttachments("have a look", storeList())).toBe("have a look")
     })
   }
 
-  it("gives two failed files two errors, not one", async () => {
+  it("shows two failed files as two failed chips and one notice naming both", async () => {
     global.fetch = vi.fn(() => Promise.resolve(serverError())) as unknown as typeof fetch
     render(<ChatComposer {...baseProps} variant="desktop" />)
 
@@ -200,18 +200,11 @@ describe("a rejected upload never reads as an attached file", () => {
     await waitFor(() => expect(storeList()).toHaveLength(2))
     await waitFor(() => expect(storeList().every((a) => a.status === "error")).toBe(true))
 
-    // Two toasts, one per file, each naming ITS file. The dev2 report was one
-    // toast for two failures, which is how a user concludes the other one
-    // worked.
-    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(2))
-    const said = toastError.mock.calls.map(([t, o]) => `${t} ${JSON.stringify(o ?? {})}`)
-    expect(said.filter((s) => s.includes("first.pdf"))).toHaveLength(1)
-    expect(said.filter((s) => s.includes("second.pdf"))).toHaveLength(1)
-    // Distinct toast ids, so sonner can never collapse one file's failure into
-    // another's.
-    const ids = toastError.mock.calls.map(([, o]) => (o as { id?: string } | undefined)?.id)
-    expect(new Set(ids).size).toBe(2)
-    expect(ids.every(Boolean)).toBe(true)
+    // No toasts. One notice names both files, so neither failure is hidden.
+    expect(toastError).not.toHaveBeenCalled()
+    const note = screen.getByRole("note").textContent ?? ""
+    expect(note).toContain("first.pdf")
+    expect(note).toContain("second.pdf")
 
     // Both chips say so.
     expect(chip("first.pdf").getAttribute("data-status")).toBe("error")
@@ -244,8 +237,9 @@ describe("a rejected upload never reads as an attached file", () => {
     // send is held and the file is named, so nothing is dropped silently.
     typeInComposer("two invoices")
     submitForm()
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(String(toastError.mock.calls.at(-1)?.[0])).toContain("bad.pdf")
+    await waitFor(() =>
+      expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toContain("bad.pdf"),
+    )
     expect(sendMessage).not.toHaveBeenCalled()
 
     // Removing the failed chip lets exactly the one that landed go out.

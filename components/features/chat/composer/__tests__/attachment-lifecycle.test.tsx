@@ -347,14 +347,102 @@ describe("attachment job lifecycle", () => {
     expect(screen.getByRole("note").textContent).toMatch(/Send is off/)
   })
 
-  it("a failure in the open chat still raises its toast", async () => {
+  it("a failure in the open chat raises no toast either: the chip and notice carry it", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
     render(tree("desktop"))
     pick([file("a.txt")])
     await waitFor(() => expect(g.calls).toHaveLength(1))
     g.calls[0].fail()
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(String(toastError.mock.calls[0][0])).toContain("a.txt")
+    await waitFor(() => expect(statuses()).toEqual(["error"]))
+    expect(toastError).not.toHaveBeenCalled()
+    expect(screen.getByRole("note").textContent).toContain("a.txt")
+  })
+
+  describe("identity unknown (session unread)", () => {
+    const unknown = () => {
+      userId = null
+      authStatus = "loading"
+    }
+    const confirm = (id: string) => {
+      userId = id
+      authStatus = "authenticated"
+    }
+
+    it("hides the chips and sends nothing while unknown; the same user confirmed resumes", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      const { rerender } = render(tree("desktop"))
+      pick([file("run.txt"), file("queued.txt")])
+      await waitFor(() => expect(g.calls).toHaveLength(1))
+      expect(screen.getByText("queued.txt")).toBeTruthy()
+
+      unknown()
+      rerender(tree("desktop"))
+      expect(screen.queryByText("run.txt")).toBeNull() // previous identity's names are masked
+      expect(screen.queryByText("queued.txt")).toBeNull()
+      expect(all()).toHaveLength(2) // ...but kept internally, nothing dropped
+      expect(statuses()).not.toContain("cancelled")
+      g.calls[0].release() // the request already on the wire settles
+      await tick(60)
+      expect(g.calls).toHaveLength(1) // the queued file does not start
+
+      confirm("user-a")
+      rerender(tree("desktop"))
+      await waitFor(() => expect(g.calls).toHaveLength(2)) // resumed
+      expect(screen.getByText("queued.txt")).toBeTruthy()
+      g.calls[1].release()
+      await waitFor(() => expect(statuses()).toEqual(["ready", "ready"]))
+    })
+
+    it("a different user confirmed afterwards: the paused job never sends and the chips are dropped", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      const { rerender } = render(tree("desktop"))
+      pick([file("run.txt"), file("queued.txt")])
+      await waitFor(() => expect(g.calls).toHaveLength(1))
+      unknown()
+      rerender(tree("desktop"))
+      g.calls[0].release()
+      await tick(60)
+      confirm("user-b")
+      rerender(tree("desktop"))
+      await tick(60)
+      expect(g.calls).toHaveLength(1)
+      expect(all()).toEqual([])
+      expect(screen.queryByText("queued.txt")).toBeNull()
+    })
+
+    it("a job past chat-row creation does not send while unknown", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      let finish!: (ok: boolean) => void
+      ensureSession = vi.fn(() => new Promise<boolean>((r) => (finish = r)))
+      const { rerender } = render(tree("desktop"))
+      pick([file("a.txt")])
+      await waitFor(() => expect(ensureSession).toHaveBeenCalled())
+      unknown()
+      rerender(tree("desktop"))
+      await act(async () => finish(true))
+      await tick(60)
+      expect(g.calls).toHaveLength(0)
+      expect(all()).toHaveLength(1) // kept
+      confirm("user-a")
+      rerender(tree("desktop"))
+      await waitFor(() => expect(g.calls).toHaveLength(1))
+      g.calls[0].release()
+      await waitFor(() => expect(statuses()).toEqual(["ready"]))
+    })
+
+    it("uploads are refused while unknown", async () => {
+      const g = gatedFetch()
+      vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+      unknown()
+      render(tree("desktop"))
+      pick([file("x.txt")])
+      await tick()
+      expect(g.calls).toHaveLength(0)
+      expect(all()).toEqual([])
+    })
   })
 })

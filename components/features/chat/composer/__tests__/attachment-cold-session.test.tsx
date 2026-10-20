@@ -179,12 +179,11 @@ describe("attaching to a chat that has no row yet", () => {
     expect(within(c).getByRole("button", { name: /retry receipt\.pdf/i })).toBeInTheDocument()
     expect(storeList()[0].path).toBeFalsy()
 
-    // …announced once, naming the file and saying what to do about it.
-    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
-    const [title, opts] = toastError.mock.calls[0]
-    const said = `${title} ${JSON.stringify(opts ?? {})}`
-    expect(said).toContain("receipt.pdf")
-    expect(said).toMatch(/retry/i)
+    // …and the inline notice names it and the way out; no toast over the chips.
+    expect(toastError).not.toHaveBeenCalled()
+    const note = screen.getByRole("note").textContent ?? ""
+    expect(note).toContain("receipt.pdf")
+    expect(note).toMatch(/Retry or Remove/)
 
     // And a message sent anyway names nothing that is not there.
     expect(composeMessageWithAttachments("have a look", storeList())).toBe("have a look")

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useRef } from "react"
+import { createContext, useCallback, useContext, useRef } from "react"
 import { Camera } from "lucide-react"
 import { toast } from "sonner"
 
@@ -17,10 +17,9 @@ import {
   abortIfPending,
   clearAbort,
   currentScopeEpoch,
-  isChatOpen,
-  markChatOpen,
   queueFor,
   registerAbort,
+  untilConfirmed,
 } from "@/lib/chat-attachment-jobs"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
@@ -184,30 +183,6 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * The toast for one refused file.
- *
- * Two rules, both learned from the dev2 report where two failed uploads
- * produced one visible message:
- *
- *   · The id is the ATTACHMENT's. Sonner replaces a toast that reuses an id,
- *     so a shared or absent id is how two files collapse into one statement —
- *     and per-attachment means a second failed retry updates that file's toast
- *     instead of stacking a third.
- *   · It says what to do. "invoice.pdf: permission denied" tells a user what
- *     broke and nothing about what is now true (the file is NOT attached) or
- *     what they can do about it (retry it, or send without it).
- *
- * The toast is still only the announcement. The durable statement is the chip,
- * which stays on screen saying "Upload failed" long after this has expired.
- */
-function toastUploadFailure(sessionId: string, att: ComposerAttachment, reason: string) {
-  toast.error(`${att.name} was not attached`, {
-    id: `attachment-upload-failed:${sessionId}:${att.id}`,
-    description: `${reason}. The file is not on the agent — press Retry on the chip, or remove it and send without it.`,
-  })
-}
-
-/**
  * The one upload path for chat attachments.
  *
  * Drop, paperclip and camera all land here. This used to be two verbatim
@@ -238,6 +213,9 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // The scope this job was queued under is gone (other human, other
       // workspace, signed out - even if the same person is back since).
       const stale = () => currentScopeEpoch() !== epoch
+      // Identity unknown (session unread): keep the file, send nothing, wait
+      // for the same identity to be confirmed. A different one ends the wait.
+      if (!(await untilConfirmed(epoch))) return
       const current = (useComposerStore.getState().attachments[storeKey] ?? []).find((a) => a.id === att.id)
       if (!current || current.status === "cancelled" || stale()) return
       updateAttachment(storeKey, att.id, { status: "uploading", error: undefined })
@@ -252,13 +230,14 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         // creates the conversation; on one that already exists it is a cached
         // `true` and costs nothing. Failing here throws into the same handler
         // a refused upload uses, so a conversation that could not be started
-        // produces an error chip and a named toast rather than a chip that
+        // produces an error chip and the inline notice rather than a chip that
         // reads as an attached file — and the endpoint is never called with a
         // chat id it would 404 on.
         if (ensureChatSession && !(await ensureChatSession())) {
           throw new UploadFailure("the conversation could not be started", "unknown")
         }
-        // The identity can change while the row is being created.
+        // The identity can change, or become unknown, while the row is created.
+        if (!(await untilConfirmed(epoch))) return
         if (stale() || ac.signal.aborted || !(useComposerStore.getState().attachments[storeKey] ?? []).some((a) => a.id === att.id)) return
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
@@ -303,14 +282,9 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
           error: reason,
           file,
         })
-        // Only announce a failure for a chip the user can still see. A file
-        // they removed mid-upload failing afterwards is not news.
-        const stillThere = (useComposerStore.getState().attachments[storeKey] ?? []).some(
-          (a) => a.id === att.id,
-        )
-        // Only when this chat is on screen: a failure in a chat the person has
-        // left would be a toast with no context. Its chip says Failed on return.
-        if (stillThere && isChatOpen(storeKey)) toastUploadFailure(storeKey, att, reason)
+        // No toast: a toast sits over the chip row and can cover the very
+        // Retry/Remove the person needs next. The chip says "Upload failed",
+        // and the composer's inline notice says why Send is off and what to do.
       } finally {
         clearAbort(storeKey, att.id)
       }
@@ -429,7 +403,6 @@ export function AttachmentZone({
   // subscription re-rendered every mounted zone on any session's draft or
   // attachment write.
   const { key: storeKey } = useAttachmentScope(sessionId)
-  useEffect(() => markChatOpen(storeKey), [storeKey])
   const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[storeKey])
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []

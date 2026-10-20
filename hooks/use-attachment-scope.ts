@@ -4,7 +4,7 @@ import { useEffect } from "react"
 
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { cancelJobsForScope, currentIdentity, enterScope } from "@/lib/chat-attachment-jobs"
+import { cancelJobsForScope, currentIdentity, enterScope, setIdentityConfirmed } from "@/lib/chat-attachment-jobs"
 import { useComposerStore } from "@/stores/composer-store"
 
 /**
@@ -60,6 +60,14 @@ export function applyIdentity(input: IdentityInput) {
     cancelJobsForScope(previous)
     useComposerStore.getState().dropAttachmentsByPrefix(previous)
   }
+  // Unknown (session unread, workspace unknown) is not confirmed: queued jobs
+  // pause until the same identity is back; a different one releases them stale.
+  setIdentityConfirmed(isConfirmed(input))
+}
+
+/** A person AND a workspace are known right now. */
+export function isConfirmed(input: IdentityInput): boolean {
+  return !!input.userId && !!input.workspaceId
 }
 
 function useIdentityInput(workspaceId: string | null | undefined): IdentityInput {
@@ -84,7 +92,9 @@ export function useAttachmentScopePrefix(): string {
   const { workspaceId } = useWorkspace()
   const input = useIdentityInput(workspaceId)
   useAttachmentScopeSync(workspaceId)
-  return nextIdentity(currentIdentity(), input).prefix
+  // While the identity is unknown the previous person's chips must not show:
+  // the empty prefix reads nothing (the Files are kept under their own key).
+  return isConfirmed(input) ? nextIdentity(currentIdentity(), input).prefix : ""
 }
 
 /** `{ prefix, key, ready }`: `key` indexes the composer store and the upload

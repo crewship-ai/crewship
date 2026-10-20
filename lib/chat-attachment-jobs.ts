@@ -63,23 +63,6 @@ export function cancelJobsForScope(prefix: string) {
   }
 }
 
-// Which chats have a composer on screen right now (a count, because the phone
-// and desktop trees can overlap for a moment). A failure in a chat that is not
-// open must not raise a toast with no context: the chip says Failed when the
-// person comes back.
-const openChats = new Map<string, number>()
-export function markChatOpen(key: string): () => void {
-  openChats.set(key, (openChats.get(key) ?? 0) + 1)
-  return () => {
-    const n = (openChats.get(key) ?? 1) - 1
-    if (n <= 0) openChats.delete(key)
-    else openChats.set(key, n)
-  }
-}
-export function isChatOpen(key: string): boolean {
-  return (openChats.get(key) ?? 0) > 0
-}
-
 // The scope the app is currently in, and a counter that moves every time it
 // changes. A job remembers the epoch it was queued under and refuses to touch
 // the network if it has moved on - including A -> B -> A, where the prefix
@@ -92,6 +75,42 @@ export function currentScopeEpoch(): number {
   return epoch
 }
 
+// Is the current identity CONFIRMED (a person and a workspace are known right
+// now)? While it is not, nothing may start sending: the Files are kept, but
+// the network waits until the same identity is confirmed again. If a
+// different identity is confirmed instead, the epoch moves and the waiting
+// jobs are released as stale.
+let confirmed = false
+const waiters: Array<{ epoch: number; resolve: (ok: boolean) => void }> = []
+
+function flushWaiters() {
+  for (let i = waiters.length - 1; i >= 0; i--) {
+    const w = waiters[i]
+    if (w.epoch !== epoch) {
+      waiters.splice(i, 1)
+      w.resolve(false)
+    } else if (confirmed) {
+      waiters.splice(i, 1)
+      w.resolve(true)
+    }
+  }
+}
+
+export function setIdentityConfirmed(value: boolean) {
+  confirmed = value
+  flushWaiters()
+}
+
+/** Resolves true when it is safe to send for a job queued under `queuedEpoch`
+ *  (identity confirmed, same epoch), false when that epoch has been left. */
+export function untilConfirmed(queuedEpoch: number): Promise<boolean> {
+  if (epoch !== queuedEpoch) return Promise.resolve(false)
+  if (confirmed) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    waiters.push({ epoch: queuedEpoch, resolve })
+  })
+}
+
 /** The identity the module last committed. Consumers derive from it (see
  *  hooks/use-attachment-scope.ts) so a transient gap does not read as a change. */
 export function currentIdentity(): { userId: string | null; prefix: string } {
@@ -102,6 +121,7 @@ export function currentIdentity(): { userId: string | null; prefix: string } {
  *  terms (leaving the chat page): cancel and epoch must move together. */
 export function bumpEpoch() {
   epoch++
+  flushWaiters()
 }
 
 export function enterScope(
@@ -113,6 +133,7 @@ export function enterScope(
   scopePrefix = prefix
   scopeUserId = userId
   epoch++
+  flushWaiters()
   return { changed: true, previous }
 }
 
@@ -125,5 +146,6 @@ export function __resetForTests() {
   scopePrefix = null
   scopeUserId = null
   epoch = 0
-  openChats.clear()
+  confirmed = false
+  for (const w of waiters.splice(0)) w.resolve(false)
 }
