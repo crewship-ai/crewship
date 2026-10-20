@@ -28,6 +28,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Preserve captured run completion timestamps across retained-output recovery and terminal replay; legacy records retain their original replay identity.
+- Restore a confirmed Document checkpoint as a new version after explicit human confirmation; exact retries preserve the receipt and older write mandates remain fenced.
 
 - Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
 
