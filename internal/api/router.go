@@ -884,6 +884,13 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	if r.hub != nil {
 		r.hub.SetStreamAuthenticator(r.authMw.authenticateStream)
 	}
+	for _, notifier := range r.revokeNotifiers {
+		if consumer, ok := notifier.(interface {
+			SetStreamAuthenticator(func(context.Context, *auth.Claims) (context.Context, func(), error))
+		}); ok {
+			consumer.SetStreamAuthenticator(r.authMw.authenticateStream)
+		}
+	}
 	if r.hub != nil {
 		notifiers = append(notifiers, r.hub)
 	}

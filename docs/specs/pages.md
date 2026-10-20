@@ -418,7 +418,11 @@ keys, preserves the previous public event fields and never rewrites the stored
 payload. Reissuing still records
 one fact and reanchors its issuer. Revoking every level records each removed row,
 including grants whose subject has departed; a missing grant remains 404 without
-a change event. Folder ACL mutations and broader permission-audit coverage are
+a change event. When a reference matches both a resolved subject and a departed
+stored ID, revoke checks and removes every matching stored row, preserves other
+subjects and unselected levels, and records each removal in the same transaction.
+Loss of issuer authority at the final commit check returns 403 and rolls back
+the grant and audit; operational database errors remain 500. Folder ACL mutations and broader permission-audit coverage are
 separate work.
 
 

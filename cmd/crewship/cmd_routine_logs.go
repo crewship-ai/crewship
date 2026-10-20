@@ -137,7 +137,11 @@ Output formats:
 			if !logsClient {
 				fmt.Fprintf(w, "Run:\t%v\n", run["id"])
 			}
-			fmt.Fprintf(w, "Routine:\t%v\n", run["pipeline_name"])
+			routineName := run["pipeline_name"]
+			if routineName == nil || routineName == "" {
+				routineName = run["pipeline_slug"]
+			}
+			fmt.Fprintf(w, "Routine:\t%v\n", routineName)
 			if !logsClient {
 				fmt.Fprintf(w, "  slug:\t%v\n", run["pipeline_slug"])
 			}
@@ -145,8 +149,18 @@ Output formats:
 				fmt.Fprintf(w, "Status:\t%s\n", statusWord(fmt.Sprintf("%v", run["status"])))
 			} else {
 				fmt.Fprintf(w, "Status:\t%v\n", run["status"])
-				fmt.Fprintf(w, "Mode:\t%v\n", run["mode"])
-				fmt.Fprintf(w, "Started:\t%v\n", run["started_at"])
+				if v, ok := run["mode"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Mode:\t%v\n", v)
+				}
+				if v, ok := run["started_at"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Started:\t%v\n", v)
+				}
+				if v, ok := run["pending_id"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Pending:\t%v\n", v)
+				}
+				if v, ok := run["reason_code"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Reason:\t%v\n", v)
+				}
 				if v, ok := run["ended_at"]; ok && v != nil && v != "" {
 					fmt.Fprintf(w, "Ended:\t%v\n", v)
 				}

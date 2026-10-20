@@ -1136,6 +1136,11 @@ var startCmd = &cobra.Command{
 			// at-or-after it was started by this process and must not
 			// be double-entered by the scan.
 			pipelineBootCutoff := time.Now()
+			if deps.DB != nil {
+				if err := pipeline.RecoverPendingStartsAtBoot(ctx, deps.DB); err != nil {
+					return fmt.Errorf("recover durable routine starts before dispatch: %w", err)
+				}
+			}
 
 			// Webhook store — event-driven triggers. Dispatch is
 			// public (no auth middleware); auth comes from the token

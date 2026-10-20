@@ -286,7 +286,11 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	expected = append(expected, after)
 	entry := pageGrantChangeEntry(journal.EntryPageGrantAdded, wsID, user, rec, req.SubjectType, subjectID, subjectRef, req.Level, panels)
 	if err := h.commitPageGrantMutation(r.Context(), tx, rec, user.ID, req.SubjectType, subjectID, expected, []pageGrantChange{{entry, previous, &after}}); err != nil {
-		replyInternalError(w, h.logger, "commit page grant", err)
+		if errors.Is(err, errPageGrantIssuerNotCurrent) {
+			replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
+		} else {
+			replyInternalError(w, h.logger, "commit page grant", err)
+		}
 		return
 	}
 
@@ -392,16 +396,14 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	// response as well as in the audit trail.
 	var removed, expected []pageGrantSnapshot
 	for _, g := range records {
-		if g.SubjectType != subjectType {
-			continue
+		matches := g.SubjectType == subjectType &&
+			(g.SubjectType == pageSubjectWorkspace || grantRowMatchesSubject(pageGrantRecord{SubjectID: g.SubjectID}, subjectID, subject)) &&
+			(level == "" || g.Level == level)
+		if matches {
+			removed = append(removed, g)
+		} else {
+			expected = append(expected, g)
 		}
-		if g.SubjectType != pageSubjectWorkspace && !grantRowMatchesSubject(pageGrantRecord{SubjectID: g.SubjectID}, subjectID, subject) {
-			continue
-		}
-		if level != "" && g.Level != level {
-			continue
-		}
-		removed = append(removed, g)
 	}
 	if len(removed) == 0 {
 		replyError(w, http.StatusNotFound, fmt.Sprintf(
@@ -412,24 +414,16 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	// Delete the rows that actually matched, by their stored subject_id, rather
 	// than by a subject the resolver may not have been able to name. `removed`
 	// is non-empty here, so this cannot become an unbounded delete.
-	stmt := `DELETE FROM page_grants WHERE page_id = ? AND subject_type = ? AND subject_id = ?`
-	args := []any{rec.ID, subjectType, removed[0].SubjectID}
-	if level != "" {
-		stmt += ` AND level = ?`
-		args = append(args, level)
-	}
-	result, err := tx.ExecContext(r.Context(), stmt, args...)
-	if err := requirePageGrantRows(result, err, int64(len(removed))); err != nil {
-		replyInternalError(w, h.logger, "delete page grant", err)
-		return
+	for _, g := range removed {
+		result, err := tx.ExecContext(r.Context(), `DELETE FROM page_grants WHERE page_id=? AND subject_type=? AND subject_id=? AND level=?`,
+			rec.ID, g.SubjectType, g.SubjectID, g.Level)
+		if err := requirePageGrantRows(result, err, 1); err != nil {
+			replyInternalError(w, h.logger, "delete page grant", err)
+			return
+		}
 	}
 
 	var changes []pageGrantChange
-	for _, g := range records {
-		if g.SubjectType == subjectType && g.SubjectID == removed[0].SubjectID && level != "" && g.Level != level {
-			expected = append(expected, g)
-		}
-	}
 	for _, g := range removed {
 		var panels []string
 		if g.PanelIDs.Valid {
@@ -440,8 +434,12 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		entry := pageGrantChangeEntry(journal.EntryPageGrantRemoved, wsID, user, rec, g.SubjectType, g.SubjectID, subjectRef, g.Level, panels)
 		changes = append(changes, pageGrantChange{entry, &g, nil})
 	}
-	if err := h.commitPageGrantMutation(r.Context(), tx, rec, user.ID, subjectType, removed[0].SubjectID, expected, changes); err != nil {
-		replyInternalError(w, h.logger, "commit page grant removal", err)
+	if err := h.commitPageGrantMutation(r.Context(), tx, rec, user.ID, "", "", expected, changes); err != nil {
+		if errors.Is(err, errPageGrantIssuerNotCurrent) {
+			replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
+		} else {
+			replyInternalError(w, h.logger, "commit page grant removal", err)
+		}
 		return
 	}
 

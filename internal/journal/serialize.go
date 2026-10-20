@@ -1,7 +1,6 @@
 package journal
 
 import (
-	"maps"
 	"time"
 )
 
@@ -16,6 +15,7 @@ import (
 // it directly. Empty optional ids/maps are omitted rather than sent as ""
 // / {} to keep frames small and match the zod schema's optional fields.
 func SerializeEntry(e Entry) map[string]any {
+	e = PublicAuthorizationAudit(e)
 	row := map[string]any{
 		"id":           e.ID,
 		"workspace_id": e.WorkspaceID,
@@ -45,13 +45,7 @@ func SerializeEntry(e Entry) map[string]any {
 		// Run authority is durable host state, not workspace-wide feed data.
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
-		payload := maps.Clone(e.Payload)
-		// Grant history is canonical audit state. Keep the established public
-		// event fields, without publishing old issuers or stored raw scopes.
-		if e.Type == EntryPageGrantAdded || e.Type == EntryPageGrantRemoved {
-			delete(payload, "previous_grant")
-			delete(payload, "grant")
-		}
+		payload := e.Payload
 		_, receiptOrigin := payload["human_authority"]
 		_, delegatedOrigin := payload["chat_origin_id"]
 		if receiptOrigin || delegatedOrigin {

@@ -13,6 +13,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
+var errPageGrantIssuerNotCurrent = errors.New("page grant issuer is no longer authorized")
+
 // Keep the complete stored tuple, including NULL versus an empty panel scope.
 // Use-time liveness and malformed-scope filtering must not erase removal facts.
 type pageGrantSnapshot struct {
@@ -38,7 +40,7 @@ func (g pageGrantSnapshot) MarshalJSON() ([]byte, error) {
 }
 
 func readPageGrantSubject(ctx context.Context, tx *sql.Tx, page, kind, subject string) ([]pageGrantSnapshot, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT page_id,subject_type,subject_id,level,panel_ids,granted_by_user_id,granted_at FROM page_grants WHERE page_id=? AND (?='' OR (subject_type=? AND subject_id=?)) ORDER BY level`, page, kind, kind, subject)
+	rows, err := tx.QueryContext(ctx, `SELECT page_id,subject_type,subject_id,level,panel_ids,granted_by_user_id,granted_at FROM page_grants WHERE page_id=? AND (?='' OR (subject_type=? AND subject_id=?)) ORDER BY subject_type,subject_id,level`, page, kind, kind, subject)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +165,15 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 	if expected == nil {
 		expected = []pageGrantSnapshot{}
 	}
-	sort.Slice(expected, func(i, j int) bool { return expected[i].Level < expected[j].Level })
+	sort.Slice(expected, func(i, j int) bool {
+		if expected[i].SubjectType != expected[j].SubjectType {
+			return expected[i].SubjectType < expected[j].SubjectType
+		}
+		if expected[i].SubjectID != expected[j].SubjectID {
+			return expected[i].SubjectID < expected[j].SubjectID
+		}
+		return expected[i].Level < expected[j].Level
+	})
 	if !reflect.DeepEqual(actual, expected) {
 		return errors.New("page grant final state differs from audited mutation")
 	}
@@ -175,6 +185,9 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		return errors.New("page identity or audience changed during grant mutation")
 	}
 	if err := h.pageGrantIssuerCurrent(ctx, changes[0].entry.WorkspaceID, actor, current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errPageGrantIssuerNotCurrent
+		}
 		return err
 	}
 	if err := tx.Commit(); err != nil {

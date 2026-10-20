@@ -1,12 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 // The pair table in openapi_response_shape_test.go is a good mechanism with one
@@ -31,6 +35,9 @@ var responseShapeExclusions = map[string]string{
 	"RunRecord": "same as RunRecordList — the component behind it.",
 	"PipelineRun": "GetRun builds its body from a map[string]any literal (internal/api/pipeline_runs.go:135). " +
 		"Needs a DTO before anything can be derived from it.",
+	"PipelineRunDetail": "oneOf of map-based actual runs and accepted starts, with no common backing struct. " +
+		"The accepted handler wire is validated by TestPipelineRunAcceptedResponseMatchesOpenAPISchema; " +
+		"the branch separation and actual-run requirements by cmd/gen-openapi TestPipelineRunDetailSchemaSeparatesAcceptedStartsFromActualRuns.",
 	"PipelineRunList": "ListWorkspaceRuns builds rows and envelope from map[string]any literals " +
 		"(internal/api/pipeline_runs.go:517). Needs a DTO first.",
 	"WorkspacePipelineResponseV1": "declares 9 properties; the handler serializes pipelineResponse, " +
@@ -168,3 +175,50 @@ func refName(schema map[string]any) (string, bool) {
 }
 
 var _ = fmt.Sprintf
+
+// The union has no single struct to pair; grade its queued branch against the
+// actual HTTP response, including a negative assertion on a required field.
+func TestPipelineRunAcceptedResponseMatchesOpenAPISchema(t *testing.T) {
+	h, db, user, workspace := webhookHandlerRigWithDispatcher(t, false)
+	h.SetRunner(&stubRunner{output: "ok"})
+	seedWebhookPipeline(t, db, workspace, "queued-schema-target", "queued-schema-target")
+	wh := seedWebhookRow(t, db, workspace, "queued-schema-target", "schema-secret", true)
+	accepted := fireRoutineWebhook(t, h, wh.Token, "schema-secret", `{"event":"test"}`, "schema-delivery")
+	if accepted.Code != 202 {
+		t.Fatalf("accept: %d %s", accepted.Code, accepted.Body.String())
+	}
+	var identity map[string]any
+	if err := json.Unmarshal(accepted.Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	request := withWorkspaceUser(httptest.NewRequest("GET", "/pipeline-runs/planned", nil), user, workspace, "MEMBER")
+	request.SetPathValue("runId", identity["run_id"].(string))
+	response := httptest.NewRecorder()
+	h.GetRun(response, request)
+	if response.Code != 200 {
+		t.Fatalf("get queued run: %d %s", response.Code, response.Body.String())
+	}
+	raw, err := os.ReadFile("openapi.gen.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("spec.json", bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("spec.json#/components/schemas/PipelineRunDetail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Validate(body); err != nil {
+		t.Fatalf("actual queued response violates OpenAPI: %v", err)
+	}
+	delete(body, "reason_code")
+	if err := schema.Validate(body); err == nil {
+		t.Fatal("queued response schema accepts missing reason_code")
+	}
+}

@@ -509,6 +509,15 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 			replyError(w, http.StatusNotFound, "Chat not found")
 			return
 		}
+		allowed, err := chataudience.CanReadArtifactConversation(r.Context(), h.db, current.ChatID, current.UserID, current.WorkspaceID, true)
+		if err != nil {
+			replyInternalError(w, h.logger, "audit private conversation context", err)
+			return
+		}
+		if !allowed {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
 		resp["human_authority"] = current
 	}
 	writeJSON(w, http.StatusOK, resp)
