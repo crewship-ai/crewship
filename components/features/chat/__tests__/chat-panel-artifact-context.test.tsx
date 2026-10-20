@@ -30,7 +30,7 @@ import { ChatPanel } from "../chat-panel"
 const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text }] }] })
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const calls: string[] = []
-type Route = (path: string) => Response | undefined
+type Route = (path: string) => Response | "reject" | "hang" | undefined
 let overrides: Route[] = []
 
 const SERVED: Route = path => {
@@ -56,7 +56,12 @@ beforeEach(() => {
   global.fetch = vi.fn((input: RequestInfo | URL) => {
     const path = String(input)
     calls.push(path)
-    for (const route of [...overrides, SERVED]) { const hit = route(path); if (hit) return Promise.resolve(hit) }
+    for (const route of [...overrides, SERVED]) {
+      const hit = route(path)
+      if (hit === "reject") return Promise.reject(new TypeError("network"))
+      if (hit === "hang") return new Promise<Response>(() => {})
+      if (hit) return Promise.resolve(hit)
+    }
     const value = path.includes("/documents/status") ? { enabled: true }
       : path.includes("/document-results") ? { results: [] }
       : path.includes("/execution-profile") ? { mode: "trusted" }
@@ -70,7 +75,8 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 /** Entry animations are time-driven; compare structure, not the frame. */
 const settled = (container: HTMLElement, html = container.innerHTML) => html.replace(/ style="[^"]*"/g, "")
-const mount = (kind?: "direct" | "issue") => render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind={kind} />)
+const panel = (sessionId = "sess-1", kind?: "direct" | "issue") => <ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId={sessionId} askForms={null} sessionKind={kind} />
+const mount = (kind?: "direct" | "issue") => render(panel("sess-1", kind))
 const echo = (content: string) => act(() => chatOptions.current?.onOwnMessageSaved?.(content, { author_user_id: "user-1" }))
 const surfaceCalls = () => calls.filter(path => /work-cards|\/links|\/library|artifact-context/.test(path))
 
@@ -249,4 +255,49 @@ it("flag on: editing is not offered in a conversation that is not a private chat
   const strip = await screen.findByRole("region", { name: "Artifact context" })
   expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
   expect(strip).toHaveTextContent("needs a private chat")
+})
+
+async function attachFirstItem() {
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
+  return screen.findByRole("region", { name: "Artifact context" })
+}
+const participants = (user_ids: string[]) => (path: string) => path.includes("/participants") ? json({ participants: user_ids.map(user_id => ({ user_id })) }) : undefined
+
+it.each([
+  ["more than one human participant", [participants(["user-1", "user-2"])], "needs a private chat"],
+  ["a failed participants read", [(path: string) => path.includes("/participants") ? "reject" as const : undefined], "Could not verify this chat is private"],
+  ["a non-ok participants read", [(path: string) => path.includes("/participants") ? json({ error: "boom" }, 500) : undefined], "Could not verify this chat is private"],
+  ["a participants read that has not answered", [(path: string) => path.includes("/participants") ? "hang" as const : undefined], "Checking chat visibility…"],
+])("flag on: Update is not offered with %s", async (_name, routes, reason) => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  overrides = routes as Route[]
+  mount()
+  const strip = await attachFirstItem()
+  await waitFor(() => expect(strip).toHaveTextContent(reason))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+})
+
+it("flag on: a restricted group profile never offers Update", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  overrides = [path => path.includes("/execution-profile") ? json({ mode: "restricted", audience: "group" }) : undefined]
+  mount()
+  await new Promise(resolve => setTimeout(resolve, 100))
+  // Protected reads are not verified for a restricted chat, so no artifact surface mounts at all.
+  expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Library" })).toBeNull()
+})
+
+it("flag on: switching session forgets the earlier chat's participants and checks again", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  const view = mount()
+  const first = await attachFirstItem()
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Update attached" })).toBeEnabled())
+  expect(first).toBeInTheDocument()
+  overrides = [path => path.includes("/chats/sess-2/participants") ? "hang" : undefined]
+  view.rerender(panel("sess-2"))
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull())
+  const second = await attachFirstItem()
+  await waitFor(() => expect(second).toHaveTextContent("Checking chat visibility…"))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
 })

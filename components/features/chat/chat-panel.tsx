@@ -75,6 +75,7 @@ import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
 import { useComposerArtifactState } from "./artifact-context/use-composer-artifact-state"
+import { deriveChatPrivacy, type ParticipantsLoad } from "./artifact-context/chat-privacy"
 import { useConversationLinks } from "./artifact-context/use-artifact-context-data"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
@@ -639,8 +640,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // for a private 1:1 chat (the endpoint returns no participants), so the
   // resolver yields null and messages render exactly as before.
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
+  // What this session's participants read said, for this session only. Nothing is assumed from a missing or failed read.
+  const [participantsLoad, setParticipantsLoad] = useState<ParticipantsLoad | null>(null)
+  const participantsScope = `${workspaceId ?? ""}:${sessionId ?? ""}`
+  const chatPrivacy = deriveChatPrivacy({ scope: participantsScope, sessionKind, sharedRestricted: sharedRestrictedChat, probeSettled: profileProbeSettled, profileKnown: executionProfile !== "pending", participants: participantsLoad, currentUserId })
   // Artifact context (flag off: inert). The strip's choices ride with the next send as one stable submission.
-  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", privateChat: sessionKind === "direct" && Object.keys(participantNames).length <= 1 && !sharedRestrictedChat })
+  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", chatPrivacy })
   const { prepareSend: prepareArtifactSend, markSent: artifactMarkSent, confirmEcho: artifactConfirmEcho } = artifactComposer
   artifactEchoRef.current = artifactConfirmEcho
   // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
@@ -648,25 +653,30 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     const prepared = prepareArtifactSend(text, metadata)
     if (!prepared.ok) { toast.error(prepared.message); return false }
     const sent = sendMessageWithPage(text, prepared.metadata)
-    if (sent !== false) artifactMarkSent(text)
+    if (sent !== false) artifactMarkSent(text, prepared.intent)
     return sent
   }, [prepareArtifactSend, artifactMarkSent, sendMessageWithPage])
   useEffect(() => {
+    // A different session never inherits the previous one's participants.
+    setParticipantNames({})
+    setParticipantsLoad(null)
     if (!sessionId || !workspaceId) return
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     let cancelled = false
+    const scope = `${workspaceId}:${sessionId}`
     apiFetch(`/api/v1/chats/${sessionSegment}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
-      .then((r) => (r.ok ? r.json() : { participants: [] }))
-      .then((data: { participants?: { user_id: string; email?: string; full_name?: string }[] }) => {
+      .then(async (r) => ({ ok: r.ok, data: r.ok ? await r.json() : { participants: [] } }))
+      .then(({ ok, data }: { ok: boolean; data: { participants?: { user_id: string; email?: string; full_name?: string }[] } }) => {
         if (cancelled) return
         const map: Record<string, string> = {}
         for (const p of data?.participants ?? []) {
           map[p.user_id] = p.full_name || p.email || "Teammate"
         }
         setParticipantNames(map)
+        setParticipantsLoad({ scope, status: ok ? "ok" : "error", userIds: Object.keys(map) })
       })
-      .catch(() => { /* private chat / transient — no attribution, no error */ })
+      .catch(() => { if (!cancelled) setParticipantsLoad({ scope, status: "error", userIds: [] }) /* no attribution; privacy stays unverified */ })
     return () => { cancelled = true }
   }, [sessionId, workspaceId])
 
