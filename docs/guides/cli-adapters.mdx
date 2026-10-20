@@ -19,6 +19,12 @@ Adding another vendor is intentionally small: one new `case` in `BuildCLICommand
 
 ## Supported adapters
 
+Claude Code tool results preserve the tool-use ID and error flag in chat and run
+traces. Results may contain a string or an array of text blocks; both pass through
+the tool-return scanner. Image data and unknown result shapes are not rendered as
+text. A visible tool result is execution evidence, not a document save receipt by
+itself: saved state still requires the document service's confirmed response.
+
 | Adapter | Binary | Turn-1 system prompt | Turn-2+ persistence | Output | Notes |
 |---|---|---|---|---|---|
 | `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--mcp-config <path>`. `--tools` is **always** passed with the per-profile built-in allowlist (see below). Default. |
