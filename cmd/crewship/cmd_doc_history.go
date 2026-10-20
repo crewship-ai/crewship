@@ -40,5 +40,5 @@ func newDocHistoryCommands() []*cobra.Command {
 			},
 		})
 	}
-	return commands
+	return append(commands, newDocRestoreCommand())
 }

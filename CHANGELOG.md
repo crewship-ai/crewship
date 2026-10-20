@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
+- Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
 
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
@@ -28,6 +29,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Preserve captured run completion timestamps across retained-output recovery and terminal replay; legacy records retain their original replay identity.
+- Restore a confirmed Document checkpoint as a new version after explicit human confirmation; exact retries preserve the receipt and older write mandates remain fenced.
 
 - Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
 
@@ -67,6 +69,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+- Prepare scoped native Slides initialization with atomic receipts and caller-owned transactions; API and editor activation follow separately.
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 

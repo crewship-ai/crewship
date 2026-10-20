@@ -123,6 +123,22 @@ These commands use current human read access, including the private audience;
 an old run or checkpoint ID grants no access. Reads never restore content or
 change a draft. The public response omits binary snapshots and writer fences.
 
+## `crewship doc restore <page-slug> --file request.json`
+
+Restore one retained checkpoint as a new confirmed revision. The original JSON
+packet contains `page_id`, a unique operation `id`, the current `schema`, opaque
+`epoch`, current `ifRev`, and the retained `checkpoint` ID. Read the current
+Document first and confirm the intended checkpoint. Keep the exact same packet
+for a retry after uncertain confirmation; never refresh its revision or epoch.
+The server checks current human write access. A successful restore increments
+the revision and generation and invalidates the previous writer epoch.
+
+The native History view requires explicit confirmation. Restore is unavailable
+while a local draft is pending or requires recovery. An uncertain result keeps
+the editor locked and offers the original retry, without claiming success.
+Browsing history still preserves the live draft. Restore does not reactivate an
+old agent run or its authority. Unsupported history content remains unavailable.
+
 ## `crewship doc read <page-slug>`
 
 For a saved Document identity, `crewship doc read @<page-id>` keeps the original
