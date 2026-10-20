@@ -263,14 +263,22 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1")
 			return cmd.CombinedOutput()
 		}
-		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}, {"page", "get", "@" + created.PageID}, {"doc", "read", "@" + created.PageID}} {
+		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}, {"page", "get", "@" + created.PageID}, {"doc", "read", "@" + created.PageID}, {"doc", "checkpoints", "@" + created.PageID}} {
 			out, err := invoke(args...)
 			if role == "OWNER" {
 				if err != nil {
 					t.Fatalf("OWNER actual CLI %v: %v %s", args, err, out)
 				}
+				if len(args) > 1 && args[1] == "checkpoints" {
+					var history struct {
+						Checkpoints []json.RawMessage `json:"checkpoints"`
+					}
+					if json.Unmarshal(out, &history) != nil || history.Checkpoints == nil || len(history.Checkpoints) != 0 {
+						t.Fatalf("actual history list before checkpoint: %s", out)
+					}
+				}
 			} else if err == nil || !bytes.Contains(out, []byte("404")) || bytes.Contains(out, []byte("Launch plan")) {
-				t.Fatalf("%s disclosed private document via actual CLI %v: %v %s", role, args, err, out)
+				t.Fatalf("%s CLI %v did not return the required private 404: %v %s", role, args, err, out)
 			}
 		}
 		out, err := invoke("page", "list")
@@ -560,6 +568,55 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil || saved.Rev != 2 || !bytes.Contains(raw, []byte("Human intervening content")) || bytes.Contains(raw, []byte("UNCONFIRMED-B")) {
 			t.Fatalf("refusal lost human edit or published B: HTTP%d %v %s", status, err, raw)
 		}
+		// Read immutable history through the actual human CLI after head advances.
+		// The engine and Go authority are real; the agent-run token is never reused.
+		historyConfig := filepath.Join(dir, "history-human.yaml")
+		if err := os.WriteFile(historyConfig, []byte("server: "+host.URL+"\nworkspace: managed-private-cli\ntoken: "+human+"\nformat: json\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		callHistory := func(args ...string) ([]byte, error) {
+			t.Helper()
+			command := exec.CommandContext(t.Context(), binary, append([]string{"doc"}, args...)...)
+			for _, entry := range os.Environ() {
+				if !strings.HasPrefix(entry, "CREWSHIP_") {
+					command.Env = append(command.Env, entry)
+				}
+			}
+			command.Env = append(command.Env, "CREWSHIP_CONFIG="+historyConfig, "CREWSHIP_NO_SLUG_CACHE=1")
+			return command.CombinedOutput()
+		}
+		readHistory := func(args ...string) []byte {
+			t.Helper()
+			out, err := callHistory(args...)
+			if err != nil {
+				t.Fatalf("actual human history CLI: %v %s", err, out)
+			}
+			for _, field := range []string{`"snapshot"`, `"epoch"`, `"generation"`, `"incarnation"`, `"blocks"`} {
+				if bytes.Contains(out, []byte(field)) {
+					t.Fatalf("history exposed engine field %s", field)
+				}
+			}
+			return out
+		}
+		var history struct {
+			Checkpoints []struct {
+				ID     string `json:"id"`
+				Rev    int64  `json:"rev"`
+				Schema int    `json:"schema"`
+			} `json:"checkpoints"`
+		}
+		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
+			t.Fatalf("history lost confirmed checkpoint identity: %s", out)
+		}
+		var historical struct {
+			PageID string `json:"page_id"`
+			ID     string `json:"id"`
+			Rev    int64  `json:"rev"`
+			Schema int    `json:"schema"`
+		}
+		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != 3 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
+			t.Fatalf("historical read did not preserve the immutable saved body: %s", out)
+		}
 		for _, check := range []struct {
 			query string
 			want  int
@@ -587,6 +644,16 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			return nil
 		}); err != nil {
 			t.Fatal(err)
+		}
+		// A formerly readable checkpoint cannot outlive its human credential.
+		if err := sessions.NewDBStore(h.db).Revoke(t.Context(), session.ID, "history reader revoked"); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"checkpoints", "@" + created.PageID}, {"checkpoint", "@" + created.PageID, packet.Checkpoint.ID}} {
+			out, err := callHistory(args...)
+			if err == nil || !bytes.Contains(out, []byte("401")) || bytes.Contains(out, []byte("CONFIRMED-A")) || bytes.Contains(out, []byte("Human intervening content")) {
+				t.Fatalf("revoked human credential still read history: %v %s", err, out)
+			}
 		}
 		t.Log("actual CLI+MCP draft: immutable original packet, semantic commit and pinned A, exact retries/conflict, B prepared but never committed, live human cursor fence, fresh-run denial, no copies/grants/storage publication; no model/container-interruption evidence")
 	}
