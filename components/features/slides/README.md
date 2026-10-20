@@ -44,3 +44,16 @@ crewship-heavy pnpm exec vitest run components/features/slides/__tests__/native-
 The authored component tests use the canonical synthetic fixture. Browser,
 saved-Page/API, actual-model and Office/PPTX acceptance are separate unexecuted
 gates in this cut; no source-branch execution is claimed as current validation.
+
+## Operation layer (`lib/slides/operations.ts`)
+
+Pure client mirror of `internal/slides/operations.go`: `decodePatch`,
+`decodeReorder`, `decodeInitialize`, `applyPatch` (atomic, no aliasing between
+request, state and result), slide/element/deck hashes equal to the Go golden
+values, and `diffToPatch`, which turns a local draft into a sequentially valid
+operation batch. Changes the wire contract cannot express (element z-order,
+slide reorder, theme/size) are reported as `unrepresentable` and never dropped;
+the save button must stay disabled for them. `lib/slides/save-client.ts` defines
+the proposed save interface behind `NEXT_PUBLIC_SLIDES_EDITOR_SAVE`;
+`save-fixture.ts` is an in-memory stand-in used by tests. JSON integers cannot be
+told from `24.0` in JavaScript, so that one Go rejection is not mirrored.
