@@ -11,6 +11,7 @@ vi.mock("sonner", () => ({
 }))
 
 import { ChatComposer } from "../chat-composer"
+import { PromptInputProvider } from "@/components/ai-elements/prompt-input"
 import { useComposerStore } from "@/stores/composer-store"
 
 let sid = "sess-0"
@@ -282,6 +283,47 @@ describe("blocked send explains itself", () => {
     expect(props.sendMessage).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["without a provider", false],
+    ["with a provider", true],
+  ])("typed text survives a blocked Enter and a blocked click %s", async (_l, provider) => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    const ui = <ChatComposer {...props} />
+    render(provider ? <PromptInputProvider>{ui}</PromptInputProvider> : ui)
+    typeHello()
+    const ta = document.querySelector("textarea")!
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ta.value).toBe("hello")
+    fireEvent.click(send())
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ta.value).toBe("hello")
+    expect(props.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("is styled as disabled and does not lift on hover", () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    expect(send().className).toContain("aria-disabled:opacity-50")
+    expect(send().className).toContain("aria-disabled:hover:translate-y-0")
+  })
+
+  it("does not announce on mount when failed chips already exist", async () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    await new Promise((r) => setTimeout(r, 80))
+    expect(screen.getByRole("status").textContent).toBe("")
+  })
+
+  it("a pending announcement is dropped if the block ends first", async () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    fireEvent.click(send())
+    fireEvent.click(screen.getByLabelText("Remove bad.txt"))
+    await new Promise((r) => setTimeout(r, 80))
+    expect(screen.getByRole("status").textContent).toBe("")
+  })
+
   it("the live region is mounted before the block and filled when it starts", () => {
     render(<ChatComposer {...props} />)
     const region = screen.getByRole("status")
@@ -329,6 +371,12 @@ describe("blocked send explains itself", () => {
     fireEvent.click(retry)
     await waitFor(() => expect(g.calls).toHaveLength(1))
     expect(g.calls[0].name).toBe("bad.txt")
+    // Pending: Send is pressable and explains instead of sending.
+    expect(send().getAttribute("aria-disabled")).toBeNull()
+    fireEvent.submit(document.querySelector("form")!)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(String(toastError.mock.calls[0][0])).toMatch(/Still uploading/)
+    expect(props.sendMessage).not.toHaveBeenCalled()
     g.calls[0].release()
     await waitFor(() => expect(list()[0].status).toBe("ready"))
     expectUnblocked()

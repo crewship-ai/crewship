@@ -243,15 +243,37 @@ export function ChatComposer({
       } not attached. Use Retry or Remove on ${unattached.length === 1 ? "it" : "each"}, then send.`
     : ""
   const [announcement, setAnnouncement] = useState("")
-  // Set (not inserted pre-filled) when the block starts, cleared when it ends.
-  useEffect(() => {
-    setAnnouncement(blockReasonText)
-  }, [blockReasonText])
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blockTextRef = useRef(blockReasonText)
+  blockTextRef.current = blockReasonText
+  const cancelAnnounce = useCallback(() => {
+    if (announceTimer.current) clearTimeout(announceTimer.current)
+    announceTimer.current = null
+  }, [])
+  // On a blocked attempt (click or Enter): clear first so a repeat is heard
+  // again, then set. The text is read when the timer fires, and nothing is
+  // announced if the block ended in between.
   const announceBlocked = useCallback(() => {
-    // Clear first so a repeated attempt is announced again.
+    cancelAnnounce()
     setAnnouncement("")
-    setTimeout(() => setAnnouncement(blockReasonText), 50)
-  }, [blockReasonText])
+    announceTimer.current = setTimeout(() => {
+      announceTimer.current = null
+      setAnnouncement(blockTextRef.current)
+    }, 50)
+  }, [cancelAnnounce])
+  // Announce when a block STARTS after mount (an upload failed, or a retry
+  // failed again); not on mount when the store already holds failed chips, so
+  // opening a conversation stays quiet. The region is cleared when it ends.
+  const wasBlocked = useRef(sendBlocked)
+  useEffect(() => {
+    if (sendBlocked && !wasBlocked.current) setAnnouncement(blockReasonText)
+    if (!sendBlocked) {
+      cancelAnnounce()
+      setAnnouncement("")
+    }
+    wasBlocked.current = sendBlocked
+  }, [sendBlocked, blockReasonText, cancelAnnounce])
+  useEffect(() => cancelAnnounce, [cancelAnnounce])
 
   // Only fires when the message actually went out — a size-guard rejection
   // must leave the draft intact so the user can trim and resend.
@@ -293,9 +315,11 @@ export function ChatComposer({
     async (message: SubmittedMessage) => {
       sentRef.current = false
       // Enter in the textarea lands here; answer it instead of returning silently.
+      // Rejecting makes PromptInput skip its own clearing of the text; a
+      // plain return would be treated as a completed send and empty the box.
       if (sendBlocked) {
         announceBlocked()
-        return
+        throw new Error("send blocked: attachment not attached")
       }
       let outgoing = message
       if (createDocument) {
@@ -432,6 +456,10 @@ export function ChatComposer({
   const submitBlockProps = sendBlocked
     ? {
         "aria-disabled": true as const,
+        // Button styles only `disabled:`; mirror it for aria-disabled and
+        // neutralise the default variant's hover lift and colour.
+        className:
+          "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:shadow-none aria-disabled:hover:translate-y-0 aria-disabled:hover:bg-primary-strong aria-disabled:active:translate-y-0",
         "aria-describedby": blockReasonId,
         onClick: (e: React.MouseEvent) => {
           e.preventDefault()
