@@ -510,3 +510,6 @@ Output is pretty-printed JSON.
 - [Backup & Restore guide](/guides/backup) — concepts, lock semantics, keyring, webhooks, metrics, instance scope.
 - [Backup API reference](/api-reference/backup) — REST endpoint shapes.
 - [Security → Instance-Scope Backup Security](/security/backup-instance-security) — threat model for instance backups.
+
+
+Bundle downloads stop before the next chunk after credential, account or required role loss. An interrupted transfer is incomplete and must not be treated as a usable backup.

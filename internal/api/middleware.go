@@ -397,7 +397,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt)
+		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt, m.persistedSessionValidator(user.ID, user.SessionID))
 		defer release()
 		if !auth.StreamCredentialCurrent(tracked) {
 			replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")

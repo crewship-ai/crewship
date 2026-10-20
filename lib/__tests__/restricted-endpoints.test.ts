@@ -34,6 +34,17 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
   })
 
   it.each([
+    ["GET", "/api/v1/pages/private-page/versions"],
+    ["GET", "/api/v1/pages/private-page/export"],
+    ["GET", "/api/v1/pages/private-page/document"],
+    ["GET", "/api/v1/pages/private-page/document/checkpoints"],
+    ["GET", "/api/v1/pages/private-page/document/checkpoints/pin"],
+    ["GET", "/api/v1/pages/private-page/project"],
+    ["GET", "/api/v1/pages/private-page/project/source"],
+    ["GET", "/api/v1/pages/private-page/project/history"],
+    ["GET", "/api/v1/pages/private-page/project/history/rev"],
+    ["GET", "/api/v1/pages/private-page/project/history/rev/source"],
+
     ["GET", "/api/v1/workspaces"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routines"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routine-runs/run-9?x=1"],
@@ -58,6 +69,10 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
     ["GET", "/api/v1/crews?workspace_id=ws-1"],
     ["POST", "/api/v1/workspaces"],
     ["DELETE", "/api/v1/chats/c-1/messages"],
+    ["POST", "/api/v1/pages/private-page/document/initialize"],
+    ["POST", "/api/v1/pages/private-page/document/patch"],
+    ["POST", "/internal/docs/v1/private-page/state"],
+    ["GET", "/api/v1/pages/private-page/project/review"],
   ])("refuses %s %s", (method, url) => {
     expect(serverAllowsRestricted(method, url)).toBe(false)
   })
