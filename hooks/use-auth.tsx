@@ -294,7 +294,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return
     }
     purgeOtherE2Recovery(null)
-    void purgeOtherDocumentDrafts(null)
+    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
+    await purgeOtherDocumentDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.
