@@ -55,11 +55,16 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     async load() {
       // The compound prefix keeps other people, workspaces and Pages out of
       // this read, including drafts from another tab of the same document.
-      const rows = await transaction("readonly", store => store.getAll(IDBKeyRange.bound([owner, ""], [owner, "\uffff"])))
-      return rows.map((row: { key: [string,string]; draft: DocumentDraft }) => {
-        keys.set(row.draft.id,row.key)
-        return row.draft
-      })
+      // A transaction that never completes must not keep the caller polling.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DocumentStorageError(message)), STORAGE_OPEN_TIMEOUT_MS) })
+      try {
+        const rows = await Promise.race([transaction("readonly", store => store.getAll(IDBKeyRange.bound([owner, ""], [owner, "\uffff"]))), expired])
+        return rows.map((row: { key: [string,string]; draft: DocumentDraft }) => {
+          keys.set(row.draft.id,row.key)
+          return row.draft
+        })
+      } finally { clearTimeout(timer) }
     },
     async put(draft) {
       // Bound each journal row before structured cloning large editor state.

@@ -133,14 +133,20 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       try {
         let next = await read()
         if (!accept(next)) return
-        if (!storage && !durableOff) {
+        if (!storage) {
           // Opened after the first authorized read so a missing or hanging
-          // store can never keep the document from loading.
+          // store can never keep the document from loading. A failed open is
+          // retried on later polls: an earlier unsent draft may still exist.
           try {
             const opened = await openDocumentDrafts(human,workspace,pageId)
             try { restored = await opened.load() } catch (cause) { opened.close(); throw cause }
             if (!active) { opened.close(); return }
             storage = opened
+            if (durableOff) {
+              durableOff = false; setStorageOff(false)
+              // Edits made while storage was away join the journal, unless a held draft must be resolved first.
+              if (!restored.length) for (const draft of queue) persist(draft)
+            }
           } catch {
             if (!active) return
             durableOff = true; restored = []; setStorageOff(true)
@@ -230,5 +236,5 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   let durability: DocumentDurability = "confirmed"
   if (recoveredDrafts.length) durability = "held"
   else if (pending > 0) durability = journalFailed || !storageReady ? (journalWrites > 0 && !journalFailed ? "writing" : "unsaved") : journalWrites > 0 ? "writing" : "local"
-  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
+  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
 }

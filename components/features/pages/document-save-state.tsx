@@ -14,9 +14,10 @@ export function durabilityLabel(durability: DocumentDurability, status: string):
 }
 
 /** Extends the header status; it stays the single live region for save state. */
-export function DocumentSaveState({ status, durability }: { status: string; durability: DocumentDurability }) {
+export function DocumentSaveState({ status, durability, storageUnavailable }: { status: string; durability: DocumentDurability; storageUnavailable?: boolean }) {
   const label = durabilityLabel(durability, status)
   return <span role="status" aria-live="polite" className="text-sm" data-durability={durability}>
     {status}{label ? <span className="text-muted-foreground"> · {label}</span> : null}
+    {storageUnavailable ? <span className="text-muted-foreground"> · This browser's storage is not available; an earlier unsent draft may exist</span> : null}
   </span>
 }

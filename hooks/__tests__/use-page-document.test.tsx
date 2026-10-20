@@ -150,6 +150,11 @@ it("still loads the server document when private durable storage is unavailable"
   expect(result.current.editable).toBe(true)
   expect(content(result.current.doc).toString()).toBe("base")
   expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
+  act(()=>content(result.current.doc).insert(4," x"))
+  await waitFor(()=>expect(result.current.pending).toBe(1))
+  expect(result.current.durability).toBe("unsaved")
+  expect(result.current.recovery).toBe(false)
+  expect(journal.put).not.toHaveBeenCalled()
  }finally{unmount();server.destroy()}
 })
 
