@@ -36,3 +36,14 @@ export function legacyMcpIntegrations(): boolean {
 export function artifactCopyMove(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACT_COPY_MOVE === "true"
 }
+
+/**
+ * Gates the static HTML App preview (`StaticAppPreview`).
+ *
+ * Default OFF: no Page endpoint returns publication HTML yet, so nothing
+ * mounts the preview in app routes. A mount site must also pass a freshly
+ * authorized publication; this flag only keeps the component dark until then.
+ */
+export function staticAppPreview(): boolean {
+  return process.env.NEXT_PUBLIC_STATIC_APP_PREVIEW === "true"
+}
