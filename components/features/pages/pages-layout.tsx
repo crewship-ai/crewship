@@ -4,6 +4,8 @@ import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-
 
 import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
+import { PageSlides } from "./page-slides"
+import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
 import { PersonalDocumentSpace } from "./personal-document-space"
 import { NewDocumentDialog } from "./new-document-dialog"
@@ -246,7 +248,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // support.
   const nativeDocument = detail.page?.hasDocument === true
   const nativePageId = typeof detail.raw?.id === "string" ? detail.raw.id.trim() : ""
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument
+  // Flag off: has_slides is never read and the Page renders exactly as before.
+  const nativeSlides = slidesEditorMount() && detail.page?.hasSlides === true && !nativeDocument
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -503,7 +507,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               </motion.div>
             ) : selectedSlug ? (
               <motion.div
-                key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
+                key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : nativeSlides ? `slides-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
@@ -515,6 +519,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
                   <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
                   </>
+                ) : nativeSlides ? (
+                  detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
+                    : <PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} />
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}

@@ -190,6 +190,21 @@ describe("workspace states", () => {
     if (kind === "error") { fireEvent.click(screen.getByRole("button", { name: "Try again" })); await screen.findByLabelText("Speaker notes") }
     else expect(screen.queryByRole("button")).toBeNull()
   })
+  it("explains a missing Slides route on load and keeps the draft when saving hits one", async () => {
+    const missing: SlidesSaveClient = { load: vi.fn().mockResolvedValue({ status: "unavailable", reason: "not_implemented" }), patch: vi.fn() }
+    const first = render(<SlidesWorkspace pageId="fixture_page" client={missing} saveEnabled />)
+    expect((await screen.findByRole("alert")).textContent).toContain("not available on this server yet")
+    first.unmount()
+    const server = createFixtureSaveClient(snapshot())
+    const client: SlidesSaveClient = { load: server.load, patch: vi.fn().mockResolvedValue({ status: "unavailable", reason: "not_implemented" }) }
+    render(<SlidesWorkspace pageId="fixture_page" client={client} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    editNotes("Zachovat")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    expect((await screen.findByRole("alert")).textContent).toContain("Saving is not available on this server yet")
+    expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Zachovat")
+    expect(screen.getByRole("status").textContent).not.toMatch(/Saved as revision/)
+  })
   it("saves a draft through the operation layer and reports the new revision", async () => {
     const server = createFixtureSaveClient(snapshot()), patch = vi.spyOn(server, "patch")
     render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)
