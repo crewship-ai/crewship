@@ -10,6 +10,7 @@ import { useChat, type ChatMessage, type ChatTurn, type HistoryPart } from "@/ho
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
+import { copyToClipboard } from "@/lib/clipboard"
 import { TurnRenderer } from "@/components/features/chat/turn-renderer"
 import { ChatComposer } from "@/components/features/chat/composer/chat-composer"
 import { FollowUps } from "@/components/features/chat/suggestions/follow-ups"
@@ -651,9 +652,7 @@ function ConnectedSetupChat({
     return true
   }, [])
   const starters = starterPrompts(language)
-  const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content).catch(() => {})
-  }, [])
+  const handleCopy = copyToClipboard
   const noopFileClick = useCallback(() => {}, [])
 
   // The ONLY call site of applyOnboardingProposal in this component, and it

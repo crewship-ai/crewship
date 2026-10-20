@@ -1,8 +1,8 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
+import { Check, Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
 import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
@@ -48,7 +48,8 @@ import { formatDurationMillis } from "@/lib/time"
 
 interface AssistantTurnProps {
   turn: ChatTurn
-  onCopy: (content: string) => void
+  /** Resolves true once the clipboard confirmed the copy. */
+  onCopy: (content: string) => Promise<boolean>
   onFileClick: (fileName: string) => void
   /** Active agent — required for "Open in Artifact" so tabs are scoped
    *  to the agent that produced them. When omitted (older callers,
@@ -772,7 +773,8 @@ function TurnFeedbackActions({
   agentId,
 }: {
   turn: ChatTurn
-  onCopy: (content: string) => void
+  /** Resolves true once the clipboard confirmed the copy. */
+  onCopy: (content: string) => Promise<boolean>
   fullText: string
   chatId?: string
   workspaceId?: string
@@ -808,6 +810,19 @@ function TurnFeedbackActions({
   // ChatTurn interface in hooks/use-chat.ts.
   const traceId = turn.metadata?.trace_id
 
+  // "Copied" is said only after the clipboard confirmed it; a refusal is said too.
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle")
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; clearTimeout(copyTimer.current) } }, [])
+  const copyReply = async () => {
+    const ok = await onCopy(fullText)
+    if (!mounted.current) return
+    clearTimeout(copyTimer.current)
+    setCopy(ok ? "copied" : "failed")
+    copyTimer.current = setTimeout(() => setCopy("idle"), ok ? 2000 : 6000)
+  }
+
   const handle = (signal: "helpful" | "not_helpful") => {
     // Per-(turn, signal) sequencing lives inside the store — submit
     // and reset chain through the same in-flight Promise so a fast
@@ -830,11 +845,14 @@ function TurnFeedbackActions({
       // `focus-within` is not optional here — these are the only way to
       // register feedback, and hover-only would put them out of reach of a
       // keyboard entirely.
-      className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100", submitted.helpful || submitted.not_helpful ? "opacity-100" : "opacity-0")}
+      className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100", submitted.helpful || submitted.not_helpful || copy !== "idle" ? "opacity-100" : "opacity-0")}
     >
-      <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
-        <Copy className="h-3.5 w-3.5" />
+      <MessageAction tooltip={copy === "copied" ? "Copied" : "Copy"} label="Copy" onClick={() => void copyReply()}>
+        {copy === "copied" ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
       </MessageAction>
+      {copy !== "idle" && <span role="status" className={copy === "failed" ? "basis-full text-label text-muted-foreground" : "sr-only"}>
+        {copy === "copied" ? "Copied to clipboard" : "Copy failed. Select the text and copy it with your keyboard."}
+      </span>}
       <MessageAction
         tooltip={submitted.helpful ? "Marked good — click to undo" : "Good response"}
         onClick={() => handle("helpful")}

@@ -3,35 +3,7 @@
 import { useCallback, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Check, Copy } from "lucide-react"
-
-/**
- * legacyCopy — fallback for non-secure contexts (HTTP dev hosts).
- * Renders a hidden textarea, selects it, and triggers the deprecated but
- * still-everywhere-supported document.execCommand('copy'). Only reached when
- * navigator.clipboard is unavailable, so there is no better option left.
- */
-function legacyCopy(text: string, onSuccess: () => void) {
-  if (typeof document === "undefined") return
-  const ta = document.createElement("textarea")
-  ta.value = text
-  ta.setAttribute("readonly", "")
-  ta.setAttribute("aria-hidden", "true")
-  ta.className = "fixed -top-[1000px] left-0 opacity-0"
-  document.body.appendChild(ta)
-  ta.select()
-  ta.setSelectionRange(0, text.length)
-  try {
-    // execCommand answers false when the copy did not happen; a "Copied"
-    // tick over a clipboard that still holds the old value is the one
-    // outcome this fallback must not produce.
-    if (document.execCommand("copy")) onSuccess()
-  } catch {
-    // No clipboard at all — silent. The text is visible on screen so the
-    // user can still select-and-copy by hand.
-  } finally {
-    document.body.removeChild(ta)
-  }
-}
+import { legacyCopy } from "@/lib/clipboard"
 
 /** Copies `text`, preferring the async clipboard API where the page is a
  *  secure context and falling back to execCommand otherwise. */
@@ -43,10 +15,10 @@ export function copyText(text: string, onSuccess: () => void) {
     typeof window !== "undefined" &&
     window.isSecureContext
   if (modernAvailable) {
-    navigator.clipboard.writeText(text).then(onSuccess).catch(() => legacyCopy(text, onSuccess))
+    navigator.clipboard.writeText(text).then(onSuccess).catch(() => { if (legacyCopy(text)) onSuccess() })
     return
   }
-  legacyCopy(text, onSuccess)
+  if (legacyCopy(text)) onSuccess()
 }
 
 interface CommandSnippetProps {

@@ -94,7 +94,7 @@ const call = (id: string, extra: Record<string, unknown> = {}) =>
   part("tool_call", { tool_id: id, tool_name: "Bash", input: { command: "ls" }, ...extra }, "Bash")
 const result = (id: string, extra: Record<string, unknown> = {}) => part("tool_result", { tool_id: id, ...extra }, "")
 const renderTurn = (t: ChatTurn) =>
-  render(<AssistantTurn turn={t} onCopy={() => {}} onFileClick={() => {}} />)
+  render(<AssistantTurn turn={t} onCopy={async () => true} onFileClick={() => {}} />)
 
 describe("CH-04 grouped activity", () => {
   beforeEach(() => cleanup())
@@ -257,10 +257,10 @@ describe("typed events from the stream consumer", () => {
     expect(details().open).toBe(false)
     details().open = true
     fireEvent(details(), new Event("toggle"))
-    rerender(<AssistantTurn turn={turn([a, withB("failed")], true)} onCopy={() => {}} onFileClick={() => {}} />)
+    rerender(<AssistantTurn turn={turn([a, withB("failed")], true)} onCopy={async () => true} onFileClick={() => {}} />)
     expect(details().getAttribute("data-activity-tone")).toBe("attention")
     expect(details().open).toBe(true)
-    rerender(<AssistantTurn turn={turn([a, withB("succeeded")], false)} onCopy={() => {}} onFileClick={() => {}} />)
+    rerender(<AssistantTurn turn={turn([a, withB("succeeded")], false)} onCopy={async () => true} onFileClick={() => {}} />)
     expect(details().getAttribute("data-activity-tone")).toBe("ok")
     expect(details().open).toBe(true)
   })

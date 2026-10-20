@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 
@@ -219,6 +219,23 @@ describe("AssistantTurn dispatch", () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "Done" })], { turnState: "completed" })} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.queryByRole("status")).toBeNull()
   })
+  it("says Copied only after the clipboard confirmed the copy", async () => {
+    let confirm!: (ok: boolean) => void
+    const copy = vi.fn(() => new Promise<boolean>(resolve => { confirm = resolve }))
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={copy} onFileClick={onFileClick} />)
+    fireEvent.click(screen.getByTestId("action-copy"))
+    expect(copy).toHaveBeenCalledWith("Answer")
+    expect(screen.queryByText("Copied to clipboard")).toBeNull()
+    await act(async () => confirm(true))
+    expect(screen.getByRole("status")).toHaveTextContent("Copied to clipboard")
+    expect(screen.getByTestId("action-copied")).toBeInTheDocument()
+  })
+  it("says the copy failed instead of pretending it worked", async () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={() => Promise.resolve(false)} onFileClick={onFileClick} />)
+    await act(async () => { fireEvent.click(screen.getByTestId("action-copy")) })
+    expect(screen.getByRole("status")).toHaveTextContent("Copy failed. Select the text and copy it with your keyboard.")
+    expect(screen.queryByText("Copied to clipboard")).toBeNull()
+  })
 
   it("renders status part via StatusIndicator", () => {
     render(<AssistantTurn turn={turn([part({ type: "status", content: "Thinking..." })])} onCopy={onCopy} onFileClick={onFileClick} />)
@@ -405,13 +422,13 @@ describe("AssistantTurn dispatch", () => {
 
 describe("authorized run image mount", () => {
   it("mounts the image viewer from persisted run identity without model image URLs", () => {
-    render(<AssistantTurn turn={turn([part({ type: "text", content: "Here is your chart." })], { runId: "run-chart" })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Here is your chart." })], { runId: "run-chart" })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getByTestId("run-images")).toHaveTextContent("agent-chart:ws-chart:run-chart")
   })
   it("does not discover image paths from model text or unfinished replies", () => {
-    const view = render(<AssistantTurn turn={turn([part({ type: "text", content: "https://untrusted.invalid/chart.png" })])} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    const view = render(<AssistantTurn turn={turn([part({ type: "text", content: "https://untrusted.invalid/chart.png" })])} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.queryByTestId("run-images")).toBeNull()
-    view.rerender(<AssistantTurn turn={turn([], { runId: "run-chart", isStreaming: true })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    view.rerender(<AssistantTurn turn={turn([], { runId: "run-chart", isStreaming: true })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.queryByTestId("run-images")).toBeNull()
   })
 })
@@ -419,16 +436,16 @@ describe("authorized run image mount", () => {
 describe("safe canonical activity and reasoning", () => {
   beforeEach(() => cleanup())
   it("never renders legacy raw thinking", () => {
-    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning" })])} onCopy={() => {}} onFileClick={() => {}} />)
+    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning" })])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.queryByText("private legacy reasoning")).toBeNull()
   })
   it("renders only the typed safe summary, ignoring the legacy content field", () => {
-    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning", thinking: { visibility: "summary", state: "completed", summary: "Checked the public sources" } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning", thinking: { visibility: "summary", state: "completed", summary: "Checked the public sources" } })])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getByText("Checked the public sources")).toBeTruthy()
     expect(screen.queryByText("private legacy reasoning")).toBeNull()
   })
   it.each(["failed", "denied", "interrupted"] as const)("does not label %s activity Completed", state => {
-    render(<AssistantTurn turn={turn([part({ type: "tool_call", content: "Read", activity: { kind: "read", state }, metadata: { completed: true } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    render(<AssistantTurn turn={turn([part({ type: "tool_call", content: "Read", activity: { kind: "read", state }, metadata: { completed: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getByTestId("tool-header").getAttribute("data-state")).not.toBe("output-available")
     expect(screen.getByText(state === "failed" ? "Failed" : state === "denied" ? "Denied" : "Interrupted")).toBeTruthy()
   })
@@ -440,7 +457,7 @@ describe("honest activity completion", () => {
     const view = render(<AssistantTurn turn={turn([
       part({ id: "a", type: "activity", tool_call_id: "a", activity: { kind: "read", state: "unknown" } }),
       part({ id: "b", type: "activity", tool_call_id: "b", activity: { kind: "read", state: "succeeded" } }),
-    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    ])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
     expect(screen.queryByText("Working")).toBeNull()
     expect(view.container.querySelector(".animate-spin")).toBeNull()
@@ -449,7 +466,7 @@ describe("honest activity completion", () => {
     render(<AssistantTurn turn={turn([
       part({ id: "a", type: "tool_call", metadata: { tool_id: "a", tool_name: "Read" } }),
       part({ id: "r", type: "tool_result", content: "Failed to read", metadata: { tool_id: "a", is_error: true } }),
-    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    ])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getAllByTestId("tool-header").map(header => header.getAttribute("data-state"))).toEqual(["output-error", "output-error"])
   })
 })
@@ -457,7 +474,7 @@ describe("honest activity completion", () => {
 describe("typed safe activity details", () => {
   beforeEach(() => cleanup())
   it("shows only typed output/diff and an explicit truncation marker", () => {
-    render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "safe-call", content: "raw legacy detail", metadata: { input: { command: "raw legacy detail" } }, activity: { kind: "read", state: "succeeded", output: "Safe bounded output", diff: "-before\n+after", truncated: true } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "safe-call", content: "raw legacy detail", metadata: { input: { command: "raw legacy detail" } }, activity: { kind: "read", state: "succeeded", output: "Safe bounded output", diff: "-before\n+after", truncated: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.getByText("Safe bounded output")).toBeTruthy()
     expect(screen.getAllByTestId("code-block").map(block => block.textContent)).toContain("-before\n+after")
     expect(screen.getByText("Details truncated")).toBeTruthy()
@@ -467,14 +484,14 @@ describe("typed safe activity details", () => {
     render(<AssistantTurn turn={turn([
       part({ type: "activity", tool_call_id: "safe-call", activity: { kind: "read", state: "succeeded" } }),
       part({ type: "tool_result", content: "raw legacy detail", metadata: { tool_id: "safe-call" } }),
-    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    ])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.queryByText("raw legacy detail")).toBeNull()
   })
 })
 
 it("does not revive legacy Task input or running status inside a typed failed activity", () => {
   cleanup()
-  render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "task", metadata: { tool_name: "Task", input: { description: "raw legacy task detail" } }, activity: { kind: "task", name: "Task", state: "failed" } })])} onCopy={() => {}} onFileClick={() => {}} />)
+  render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "task", metadata: { tool_name: "Task", input: { description: "raw legacy task detail" } }, activity: { kind: "task", name: "Task", state: "failed" } })])} onCopy={async () => true} onFileClick={() => {}} />)
   expect(screen.getByText("Failed")).toBeTruthy()
   expect(screen.queryByText("raw legacy task detail")).toBeNull()
   expect(screen.queryByText("Working")).toBeNull()
