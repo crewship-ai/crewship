@@ -79,3 +79,12 @@ describe("explicit document creation consent", () => {
     expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
   })
 })
+
+it.each(["desktop", "mobile"] as const)("shows the actual selected personal audience on %s", variant => {
+ render(<ChatComposer {...props} variant={variant} />)
+ expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
+ selectCreation()
+ expect(screen.getByText("My space · You and workspace OWNER (audited access)")).toBeTruthy()
+ selectCreation()
+ expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
+})

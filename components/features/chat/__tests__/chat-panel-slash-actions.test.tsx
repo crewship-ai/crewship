@@ -27,7 +27,7 @@ const chatStub = vi.hoisted(() => ({
   regenerateLastTurn: vi.fn(),
   editAndResend: vi.fn(),
   loadHistory: vi.fn(),
-  markHistoryUnavailable: vi.fn(),
+  markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(),
   resubscribeSession: vi.fn(),
   isStreaming: false,
   connectionStatus: "connected",
@@ -95,7 +95,7 @@ function stubFetch() {
  *  in PANEL_HANDLED_COMMAND_IDS with no entry here fails the walk below. */
 const PANEL_EFFECT: Record<string, () => void | Promise<void>> = {
   clear: () => {
-    expect(chatStub.loadHistory).toHaveBeenCalledWith([])
+    expect(chatStub.loadHistory).toHaveBeenCalledWith([], { reset: true })
   },
   regenerate: () => {
     expect(chatStub.regenerateLastTurn).toHaveBeenCalled()
