@@ -276,11 +276,14 @@ describe("useWebSocket", () => {
   })
   it("ignores already queued callbacks from an old authority socket", async () => {
     const oldHandler = vi.fn(), newHandler = vi.fn(), connected = vi.fn()
+    const expired = addAuthHandler(vi.fn())
     const hook = renderHook(({ enabled, handler }) => useWebSocket({ enabled, url: "ws://localhost/ws", getToken: tokenFn("synthetic"), onMessage: handler, onConnect: connected }), { initialProps: { enabled: true, handler: oldHandler } })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     const old = mockInstances[0]
     act(() => old.simulateOpen())
-    const queued = { message: old.onmessage!, close: old.onclose!, error: old.onerror!, open: old.onopen! }
+    const queued = { message: old.onmessage!, close: old.onclose!, error: old.onerror, open: old.onopen! }
+    // Error events have no handler: the following close decides retry/auth.
+    expect(queued.error).toBeNull()
     hook.rerender({ enabled: false, handler: newHandler })
     hook.rerender({ enabled: true, handler: newHandler })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -289,11 +292,17 @@ describe("useWebSocket", () => {
     const connectedCount = connected.mock.calls.length
     act(() => {
       queued.message({ data: JSON.stringify({ type: "chat_event", payload: "old private" }) })
-      queued.error(); queued.open(); queued.close({ code: 4401, reason: "" })
+      queued.error?.(); queued.open(); queued.close({ code: 4401, reason: "" })
     })
     expect(newHandler).not.toHaveBeenCalled()
     expect(connected).toHaveBeenCalledTimes(connectedCount)
     expect(hook.result.current.status).toBe("connected")
+    expect(expired).not.toHaveBeenCalled()
+    expect(old.sent).toHaveLength(1) // stale open must not send another auth frame
+    act(() => current.simulateError())
+    expect(hook.result.current.status).toBe("connected")
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500) })
+    expect(mockInstances).toHaveLength(2) // no stale callback schedules a new socket
     act(() => current.simulateMessage({ type: "current" }))
     expect(newHandler).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "current" }))
   })

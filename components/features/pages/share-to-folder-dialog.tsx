@@ -154,7 +154,7 @@ export function ShareToFolderDialog({ workspaceId, open, onOpenChange, subjects,
                   data-folder-option={f.slug}
                   onClick={() => setTarget(f.slug)}
                   className={cn(
-                    "flex min-h-8 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs coarse:min-h-11",
+                    "flex min-h-8 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs coarse:min-h-[44px]",
                     target === f.slug ? "border-primary/40 bg-primary/15 text-primary-hover" : "border-hairline bg-foreground/[0.03] text-muted-foreground",
                   )}
                 >

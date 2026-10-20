@@ -335,7 +335,7 @@ it("does not invalidate the former workspace when its queued realtime refresh fi
   await loaded()
   vi.useFakeTimers()
   act(() => state.events.get("run.completed")!())
-  state.workspace = { workspaceId: "b", loading: false }
+  state.workspace = { workspaceId: "b", role: "ADMIN", loading: false }
   view.rerender(<DashboardPage />)
   act(() => vi.advanceTimersByTime(300))
   expect(state.invalidateA).not.toHaveBeenCalled()

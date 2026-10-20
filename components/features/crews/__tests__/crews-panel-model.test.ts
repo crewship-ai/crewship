@@ -9,6 +9,7 @@ import {
   panelStateToParams,
   tempHireLabel,
   type PanelAgent,
+  type CrewView,
 } from "@/components/features/crews/crews-panel-model"
 
 const crew = (id: string, name: string) => ({ id, name, slug: id, icon: null, color: null })
@@ -62,6 +63,14 @@ describe("buildPanel", () => {
     agent({ id: "nightwatch", crew_id: "finance", ephemeral: true, expired_at: "2026-10-10T00:00:00Z" }),
     agent({ id: "concierge", crew_id: null }),
   ]
+
+  it.each(["constructor", "toString", "__proto__"])("rejects a runtime view key %s rather than invoking object members", (view) => {
+    // Runtime URL/storage data can violate the TypeScript contract.
+    const model = buildPanel({ crews, agents, state: { view: view as CrewView, group: "status" } })
+    expect(model.shown).toBe(0)
+    expect(model.sections).toEqual([])
+    expect(model.unassigned).toEqual([])
+  })
 
   it("groups crews Needs you → Working → Idle and counts every view", () => {
     const m = buildPanel({ crews, agents, state: { view: "all", group: "status" } })

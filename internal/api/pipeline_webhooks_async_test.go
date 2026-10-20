@@ -24,6 +24,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -559,11 +560,10 @@ func TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous(t *testing.T) {
 	}
 }
 
-// ODCH-RT-25: with concurrency_policy "skip" an over-limit delivery is not a
-// 429 the sender must retry: the start is dropped on purpose and the sender
-// is told so (200, status skipped). No run is created and the runner is not
-// called again.
-func TestPipelineWebhooks_Fire_ConcurrencyPolicySkip_AnswersSkipped(t *testing.T) {
+// A webhook is accepted durably before capacity is dispatched. Even a legacy
+// skip policy must not discard acknowledged work: keep its receipt and run ID,
+// hold it behind the active run, then execute once when capacity is free.
+func TestPipelineWebhooks_Fire_ConcurrencyPolicySkip_PreservesAcceptedWork(t *testing.T) {
 	runner := newBlockingRunner()
 	h, db, _, wsID := webhookHandlerRig(t)
 	h.SetRunner(runner)
@@ -598,19 +598,39 @@ func TestPipelineWebhooks_Fire_ConcurrencyPolicySkip_AnswersSkipped(t *testing.T
 	}
 
 	rr := fire(`{"n":2}`, "evt-2")
-	if rr.Code != 200 {
-		t.Fatalf("skipped fire = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("capacity must retain accepted work: %d; body=%s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil || resp["status"] != "SKIPPED" || resp["run_id"] != nil {
-		t.Fatalf("skipped body = %v (%v)", resp, err)
+	var accepted map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil || accepted["status"] != "PENDING" {
+		t.Fatalf("accepted body = %v (%v)", accepted, err)
+	}
+	runID, ok := accepted["run_id"].(string)
+	if !ok || runID == "" {
+		t.Fatal("accepted delivery has no stable run identity")
+	}
+	var pending int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pending_runs WHERE run_id=?`, runID).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("acknowledged delivery was not retained durably: %d %v", pending, err)
 	}
 	if rr.Header().Get("Retry-After") != "" {
-		t.Error("a deliberate skip must not ask the sender to retry")
+		t.Error("accepted work must not ask the sender to retry")
 	}
 	if n := runner.callCount(); n != 1 {
-		t.Errorf("runner called %d times, want 1", n)
+		t.Errorf("capacity exceeded: runner called %d times, want 1", n)
 	}
+
 	release()
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
+	if n := runner.callCount(); n != 2 {
+		t.Fatalf("legacy skip policy dropped accepted delivery: %d calls, want 2", n)
+	}
+	retry := fire(`{"n":2}`, "evt-2")
+	var repeated map[string]any
+	if err := json.Unmarshal(retry.Body.Bytes(), &repeated); err != nil || retry.Code != http.StatusAccepted || repeated["run_id"] != runID || repeated["deduped"] != true {
+		t.Fatalf("sender retry changed accepted identity: %d %v (%v)", retry.Code, repeated, err)
+	}
+	if n := runner.callCount(); n != 2 {
+		t.Fatalf("sender retry executed a second copy: %d calls, want 2", n)
+	}
 }

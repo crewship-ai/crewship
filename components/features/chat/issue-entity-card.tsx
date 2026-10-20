@@ -32,8 +32,8 @@ export function CardWriteFeedback({ state, message, retry, resolveConflict }: {
     {state === "saved" && "Saved"}
     {state === "validation" && message}
     {state === "rechecking" && "Checking current access…"}
-    {state === "unknown" && <><p>The outcome is unknown. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12 hover:translate-y-0" onClick={() => void retry()}>Check and retry the same operation</Button></>}
-    {state === "conflict" && <><p>This issue changed. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12 hover:translate-y-0" onClick={resolveConflict}>Reload current values; keep my draft</Button></>}
+    {state === "unknown" && <><p>The outcome is unknown. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-[44px] hover:translate-y-0" onClick={() => void retry()}>Check and retry the same operation</Button></>}
+    {state === "conflict" && <><p>This issue changed. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-[44px] hover:translate-y-0" onClick={resolveConflict}>Reload current values; keep my draft</Button></>}
   </div>
 }
 

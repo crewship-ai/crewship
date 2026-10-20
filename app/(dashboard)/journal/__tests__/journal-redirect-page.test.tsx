@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, waitFor } from "@testing-library/react"
+import type { PersonLookup } from "@/hooks/use-journal-lookup"
 
 // /journal is a redirect into Activity (F-02). The mapping table itself is
 // lib/__tests__/journal-redirect.test.ts; this suite checks the page applies
@@ -23,6 +24,7 @@ const m = vi.hoisted(() => ({
     crews: Map<string, { id: string; slug: string }>
     agents: Map<string, { id: string; slug: string }>
     missions: Map<string, { id: string; identifier?: string }>
+    people: Map<string, PersonLookup>
     loading: boolean
     refresh: () => void
   },

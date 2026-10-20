@@ -24,8 +24,8 @@ export function ViewerLinkSwitcher({ links, current, onSwitch, onViewLatest }: V
   options.forEach(option => counts.set(text(option), (counts.get(text(option)) ?? 0) + 1))
   return <div className="flex min-w-0 items-center gap-2">
     <span className="text-xs text-muted-foreground" aria-live="polite" data-testid="viewer-target-label">{targetLabel(current)}</span>
-    {current.mode === "revision" && onViewLatest && <Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" onClick={onViewLatest}>View latest</Button>}
-    {(options.length > 1 || (options.length === 1 && !inList)) && <select aria-label="Linked items" className="min-w-0 rounded border bg-background p-1 text-sm coarse:min-h-12" value={inList ? currentKey : ""}
+    {current.mode === "revision" && onViewLatest && <Button type="button" size="sm" variant="ghost" className="coarse:min-h-[44px]" onClick={onViewLatest}>View latest</Button>}
+    {(options.length > 1 || (options.length === 1 && !inList)) && <select aria-label="Linked items" className="min-w-0 rounded border bg-background p-1 text-sm coarse:min-h-[44px]" value={inList ? currentKey : ""}
       onChange={event => { const next = options.find(option => targetKey(option.target) === event.target.value); if (next) onSwitch(next.target) }}>
       {!inList && <option value="" disabled>Select an item</option>}
       {options.map(option => <option key={targetKey(option.target)} value={targetKey(option.target)}>{text(option)}{(counts.get(text(option)) ?? 0) > 1 ? ` · ${option.target.pageId.slice(0, 8)}` : ""}</option>)}

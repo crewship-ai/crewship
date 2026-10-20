@@ -28,9 +28,9 @@ func membersStub(t *testing.T) (*settingsStub, string) {
 
 func TestAcceptance_WorkspaceMembers_RoleChangeResolvesUserIDToMembership(t *testing.T) {
 	stub, cfg := membersStub(t)
-	stub.routes["PATCH /api/v1/workspaces/ws_test/members/mem_1"] = func(map[string]any) (int, string) {
+	stub.setRoute("PATCH /api/v1/workspaces/ws_test/members/mem_1", func(map[string]any) (int, string) {
 		return 200, `{"status":"updated","role":"MANAGER"}`
-	}
+	})
 	// The UI addresses a person by membership id; an agent has the user id.
 	// Both must land on the membership row.
 	for _, id := range []string{"mem_1", "user_1"} {
@@ -52,9 +52,9 @@ func TestAcceptance_WorkspaceMembers_RoleChangeResolvesUserIDToMembership(t *tes
 
 func TestAcceptance_WorkspaceMembers_LadderRefusalIsAnError(t *testing.T) {
 	stub, cfg := membersStub(t)
-	stub.routes["PATCH /api/v1/workspaces/ws_test/members/mem_2"] = func(map[string]any) (int, string) {
+	stub.setRoute("PATCH /api/v1/workspaces/ws_test/members/mem_2", func(map[string]any) (int, string) {
 		return 403, `{"error":"cannot modify a member above your own role"}`
-	}
+	})
 	out, err := runProfileCLI(t, cfg, "workspace", "member", "role", "mem_2", "member")
 	if err == nil {
 		t.Fatalf("a 403 from the ladder must fail the command; output: %s", out)
@@ -70,12 +70,12 @@ func TestAcceptance_WorkspaceMembers_LadderRefusalIsAnError(t *testing.T) {
 func TestAcceptance_WorkspaceMembers_CapabilitiesGrantRevokePreset(t *testing.T) {
 	stub, cfg := membersStub(t)
 	capPath := "/api/v1/workspaces/ws_test/members/user_1/capabilities"
-	stub.routes["PATCH "+capPath] = func(map[string]any) (int, string) {
+	stub.setRoute("PATCH "+capPath, func(map[string]any) (int, string) {
 		return 200, `{"user_id":"user_1","role":"MEMBER","capabilities":["chat","skill.create"]}`
-	}
-	stub.routes["GET "+capPath] = func(map[string]any) (int, string) {
+	})
+	stub.setRoute("GET "+capPath, func(map[string]any) (int, string) {
 		return 200, `{"user_id":"user_1","role":"MEMBER","capabilities":["chat","skill.create"]}`
-	}
+	})
 
 	if out, err := runProfileCLI(t, cfg, "workspace", "member", "capabilities", "grant", "user_1", "skill.create"); err != nil {
 		t.Fatalf("grant: %v\n%s", err, out)
@@ -111,7 +111,7 @@ func TestAcceptance_WorkspaceMembers_CapabilitiesGrantRevokePreset(t *testing.T)
 
 func TestAcceptance_WorkspaceMembers_RemoveUsesMembershipID(t *testing.T) {
 	stub, cfg := membersStub(t)
-	stub.routes["DELETE /api/v1/workspaces/ws_test/members/mem_1"] = func(map[string]any) (int, string) { return 200, `{"status":"removed"}` }
+	stub.setRoute("DELETE /api/v1/workspaces/ws_test/members/mem_1", func(map[string]any) (int, string) { return 200, `{"status":"removed"}` })
 	out, err := runProfileCLI(t, cfg, "workspace", "member", "remove", "user_1", "--yes")
 	if err != nil {
 		t.Fatalf("remove: %v\n%s", err, out)

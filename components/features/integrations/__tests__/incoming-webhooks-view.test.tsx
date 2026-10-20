@@ -63,6 +63,7 @@ function data(): IncomingData {
       refresh: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      test: vi.fn<IncomingData["hooks"]["test"]>().mockResolvedValue({ inputs: {}, ignored_template_keys: [], valid: true }),
       remove: vi.fn(),
     },
   }

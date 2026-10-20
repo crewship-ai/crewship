@@ -332,7 +332,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {!selectedSlug && documentAvailability.data === true && <SubBarSecondary
               icon={FolderUser}
               aria-pressed={personalSpace}
-              className="coarse:min-h-12"
+              className="coarse:min-h-[44px]"
               onClick={() => setPersonalSpace(value => !value)}
               title="Show your private Documents in this workspace"
             >My space</SubBarSecondary>}

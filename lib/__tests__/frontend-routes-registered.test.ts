@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { artifactCopyMove, chatArtifactContext, documentReviewActions } from "@/lib/feature-flags"
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -39,14 +40,23 @@ const KNOWN: Record<string, string> = {
   "/api/v1/llm/models": "known defect #3766: the chat model picker calls a route nobody registers",
 }
 
+// Proposed clients may ship behind a default-off surface before their API.
+// Scope each exception to its exact client file: the same missing path used by
+// another component must still fail. These are not registered server routes.
+const DEFERRED_CLIENTS: Record<string, { file: string; flag: string; enabled: () => boolean }> = {
+  "/api/v1/chats/X/X": { file: "components/features/chat/artifact-context/client.ts", flag: "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", enabled: chatArtifactContext },
+  "/api/v1/pages/X/document/proposals": { file: "lib/documents/proposals.ts", flag: "NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS", enabled: documentReviewActions },
+  "/api/v1/pages/X/duplicate": { file: "lib/pages/catalog-duplicate.ts", flag: "NEXT_PUBLIC_ARTIFACT_COPY_MOVE", enabled: artifactCopyMove },
+  "/api/v1/pages/X/move": { file: "lib/pages/catalog-move.ts", flag: "NEXT_PUBLIC_ARTIFACT_COPY_MOVE", enabled: artifactCopyMove },
+}
+
 function routes(): RegExp[] {
   const spec = JSON.parse(readFileSync(path.join(ROOT, "internal/api/openapi.gen.json"), "utf8")) as { paths: Record<string, unknown> }
   return Object.keys(spec.paths).map((p) => new RegExp(`^${p.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{[^}]+\}/g, "[^/]+")}${"$"}`))
 }
 
-function calledPaths(): Map<string, string> {
-  const out = execFileSync("git", ["grep", "-nE", "/api/v1/", "--", "app", "components", "hooks", "lib", ":!**/__tests__/**", ":!**/*.test.*"], { cwd: ROOT, encoding: "utf8" })
-  const found = new Map<string, string>()
+function calledPaths(out = execFileSync("git", ["grep", "-nE", "/api/v1/", "--", "app", "components", "hooks", "lib", ":!**/__tests__/**", ":!**/*.test.*"], { cwd: ROOT, encoding: "utf8" })): Iterable<[string, string]> {
+  const found = new Map<string, [string, string]>()
   for (const line of out.split("\n")) {
     const file = line.split(":", 1)[0]
     // Fold template holes innermost first, so `/pages/${encode(`@${id}`)}/x`
@@ -62,23 +72,52 @@ function calledPaths(): Map<string, string> {
       u = u.replace(/(?<!\/)§.*$/, "") // a hole glued to a segment is a query suffix
       u = u.replace(/§/g, "X")
       if (u.includes("${") || u.includes("*") || u.includes("...")) continue
-      found.set(u.replace(/\/$/, ""), found.get(u.replace(/\/$/, "")) ?? `${file}${raw.endsWith("/") ? " (prefix)" : ""}`)
+      const normalized = u.replace(/\/$/, "")
+      const where = `${file}${raw.endsWith("/") ? " (prefix)" : ""}`
+      found.set(JSON.stringify([normalized, where]), [normalized, where])
     }
   }
-  return found
+  return found.values()
+}
+
+function missingRoutes(calls: Iterable<[string, string]>, rs = routes()): string[] {
+  const prefixes = rs.map((r) => new RegExp(r.source.replace(/\$$/, "")))
+  const missing: string[] = []
+  for (const [u, where] of calls) {
+    if (KNOWN[u] || DEFERRED_CLIENTS[u]?.file === where) continue
+    if (rs.some((r) => r.test(u.replace(/X/g, "x")))) continue
+    if (where.endsWith("(prefix)") && prefixes.some((r) => r.test(`${u.replace(/X/g, "x")}/`))) continue
+    missing.push(`${u} (${where.replace(" (prefix)", "")})`)
+  }
+  return missing
 }
 
 describe("frontend → router", () => {
-  it("every /api/v1 path the app calls is registered, or a listed exception", () => {
-    const rs = routes()
-    const prefixes = rs.map((r) => new RegExp(r.source.replace(/\$$/, "")))
-    const missing: string[] = []
-    for (const [u, where] of calledPaths()) {
-      if (KNOWN[u]) continue
-      if (rs.some((r) => r.test(u.replace(/X/g, "x")))) continue
-      if (where.endsWith("(prefix)") && prefixes.some((r) => r.test(`${u.replace(/X/g, "x")}/`))) continue
-      missing.push(`${u} (${where.replace(" (prefix)", "")})`)
+  it("proposed clients remain limited to default-off surfaces", () => {
+    try {
+      for (const client of Object.values(DEFERRED_CLIENTS)) {
+        vi.stubEnv(client.flag, undefined)
+        expect(client.enabled(), client.file).toBe(false)
+        vi.stubEnv(client.flag, "false")
+        expect(client.enabled(), client.file).toBe(false)
+      }
+    } finally {
+      vi.unstubAllEnvs()
     }
+  })
+
+  it.each(Object.entries(DEFERRED_CLIENTS))("does not hide another file using deferred path %s", (url, client) => {
+    const deferred = `${client.file}:1:apiFetch("${url}")`
+    const unflagged = `components/unflagged-client.tsx:1:apiFetch("${url}")`
+    const expected = [`${url} (components/unflagged-client.tsx)`]
+    // The exception cannot depend on which caller git grep encounters first.
+    for (const lines of [[deferred, unflagged], [unflagged, deferred]]) {
+      expect(missingRoutes(calledPaths(lines.join("\n")), [])).toEqual(expected)
+    }
+  })
+
+  it("every /api/v1 path the app calls is registered, or a listed exception", () => {
+    const missing = missingRoutes(calledPaths())
     expect(missing).toEqual([])
   })
 })

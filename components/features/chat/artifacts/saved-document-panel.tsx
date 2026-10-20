@@ -20,7 +20,7 @@ export function SavedDocumentPanel({ headerExtra, ...props }: SavedDocumentPanel
   return <DocumentViewer {...props} scopeKey={scopeKey} read={read}
     headerExtra={typeof headerExtra === "function" ? headerExtra(read.status === "ready") : headerExtra}
     renderBody={document => <div className="space-y-3">
-      <Button asChild variant="outline" size="sm" className="coarse:min-h-12">
+      <Button asChild variant="outline" size="sm" className="coarse:min-h-[44px]">
         <a href={`/pages?${new URLSearchParams({ ref: "@" + document.target.pageId, workspace_id: document.target.workspaceId })}`}
           target="_blank" rel="noopener noreferrer">
           Open full editor<ExternalLink className="size-4" aria-hidden />

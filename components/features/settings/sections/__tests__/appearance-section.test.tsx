@@ -223,7 +223,7 @@ describe("AppearanceSection autosave and Undo", () => {
   it("Undo of a style pick restores the style, its accent and its marks", () => {
     render(<AppearanceSection />)
     const before = document.documentElement.dataset.accent ?? "blue"
-    fireEvent.click(screen.getByRole("radio", { name: "Plum", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Plum$/ }))
     expect(readStyleState()?.style).toBe("plum")
     act(() => lastUndo().onClick())
     expect(readStyleState()).toBeNull()

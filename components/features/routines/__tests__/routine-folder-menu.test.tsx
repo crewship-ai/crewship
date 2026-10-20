@@ -2,7 +2,7 @@
 // `foldermenu`): Rename…, Icon and colour…, New subfolder, Move to…, Delete
 // folder…. Share is not offered: routine folders grant no access.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 
 import { RoutinesExplorer } from "../routines-explorer"
@@ -34,13 +34,13 @@ const list = [
 const routines = [pipeline("standup", "Standup", "f_daily"), pipeline("loose", "Loose")]
 
 type FolderProps = NonNullable<React.ComponentProps<typeof RoutinesExplorer>["folders"]>
-let cb: { onCreate: ReturnType<typeof vi.fn>; onMove: ReturnType<typeof vi.fn>; onUpdate: ReturnType<typeof vi.fn>; onDelete: ReturnType<typeof vi.fn> }
+let cb: { [K in "onCreate" | "onMove" | "onUpdate" | "onDelete"]: Mock<NonNullable<FolderProps[K]>> }
 beforeEach(() => {
   cb = {
-    onCreate: vi.fn(async () => null),
-    onMove: vi.fn(async () => null),
-    onUpdate: vi.fn(async () => null),
-    onDelete: vi.fn(async () => null),
+    onCreate: vi.fn<NonNullable<FolderProps["onCreate"]>>(async () => null),
+    onMove: vi.fn<NonNullable<FolderProps["onMove"]>>(async () => null),
+    onUpdate: vi.fn<NonNullable<FolderProps["onUpdate"]>>(async () => null),
+    onDelete: vi.fn<NonNullable<FolderProps["onDelete"]>>(async () => null),
   }
 })
 

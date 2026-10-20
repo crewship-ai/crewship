@@ -6,7 +6,7 @@ import { diffToPatch, type Unrepresentable } from "@/lib/slides/operations"
 import type { SlidesSaveClient, SlidesSnapshot } from "@/lib/slides/save-client"
 import { SlidesEditor } from "./slides-editor"
 
-const control = "min-h-9 coarse:min-h-12 rounded border px-3 disabled:opacity-50"
+const control = "min-h-9 coarse:min-h-[44px] rounded border px-3 disabled:opacity-50"
 const reasons: Record<Unrepresentable, string> = {
   layer_order: "layer order",
   slide_order: "slide order",

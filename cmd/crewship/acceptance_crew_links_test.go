@@ -25,7 +25,7 @@ func crewLinksStub(t *testing.T) (*settingsStub, string) {
 
 func TestAcceptance_CrewLinks_ConnectSendsResolvedIDsAndDirection(t *testing.T) {
 	stub, cfg := crewLinksStub(t)
-	stub.routes["POST /api/v1/crew-connections"] = func(map[string]any) (int, string) { return 201, `{"id":"conn_9"}` }
+	stub.setRoute("POST /api/v1/crew-connections", func(map[string]any) (int, string) { return 201, `{"id":"conn_9"}` })
 
 	out, err := runProfileCLI(t, cfg, "crew", "connect", "alpha", "beta")
 	if err != nil {
@@ -69,9 +69,9 @@ func TestAcceptance_CrewLinks_ListShowsDirectionsAndJSONParses(t *testing.T) {
 
 func TestAcceptance_CrewLinks_FileAccessCarriesExpectedVersion(t *testing.T) {
 	stub, cfg := crewLinksStub(t)
-	stub.routes["PUT /api/v1/crew-connections/conn_1/file-access"] = func(b map[string]any) (int, string) {
+	stub.setRoute("PUT /api/v1/crew-connections/conn_1/file-access", func(b map[string]any) (int, string) {
 		return 200, `{"id":"conn_1","access_version":4}`
-	}
+	})
 	out, err := runProfileCLI(t, cfg, "crew", "file-access", "conn_1", "alpha", "read_write", "3")
 	if err != nil {
 		t.Fatalf("file-access: %v\n%s", err, out)
@@ -89,9 +89,9 @@ func TestAcceptance_CrewLinks_FileAccessCarriesExpectedVersion(t *testing.T) {
 // retry, so the UI's "someone changed this" state has one meaning everywhere.
 func TestAcceptance_CrewLinks_StaleFileAccessVersionExitsConflict(t *testing.T) {
 	stub, cfg := crewLinksStub(t)
-	stub.routes["PUT /api/v1/crew-connections/conn_1/file-access"] = func(map[string]any) (int, string) {
+	stub.setRoute("PUT /api/v1/crew-connections/conn_1/file-access", func(map[string]any) (int, string) {
 		return 409, `{"error":"stale access_version"}`
-	}
+	})
 	out, err := runProfileCLI(t, cfg, "crew", "file-access", "conn_1", "alpha", "none", "2")
 	if err == nil {
 		t.Fatalf("a 409 must fail; output: %s", out)
@@ -106,7 +106,7 @@ func TestAcceptance_CrewLinks_StaleFileAccessVersionExitsConflict(t *testing.T) 
 
 func TestAcceptance_CrewLinks_DisconnectDeletesTheConnection(t *testing.T) {
 	stub, cfg := crewLinksStub(t)
-	stub.routes["DELETE /api/v1/crew-connections/conn_1"] = func(map[string]any) (int, string) { return 200, `{}` }
+	stub.setRoute("DELETE /api/v1/crew-connections/conn_1", func(map[string]any) (int, string) { return 200, `{}` })
 	out, err := runProfileCLI(t, cfg, "crew", "disconnect", "conn_1")
 	if err != nil {
 		t.Fatalf("disconnect: %v\n%s", err, out)

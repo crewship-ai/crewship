@@ -1,7 +1,7 @@
 // Sign out everywhere used the browser's own confirm() — one sentence in the
 // browser's chrome, untestable and outside the page (POP-02). It is the
 // shared confirmation now, and a refusal keeps it open.
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react"
@@ -71,11 +71,12 @@ describe("Admin confirmations", () => {
     const root = path.resolve(__dirname, "../../../../..")
     const hits: string[] = []
     const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const name = entry.name
         const p = path.join(dir, name)
         if (name === "__tests__" || name === "node_modules") continue
-        if (statSync(p).isDirectory()) walk(p)
-        else if (/\.tsx?$/.test(name) && /window\.confirm\(/.test(readFileSync(p, "utf8"))) hits.push(path.relative(root, p))
+        if (entry.isDirectory()) walk(p)
+        else if (entry.isFile() && /\.tsx?$/.test(name) && /window\.confirm\(/.test(readFileSync(p, "utf8"))) hits.push(path.relative(root, p))
       }
     }
     walk(path.join(root, "components/features/admin"))

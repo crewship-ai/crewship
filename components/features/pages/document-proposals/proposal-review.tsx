@@ -60,14 +60,14 @@ export function ProposalReview({ proposal, headRev, reviewedRev, canDecide, hasL
     {open && (canDecide ? <div className="space-y-2">
       {hasLocalDraft && <div role="status" className="space-y-2">
         <p>You have unsent edits. Accepting reloads the document, so wait until they are confirmed, or download them first.</p>
-        <Button type="button" variant="outline" className="coarse:min-h-12" onClick={onDownloadDraft}>Download unsent edits</Button>
+        <Button type="button" variant="outline" className="coarse:min-h-[44px]" onClick={onDownloadDraft}>Download unsent edits</Button>
       </div>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" className="coarse:min-h-12" disabled={busy || needsChoice} onClick={() => void decide("accept")}>{retry === "accept" ? "Try again (same request)" : "Accept proposal"}</Button>
+        <Button type="button" className="coarse:min-h-[44px]" disabled={busy || needsChoice} onClick={() => void decide("accept")}>{retry === "accept" ? "Try again (same request)" : "Accept proposal"}</Button>
         {confirmReject ? <>
-          <Button type="button" variant="destructive" className="coarse:min-h-12" disabled={busy} onClick={() => void decide("reject")}>{retry === "reject" ? "Try again (same request)" : "Confirm reject"}</Button>
-          <Button type="button" variant="ghost" className="coarse:min-h-12" disabled={busy} onClick={() => setConfirmReject(false)}>Keep reviewing</Button>
-        </> : <Button type="button" variant="outline" className="coarse:min-h-12" disabled={busy} onClick={() => setConfirmReject(true)}>Reject proposal</Button>}
+          <Button type="button" variant="destructive" className="coarse:min-h-[44px]" disabled={busy} onClick={() => void decide("reject")}>{retry === "reject" ? "Try again (same request)" : "Confirm reject"}</Button>
+          <Button type="button" variant="ghost" className="coarse:min-h-[44px]" disabled={busy} onClick={() => setConfirmReject(false)}>Keep reviewing</Button>
+        </> : <Button type="button" variant="outline" className="coarse:min-h-[44px]" disabled={busy} onClick={() => setConfirmReject(true)}>Reject proposal</Button>}
       </div>
     </div> : <p className="text-sm">You can compare this proposal but not decide on it.</p>)}
   </section>

@@ -20,7 +20,7 @@ export function ArtifactLibraryHost({ workspaceId, chatId, currentUserId, onOpen
   // A denied read drops everything: nothing from a lost grant stays on screen.
   const items = result?.status === "ok" ? rows.map(row => row.item) : []
   return <div className="shrink-0 border-b px-4 py-1 md:px-6">
-    <Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" aria-expanded={open} aria-controls="chat-artifact-library" onClick={() => setOpen(value => !value)}>Library</Button>
+    <Button type="button" size="sm" variant="ghost" className="coarse:min-h-[44px]" aria-expanded={open} aria-controls="chat-artifact-library" onClick={() => setOpen(value => !value)}>Library</Button>
     {open && <div id="chat-artifact-library" className="max-h-60 overflow-auto py-2">
       <ConversationLibrary items={items} filter={filter} status={status} onRetry={() => void refetch()} onFilterChange={setFilter}
         onOpen={linkId => {

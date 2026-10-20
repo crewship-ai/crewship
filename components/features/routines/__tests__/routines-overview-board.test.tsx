@@ -121,13 +121,22 @@ describe("<RoutinesOverviewBoard>", () => {
       { id: "p_failed", pipeline_slug: "weekly", fire_at: at(-5), status: "failed", last_error: "The routine is no longer active." },
       { id: "p_expired", pipeline_slug: "pr", fire_at: at(-6), status: "expired" },
       { id: "p_old", pipeline_slug: "weekly", fire_at: at(-24 * 10), status: "failed" },
-      { id: "p_wait", pipeline_slug: "pr", fire_at: at(-0.1), status: "pending", dispatch_attempts: 2 },
+      { id: "p_wait", pipeline_slug: "pr", fire_at: at(-0.1), status: "pending", dispatch_attempts: 2, reason_code: "routine_capacity" },
     ] as never[]
     render(<RoutinesOverviewBoard {...props({ pendingStarts, activeRuns: [], waitpoints: [] })} />)
     const needs = screen.getByRole("region", { name: "Needs you" })
     expect(within(needs).getByText("Weekly report: 1 accepted start did not run")).toBeInTheDocument()
     expect(within(needs).getByText("Review pull requests: 1 accepted start did not run")).toBeInTheDocument()
     expect(within(screen.getByRole("region", { name: "Running now" })).getByText(/1 start waits for a free slot/)).toBeInTheDocument()
+  })
+
+  it.each([undefined, "retry_backoff", "future_code"])("does not infer a capacity wait from attempts with reason %s", reason_code => {
+    const pendingStarts = [{ id: "unknown", pipeline_slug: "pr", fire_at: at(-0.1), status: "pending", dispatch_attempts: 9, reason_code }] as never[]
+    const view = render(<RoutinesOverviewBoard {...props({ pendingStarts, activeRuns: [], waitpoints: [] })} />)
+    const running = screen.getByRole("region", { name: "Running now" })
+    expect(within(running).queryByText(/start waits for a free slot/)).not.toBeInTheDocument()
+    view.rerender(<RoutinesOverviewBoard {...props({ pendingStarts: [...pendingStarts, { id: "capacity", pipeline_slug: "pr", fire_at: at(-0.1), status: "pending", dispatch_attempts: 0, reason_code: "routine_capacity" }] as never[], activeRuns: [], waitpoints: [] })} />)
+    expect(within(running).getByText(/1 start waits for a free slot/)).toBeInTheDocument()
   })
 
   it("says so when nothing needs anyone and nothing runs", () => {

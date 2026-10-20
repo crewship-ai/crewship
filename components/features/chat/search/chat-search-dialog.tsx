@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useHotkeys } from "react-hotkeys-hook"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import {
@@ -89,10 +89,9 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
   const note = status === "partial" || status === "truncated" || status === "unavailable" || status === "error"
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[10%] max-h-[80dvh] w-[calc(100vw-1rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl" aria-describedby={undefined}>
-        <DialogTitle className="sr-only">Search chats</DialogTitle>
-        <DialogDescription className="sr-only">Filters: from:, in:, has:link|code|tool, after:YYYY-MM-DD, before:YYYY-MM-DD</DialogDescription>
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="md" restoreOpenerFocus>
+      <CreateSurfaceHeader title="Search chats" description="Filters: from:, in:, has:link|code|tool, after:YYYY-MM-DD, before:YYYY-MM-DD" onClose={() => onOpenChange(false)} />
+      <CreateSurfaceBody padded={false} scroll={false}>
         <div role="tablist" aria-label="Search scope" className="flex gap-1 border-b px-2 pt-2 pr-10">
           {SCOPES.map((s, i) => (
             <button key={s.id} id={tabId(s.id)} type="button" role="tab" aria-selected={scope === s.id} aria-controls={panelId} tabIndex={scope === s.id ? 0 : -1}
@@ -135,8 +134,8 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
                 {rows.map(({ hit, href }, i) => (
                   <li key={`${hit.session_id}:${hit.id}`} id={optionId(i)} role="option" aria-selected={i === active} data-href={href}
                     onClick={() => openRow(i)} onMouseMove={() => setActive(i)}
-                    className={cn("kit-tap min-h-11 cursor-pointer px-3 py-1.5 text-xs", i === active && "bg-accent")}>
-                    <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    className={cn("kit-tap min-h-11 coarse:min-h-[44px] cursor-pointer px-3 py-1.5 text-xs", i === active && "bg-accent")}>
+                    <span className="flex items-center gap-2 text-micro text-muted-foreground">
                       <span className="truncate">{hit.role === "user" ? "User" : hit.agent_name || hit.agent_slug}</span>
                       <time dateTime={hit.ts}>{new Date(hit.ts).toLocaleDateString()}</time>
                     </span>
@@ -152,15 +151,15 @@ export function ChatSearchDialog({ workspaceId, roster, current, open, onOpenCha
               files.items.length === 0 && files.status !== "idle" ? <p className="px-3 py-2 text-xs text-muted-foreground">No matching files among indexed content.</p> :
               <>
                 <ul aria-label="File results">{files.items.map((f) => (
-                  <li key={f.id} aria-disabled="true" title="Sample data, not a real file" className="min-h-11 px-3 py-1.5 text-xs opacity-70"><span className="block truncate font-medium">{f.name}</span>{f.snippet && <span className="line-clamp-2 text-muted-foreground">{snippetSegments(f.snippet, parsed.text).map((sg, k) => sg.match ? <mark key={k}>{sg.text}</mark> : <span key={k}>{sg.text}</span>)}</span>}<span className="sr-only">Sample data, not a real file</span></li>
+                  <li key={f.id} aria-disabled="true" title="Sample data, not a real file" className="min-h-11 coarse:min-h-[44px] px-3 py-1.5 text-xs opacity-70"><span className="block truncate font-medium">{f.name}</span>{f.snippet && <span className="line-clamp-2 text-muted-foreground">{snippetSegments(f.snippet, parsed.text).map((sg, k) => sg.match ? <mark key={k}>{sg.text}</mark> : <span key={k}>{sg.text}</span>)}</span>}<span className="sr-only">Sample data, not a real file</span></li>
                 ))}</ul>
               </>
             )}
-            {rows.length >= CHAT_SEARCH_PAGE && <p className="px-3 py-1 text-[11px] text-muted-foreground">Showing the first {CHAT_SEARCH_PAGE} matches. Narrow the search to see others.</p>}
+            {rows.length >= CHAT_SEARCH_PAGE && <p className="px-3 py-1 text-label text-muted-foreground">Showing the first {CHAT_SEARCH_PAGE} matches. Narrow the search to see others.</p>}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+    </CreateSurface>
   )
 }
 

@@ -147,12 +147,15 @@ function hit(q: string, ...fields: (string | null | undefined)[]): boolean {
   return fields.some((f) => f != null && f.toLowerCase().includes(q))
 }
 
-const VIEW_TEST: Record<CrewView, (row: PanelCrewRow) => boolean> = {
-  all: () => true,
-  needs: (r) => r.status.state === "needs",
-  working: (r) => r.status.state === "working",
-  idle: (r) => r.status.state === "idle",
-  temp: (r) => r.agents.some((a) => a.ephemeral),
+function matchesView(view: CrewView, row: PanelCrewRow): boolean {
+  switch (view) {
+    case "all": return true
+    case "needs": return row.status.state === "needs"
+    case "working": return row.status.state === "working"
+    case "idle": return row.status.state === "idle"
+    case "temp": return row.agents.some((agent) => agent.ephemeral)
+    default: return false
+  }
 }
 
 const SECTION_LABEL: Record<CrewState, string> = { needs: "Needs you", working: "Working", idle: "Idle" }
@@ -189,13 +192,13 @@ export function buildPanel<C extends PanelCrew, A extends PanelAgent>({
     }
   })
   const counts = Object.fromEntries(
-    CREW_VIEWS.map((v) => [v.id, rows.filter((r) => VIEW_TEST[v.id](r as PanelCrewRow)).length]),
+    CREW_VIEWS.map((v) => [v.id, rows.filter((r) => matchesView(v.id, r)).length]),
   ) as Record<CrewView, number>
 
   const q = search.trim().toLowerCase()
   const visible = rows.filter(
     (r) =>
-      VIEW_TEST[state.view](r as PanelCrewRow) &&
+      matchesView(state.view, r) &&
       (!q || hit(q, r.crew.name, r.crew.slug) || r.agents.some((a) => hit(q, a.name, a.slug, a.role_title))),
   )
   const byName = (a: PanelCrewRow<C, A>, b: PanelCrewRow<C, A>) => a.crew.name.localeCompare(b.crew.name)

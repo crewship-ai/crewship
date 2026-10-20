@@ -84,7 +84,7 @@ test.describe("legacy links without JavaScript", () => {
   for (const [from, to] of [["/agents", "/crews"], ["/audit", "/settings/audit"]] as const) {
     test(`${from} lands on ${to}`, async ({ page }) => {
       await page.goto(from)
-      await expect(page).toHaveURL(new RegExp(`${to.replace(/\//g, "\\/")}(\\.html)?(\\?|$)`))
+      await expect(page).toHaveURL((url) => url.pathname === to || url.pathname === `${to}.html`)
     })
   }
 })

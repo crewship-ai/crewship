@@ -30,7 +30,7 @@ export function WorkResultCard({ card, onAction }: WorkResultCardProps) {
     </dl>}
     {view.detail && <p className="text-xs">{view.detail}</p>}
     {view.actions.length > 0 && <div className="flex flex-wrap gap-2">
-      {view.actions.map(action => <Button key={action.id} type="button" size="sm" variant="outline" className="coarse:min-h-12"
+      {view.actions.map(action => <Button key={action.id} type="button" size="sm" variant="outline" className="coarse:min-h-[44px]"
         onClick={event => onAction(action.id, card, event.currentTarget)}>{action.label}</Button>)}
     </div>}
   </article>

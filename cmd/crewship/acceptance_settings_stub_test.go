@@ -27,6 +27,14 @@ type settingsCall struct {
 	Body                map[string]any
 }
 
+// setRoute may run after start: background profile/health requests can still
+// be reading the route table while a test prepares its next CLI command.
+func (s *settingsStub) setRoute(route string, handler func(map[string]any) (int, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.routes[route] = handler
+}
+
 func (s *settingsStub) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
