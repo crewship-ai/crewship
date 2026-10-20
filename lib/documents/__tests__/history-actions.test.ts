@@ -51,7 +51,7 @@ describe("proposal client", () => {
     reply(200, { ...wire, base_content: base, proposed_content: proposed })
     expect(await createHttpProposalClient("w", "page").read("p1")).toMatchObject({ id: "p1", baseRev: 4, baseContent: base, proposedContent: proposed })
   })
-  it.each([[{ ...wire, base_rev: "4" }], [{ ...wire, status: "weird" }], [{ ...wire, target: { block_ids: [1] } }], [{ ...wire, id: 7 }]])("rejects a malformed proposal %#", async bad => {
+  it.each([[{ ...wire, base_rev: "4" }], [{ ...wire, status: "weird" }], [{ ...wire, target: { block_ids: [1] } }], [{ ...wire, target: { block_ids: [] } }], [{ ...wire, id: 7 }]])("rejects a malformed proposal %#", async bad => {
     reply(200, { proposals: [bad] })
     await expect(createHttpProposalClient("w", "page").list()).rejects.toThrow("proposals unreadable")
   })

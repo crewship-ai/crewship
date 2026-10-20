@@ -23,12 +23,29 @@ const done = { status: "done" as const, rev: 6 }
 const revert = (n = 1) => screen.getAllByRole("button", { name: "Revert this change" })[n]
 
 describe("history compare and revert", () => {
-  it("compares the selected revision with the current confirmed document using words, not colour", async () => {
+  it("compares the selected revision with the saved version using words, not colour", async () => {
     view({})
-    fireEvent.click(screen.getByRole("button", { name: "Compare with current" }))
+    fireEvent.click(screen.getByRole("button", { name: "Compare with saved version" }))
     expect(screen.getByText(/1 added, 1 removed, 1 changed, 0 moved/)).toBeInTheDocument()
     expect(screen.getByText(/Added · paragraph/)).toBeInTheDocument()
     expect(screen.getByText(/Removed · paragraph/)).toBeInTheDocument()
+  })
+  it("labels the comparison as the saved version and says unsent edits are not included", () => {
+    view({ hasLocalDraft: true })
+    fireEvent.click(screen.getByRole("button", { name: "Compare with saved version" }))
+    expect(screen.getByRole("region", { name: "Compare revision 2 with the saved version" })).toBeInTheDocument()
+    expect(screen.getByText(/Unsent edits are not included/)).toBeInTheDocument()
+  })
+  it("has no draft note when nothing is unsent", () => {
+    view({})
+    fireEvent.click(screen.getByRole("button", { name: "Compare with saved version" }))
+    expect(screen.queryByText(/Unsent edits are not included/)).toBeNull()
+  })
+  it("never compares against a document that has not loaded", () => {
+    view({ currentContent: undefined })
+    expect(screen.getByRole("button", { name: "Compare with saved version" })).toBeDisabled()
+    expect(screen.getByText("Loading current document…")).toBeInTheDocument()
+    expect(screen.queryByText(/Removed · paragraph/)).toBeNull()
   })
   it("offers no write action without an actions client", () => {
     view({})

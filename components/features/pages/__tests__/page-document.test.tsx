@@ -259,7 +259,7 @@ async function openReviewHistory(canWrite:boolean,flag=true) {
   render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
   fireEvent.click(await screen.findByRole("button",{name:"History"}))
   fireEvent.click(await screen.findByRole("button",{name:/Revision 1/}))
-  await screen.findByRole("button",{name:"Compare with current"})
+  await screen.findByRole("button",{name:"Compare with saved version"})
   saved.destroy()
 }
 it("offers Revert to a writer",async()=>{
@@ -274,7 +274,7 @@ it("never offers Revert to a reader",async()=>{
 })
 it("offers Compare without the review flag, but neither Revert nor proposals",async()=>{
   await openReviewHistory(true,false)
-  expect(screen.getByRole("button",{name:"Compare with current"})).toBeInTheDocument()
+  expect(screen.getByRole("button",{name:"Compare with saved version"})).toBeInTheDocument()
   expect(screen.queryByRole("button",{name:"Revert this change"})).toBeNull()
   expect(screen.queryByRole("region",{name:"Document proposals"})).toBeNull()
   expect(request.mock.calls.some(([url])=>String(url).includes("/proposals"))).toBe(false)

@@ -71,10 +71,14 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
         </li>)}
       </ul>}
       {selectedId && <div className="space-y-2">
-        {exact && review && <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="coarse:min-h-12" aria-pressed={comparing === selectedId} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with current</Button>
+        {exact && review && <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" className="coarse:min-h-12" aria-pressed={comparing === selectedId} disabled={review.currentContent === undefined} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with saved version</Button>
+          {review.currentContent === undefined && <p role="status" className="text-sm">Loading current document…</p>}
         </div>}
-        {exact && review && comparing === selectedId && <DocumentCompare base={read.content} target={review.currentContent} baseLabel={`revision ${read.rev}`} targetLabel="the current document" />}
+        {exact && review && review.currentContent !== undefined && comparing === selectedId && <>
+          {review.hasLocalDraft && <p className="text-sm">Unsent edits are not included: this compares with the last saved version.</p>}
+          <DocumentCompare base={read.content} target={review.currentContent} baseLabel={`revision ${read.rev}`} targetLabel="the saved version" />
+        </>}
         {exact && review?.actions && <HistoryActions key={selectedId} checkpointId={selectedId} revision={read.rev} headRev={review.headRev} hasLocalDraft={review.hasLocalDraft} actions={review.actions} onDownloadDraft={review.onDownloadDraft} onDone={review.onActionDone} />}
         {exact ? <ConfirmedContent key={`${scopeKey}/${selectedId}/${read.rev}`} snapshot={read} />
           : <p role={snapshot.status === "denied" || snapshot.status === "error" ? "alert" : "status"}>

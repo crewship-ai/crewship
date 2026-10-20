@@ -35,7 +35,7 @@ function proposalFromWire(value: unknown): DocumentProposal {
   const { id, author, run_id: runId, target, base_rev: baseRev, status, created_at: createdAt } = value
   const ids = isObject(target) && Array.isArray(target.block_ids) ? target.block_ids : undefined
   const scope = target === "document" || (isObject(target) && target.kind === "document") ? { kind: "document" as const }
-    : ids && ids.every(item => typeof item === "string") ? { kind: "blocks" as const, blockIds: ids as string[] } : undefined
+    : ids && ids.length > 0 && ids.every(item => typeof item === "string") ? { kind: "blocks" as const, blockIds: ids as string[] } : undefined
   if (typeof id !== "string" || typeof author !== "string" || !scope || !Number.isSafeInteger(baseRev) || typeof status !== "string" || !STATUSES.includes(status) || typeof createdAt !== "string"
     || (runId !== undefined && runId !== null && typeof runId !== "string")) throw new Error("proposals unreadable")
   return { id, author, ...(typeof runId === "string" ? { runId } : {}), target: scope, baseRev: baseRev as number, status: status as ProposalStatus, createdAt }

@@ -26,7 +26,7 @@ import type { DocumentHistoryActions } from "@/lib/documents/history-actions"
 
 /** Optional compare and revert tools; without them history is a read-only browser (plus restore). */
 export interface DocumentHistoryReview {
-  /** Confirmed head content and revision; compare and revert are relative to it. */
+  /** Confirmed (saved) head content and revision; compare and revert are relative to it. Undefined until loaded. */
   currentContent: unknown
   headRev: number
   hasLocalDraft: boolean

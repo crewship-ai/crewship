@@ -228,4 +228,3 @@ __pycache__/
 
 # Local chat worker bundles are generated before Next dev/build.
 /public/chat-workers/
-/.next-*

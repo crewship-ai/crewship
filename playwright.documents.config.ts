@@ -7,18 +7,20 @@ import { defineConfig, devices } from "@playwright/test"
  *   scripts/throwaway-server.sh run NAME --documents --binary PATH -- \
  *     pnpm exec playwright test --config=playwright.documents.config.ts
  *
- * (--env CREWSHIP_SKIP_SIDECAR=1 and --env CREWSHIP_ALLOWED_ORIGINS=http://localhost:3391,http://localhost:3392 are
+ * (--env CREWSHIP_SKIP_SIDECAR=1 and --env CREWSHIP_ALLOWED_ORIGINS=http://localhost:3391 are
  * needed: no sidecar binary beside a plain `go build`, and the browser origin is the dev frontend.)
  *
- * The run command exports CREWSHIP_SERVER; this config starts two development
- * frontends that proxy /api to that port, one with the review flag off and one on.
+ * The run command exports CREWSHIP_SERVER; this config starts a development
+ * frontend that proxies /api to that port, with the review flag off or on
+ * (DOCUMENTS_E2E_REVIEW_FLAG=off|on; run the spec once for each).
  */
 const server = process.env.CREWSHIP_SERVER ?? ""
 const goPort = /:(\d{2,5})\/?$/.exec(server)?.[1] ?? "8080"
-// Two frontends on one backend: the default one (flag off, where compare must
-// already work) and one with the review flag on (revert and proposals).
+// One frontend per run: DOCUMENTS_E2E_REVIEW_FLAG=off (default) runs the compare
+// tests where the review flag is off; =on runs revert and proposals with it on.
+// Run the command twice, each against its own throwaway server.
 const webPort = process.env.DOCUMENTS_E2E_WEB_PORT && /^[1-9]\d{3,4}$/.test(process.env.DOCUMENTS_E2E_WEB_PORT) ? process.env.DOCUMENTS_E2E_WEB_PORT : "3391"
-const flaggedPort = String(Number(webPort) + 1)
+const flag = process.env.DOCUMENTS_E2E_REVIEW_FLAG === "on" ? "true" : "false"
 
 export default defineConfig({
   testDir: "./e2e",
@@ -36,16 +38,13 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: [
-    { port: webPort, flag: "false" },
-    { port: flaggedPort, flag: "true" },
-  ].map(({ port, flag }) => ({
-    command: `pnpm dev --port ${port}`,
-    url: `http://localhost:${port}`,
+  webServer: {
+    command: `pnpm dev --port ${webPort}`,
+    url: `http://localhost:${webPort}`,
     reuseExistingServer: false,
     timeout: 240_000,
-    stdout: "ignore" as const,
-    stderr: "pipe" as const,
-    env: { NEXT_PUBLIC_GO_PORT: goPort, NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS: flag, NEXT_DIST_DIR: `.next-${port}` },
-  })),
+    stdout: "ignore",
+    stderr: "pipe",
+    env: { NEXT_PUBLIC_GO_PORT: goPort, NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS: flag },
+  },
 })

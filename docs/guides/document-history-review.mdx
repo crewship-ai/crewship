@@ -1,6 +1,6 @@
 ---
 title: "Document history, revert and proposals"
-description: "Compare a retained revision with the current document, revert one change, and review agent proposals."
+description: "Compare a retained revision with the saved version, revert one change, and review agent proposals."
 icon: "history"
 stability: experimental
 tag: Experimental
@@ -14,9 +14,10 @@ endpoints ship. History browsing and compare do not need them.
 
 ## Compare
 
-Open **History**, pick a revision, then **Compare with current**. Each changed
+Open **History**, pick a revision, then **Compare with saved version**. Each changed
 block is labelled **Added**, **Removed**, **Changed** or **Moved** with its
-before and after text. Comparing never edits the document.
+before and after text. The comparison is against the last saved version; unsent
+edits are not included, and the page says so. Comparing never edits the document.
 
 ## Revert a change
 
