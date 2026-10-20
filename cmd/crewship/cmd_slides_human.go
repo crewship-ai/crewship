@@ -26,13 +26,14 @@ func newSlideCommand() *cobra.Command {
 			if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 				return fmt.Errorf("human Slides commands require a human credential")
 			}
-			path := "/api/v1/pages/" + pagePathEscape(args[0]) + "/slides"
+			basePath := "/api/v1/pages/" + pagePathEscape(args[0]) + "/slides"
+			readPath := basePath
 			if operation == "at-rev" {
 				n, e := strconv.ParseInt(args[1], 10, 64)
 				if e != nil || n < 1 {
 					return fmt.Errorf("positive revision required")
 				}
-				path += "/revisions/" + args[1]
+				readPath += "/revisions/" + args[1]
 			}
 			var raw []byte
 			if operation == "initialize" {
@@ -68,9 +69,9 @@ func newSlideCommand() *cobra.Command {
 			}
 			var response *http.Response
 			if operation == "initialize" {
-				response, e = client.Post(path+"/initialize", json.RawMessage(raw))
+				response, e = client.Post(basePath+"/initialize", json.RawMessage(raw))
 			} else {
-				response, e = client.Get(path)
+				response, e = client.Get(readPath)
 			}
 			if e != nil {
 				return e
