@@ -185,7 +185,17 @@ for (const width of [1280, 390]) {
       await expect(page.getByText("Body at latest")).toHaveCount(0)
       expect(mock.requests.some(request => request.endsWith("/document") || request.includes("/document?"))).toBe(false)
 
-      await viewer.getByRole("button", { name: "Use in message" }).click()
+      // An unverified revision names nothing and cannot be attached.
+      await expect(viewer.getByRole("button", { name: "Use in message" })).toHaveCount(0)
+      await expect(viewer).not.toContainText("Quarterly plan")
+      await expect(viewer).not.toContainText("Saved revision")
+
+      // A readable item the server later answers 404 for leaves the composer.
+      await viewer.getByRole("button", { name: width < 600 ? "Back to chat" : "Close document preview" }).click()
+      await page.getByRole("button", { name: "Library", exact: true }).click()
+      await page.getByRole("region", { name: "Conversation library" }).getByRole("button", { name: "Roadmap" }).click()
+      await expect(page.getByRole("region", { name: "Document preview" }).getByText("Roadmap body at latest")).toBeVisible({ timeout: TIMEOUT })
+      await page.getByRole("region", { name: "Document preview" }).getByRole("button", { name: "Use in message" }).click()
       await expect.poll(() => mock.requests.some(request => request.includes("/artifact-context/preview")), { timeout: TIMEOUT }).toBe(true)
       await expect(page.getByRole("region", { name: "Artifact context" })).toHaveCount(0)
 

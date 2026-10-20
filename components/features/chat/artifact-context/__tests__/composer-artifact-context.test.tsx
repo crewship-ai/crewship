@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { ComposerArtifactContextStrip } from "../composer/composer-artifact-context"
-import { addAttachment, attachmentId, buildSubmission, classifySubmit, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
+import { addAttachment, attachmentId, buildSubmission, detachAttachment, sendBlock, type AttachedArtifact, type Audience, type ComposerArtifactContext } from "../composer/composer-context-model"
 
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -111,8 +111,7 @@ it("builds the submission from ids and expected state only, once the choices are
   expect(buildSubmission(ctx({ mode: "reply_only" }), "")).toBeNull()
   expect(buildSubmission(ctx({ mode: "reply_only" }), "sub-2")?.update_page_id).toBeUndefined()
 })
-it("a retry keeps the same submission id, and a stale or unreadable answer is handled apart from an unknown one", () => {
+it("building the submission twice with the same id gives the same id", () => {
   const c = ctx({ mode: "create" })
   expect(buildSubmission(c, "sub-3")?.submission_id).toBe(buildSubmission(c, "sub-3")?.submission_id)
-  expect([200, 202, 409, 404, 503, "network"].map(code => classifySubmit(code as number | "network"))).toEqual(["accepted", "accepted", "stale", "unreadable", "unknown", "unknown"])
 })

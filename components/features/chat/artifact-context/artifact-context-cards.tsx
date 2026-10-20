@@ -18,7 +18,7 @@ const COMMAND: Partial<Record<WorkCardActionId, WorkCardCommand>> = { cancel: "c
 /** Agent work results of this conversation, from the server projection. Renders nothing while the flag is off or the endpoint is not served. */
 export function ArtifactContextCards({ workspaceId, chatId, currentUserId, onOpen }: Props) {
   const enabled = useArtifactContextEnabled()
-  const { cards, result, refetch } = useWorkCards({ workspaceId, chatId, currentUserId })
+  const { cards, result, stale, refetch } = useWorkCards({ workspaceId, chatId, currentUserId })
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   if (!enabled || !result) return null
   if (result.status === "error" && cards.length === 0) return <section aria-label="Agent work results" className="mx-auto my-4 w-full max-w-3xl">
@@ -44,7 +44,7 @@ export function ArtifactContextCards({ workspaceId, chatId, currentUserId, onOpe
   }
   return <section aria-label="Agent work results" className="mx-auto my-4 w-full max-w-3xl space-y-3">
     <h3 className="text-sm font-medium">Agent work</h3>
-    {result.status === "error" && <p role="status" className="text-xs text-muted-foreground">Results could not refresh. Showing the last known state; this is not a removal of access.</p>}
-    <div className="grid gap-3 sm:grid-cols-2">{visible.map(entry => <WorkResultCard key={entry.model.id} card={result.status === "error" ? { ...entry.model, load: "unavailable" } : entry.model} onAction={act} />)}</div>
+    {stale && <p role="status" className="text-xs text-muted-foreground">Results could not refresh. Showing the last known state; this is not a removal of access.</p>}
+    <div className="grid gap-3 sm:grid-cols-2">{visible.map(entry => <WorkResultCard key={entry.model.id} card={stale ? { ...entry.model, load: "unavailable" } : entry.model} onAction={act} />)}</div>
   </section>
 }

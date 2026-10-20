@@ -472,10 +472,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const { prepareSend: prepareArtifactSend, sent: artifactSubmissionSent } = artifactComposer
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
     if (!canChat) return false
-    const prepared = prepareArtifactSend(metadata)
-    if (!prepared.ok) { toast.error(prepared.message); return false }
-    metadata = prepared.metadata
-    const carriesArtifact = Boolean(metadata && "artifact_submission" in metadata)
     if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
@@ -489,15 +485,22 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         return false
       }
       pendingPageSendRef.current = text.trim()
-      if (carriesArtifact) artifactSubmissionSent()
       return true
     } else {
       const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
-      else if (carriesArtifact) artifactSubmissionSent()
       return sent
     }
-  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs, prepareArtifactSend, artifactSubmissionSent])
+  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
+  // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
+  const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    const prepared = prepareArtifactSend(metadata)
+    if (!prepared.ok) { toast.error(prepared.message); return false }
+    const carriesArtifact = Boolean(prepared.metadata && "artifact_submission" in prepared.metadata)
+    const sent = sendMessageWithPage(text, prepared.metadata)
+    if (sent !== false && carriesArtifact) artifactSubmissionSent()
+    return sent
+  }, [prepareArtifactSend, artifactSubmissionSent, sendMessageWithPage])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -1456,7 +1459,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
-          sendMessage={sendMessageWithPage}
+          sendMessage={sendFromComposer}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
@@ -1590,7 +1593,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
-          sendMessage={sendMessageWithPage}
+          sendMessage={sendFromComposer}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}

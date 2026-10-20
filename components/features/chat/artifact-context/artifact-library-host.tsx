@@ -14,9 +14,9 @@ export function ArtifactLibraryHost({ workspaceId, chatId, currentUserId, onOpen
   const enabled = useArtifactContextEnabled()
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState<LibraryFilter>("all")
-  const { rows, result, loading, refetch } = useConversationLibrary({ workspaceId, chatId, currentUserId, open })
+  const { rows, result, stale, loading, refetch } = useConversationLibrary({ workspaceId, chatId, currentUserId, open })
   if (!enabled || !workspaceId || !chatId || !currentUserId) return null
-  const status = loading ? "loading" : result && (result.status === "unsupported" || result.status === "error") ? "unavailable" : "ready"
+  const status = loading ? "loading" : stale || (result && (result.status === "unsupported" || result.status === "error")) ? "unavailable" : "ready"
   // A denied read drops everything: nothing from a lost grant stays on screen.
   const items = result?.status === "ok" ? rows.map(row => row.item) : []
   return <div className="shrink-0 border-b px-4 py-1 md:px-6">

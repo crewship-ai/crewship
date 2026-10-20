@@ -172,3 +172,32 @@ it("flag on: an item the server answers 404 for is dropped from the composer", a
   await waitFor(() => expect(screen.queryByRole("region", { name: "Artifact context" })).toBeNull())
   expect(screen.queryByText("Quarterly plan", { selector: "li *" })).toBeNull()
 })
+
+it("flag on: a suggestion chip is not the composer's send; it spends no submission and keeps the draft", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Use in message" }))
+  const strip = await screen.findByRole("region", { name: "Artifact context" })
+  fireEvent.click(screen.getByLabelText("Update attached"))
+  await waitFor(() => expect(strip).toHaveTextContent("Saved to Finance"))
+  fireEvent.click(await screen.findByRole("button", { name: "Tell me more" }))
+  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalled())
+  expect(chat.sendMessage.mock.calls[0]).toEqual(["Tell me more"])
+  expect(screen.getByRole("region", { name: "Artifact context" })).toHaveTextContent("Saved to Finance")
+  // The composer's own send still carries it, once.
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  expect(chat.sendMessage.mock.calls[1][1].artifact_submission.edit_mode).toBe("update")
+})
+
+it("flag on: a denied or missing pinned revision shows neither the title nor the saved revision, and cannot be attached", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  overrides = [path => path.includes("/document/checkpoints/") ? json({ error: "forbidden" }, 403) : undefined]
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }))
+  const viewer = await screen.findByRole("region", { name: "Document preview" })
+  await waitFor(() => expect(viewer).toHaveTextContent("Access to this revision is unavailable."))
+  expect(viewer).not.toHaveTextContent("Quarterly plan")
+  expect(viewer).not.toHaveTextContent("Saved revision")
+  expect(screen.queryByRole("button", { name: "Use in message" })).toBeNull()
+})
