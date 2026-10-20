@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Stop pending Document journal writers before erasing browser drafts on sign-out or account change, so delayed writes cannot restore private copies.
+
 - ⚠️ **Behaviour change: GDPR erasure anonymizes retired credential creators.** Retired credentials no longer require a live custodian; their creator attribution becomes NULL while IDs and audit history remain. Active credentials retain the existing custody requirement, and creatorless tombstones cannot be reactivated. Workspace restore/fork preserves nullable retired creators.
 
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.

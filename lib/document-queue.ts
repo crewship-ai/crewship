@@ -108,6 +108,21 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
   }
 }
 
+// Auth transitions retire mounted writers synchronously, before any asynchronous
+// storage operation. A late mount from the old principal is retired too.
+const draftWriters = new Map<symbol, { human: string; retire: () => Promise<void> }>()
+let journalHuman: string | null | undefined
+let identityPurge = Promise.resolve()
+export function registerDocumentDraftWriter(human: string, retire: () => Promise<void>): () => void {
+  if (journalHuman !== undefined && human !== journalHuman) {
+    void retire().catch(() => {})
+    return () => {}
+  }
+  const key = Symbol()
+  draftWriters.set(key, { human, retire })
+  return () => { draftWriters.delete(key) }
+}
+
 /**
  * Privacy purge, independent of any open store or Page lock. The journal holds
  * snapshots of private Documents, so access loss (a Page denial) and sign-out
@@ -118,11 +133,16 @@ async function purgeRows(range: () => IDBKeyRange | undefined, owns: (owner: str
   if (typeof indexedDB === "undefined") return
   try {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout")), STORAGE_OPEN_TIMEOUT_MS)
+      let settled = false
+      const fail = () => { if (settled) return; settled = true; clearTimeout(timer); reject(new Error("open")) }
+      const timer = setTimeout(fail, STORAGE_OPEN_TIMEOUT_MS)
       const request = indexedDB.open("crewship-document-drafts", 1)
       request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
-      request.onerror = request.onblocked = () => { clearTimeout(timer); reject(new Error("open")) }
-      request.onsuccess = () => { clearTimeout(timer); resolve(request.result) }
+      request.onerror = request.onblocked = fail
+      request.onsuccess = () => {
+        if (settled) { request.result.close(); return }
+        settled = true; clearTimeout(timer); resolve(request.result)
+      }
     })
     try {
       await new Promise<void>((resolve, reject) => {
@@ -152,7 +172,18 @@ export function purgeDocumentDrafts(human: string, workspace: string, page: stri
  * A shared browser never keeps one person's private text for the next sign-in.
  */
 export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
-  return purgeRows(() => undefined, owner => {
+  journalHuman = userId
+  const barriers: Promise<void>[] = []
+  for (const [key, writer] of draftWriters) {
+    if (userId !== null && writer.human === userId) continue
+    draftWriters.delete(key)
+    barriers.push(writer.retire())
+  }
+  // Serializing transitions prevents an older purge from deleting a new
+  // principal's edits after that principal has been exposed by the auth hook.
+  const drained = Promise.allSettled(barriers)
+  identityPurge = identityPurge.catch(() => {}).then(() => drained).then(() => purgeRows(() => undefined, owner => {
     try { return !userId || JSON.parse(owner)[0] !== userId } catch { return true }
-  })
+  }))
+  return identityPurge
 }

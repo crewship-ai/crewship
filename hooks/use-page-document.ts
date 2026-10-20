@@ -5,7 +5,7 @@ import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { apiFetch } from "@/lib/api-fetch"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { openDocumentDrafts, DocumentStorageError, DocumentStorageBusy, purgeDocumentDrafts, type DocumentDraft, type DocumentDraftStore } from "@/lib/document-queue"
+import { openDocumentDrafts, DocumentStorageError, DocumentStorageBusy, purgeDocumentDrafts, registerDocumentDraftWriter, type DocumentDraft, type DocumentDraftStore } from "@/lib/document-queue"
 
 import { useQueryClient } from "@tanstack/react-query"
 import { verifyMutationReceipt, type DocumentState } from "@/lib/documents/contracts"
@@ -81,7 +81,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     const queryKey = documentKeys.detail(workspace,pageId,human)
     const controller = new AbortController()
     let requiredRev = 0
-    let active = true, epoch: string | undefined, polling = false, blocked = false
+    let active = true, retired = false, epoch: string | undefined, polling = false, blocked = false
     let storage: DocumentDraftStore | undefined, schema = 0, durableOff = false
     let journalBroken = false, unverifiedStaged: DocumentDraft[] | undefined, blockedOther = false, opening: Promise<void> | undefined, retryAt = 0, retryDelay = 5000, tried = false
     const stored = new Set<string>()
@@ -101,7 +101,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         const rows = [...dirty.values()].map(draft => structuredClone(draft)); dirty.clear(); inflight = rows.length; countWrites()
         let snapshot: string | undefined
         for (const draft of rows) {
-          if (authorizationLost.current) break
+          if (retired || authorizationLost.current) break
           if (!storage) throw new DocumentStorageError("Private document storage is unavailable.")
           // The packet (update, request) of an attempted draft is never rewritten; only the recovery baseline is taken here.
           if (!draft.attempted || !draft.snapshot) draft.snapshot = snapshot ??= encodeUpdate(Y.encodeStateAsUpdate(doc))
@@ -124,7 +124,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       while (flushing || dirty.size) await (flushing ?? run())
     }
     const persist = (batch: DocumentDraft) => {
-      if (durableOff || authorizationLost.current) return
+      if (retired || durableOff || authorizationLost.current) return
       stored.add(batch.id)
       dirty.set(batch.id, batch)
       countWrites()
@@ -296,15 +296,26 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         setError(cause instanceof Error ? cause.message : "Could not sync document.")
       } finally { polling = false }
     }
-    if (workspace && pageId) void poll()
     const timer = setInterval(() => void poll(), 500)
+    const unregisterWriter = registerDocumentDraftWriter(human, () => {
+      retired = true; active = false; authorizationLost.current = true
+      clearInterval(timer); clearTimeout(flushTimer); flushTimer = undefined
+      controller.abort(); dirty.clear()
+      setConfirmed(undefined); setRecoveredDrafts([]); setUnverified([]); setDenied(true)
+      setStatus("Document access is unavailable.")
+      // A put already started owns a transaction. Drain it before auth's final
+      // purge; neither queued edits nor the later unmount may start another.
+      return (flushing ?? Promise.resolve()).catch(() => {})
+    })
+    if (workspace && pageId) void poll()
     return () => {
+      unregisterWriter()
       active = false; clearInterval(timer); controller.abort()
       window.removeEventListener("pagehide", hide); document.removeEventListener("visibilitychange", hide)
       void client.cancelQueries({queryKey,exact:true})
       client.removeQueries({queryKey,exact:true})
       doc.off("update", local); doc.destroy()
-      void flushAll().catch(() => {}).finally(() => { storage?.close() })
+      void (retired ? flushing ?? Promise.resolve() : flushAll()).catch(() => {}).finally(() => { storage?.close() })
     }
   // The queue is scoped to the human and immutable Page identity; the ref follows slug renames.
   // eslint-disable-next-line react-hooks/exhaustive-deps
