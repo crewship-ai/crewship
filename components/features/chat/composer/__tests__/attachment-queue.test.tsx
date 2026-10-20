@@ -4,6 +4,12 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 vi.mock("../mention-autocomplete", () => ({ MentionAutocomplete: () => null }))
 const toastError = vi.fn()
 vi.mock("sonner", () => ({
@@ -28,7 +34,7 @@ const props = {
 }
 
 const file = (name: string, size = 7) => new File([new Uint8Array(size)], name, { type: "text/plain" })
-const list = () => useComposerStore.getState().attachments[sid] ?? []
+const list = () => useComposerStore.getState().attachments[K + sid] ?? []
 
 /** A fetch whose responses the test releases one by one. */
 function gatedFetch() {
@@ -199,7 +205,7 @@ describe("review blockers", () => {
       file: status === "cancelled" ? file(`x${i}.txt`) : undefined,
     })
     useComposerStore.setState({
-      attachments: { [sid]: [mk(0, "cancelled"), ...Array.from({ length: 10 }, (_, i) => mk(i + 1, "ready"))] },
+      attachments: { [K + sid]: [mk(0, "cancelled"), ...Array.from({ length: 10 }, (_, i) => mk(i + 1, "ready"))] },
     })
     render(<ChatComposer {...props} />)
     fireEvent.click(screen.getByLabelText("Retry x0.txt"))
@@ -210,7 +216,7 @@ describe("review blockers", () => {
 
   it("send is blocked, naming the files, while a failed or cancelled chip is present", async () => {
     useComposerStore.setState({
-      attachments: { [sid]: [
+      attachments: { [K + sid]: [
         { id: "r", name: "ok.txt", size: 5, type: "text/plain", status: "ready", path: `attachments/${sid}/ok.txt` },
         { id: "c", name: "gone.txt", size: 5, type: "text/plain", status: "cancelled" },
       ] },
@@ -258,7 +264,7 @@ describe("blocked send explains itself", () => {
   it.each(["error", "cancelled"] as const)(
     "a %s attachment blocks Send and shows a linked inline reason in words",
     (status) => {
-      useComposerStore.setState({ attachments: { [sid]: [failed(status)] } })
+      useComposerStore.setState({ attachments: { [K + sid]: [failed(status)] } })
       render(<ChatComposer {...props} />)
       typeHello()
       const notice = expectBlocked()
@@ -268,7 +274,7 @@ describe("blocked send explains itself", () => {
   )
 
   it("Send stays focusable and a click or Enter does not send but announces the reason", async () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     typeHello()
     expect(send().disabled).toBe(false) // aria-disabled, so it can take focus
@@ -287,7 +293,7 @@ describe("blocked send explains itself", () => {
     ["without a provider", false],
     ["with a provider", true],
   ])("typed text survives a blocked Enter and a blocked click %s", async (_l, provider) => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     const ui = <ChatComposer {...props} />
     render(provider ? <PromptInputProvider>{ui}</PromptInputProvider> : ui)
     typeHello()
@@ -302,21 +308,21 @@ describe("blocked send explains itself", () => {
   })
 
   it("is styled as disabled and does not lift on hover", () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     expect(send().className).toContain("aria-disabled:opacity-50")
     expect(send().className).toContain("aria-disabled:hover:translate-y-0")
   })
 
   it("does not announce on mount when failed chips already exist", async () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     await new Promise((r) => setTimeout(r, 80))
     expect(screen.getByRole("status").textContent).toBe("")
   })
 
   it("a pending announcement is dropped if the block ends first", async () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     fireEvent.click(send())
     fireEvent.click(screen.getByLabelText("Remove bad.txt"))
@@ -329,7 +335,7 @@ describe("blocked send explains itself", () => {
     const region = screen.getByRole("status")
     expect(region.textContent).toBe("")
     act(() => {
-      useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+      useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     })
     expect(screen.getByRole("status")).toBe(region)
     expect(region.textContent).toContain("bad.txt")
@@ -337,7 +343,7 @@ describe("blocked send explains itself", () => {
 
   it("names at most two files, then a count", () => {
     useComposerStore.setState({
-      attachments: { [sid]: ["a", "b", "c", "d"].map((x) => failed("error", `${x}.txt`)) },
+      attachments: { [K + sid]: ["a", "b", "c", "d"].map((x) => failed("error", `${x}.txt`)) },
     })
     render(<ChatComposer {...props} />)
     const text = expectBlocked().textContent!
@@ -346,7 +352,7 @@ describe("blocked send explains itself", () => {
   })
 
   it("two composers get distinct notice ids", () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<><ChatComposer {...props} /><ChatComposer {...props} /></>)
     const ids = screen.getAllByLabelText("Submit").map((b) => b.getAttribute("aria-describedby"))
     expect(new Set(ids).size).toBe(2)
@@ -355,7 +361,7 @@ describe("blocked send explains itself", () => {
   it("Retry is a focusable native button and restarts the upload", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     typeHello()
     expectBlocked()
@@ -383,7 +389,7 @@ describe("blocked send explains itself", () => {
   })
 
   it("Remove is a focusable native button and clears the block", async () => {
-    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    useComposerStore.setState({ attachments: { [K + sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     typeHello()
     expectBlocked()

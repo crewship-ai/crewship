@@ -29,6 +29,12 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 
 vi.mock("../mention-autocomplete", () => ({
   MentionAutocomplete: () => null,
@@ -105,7 +111,7 @@ function pickNothing() {
 }
 
 function storeList() {
-  return useComposerStore.getState().attachments["sess-draft"] ?? []
+  return useComposerStore.getState().attachments[K + "sess-draft"] ?? []
 }
 
 function chip(name: string): HTMLElement {

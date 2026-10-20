@@ -267,6 +267,41 @@ test.describe("chat attachment queue (real backend)", () => {
     await failRetrySendReload(page, `p${Date.now().toString(36)}`)
     await noHorizontalScroll(page)
   })
+
+  test("phone: switching to Artifacts and back mid-upload does not cancel it", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openChat(page, slugs[2])
+    const tag = `t${Date.now().toString(36)}`
+    const first = `${tag}-first.txt`
+    const second = `${tag}-second.txt`
+    const gate = await gateUploads(page)
+    gate.hold(first)
+    await pick(page, [file(first), file(second)])
+    await expect(chip(page, first)).toHaveAttribute("data-status", "uploading", { timeout: TIMEOUT })
+    await expect(chip(page, second)).toHaveAttribute("data-status", "validating")
+    await expect.poll(() => gate.seen, { timeout: TIMEOUT }).toEqual([first])
+
+    // The composer unmounts on the Artifacts tab and mounts again on Chat.
+    const tabs = page.getByRole("tablist", { name: "Chat panel" })
+    await tabs.getByRole("tab", { name: "Artifacts" }).click()
+    await expect(page.getByPlaceholder(/^Message /)).toHaveCount(0)
+    await tabs.getByRole("tab", { name: "Work" }).click()
+    await tabs.getByRole("tab", { name: "Chat" }).click()
+    await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: TIMEOUT })
+
+    // Nothing was cancelled: the held upload is still running, the second waits.
+    await expect(chip(page, first)).toHaveAttribute("data-status", "uploading")
+    await expect(chip(page, second)).toHaveAttribute("data-status", "validating")
+    gate.release(first)
+    await expect(chip(page, first)).toHaveAttribute("data-status", "ready", { timeout: TIMEOUT })
+    await expect(chip(page, second)).toHaveAttribute("data-status", "ready", { timeout: TIMEOUT })
+    expect(gate.seen).toEqual([first, second])
+    // Cancelled chips would have blocked Send.
+    await page.getByPlaceholder(/^Message /).fill("tab switch check")
+    await expect(sendButton(page)).not.toHaveAttribute("aria-disabled", "true")
+    await expect(notice(page)).toHaveCount(0)
+    await noHorizontalScroll(page)
+  })
 })
 
 /** Synthesize a drop or paste carrying real File objects. */

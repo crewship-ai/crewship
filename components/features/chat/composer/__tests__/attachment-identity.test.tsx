@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 
 let userId: string | null = "user-a"
 let workspaceId = "ws-1"
@@ -119,20 +119,6 @@ describe("attachments are scoped to the human, workspace and chat", () => {
     rerender(<ChatComposer {...props} />)
     expect(screen.queryByText("w1.txt")).toBeNull()
     expect(g.calls[0].signal?.aborted).toBe(true)
-  })
-
-  it("unmounting the composer cancels queued and running uploads", async () => {
-    const g = gatedFetch()
-    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
-    render(<ChatComposer {...props} />)
-    pick([file("u1.txt"), file("u2.txt")])
-    await waitFor(() => expect(g.calls).toHaveLength(1))
-    cleanup()
-    expect(g.calls[0].signal?.aborted).toBe(true)
-    g.calls[0].release()
-    await new Promise((r) => setTimeout(r, 30))
-    expect(g.calls).toHaveLength(1) // u2 never started
-    expect(Object.values(useComposerStore.getState().attachments).flat().map((a) => a.status)).not.toContain("uploading")
   })
 
   it("a job still creating the chat row when the human changes never sends the file", async () => {

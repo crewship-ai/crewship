@@ -1,6 +1,7 @@
 "use client"
 
 import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
+import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
@@ -869,6 +870,7 @@ export function ChatClient() {
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+        <AttachmentLifecycle sessionId={sessionId} />
         {subbar}
 
         {!humanConversationId && <div
@@ -945,6 +947,9 @@ export function ChatClient() {
      * centre is a raised reading surface inside a card-coloured frame.
      */
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      {/* First child in both layouts, so it is the one instance across the
+          breakpoint: it owns the upload queue's lifetime. */}
+      <AttachmentLifecycle sessionId={sessionId} />
       {subbar}
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* The column's frame, matching /routines and /issues: the aside owns
