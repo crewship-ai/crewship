@@ -313,6 +313,7 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/admin/backups/verify ?path",
 	"GET /api/v1/agents/{agentId}/files/download ?path",
 	"GET /api/v1/auth/pair/poll ?code",
+	"GET /api/v1/chats/{chatId}/artifact-context/preview ?page_id",
 	"GET /api/v1/crews/{crewId}/files/download ?path",
 	"GET /api/v1/integrations/composio/tools ?toolkit",
 	"GET /api/v1/memory/versions ?path",
