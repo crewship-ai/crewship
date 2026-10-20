@@ -205,6 +205,17 @@ describe("workspace states", () => {
     expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Zachovat")
     expect(screen.getByRole("status").textContent).not.toMatch(/Saved as revision/)
   })
+  it.each([["not_found", /can.t save this presentation/i], ["forbidden", /can.t save this presentation/i], ["signed_out", /sign in again/i]] as const)("keeps the draft when a save answers %s", async (reason, text) => {
+    const server = createFixtureSaveClient(snapshot())
+    const client: SlidesSaveClient = { load: server.load, patch: vi.fn().mockResolvedValue({ status: "unavailable", reason }) }
+    render(<SlidesWorkspace pageId="fixture_page" client={client} saveEnabled />)
+    await screen.findByLabelText("Speaker notes")
+    editNotes("Nesmaz")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save changes" })) })
+    expect((await screen.findByRole("alert")).textContent).toMatch(text)
+    expect((screen.getByLabelText("Speaker notes") as HTMLTextAreaElement).value).toBe("Nesmaz")
+    expect(screen.queryByText("This presentation is not available.")).toBeNull()
+  })
   it("saves a draft through the operation layer and reports the new revision", async () => {
     const server = createFixtureSaveClient(snapshot()), patch = vi.spyOn(server, "patch")
     render(<SlidesWorkspace pageId="fixture_page" client={server} saveEnabled />)

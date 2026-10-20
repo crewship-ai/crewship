@@ -19,7 +19,7 @@ const PAGE_ID = "slides-e2e-page", SLUG = "slides-e2e"
 const slidesPath = `/api/v1/pages/%40${PAGE_ID}/slides`
 
 const fixture = JSON.parse(readFileSync(join(process.cwd(), "testdata/slides-schema-v1.json"), "utf8")) as { deck: SlideDeck }
-// The save contract binds a deck to its Page: page_id must equal deck_id.
+// The save contract binds a deck to its Page (page_id == deck_id); the fixture deck is re-keyed to the mocked Page.
 const start = () => createFixtureSaveClient({ deck: { ...structuredClone(fixture.deck), deck_id: PAGE_ID }, rev: 3, orderVersion: 1 })
 type Server = ReturnType<typeof start>
 const text404 = (route: Route) => route.fulfill({ status: 404, contentType: "text/plain; charset=utf-8", body: "404 page not found\n" })
