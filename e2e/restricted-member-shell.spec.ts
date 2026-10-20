@@ -68,11 +68,27 @@ for (const width of [1280, 390]) {
     })
     await page.goto("/routines")
     await expect(page.getByRole("heading", { name: "Private routines" })).toBeVisible()
-    await page.getByRole("button", { name: "User menu" }).click()
-    await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
-    const dialog = page.getByRole("dialog", { name: "Connect CLI" })
+    if (width < 768) {
+      // v67 phone header is one row (PAR-052): the user row lives in the
+      // More sheet, as in chrome-roles.spec.ts.
+      await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click()
+      await page.getByRole("dialog", { name: "Navigation" }).getByRole("button", { name: "User menu" }).click()
+      // Harbor 2 G12: below 768 px the user menu is the kit MenuSheet, a
+      // bottom-sheet dialog whose rows are buttons and links, not menuitems.
+      const sheet = page.getByRole("dialog", { name: "User menu" })
+      await expect(sheet).toBeVisible()
+      await expect(page.getByRole("menu")).toHaveCount(0)
+      await sheet.getByRole("button", { name: "Connect CLI…" }).click()
+      await expect(sheet).toBeHidden()
+    } else {
+      await page.getByRole("button", { name: "User menu" }).click()
+      await page.getByRole("menuitem", { name: "Connect CLI…" }).click()
+    }
+    const dialog = page.getByRole("dialog", { name: "Connect the CLI" })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR --server=${new URL(page.url()).origin}`)
+    const origin = new URL(page.url()).origin
+    const isDefaultLocalServer = origin === "http://localhost:8080" || origin === "http://127.0.0.1:8080"
+    await expect(dialog.getByTestId("pair-command")).toHaveText(`crewship login --pair --code=GUEST-PAIR${isDefaultLocalServer ? "" : ` --server=${origin}`}`)
     expect(starts).toBe(1)
     consumed = true
     await expect(dialog.getByRole("status")).toHaveText(/CLI connected/)
@@ -190,11 +206,32 @@ for (const width of [1280, 390]) {
 
     // A screen outside the surfaces is never mounted, so it sends nothing.
     await page.goto("/issues")
-    await expect(page.getByText("Not available with your access")).toBeVisible()
+    // Harbor 2 G03: the No-access state names the screen and offers one way on.
+    await expect(page.getByRole("heading", { name: "Issues isn’t part of your access" })).toBeVisible()
     await page.waitForTimeout(1_000)
     expect(forbidden).toEqual([])
   })
 }
+
+// DSH-02 (#3505 → #3481, SHL-07): a restricted session has no Dashboard, so
+// the phone Home tab leads to its own home (chat here) and Chat is not
+// offered a second time.
+test("phone Home tab leads to the restricted home and Chat is not offered twice", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname
+    let body: unknown = []
+    if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
+    else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
+    else if (path === "/api/v1/workspaces") body = ROWS
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+  })
+  await page.goto("/routines")
+  const tabs = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: /^more$/i }) })
+  const home = tabs.getByRole("link", { name: "Home" })
+  await expect(home).toHaveAttribute("href", "/chat")
+  await expect(tabs.getByRole("link", { name: "Chat" })).toHaveCount(0)
+})
 
 // The production grid stays read only while mobile navigation returns the
 // selected source context to an actionable composer, without sending it.
@@ -540,8 +577,11 @@ for (const width of [1280, 390]) {
       await page.getByRole("button", { name: /Reasoning duration unavailable/ }).click()
       await expect(page.getByText("Reasoning unavailable", { exact: true })).toBeVisible()
       await expect(page.getByText("legacy private content must not render")).toHaveCount(0)
-      await page.getByText("Activity incomplete", { exact: true }).click()
+      // A group with a failed step opens by itself: the failure is labelled
+      // without a click, and the group is never summarised as success.
+      await expect(page.getByText("Activity incomplete", { exact: true })).toBeVisible()
       await expect(page.getByText("Failed", { exact: true })).toBeVisible()
+      await expect(page.getByText("Worked", { exact: true })).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })

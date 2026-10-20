@@ -60,3 +60,17 @@ The confirmed snapshot body reuses `../document-readonly/DocumentReadonly` after
 the exact selected checkpoint and current scope checks. That shared reader rejects
 non-Document roots and clears prior DOM if serialization fails. Browsing still
 does not create a live editor or restore the original run authority.
+
+## Compare, and revert (flagged)
+
+With the `review` prop the history offers **Compare with saved version** (block
+diff against the last confirmed head, `lib/documents/block-diff.ts`). Compare is
+not flagged: it reads only the checkpoint endpoints on main. It is disabled with
+"Loading current document…" until the head content exists, and with unsent
+edits it says they are not included. When `review.actions` is supplied (writers
+only, and only behind `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS`), **Revert this
+change** is offered, a separate action from restore. Revert is disabled while
+unsent edits exist, sends the head revision the user reviewed and one request ID
+per decision, and reports network and 5xx failures as an unknown outcome. The
+HTTP client (`lib/documents/history-actions.ts`) targets a proposed endpoint.
+Revert tests use fixtures.

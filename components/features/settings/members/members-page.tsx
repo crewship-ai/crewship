@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Download, Mail, MessageSquare, Settings as SettingsIcon, Users, X } from "lucide-react"
+import { ChevronDown, Download, Eye, Mail, MessageSquare, Terminal, TriangleAlert, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -11,10 +11,11 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { ALL_CAPABILITIES, CAPABILITY_BUNDLES, CAPABILITY_LABELS, Capability, type CapabilityBundle, type CapabilityValue } from "@/lib/capabilities"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { personLabel } from "@/components/ui/user-avatar"
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+import { Peek } from "@/components/ui/peek"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -22,9 +23,11 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
+import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
+import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsKpiStrip, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { PageError } from "@/components/layout/page-state"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
 import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
@@ -40,7 +43,6 @@ import {
   ROLE_LABEL,
   aboveRole,
   accessProfile,
-  activeFilterCount,
   byRoleThenName,
   memberMatches,
   membersUrlQuery,
@@ -54,8 +56,8 @@ import {
 import { useMembers } from "./use-members"
 import { useAccessWrites } from "./use-access"
 import { MemberDetail } from "./member-detail"
-import { AREA_ICON, ROLE_ICON } from "./member-bits"
-import { InvitationList, PeopleList, PeopleTable, type PeopleGroup } from "./people-table"
+import { AREA_ICON, ConfirmWhen, ROLE_ICON } from "./member-bits"
+import { InvitationList, PeopleList, PeopleTable, joinedDate, type PeopleGroup } from "./people-table"
 import { MembersAttention, RevealCard, membersFindings } from "./members-attention"
 import { useInvitations, useRevealPolicy } from "./use-invitations"
 
@@ -66,6 +68,8 @@ interface Confirm {
   body: React.ReactNode
   action: string
   danger?: boolean
+  /** When the change lands: written on confirm, or drafted until Save. */
+  when: "now" | "save"
   run: () => Promise<unknown> | void
 }
 
@@ -200,13 +204,13 @@ export function MembersPage() {
   // draft. Everything else is undone by Discard.
   const askHighStakes = (title: string, body: React.ReactNode, action: string, gains: CapabilityValue[], run: () => void) => {
     if (gains.length === 0) { run(); return }
-    setConfirm({ title, body, action, danger: true, run })
+    setConfirm({ title, body, action, danger: true, when: "save", run })
   }
 
   const onCell = (m: Member, cap: CapabilityValue, next: boolean) => {
     const label = CAPABILITY_LABELS[cap].en
     askHighStakes(`Grant ${label}?`,
-      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description}</>,
       `Grant ${label}`, next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
       () => stage([m], (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))))
   }
@@ -217,7 +221,7 @@ export function MembersPage() {
   const onProfile = (m: Member, preset: CapabilityBundle) => {
     const gains = highStakesGains([m], CAPABILITY_BUNDLES[preset])
     askHighStakes(`Set ${nameOf(m)} to ${PROFILE_LABEL[preset]}?`,
-      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
       `Set to ${PROFILE_LABEL[preset]}`, gains, () => stage([m], () => [...CAPABILITY_BUNDLES[preset]]))
   }
 
@@ -231,13 +235,13 @@ export function MembersPage() {
       const people = selectedPeople
       const gains = highStakesGains(people, CAPABILITY_BUNDLES[preset])
       askHighStakes(`Set ${people.length} people to ${PROFILE_LABEL[preset]}?`,
-        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
         "Apply profile", gains, () => { stage(people, () => [...CAPABILITY_BUNDLES[preset]]); clearSelection() })
     },
     cap: (cap: CapabilityValue, next: boolean) => {
       const people = selectedPeople
       askHighStakes(`Grant ${CAPABILITY_LABELS[cap].en} to ${people.length} people?`,
-        <>{CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+        <>{CAPABILITY_LABELS[cap].description}</>,
         "Grant", next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
         () => { stage(people, (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))); clearSelection() })
     },
@@ -250,6 +254,7 @@ export function MembersPage() {
           Their capabilities do not change.
         </>,
         action: "Change role",
+        when: "now",
         run: async () => { await access.changeRole(eligible, r); clearSelection() },
       })
     },
@@ -291,7 +296,7 @@ export function MembersPage() {
             {ALL_CAPABILITIES.filter((c) => c !== Capability.Chat).map((cap) => (
               <SidebarFacetOption key={cap} active={filters.cap === cap} onToggle={() => setFilters({ cap: filters.cap === cap ? "" : cap })}>
                 <span className={cn(HIGH_STAKES_CAPABILITIES.has(cap) && "text-destructive")}>{CAPABILITY_LABELS[cap].en}</span>
-                <span className="ml-auto font-mono text-micro text-muted-foreground">{capsLoading ? "…" : countWith({ cap })}</span>
+                <span className="ml-auto text-micro tabular-nums text-muted-foreground">{capsLoading ? "…" : countWith({ cap })}</span>
               </SidebarFacetOption>
             ))}
           </SidebarFacet>
@@ -305,7 +310,7 @@ export function MembersPage() {
   const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const nav = (
     <>
-      <DrillNavSection label="People" count={members.length}>
+      <DrillNavSection collapsible={false} label="People" count={members.length}>
         <DrillNavItem index={0} selected={!filters.status && !filters.role && !filters.area && !filters.flag} onSelect={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, q: filters.q })}
           icon={ico(Users)} label="Everyone" meta={members.length} />
         {isManager && (
@@ -314,7 +319,7 @@ export function MembersPage() {
             icon={ico(Mail)} label="Invited" meta={invitationsQuery.isLoading ? "…" : invitations.length} />
         )}
       </DrillNavSection>
-      <DrillNavSection label="Role">
+      <DrillNavSection collapsible={false} label="Role">
         {ROLES.map((r, i) => {
           const n = countWith({ role: r })
           return (
@@ -324,7 +329,7 @@ export function MembersPage() {
         })}
       </DrillNavSection>
       {capsReadable && (
-        <DrillNavSection label="Can do">
+        <DrillNavSection collapsible={false} label="Can do">
           {[...AREAS.map((a) => ({ key: a.key as string, label: a.label, sub: a.caps.map((c) => c.short.toLowerCase()).join(" · "), icon: ico(AREA_ICON[a.key], "text-primary-hover") })),
             { key: "chat", label: "Chat only", sub: undefined, icon: ico(MessageSquare) }].map((a, i) => {
             const n = countWith({ area: a.key })
@@ -336,7 +341,7 @@ export function MembersPage() {
         </DrillNavSection>
       )}
       {capsReadable && (
-        <DrillNavSection label="Needs a look">
+        <DrillNavSection collapsible={false} label="Needs a look">
           {MEMBER_FLAGS.map((f, i) => {
             const n = countWith({ flag: f.key })
             return (
@@ -370,6 +375,12 @@ export function MembersPage() {
     onInvited: () => setFilters({ status: "invited" }),
   }) : null
 
+  // J / K in the Peek walk the people in the order the roster shows them.
+  const order = groups.flatMap((g) => g.people)
+  const at = opened ? order.findIndex((m) => m.user.id === opened.user.id) : -1
+  const prev = at > 0 ? order[at - 1] : null
+  const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null
+
   const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
   const cardActions = (
     <>
@@ -383,7 +394,7 @@ export function MembersPage() {
           ))}
         </div>
       )}
-      <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={exportCsv} disabled={shown.length === 0}>
+      <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={exportCsv} disabled={shown.length === 0}>
         <Download className="mr-1.5 h-3 w-3" />Export CSV
       </Button>
     </>
@@ -401,22 +412,21 @@ export function MembersPage() {
         <button key={t.key} type="button" role="tab" aria-selected={t.on} onClick={t.run}
           className={cn("inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
           {t.tone && <span className={cn("h-1.5 w-1.5 rounded-full", t.tone)} aria-hidden />}
-          {t.label}{t.n != null && <span className="font-mono text-micro text-muted-foreground">{t.n}</span>}
+          {t.label}{t.n != null && <span className="text-micro tabular-nums text-muted-foreground">{t.n}</span>}
         </button>
       ))}
     </div>
   )
 
   return (
-    <DrillPage
-      parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+    <SettingsDrillPage
+      panelId="drill-members"
       title="Members"
       icon={Users}
-      description="Who is in this workspace, what each person manages and what they may do"
+      description="Who is in this workspace, what each person manages and what they may do."
       toolbar={toolbar}
       nav={nav}
       mobileNav={mobileNav}
-      filterCount={activeFilterCount(filters, capsReadable)}
       actions={isMobile ? undefined : addMember}
     >
       {wsLoading || roster.loading ? (
@@ -439,34 +449,35 @@ export function MembersPage() {
             </div>
           )}
 
-          <SettingsSummary slot="members-summary">
-            <SummaryItem n={members.length}>{members.length === 1 ? "person" : "people"}</SummaryItem>
-            {isManager && invitations.length > 0 && <SummaryItem n={invitations.length}>invited</SummaryItem>}
-            {chatOnlyCount != null && <SummaryItem n={chatOnlyCount}>chat only</SummaryItem>}
-            {revealers != null && (
-              <button type="button" onClick={() => pick({ flag: filters.flag === "reveal" ? "" : "reveal" })} className="hover:text-foreground">
-                <SummaryItem n={revealers} tone={revealers ? "danger" : undefined}>can reveal secrets</SummaryItem>
-              </button>
-            )}
-            {aboveCount != null && aboveCount > 0 && (
-              <button type="button" onClick={() => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" })} className="hover:text-foreground">
-                <SummaryItem n={aboveCount} tone="warn">above their role</SummaryItem>
-              </button>
-            )}
-            {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
-            {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
-          </SettingsSummary>
+          {/* v67's strip of five figures. The two that ask for a look filter
+              the roster; a read-only role is told once, under it. */}
+          <SettingsKpiStrip slot="members-summary" items={[
+            { icon: Users, label: "People", value: members.length },
+            ...(isManager ? [{ icon: Mail, label: "Invited", value: invitationsQuery.isLoading ? "…" : invitations.length, onClick: () => setFilters({ status: filters.status === "invited" ? "" : "invited" }), pressed: filters.status === "invited" }] : []),
+            ...(chatOnlyCount != null ? [{ icon: MessageSquare, label: "Chat only", value: chatOnlyCount, onClick: () => pick({ area: filters.area === "chat" ? "" : "chat" }), pressed: filters.area === "chat" && !filters.status }] : []),
+            ...(revealers != null ? [{ icon: Eye, label: "Can reveal secrets", value: revealers, onClick: () => pick({ flag: filters.flag === "reveal" ? "" : "reveal" }), pressed: filters.flag === "reveal" && !filters.status }] : []),
+            ...(aboveCount != null ? [{ icon: TriangleAlert, label: "Above their role", value: aboveCount, onClick: () => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" }), pressed: filters.flag === "risky-low-role" && !filters.status }] : []),
+          ]} />
+          {((!filters.status && shown.length !== members.length) || !isAdmin) && (
+            <SettingsSummary slot="members-note">
+              {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
+              {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
+            </SettingsSummary>
+          )}
 
           {roster.error && (
-            <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {roster.error}. <button type="button" className="underline" onClick={roster.refresh}>Retry</button>
-            </p>
+            <PageError className="max-w-none px-0 py-0" title="Couldn’t load the members" description={`${roster.error}.`} onRetry={roster.refresh} />
           )}
 
           {capsFailed && (
-            <p role="alert" data-slot="members-caps-error" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              Could not read what people may do, so it cannot be changed until it loads. <button type="button" className="underline" onClick={() => void capsQuery.refetch()}>Retry</button>
-            </p>
+            <PageBanner
+              tone="bad"
+              icon={TriangleAlert}
+              data-slot="members-caps-error"
+              action={<Button variant="outline" size="sm" onClick={() => void capsQuery.refetch()}>Retry</Button>}
+            >
+              Could not read what people may do, so it cannot be changed until it loads.
+            </PageBanner>
           )}
 
           {findings && !filters.status && <MembersAttention findings={findings} />}
@@ -479,7 +490,7 @@ export function MembersPage() {
 
           {filters.status === "invited" ? (
             <SettingsCard icon={Mail} title="Invitations" description="Sent, not accepted yet. An expired one cannot be accepted — invite again.">
-              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} />}
+              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} workspaceId={ws} manage={isAdmin} callerRole={role} onChanged={() => void invitationsQuery.refetch()} />}
             </SettingsCard>
           ) : (
             <SettingsCard icon={Users} title="People"
@@ -510,39 +521,51 @@ export function MembersPage() {
         )}
       </AnimatePresence>
 
-      <Sheet open={opened !== null} onOpenChange={(o) => { if (!o) open(null) }}>
-        <SheetContent side="right" className="w-full gap-0 overflow-y-auto bg-background p-5 sm:max-w-[520px]" data-slot="member-sheet">
-          <SheetTitle className="sr-only">{opened ? nameOf(opened) : "Member"}</SheetTitle>
-          <SheetDescription className="sr-only">Role, what they may do and where</SheetDescription>
-          {opened && (
-            <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
-              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
-              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
-          )}
-          {/* The page's own save bar sits under the sheet's overlay; the same
-              bar, from the same context, docks to the bottom of the sheet. */}
-          <div className="pointer-events-none sticky bottom-0 mt-4 flex justify-center pb-1 [&>*]:pointer-events-auto">
-            <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
+      <Peek
+        open={opened !== null}
+        onOpenChange={(o) => { if (!o) open(null) }}
+        title={opened ? <>{nameOf(opened)}{opened.user.id === currentUserId && <span className="ml-1.5 text-xs font-normal text-muted-foreground">you</span>}</> : "Member"}
+        subtitle={opened ? <>{opened.user.full_name?.trim() ? `${opened.user.email} · ` : ""}joined {joinedDate(opened.created_at)}</> : undefined}
+        onPrev={prev ? () => open(prev) : undefined}
+        onNext={next ? () => open(next) : undefined}
+        footer={opened ? (
+          <div className="flex flex-col gap-2">
+            {/* The page's own save bar sits under the Peek's overlay; the
+                same bar, from the same context, docks here. */}
+            <div className="flex justify-center empty:hidden [&>*]:pointer-events-auto">
+              <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
+            </div>
+            <p className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground" data-slot="member-cli">
+              <Terminal className="h-3 w-3 shrink-0" aria-hidden />
+              <code className="truncate font-mono text-micro">crewship workspace member capabilities list {opened.user.id}</code>
+            </p>
           </div>
-        </SheetContent>
-      </Sheet>
+        ) : undefined}
+      >
+        {opened && (
+          <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin} inPeek
+            granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
+            onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
+        )}
+      </Peek>
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="text-sm">{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription className="text-xs">{confirm?.body}</AlertDialogDescription>
+            {confirm && <ConfirmWhen when={confirm.when} />}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-            <AlertDialogAction className={cn("h-7 text-xs", confirm?.danger && "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
+            <AlertDialogCancel className="text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction className={cn("text-xs", confirm?.danger && "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
               onClick={() => { const c = confirm; setConfirm(null); void c?.run() }}>
               {confirm?.action}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </DrillPage>
+    </SettingsDrillPage>
   )
 }
 
@@ -575,7 +598,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
         <Button variant="outline" size="sm" className={selectionBarButton}>{label}<ChevronDown className="h-3 w-3" /></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuLabel className="font-mono text-micro uppercase tracking-[0.08em] text-primary-hover">{heading}</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-micro font-semibold text-primary-hover">{heading}</DropdownMenuLabel>
         {items.map((i) => (
           <DropdownMenuItem key={i.key} onSelect={i.run} className={cn("text-xs", i.danger && "text-destructive")}>{i.label}</DropdownMenuItem>
         ))}
@@ -588,7 +611,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
     <motion.div role="toolbar" aria-label="Change the selected people" data-slot="members-bulk"
       initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
       className={cn(selectionBar, "fixed left-1/2 -translate-x-1/2 transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
-      <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{count}</span> selected</span>
+      <span className="px-1 text-xs"><span className="font-semibold tabular-nums">{count}</span> selected</span>
       {menu("Set access", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Preset")}
       {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
       {menu("Revoke", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, run: () => onCap(c, false) })), "Revoke from all selected")}

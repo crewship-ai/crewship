@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useRef, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
@@ -27,7 +28,9 @@ export function HumanDecisionForm({
     Object.fromEntries(fields.map((f) => [f.name, f.default ?? ""])),
   )
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  // The action being sent: its button keeps its size and shows a spinner in
+  // place of its label (no layout shift), and every button waits for it.
+  const [busy, setBusy] = useState<string | null>(null)
   const sending = useRef(false)
   const decide = async (action: DecisionAction) => {
     if (disabled || sending.current) return
@@ -53,19 +56,19 @@ export function HumanDecisionForm({
         }
       }
       sending.current = true
-      setBusy(true)
+      setBusy(action.id)
       if (!(await onDecide(action.approved, { action_id: action.id, data })))
         setError("Decision was not accepted. Review the fields and try again.")
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       sending.current = false
-      setBusy(false)
+      setBusy(null)
     }
   }
   return (
     <div className="min-w-0 w-full space-y-3 [overflow-wrap:anywhere]">
-      <fieldset disabled={disabled || busy} className="min-w-0 space-y-3">
+      <fieldset disabled={disabled || busy !== null} className="min-w-0 space-y-3">
         {fields.map((field) => (
           <FormField
             key={field.name}
@@ -78,18 +81,25 @@ export function HumanDecisionForm({
             }}
           />
         ))}
+        {/* The approving action last: the primary sits on the right, as in
+            every decision dock. On a phone the buttons share the row. */}
         <div className="flex flex-wrap gap-2">
-          {form.actions.map((action) => (
-            <Button
-              type="button"
-              key={action.id}
-              className="h-auto min-h-9 max-w-full whitespace-normal [overflow-wrap:anywhere]"
-              variant={action.approved ? "default" : "outline"}
-              onClick={() => void decide(action)}
-            >
-              {action.label}
-            </Button>
-          ))}
+          {[...form.actions.filter((a) => !a.approved), ...form.actions.filter((a) => a.approved)].map((action) => {
+            const pending = busy === action.id
+            return (
+              <Button
+                type="button"
+                key={action.id}
+                className="relative h-auto min-h-9 max-w-full whitespace-normal [overflow-wrap:anywhere] max-md:flex-1"
+                variant={action.approved ? "default" : "outline"}
+                aria-busy={pending || undefined}
+                onClick={() => void decide(action)}
+              >
+                <span data-slot="decision-label" className={pending ? "invisible" : undefined}>{action.label}</span>
+                {pending && <Loader2 className="absolute h-4 w-4 animate-spin" aria-hidden />}
+              </Button>
+            )
+          })}
         </div>
       </fieldset>
       {error && (

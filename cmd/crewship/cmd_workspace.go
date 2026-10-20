@@ -225,6 +225,9 @@ var workspaceGetCmd = &cobra.Command{
 			// writes; decoded rather than kept raw so YAML output renders it
 			// as a mapping and the human line can name the SDK defaults for `{}`.
 			PagesTheme map[string]string `json:"pages_theme" yaml:"pages_theme"`
+			// AppearanceDefault is the default look `workspace update
+			// --appearance-default` writes (style, knobs, accent, theme).
+			AppearanceDefault map[string]any `json:"appearance_default" yaml:"appearance_default"`
 		}
 		if err := cli.ReadJSON(resp, &ws); err != nil {
 			return err
@@ -242,6 +245,7 @@ var workspaceGetCmd = &cobra.Command{
 			{"Language", lang},
 			{"Allow privileged credentials", fmt.Sprintf("%t", ws.AllowPrivilegedCredentials)},
 			{"Pages theme", formatPagesTheme(ws.PagesTheme)},
+			{"Appearance default", formatAppearanceDefault(ws.AppearanceDefault)},
 			{"ID", ws.ID},
 			{"Created", ws.CreatedAt},
 		}
@@ -302,6 +306,14 @@ var workspaceUpdateCmd = &cobra.Command{
 				return err
 			}
 			body["pages_theme"] = theme
+		}
+		if flags.Changed("appearance-default") {
+			v, _ := flags.GetString("appearance-default")
+			look, err := parseAppearanceDefaultFlag(v)
+			if err != nil {
+				return err
+			}
+			body["appearance_default"] = look
 		}
 
 		if len(body) == 0 {
@@ -824,6 +836,52 @@ func parsePagesThemeFlag(value string) (map[string]string, error) {
 	return theme, nil
 }
 
+// parseAppearanceDefaultFlag reads `--appearance-default` as inline JSON or
+// `@file`: an object with style, knobs, accent and theme, or {} to reset.
+// Only the shape is checked here; the ids and sizes belong to the server
+// (internal/api/workspace_appearance_default.go).
+func parseAppearanceDefaultFlag(value string) (map[string]any, error) {
+	raw := strings.TrimSpace(value)
+	if strings.HasPrefix(raw, "@") {
+		path := strings.TrimPrefix(raw, "@")
+		if path == "" {
+			return nil, fmt.Errorf("--appearance-default @file needs a path")
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read --appearance-default file: %w", err)
+		}
+		raw = strings.TrimSpace(string(b))
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("--appearance-default expects a JSON object such as '{\"style\": \"slate\", \"accent\": \"teal\", \"theme\": \"dark\"}' or {} to reset")
+	}
+	var look map[string]any
+	if err := json.Unmarshal([]byte(raw), &look); err != nil || look == nil {
+		return nil, fmt.Errorf("--appearance-default must be a JSON object with style, knobs, accent and theme")
+	}
+	return look, nil
+}
+
+// formatAppearanceDefault renders the default look for the human detail view.
+func formatAppearanceDefault(look map[string]any) string {
+	if len(look) == 0 {
+		return "(none)"
+	}
+	keys := make([]string, 0, len(look))
+	for key := range look {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if v, err := json.Marshal(look[key]); err == nil {
+			parts = append(parts, key+"="+strings.Trim(string(v), `"`))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // formatPagesTheme renders the theme object for the human detail view.
 func formatPagesTheme(theme map[string]string) string {
 	if len(theme) == 0 {
@@ -859,6 +917,8 @@ func init() {
 		"Days of decided approvals_queue history to keep; 0 means keep forever. Unset uses the 90-day default (#2233)")
 	workspaceUpdateCmd.Flags().String("pages-theme", "",
 		"Shared Page colours as a JSON object of #RRGGBB values keyed accent, background, surface, text, muted, border; @file reads it from a file, {} resets to the SDK defaults")
+	workspaceUpdateCmd.Flags().String("appearance-default", "",
+		"Default look for members who have not chosen their own, as a JSON object with style, knobs, accent and theme (OWNER/ADMIN); @file reads it from a file, {} resets it")
 
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

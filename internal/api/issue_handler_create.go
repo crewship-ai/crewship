@@ -40,16 +40,22 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// rule Update applies — so a caller cannot mint an issue directly
 		// in DONE and skip the review path (#2426: the manifest's
 		// `status: todo` used to be ignored and land as BACKLOG).
-		Status        string   `json:"status"`
-		Priority      string   `json:"priority"`
-		AssigneeType  *string  `json:"assignee_type"`
-		AssigneeID    *string  `json:"assignee_id"`
-		DueDate       *string  `json:"due_date"`
-		ProjectID     *string  `json:"project_id"`
-		Estimate      *int     `json:"estimate"`
-		ParentIssueID *string  `json:"parent_issue_id"`
-		MilestoneID   *string  `json:"milestone_id"`
-		Labels        []string `json:"labels"`
+		Status       string  `json:"status"`
+		Priority     string  `json:"priority"`
+		AssigneeType *string `json:"assignee_type"`
+		AssigneeID   *string `json:"assignee_id"`
+		// OwnerUserID and DelegateAgentID set the two slots independently, so
+		// one create can name the accountable person and the agent doing the
+		// work. They replace the single assignee pair and cannot be mixed
+		// with it.
+		OwnerUserID     *string  `json:"owner_user_id"`
+		DelegateAgentID *string  `json:"delegate_agent_id"`
+		DueDate         *string  `json:"due_date"`
+		ProjectID       *string  `json:"project_id"`
+		Estimate        *int     `json:"estimate"`
+		ParentIssueID   *string  `json:"parent_issue_id"`
+		MilestoneID     *string  `json:"milestone_id"`
+		Labels          []string `json:"labels"`
 		// RoutineID binds the issue to a saved routine (pipeline). When
 		// set, /run-routine on this issue invokes the bound pipeline
 		// with RoutineInputs as the inputs payload. Stored as the
@@ -171,6 +177,46 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// owner_user_id / delegate_agent_id: validated in this workspace, then
+	// folded into the legacy pair (the delegate is the assignee when there is
+	// one, as the agent holds the work) so every older reader still works.
+	var explicitOwner, explicitDelegate *string
+	if (req.OwnerUserID != nil && *req.OwnerUserID != "") || (req.DelegateAgentID != nil && *req.DelegateAgentID != "") {
+		if req.AssigneeID != nil && *req.AssigneeID != "" {
+			writeProblem(w, r, http.StatusBadRequest, "owner_user_id and delegate_agent_id cannot be combined with assignee_id")
+			return
+		}
+		if req.OwnerUserID != nil && *req.OwnerUserID != "" {
+			ok, vErr := validateAssigneeWorkspace(r.Context(), tx, "user", *req.OwnerUserID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate owner_user_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "owner_user_id does not exist in this workspace")
+				return
+			}
+			explicitOwner = req.OwnerUserID
+		}
+		if req.DelegateAgentID != nil && *req.DelegateAgentID != "" {
+			ok, vErr := validateAssigneeWorkspace(r.Context(), tx, "agent", *req.DelegateAgentID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate delegate_agent_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "delegate_agent_id does not exist in this workspace")
+				return
+			}
+			explicitDelegate = req.DelegateAgentID
+		}
+		legacyType, legacyID := "user", explicitOwner
+		if explicitDelegate != nil {
+			legacyType, legacyID = "agent", explicitDelegate
+		}
+		req.AssigneeType, req.AssigneeID = &legacyType, legacyID
+	}
+
 	// Same workspace-scoping for assignee_id as the parent_issue_id / routine_id
 	// checks: pre-fix the field went into the INSERT verbatim, so a
 	// workspace-A caller could assign a new issue to a guessed or enumerated
@@ -261,6 +307,9 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// delegate, a user assignee is the human owner. Legacy pair kept as the
 	// compatibility projection for the migration window.
 	ownerUserID, delegateAgentID := ownerDelegateInsertValues(req.AssigneeType, req.AssigneeID)
+	if explicitOwner != nil || explicitDelegate != nil {
+		ownerUserID, delegateAgentID = explicitOwner, explicitDelegate
+	}
 
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,

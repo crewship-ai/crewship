@@ -173,7 +173,9 @@ test.describe("onboarding wizard — first-run flow", () => {
     // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
-    await expect(page.getByText(/initial setup/i)).toBeVisible()
+    // The first-run screen, not the ordinary sign-in. Harbor 2 (auth A10)
+    // dropped the "Initial setup" eyebrow; the Auth card names the job.
+    await expect(page.getByRole("heading", { level: 1, name: "Create the administrator account" })).toBeVisible()
     await page.fill("#full_name", fullName)
     await page.fill("#email", email)
     await page.fill("#password", password)
@@ -233,7 +235,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     // the saved secret to the browser.
     await page.reload({ waitUntil: "networkidle" })
     await expect(page.locator("#workspace_name")).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /prefer to pick a template instead/i })).toBeVisible({
+    await expect(page.getByRole("button", { name: /^pick a template instead$/i })).toBeVisible({
       timeout: 20_000,
     })
 
@@ -242,12 +244,12 @@ test.describe("onboarding wizard — first-run flow", () => {
     // doesn't drive. AnimatePresence mounts only the active step, so visible
     // aria-pressed buttons are all crew cards — assert the exact count so
     // adding *or* removing a template trips the test.
-    await page.getByRole("button", { name: /prefer to pick a template instead/i }).click()
+    await page.getByRole("button", { name: /^pick a template instead$/i }).click()
     await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
     await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
     await page.getByRole("button", { name: /software development/i }).click()
-    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
-    expect(await page.locator('img[width="32"]').count()).toBe(4)
+    // The picked template's roster, in the "You get" panel beside the tiles.
+    await expect(page.getByTestId("onboarding-template-agent")).toHaveCount(4, { timeout: 10_000 })
 
     const launch = page.getByRole("button", { name: /launch/i })
     await expect(launch).toBeEnabled()
@@ -269,10 +271,16 @@ test.describe("onboarding wizard — first-run flow", () => {
 
     // "Start chatting" when the agent slug resolved, "Go to dashboard" when it
     // did not — handleLaunch resolves it with one GET /agents/<id> and falls
-    // back deliberately, so both buttons are legitimate. Take whichever is
-    // offered, then assert below that it was the good one: a fallback becomes
-    // a one-line failure naming its cause instead of a 15s timeout.
-    await page.getByRole("button", { name: /start chatting|go to dashboard/i }).first().click()
+    // back deliberately. Harbor 2's receipt (onboarding O08) keeps a secondary
+    // "Go to dashboard" beside the primary "Start chatting" when the slug
+    // resolved, so take the primary action that is offered, then assert below
+    // that it was the good one: a fallback becomes a one-line failure naming
+    // its cause instead of a 15s timeout.
+    const startChatting = page.getByRole("button", { name: /start chatting/i })
+    const primary = (await startChatting.count()) > 0
+      ? startChatting
+      : page.getByRole("button", { name: /go to dashboard/i })
+    await primary.click()
 
     await page.waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", {
       timeout: 15_000,

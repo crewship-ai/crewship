@@ -12,6 +12,8 @@ tag: Experimental
 
 The top bar reads in two halves, split by a thin rule: the **system** (the status pill and Search) and **you** (Activity, Inbox and the user menu). Workspace switching is not in the top bar — it is the top of the left rail, because the workspace is the context of everything in that rail. On a phone, where there is no rail, the switcher heads the navigation sheet.
 
+The rail is built on one axis: every icon, the workspace mark, the Crewship sail and your avatar are centred on the same line whether the rail is folded or open, so opening it moves nothing. The workspace, the sail and your avatar are the same size. The Crewship sail is always Crewship blue, whatever style or accent you choose; the workspace mark follows your style. The middle of the rail, with the apps, scrolls on its own and fades at the edge that has more, so the workspace, Search, the sail and you always stay in view. In the open rail, click a group's name (Work, Build) to fold it; the rail remembers this on this device, and the folded rail always shows every app.
+
 ## Status pill
 
 One message in one tone, the worst state winning:
@@ -22,7 +24,7 @@ One message in one tone, the worst state winning:
 | **N agent errors** (red) | At least one agent is in `ERROR` |
 | **N queued** (amber) | Assignments are waiting in the admission queue |
 | **No agents** (grey) | The workspace has no agents, so nothing can run |
-| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current |
+| **Connecting** / **Reconnecting** (amber), **Offline** (red) | The engine or the real-time channel is not up. Fleet counts are hidden — they would be last-known, not current. While the real-time channel is being retried (a restart, usually) the pill stays amber; it turns red only once Crewship cannot be reached. **Offline** is amber when the browser itself has no network |
 
 Clicking the pill opens **System status**: engine and real-time state separately, the agent breakdown (total, running, idle, queued) while it is current, and — when agents are in error — the agents themselves, each linking to `/crews?agent=<slug>`. Data comes from `GET /api/v1/agents/crews-status`; the errored list reads `GET /api/v1/agents` only while the popover is open.
 
@@ -31,7 +33,7 @@ Clicking the pill opens **System status**: engine and real-time state separately
 - The header (avatar, name, e-mail) opens **Settings → Profile**; under it, your role in the current workspace.
 - **Theme** — Dark / Light / System inline. Accent and the rest live in Settings → Appearance.
 - **Notification sounds** — the master on/off switch; detail in Settings → Notification sounds.
-- **Notification preferences** — your category × channel matrix (`/integrations?tab=notifications&section=preferences`).
+- **Notification preferences** — your category × channel matrix (`/integrations?space=channels&view=preferences`).
 - **Sessions & CLI tokens** — with the number of active browser sessions.
 - **Connect CLI…** — signs a terminal in with a one-time code; see [CLI pairing](/guides/cli-pairing).
 - **Help & resources** — Documentation, What's new, Report an issue, GitHub.
@@ -39,19 +41,44 @@ Clicking the pill opens **System status**: engine and real-time state separately
 
 Restricted sessions are not offered Notification preferences or Connect CLI.
 
+## When a session ends
+
+When a session ends, the app shows one of these full screens instead of a bare login form. **Sign in** opens the form, and after signing in you return to the address you were on.
+
+| Screen | When |
+|---|---|
+| **You're signed out** · "See you next time." with **Sign in again** and **Back to crewship.ai** | You pressed **Log out** in this browser, or in another tab of it. |
+| **Your session expired** · "Sign in again to pick up where you left off." | The session timed out. The screen says which account was signed in, with **Use another account**. If you had an unsent chat message, it adds "Your unsent message to <agent> is kept on this device": the draft stays in the browser and comes back when you sign in as the same person. |
+| **Signed out on this device** · "Someone signed you out from another device or an admin ended your session." | The server ended the session. This happens when it was signed out from Settings → Sessions & tokens or another device, revoked by an admin, the account was suspended, or its refresh token was reused. |
+| **Crewship is restarting** · "This usually takes under a minute. The page reconnects on its own." | The server cannot be reached while the app is opening. The screen counts down to the next try (every 10 s) and has **Try now**. Nobody is signed out. The sail pulses unless your system asks for reduced motion. |
+
 ## Settings → Appearance
+
+Styles are grouped by category. **Gaming** holds Afterglow, a dark theme pack; see [Theme packs](/guides/theme-packs).
 
 `/settings?tab=appearance`
 
-- **Theme** — Dark, Light or System (follows the OS).
-  - In light, the left rail, section panels and cards are white on a quiet grey page ground.
+- **Theme** — Dark, Light or System (follows the OS). A new device starts on System; a device that used Crewship before keeps Dark unless you chose otherwise.
+  - In light, the left rail sits on a quiet grey ground; content, section panels and cards are white and separated by hairlines.
 - **Accent** — eight presets as large swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in a preview strip. Green, red and amber are never accents — they mean done, failed and needs-attention.
   - **Team colour** (its own row under the swatches) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
-- **Text size** — Small, Default or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account.
+- **Text size** — Small (13 px text, what a new device starts at), Standard (14 px, the earlier default) or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account. A size you, or an earlier version of Crewship, saved keeps its size; a device that used Crewship before without saving one keeps Standard.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
-- **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
+- **Touch** — on any touch screen (phone, tablet or touch laptop, at any window width) every button, field, tab and menu item is at least 44 px tall, and checkboxes and radios get a 44 px tap area.
+- **Sidebar** — Expanded (default), Expand on hover, or Collapsed; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Sync across devices** — on by default. Theme, accent, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+- **Animated avatars** — on by default. Voxel Bot and Voxel Art agent avatars blink and stretch now and then when drawn at 32 px or larger; turn this off to keep them still. Reduce motion On keeps them still too, and so does an operating system set to reduce motion while Reduce motion is System. It is yours alone: a workspace default never sets it, and **Use workspace default** leaves it as it is. See [Avatar styles](/api-reference/agents#avatar-styles).
+- **Sync across devices** — on by default. Theme, accent, text size, density, sidebar, motion and animated avatars are stored with your account under the `appearance` key of the per-user preference store, the visual style under `appearance.style` (`GET`/`PUT /api/v1/me/preferences/{key}`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser. Changes are written in order and retried when the connection drops; if the server refuses one, **Not synced · Retry** appears next to the switch and your look on this device stays as you set it.
+
+### Workspace default look
+
+An owner or admin can make a look the **workspace default** (**Settings → Appearance → Workspace default → Use my look as default**; CLI: `crewship workspace update --appearance-default`). It holds a style with its options, an accent and a theme, and **Reset** clears it.
+
+- A value is **yours** only when you change it, in Appearance or the top-bar menu. A card says **Set by you** or **Workspace default** for the style, theme and accent.
+- Everything you did not choose follows the default: when an admin changes it, it changes for you; when you switch workspace, you get that workspace's default (or the built-in look when it has none).
+- **Use workspace default** forgets your own style, theme and accent and returns to it. Text size, density, sidebar and motion are never part of the default.
+- Only what you chose is saved to your account under `appearance` and `appearance.style`. A device that only inherits writes nothing.
+- With **Sync across devices** off, your choices on this device still win and the rest is inherited; nothing is sent.
 
 ## Settings → General → Pages appearance
 
@@ -71,10 +98,11 @@ Everything on these pages is stored with **your user**, not with the browser, in
 
 | Key | What |
 |---|---|
-| `appearance` | theme, accent, text size, density, sidebar mode, reduce motion |
+| `appearance` | theme, accent, text size, density, sidebar mode, reduce motion, animated avatars (`avatarAnimation`; per user, never set by the workspace default) |
+| `appearance.style` | visual style and its options (`{"v":1,"style":"harbor","knobs":{}}`); kept apart so an older client that rewrites `appearance` cannot drop it |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 
-A new user starts on the defaults — **Dark**, **Blue**, Default text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+A new user starts on the defaults — **System** theme (follows the OS), **Blue**, Small text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
 
 ## Settings → Sessions & tokens
 

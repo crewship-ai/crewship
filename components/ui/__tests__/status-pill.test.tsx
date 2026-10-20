@@ -22,3 +22,16 @@ describe("StatusPill", () => {
     expect(container.querySelector(".animate-pulse")).not.toBeNull()
   })
 })
+
+describe("StatusPill icon", () => {
+  it("renders an icon in place of the dot when one is given", () => {
+    const { container } = render(<StatusPill status="FAILED" icon={<svg data-testid="glyph" />} />)
+    expect(screen.getByTestId("glyph")).toBeTruthy()
+    expect(container.querySelector('[data-slot="status-pill-dot"]')).toBeNull()
+  })
+
+  it("keeps the dot when there is no icon", () => {
+    const { container } = render(<StatusPill status="FAILED" />)
+    expect(container.querySelector('[data-slot="status-pill-dot"]')).not.toBeNull()
+  })
+})

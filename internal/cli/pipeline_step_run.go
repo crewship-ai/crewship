@@ -25,7 +25,7 @@ type StepRunResult struct {
 	Output           string   `json:"output"`
 	Valid            bool     `json:"valid"`
 	ValidationReason string   `json:"validation_reason"`
-	CostUSD          float64  `json:"cost_usd"`
+	CostUSD          *float64 `json:"cost_usd"` // nil below ADMIN (#3590)
 	TokensIn         int      `json:"tokens_in"`
 	TokensOut        int      `json:"tokens_out"`
 	DurationMs       int64    `json:"duration_ms"`

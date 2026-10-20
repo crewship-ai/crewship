@@ -83,7 +83,7 @@ export async function knownProjectManage({fixture, contexts, pages, check, open,
   // The exact boundary is not an Issues navigation or query bypass.
   for(const route of ['/issues','/chat','/credentials']) {
     await open('desktop',route)
-    await expect(pages.desktop.getByText('Not available with your access',{exact:true})).toBeVisible()
+    await expect(pages.desktop.getByText(/isn’t part of your access$/)).toBeVisible()
   }
   await open('desktop',`${link(a.id)}&search=private`)
   await expect(pages.desktop.getByRole('alert').filter({hasText:/known project/})).toHaveText(/known project/)

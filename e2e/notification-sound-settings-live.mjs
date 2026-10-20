@@ -65,10 +65,10 @@ try{
  assert.equal(await page.evaluate(()=>window.__soundStarts.length),0);
  passed('Settings deep link and browser reload restore choices but require renewed audio activation');
  await page.setViewportSize({width:390,height:844});
- await page.getByRole('button',{name:'Open settings navigation',exact:true}).click();
+ await page.getByRole('button',{name:'Settings navigation',exact:true}).click();
  await page.getByRole('navigation',{name:'Settings sections'}).getByRole('button',{name:'Profile',exact:true}).click();
  await expect(form).not.toBeVisible();
- await page.getByRole('button',{name:'Open settings navigation',exact:true}).click();
+ await page.getByRole('button',{name:'Settings navigation',exact:true}).click();
  await page.getByRole('navigation',{name:'Settings sections'}).getByRole('button',{name:'Notification sounds',exact:true}).click();
  await expect(form).toBeVisible();await expect(page.getByRole('dialog')).not.toBeVisible();
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

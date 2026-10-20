@@ -68,7 +68,7 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"entries":     serializeEntries(entries),
+		"entries":     costAwareEntries(r.Context(), entries),
 		"next_cursor": next,
 		"count":       len(entries),
 	})
@@ -238,7 +238,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		if !auth.StreamCredentialCurrent(r.Context()) {
 			return
 		}
-		writeSSEEvent(w, "entry", e)
+		writeSSEEvent(r.Context(), w, "entry", e)
 		lastSeenTime = ts
 		lastSeenID = e.ID
 		hasWatermark = true
@@ -313,7 +313,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if !auth.StreamCredentialCurrent(r.Context()) {
 				return false
 			}
-			writeSSEEvent(w, "entry", e)
+			writeSSEEvent(r.Context(), w, "entry", e)
 			lastSeenTime = ts
 			lastSeenID = e.ID
 		}
@@ -681,7 +681,7 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Reuse the list serializer so single-entry shape stays identical to
 	// the array form a client just paged through. The slice form is the
 	// only one that survived as the canonical serialiser.
-	writeJSON(w, http.StatusOK, serializeEntries([]journal.Entry{*entry})[0])
+	writeJSON(w, http.StatusOK, costAwareEntries(r.Context(), []journal.Entry{*entry})[0])
 }
 
 // Count serves GET /api/v1/journal/count. Returns the total number of
@@ -729,6 +729,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 }
 
 // Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// OWNER/ADMIN only (#3590).
 // Query params:
 //
 //	window=24h|7d|30d — default 24h
@@ -737,6 +738,9 @@ func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 
@@ -997,8 +1001,8 @@ func serializeEntries(entries []journal.Entry) []map[string]any {
 // writeSSEEvent frames one journal entry as an SSE message. Uses the
 // entry's ID as the SSE event ID so the client's automatic Last-Event-ID
 // handling lets reconnects skip already-seen rows.
-func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
-	payload := serializeEntries([]journal.Entry{e})[0]
+func writeSSEEvent(ctx context.Context, w http.ResponseWriter, eventType string, e journal.Entry) {
+	payload := costAwareEntries(ctx, []journal.Entry{e})[0]
 	data, _ := json.Marshal(payload)
 	_, _ = fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", e.ID, eventType, data)
 }

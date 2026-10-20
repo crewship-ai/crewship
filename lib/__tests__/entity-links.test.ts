@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { entityHref } from "@/lib/entity-links"
+import { filtersFromParams } from "@/hooks/use-issue-filters"
 
 // Every link the audits found dead pointed at a route that does not exist
 // (/agents/<id>, /orchestration/issues, /crews/<id>). These pin the routes
@@ -12,9 +13,19 @@ describe("entityHref", () => {
   })
 
   it("scopes issues to a crew or assignee on the issues page, not /orchestration", () => {
-    expect(entityHref({ kind: "issues", assigneeSlug: "alex" })).toBe("/issues?assignee=alex")
-    expect(entityHref({ kind: "issues", crewSlug: "engineering", status: "IN_PROGRESS" })).toBe("/issues?crew=engineering&status=IN_PROGRESS")
+    expect(entityHref({ kind: "issues", assigneeId: "agt_1" })).toBe("/issues?assignee_id=agt_1")
+    expect(entityHref({ kind: "issues", crewId: "crw_1", status: "IN_PROGRESS" })).toBe("/issues?crew_id=crw_1&status=IN_PROGRESS")
     expect(entityHref({ kind: "issue", identifier: "ENG-48" })).toBe("/issues/ENG-48")
+  })
+
+  // The page (and GET /issues) read crew_id / assignee_id and match them
+  // against ids; a link spelled ?crew=&assignee= landed on the whole list.
+  it("builds an /issues link the Issues page reads back as the same filter", () => {
+    const href = entityHref({ kind: "issues", crewId: "crw_1", assigneeId: "agt_1", status: "REVIEW" })
+    const f = filtersFromParams(new URL(href, "http://x").searchParams)
+    expect(f.crewId).toBe("crw_1")
+    expect(f.agentId).toBe("agt_1")
+    expect(f.statuses).toEqual(["REVIEW"])
   })
 
   it("carries the pipeline alongside a run id, which /activity needs to resolve it", () => {
@@ -39,9 +50,21 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "integrations" })).toBe("/integrations")
   })
 
+  it("sends a journal reference straight to Activity, in Activity's own keys (F-02)", () => {
+    expect(entityHref({ kind: "journal" })).toBe("/activity")
+    expect(entityHref({ kind: "journal", crewSlug: "ops", agentSlug: "riley", missionId: "ENG-1", traceId: "run_1" })).toBe(
+      "/activity?crew=ops&agent=riley&mission=ENG-1&run=run_1",
+    )
+  })
+
+  it("opens spend on Activity's Spend view, not the retired /paymaster (#3618)", () => {
+    expect(entityHref({ kind: "spend" })).toBe("/activity?mode=spend")
+    expect(entityHref({ kind: "spend", crewId: "crw_1" })).toBe("/activity?mode=spend")
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
-    expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/journal?mission_id=m%2F1")
+    expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/activity?mission=m%2F1")
     expect(entityHref({ kind: "credentials" })).toBe("/credentials")
   })
 })

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { PipelineDetailSheet } from "../pipeline-detail-sheet"
+import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", async (original) => ({ ...(await original<typeof import("@/lib/api-fetch")>()), apiFetch: api }))
@@ -23,8 +24,7 @@ async function loaded() { await screen.findByRole("button", { name: "Export bund
 beforeEach(() => {
   api.mockReset()
   api.mockImplementation((url: string) => Promise.resolve(defaultRead(url)))
-  vi.stubGlobal("confirm", vi.fn(() => true))
-  vi.stubGlobal("alert", vi.fn())
+  mountConfirmHost()
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -114,12 +114,13 @@ it("confirms rollback, sends the chosen historical version and refreshes the cur
   })
   render(<PipelineDetailSheet workspaceId="ws" slug="routine" open onClose={vi.fn()} />)
   await loaded(); tab("Versions")
-  vi.mocked(globalThis.confirm).mockReturnValueOnce(false)
   fireEvent.click(screen.getByRole("button", { name: "Rollback" }))
+  expect(await screen.findByRole("alertdialog")).toHaveTextContent("next save will be version 3")
+  await answerConfirm("Cancel")
   expect(api.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0)
   fireEvent.click(screen.getByRole("button", { name: "Rollback" }))
+  await answerConfirm("Roll back")
   expect(await screen.findByText("Restored routine")).toBeVisible()
-  expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringContaining("next save will be version 3"))
   const [url, init] = api.mock.calls.find(([, init]) => init?.method === "POST")!
   expect(url).toBe("/api/v1/workspaces/ws/pipelines/routine/rollback")
   expect(JSON.parse(init.body)).toEqual({ version: 1 })
@@ -131,6 +132,7 @@ it("does not let an old rollback reload into a new workspace", async () => {
   const view = render(<PipelineDetailSheet workspaceId="old" slug="old" open onClose={vi.fn()} />)
   await loaded(); tab("Versions")
   fireEvent.click(screen.getByRole("button", { name: "Rollback" }))
+  await answerConfirm("Roll back")
   view.rerender(<PipelineDetailSheet workspaceId="new" slug="new" open onClose={vi.fn()} />)
   await screen.findByText("Routine new")
   const oldReadsBefore = api.mock.calls.filter(([url, init]) => url.includes("/old/") && !init?.method).length
@@ -145,6 +147,7 @@ it.each(["refused", "network"])("reports a %s rollback without losing the loaded
   render(<PipelineDetailSheet workspaceId="ws" slug="routine" open onClose={vi.fn()} />)
   await loaded(); tab("Versions")
   fireEvent.click(screen.getByRole("button", { name: "Rollback" }))
+  await answerConfirm("Roll back")
   expect(await screen.findByRole("alert")).toHaveTextContent(/Rollback/)
   expect(screen.getByText("Second revision")).toBeVisible()
 })
@@ -224,7 +227,7 @@ it.each(["rollback body", "rollback reload", "export body", "rollback rejection"
       if (url.endsWith("/old") && kind === "rollback reload") { blocked = true; return pending.promise }
       return Promise.resolve(defaultRead(url))
     })
-    if (kind.startsWith("rollback")) { tab("Versions"); fireEvent.click(screen.getByRole("button", { name: "Rollback" })) }
+    if (kind.startsWith("rollback")) { tab("Versions"); fireEvent.click(screen.getByRole("button", { name: "Rollback" })); await answerConfirm("Roll back") }
     else fireEvent.click(screen.getByRole("button", { name: "Export bundle" }))
     await waitFor(() => expect(blocked).toBe(true))
   }

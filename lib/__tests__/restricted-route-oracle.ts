@@ -22,10 +22,16 @@ function patternsIn(source: string): string[] {
   return [...source.matchAll(PATTERN)].map((m) => m[1])
 }
 
-/** Every method+path pattern literal in `internal/api/restricted_access.go`. */
-export function goRestrictedAllowlist(): string[] {
-  const source = readFileSync(path.join(ROOT, "internal/api/restricted_access.go"), "utf8")
-  return [...new Set(patternsIn(source))].sort()
+/** Only keys of the gofmt-formatted restrictedRoutes map, never denial literals. */
+export function goRestrictedAllowlist(
+  source = readFileSync(path.join(ROOT, "internal/api/restricted_access.go"), "utf8"),
+): string[] {
+  const body = source.match(/^var restrictedRoutes = map\[string\]restrictedRule\{\r?\n([\s\S]*?)^\}/m)?.[1]
+  if (body === undefined) throw new Error("restrictedRoutes map not found")
+  // Gofmt places these keys one tab deep. Comments and nested callback/map
+  // literals cannot introduce an allowlisted route, nor can code after the map.
+  const keys = [...body.matchAll(/^\t"((?:GET|POST|PUT|PATCH|DELETE|HEAD) \/api\/[^"\s]+)"\s*:/gm)]
+  return [...new Set(keys.map((m) => m[1]))].sort()
 }
 
 let registered: string[] | null = null

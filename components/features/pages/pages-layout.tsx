@@ -4,6 +4,8 @@ import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-
 
 import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
+import { PageSlides } from "./page-slides"
+import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
 import { PersonalDocumentSpace } from "./personal-document-space"
 import { NewDocumentDialog } from "./new-document-dialog"
@@ -246,7 +248,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // support.
   const nativeDocument = detail.page?.hasDocument === true
   const nativePageId = typeof detail.raw?.id === "string" ? detail.raw.id.trim() : ""
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument
+  // Flag off: has_slides is never read and the Page renders exactly as before.
+  const nativeSlides = slidesEditorMount() && detail.page?.hasSlides === true && !nativeDocument
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -317,7 +321,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
-        className="coarse:[&>div]:min-h-12"
+        className="coarse:[&>div]:min-h-[44px]"
         icon={CONCEPT_ICON.pages}
         title="Artifacts"
         section={editing ? "Edit" : undefined}
@@ -328,7 +332,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {!selectedSlug && documentAvailability.data === true && <SubBarSecondary
               icon={FolderUser}
               aria-pressed={personalSpace}
-              className="coarse:min-h-12"
+              className="coarse:min-h-[44px]"
               onClick={() => setPersonalSpace(value => !value)}
               title="Show your private Documents in this workspace"
             >My space</SubBarSecondary>}
@@ -343,7 +347,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   aria-pressed={!showPanels}
                   onClick={() => setShowPanels(false)}
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     !showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
@@ -357,7 +361,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   onClick={() => setShowPanels(true)}
                   title="Show this Page's panels instead; the application is closed in this tab and keeps running for everyone else"
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
@@ -382,7 +386,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Share
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && (
+            {selectedSlug && !editing && !nativeDocument && !nativeSlides && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
@@ -398,7 +402,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-12" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && documentAvailability.data === true && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
@@ -503,7 +507,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               </motion.div>
             ) : selectedSlug ? (
               <motion.div
-                key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
+                key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : nativeSlides ? `slides-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
@@ -515,6 +519,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
                   <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
                   </>
+                ) : nativeSlides ? (
+                  detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
+                    : <PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}

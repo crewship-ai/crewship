@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -222,6 +223,9 @@ func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	replay := h.src.ReplaySession(channel, lastSeq)
 
 	st := &runStreamWriter{credentialContext: r.Context(), w: w, flusher: flusher, rc: http.NewResponseController(w), lastSeq: lastSeq}
+	// #3590: run metadata carries total_cost_usd / model_usage. Only the
+	// workspace's OWNER/ADMIN read it; anyone else gets the frame without.
+	st.redactCosts = !h.canReadCosts(r.Context(), user.ID, channel)
 	st.authorize = func() error {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -392,6 +396,19 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 	}
 }
 
+// canReadCosts asks the source for the #3590 money rule on channel. A source
+// that cannot answer means redact.
+func (h *RunStreamHandler) canReadCosts(ctx context.Context, userID, channel string) bool {
+	cr, ok := h.src.(interface {
+		CanReadCostsChannel(ctx context.Context, userID, channel string) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	allowed, err := cr.CanReadCostsChannel(ctx, userID, channel)
+	return err == nil && allowed
+}
+
 // runStreamWriter serializes frames to the response and tracks the highest seq
 // already written, which is what makes replay-then-live safe to concatenate.
 type runStreamWriter struct {
@@ -401,6 +418,8 @@ type runStreamWriter struct {
 	flusher           http.Flusher
 	rc                *http.ResponseController
 	lastSeq           int64
+	// redactCosts strips internal/costvis fields from every frame.
+	redactCosts bool
 	// writeErr latches the first failed write.
 	writeErr error
 }
@@ -422,6 +441,13 @@ func (s *runStreamWriter) write(f runStreamFrame) {
 			s.writeErr = err
 			return
 		}
+	}
+	if s.redactCosts && f.Metadata != nil {
+		redacted, err := costvis.RedactValue(f.Metadata)
+		if err != nil {
+			return
+		}
+		f.Metadata = redacted
 	}
 	data, err := json.Marshal(f)
 	if err != nil {

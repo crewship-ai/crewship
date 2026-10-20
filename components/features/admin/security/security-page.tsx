@@ -11,7 +11,7 @@ import { INSTANCE_SCOPE } from "@/lib/admin-api"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import {
@@ -295,7 +295,7 @@ export function SecurityPage() {
             className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
               // A phone: edge to edge above the tab bar, the count without its word.
               "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
-            <span className="px-1"><span className="font-mono font-semibold tabular-nums">{pickedRows.length}</span><span className="max-sm:hidden"> selected</span></span>
+            <span className="px-1"><span className="font-semibold tabular-nums">{pickedRows.length}</span><span className="max-sm:hidden"> selected</span></span>
             {BULK.map((b, i) => (
               <Button key={b.key} type="button" size="sm" variant={i === 0 ? "default" : "outline"} className={cn(i === 0 ? selectionBarAction : selectionBarButton, "max-sm:px-2")}
                 onClick={() => setBulk(b.key)}>
@@ -307,18 +307,22 @@ export function SecurityPage() {
             </Button>
           </div>
         )}
-        <Dialog open={bulk !== null} onOpenChange={(o) => { if (!o) setBulk(null) }}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{BULK.find((b) => b.key === bulk)?.title} for {pickedRows.length} {pickedRows.length === 1 ? "workspace" : "workspaces"}</DialogTitle>
-              <DialogDescription>{pickedRows.map((r) => r.workspace_name).join(", ")}</DialogDescription>
-            </DialogHeader>
+        <CreateSurface open={bulk !== null} onOpenChange={(o) => { if (!o) setBulk(null) }} size="sm">
+            <CreateSurfaceHeader
+              title={<>{BULK.find((b) => b.key === bulk)?.title} for {pickedRows.length} {pickedRows.length === 1 ? "workspace" : "workspaces"}</>}
+              description={pickedRows.map((r) => r.workspace_name).join(", ")}
+              onClose={() => setBulk(null)}
+            />
+            {/* BulkGovernanceForm brings its own Review/Cancel row (`inDialog`):
+                saving goes through its change-review confirmation, not a
+                one-click primary, so the surface adds no second footer. */}
+            <CreateSurfaceBody>
             {bulk && (
               <BulkGovernanceForm section={bulk} rows={pickedRows} all={false} inDialog={{ onCancel: () => setBulk(null) }}
                 onSaved={() => { setBulk(null); setPicked(new Set()); void inst.reloadGov() }} />
             )}
-          </DialogContent>
-        </Dialog>
+            </CreateSurfaceBody>
+        </CreateSurface>
       </>
     )
   } else if (view === "activity") {
@@ -356,6 +360,7 @@ export function SecurityPage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-security"
       title="Security"
       icon={Shield}
       description="Who may read a secret, and how every workspace is watched"

@@ -30,6 +30,8 @@ crewship skill <subcommand> [flags]
 | `import` | Upload a SKILL.md (single URL/file) or walk a whole git repo. |
 | `create` | LLM-author a SKILL.md via Anthropic Messages (requires API key). |
 | `delete` | Remove a skill from the workspace registry. |
+| `archive` | Move a skill to the Archived view (hidden from the library and pickers). |
+| `restore` | Bring an archived skill back to active. |
 | `assign` | Attach a skill to one agent, several agents, or a whole crew. |
 | `unassign` | Detach the same way. |
 | `proposed list` | List skills auto-promoted from memory awaiting operator approval. |
@@ -112,7 +114,7 @@ crewship skill list [flags]
 
 **Output columns:** SLUG, VENDOR, NAME, CATEGORY, MATURITY, SOURCE, SCAN,
 AGENTS (agents of this workspace holding it), USES 7D (this workspace's
-invocations in the last seven days). `--format json` carries `installed_on`
+invocations in the last seven days), USES 30D (the last thirty). `--format json` carries `installed_on`
 and `usage` in full.
 
 Examples:
@@ -240,6 +242,22 @@ crewship skill rm <slug-or-id>              # alias
   Cascades to `agent_skills` — every agent loses the skill. `BUNDLED` skills
   cannot be deleted (they re-seed on every server start).
 </Warning>
+
+---
+
+## `crewship skill archive` / `restore`
+
+Move a skill into or out of the Archived view by hand. Archived skills are
+hidden from the library and from agent pickers; agents that already hold one
+keep it. Needs the `OWNER` or `ADMIN` role; both commands are idempotent.
+
+```bash
+crewship skill archive <slug-or-id>
+crewship skill restore <slug-or-id>
+```
+
+A restored skill is still judged by the keeper's sweep: with no agent holding
+it and no use, it is stale again after 30 days and archived after 90.
 
 ---
 

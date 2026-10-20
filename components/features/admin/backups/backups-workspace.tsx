@@ -12,7 +12,7 @@ import { formatAgo, formatWhen, proofLabel, runPlanLabel, runResult, type ScopeW
 import { useBackupsOverview } from "./use-backups-overview"
 import { useBackupRuns } from "./use-backup-runs"
 import { OverviewBody } from "./backups-overview"
-import type { SectionCtx } from "./backups-console"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * One workspace's backups, like a workspace's page in People & workspaces and

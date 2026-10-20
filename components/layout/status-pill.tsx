@@ -8,6 +8,7 @@ import { Bot, Clock, TriangleAlert, WifiOff } from "lucide-react"
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { CrewsStatus } from "@/hooks/use-crews-status"
+import type { WSReason } from "@/hooks/use-websocket"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
@@ -101,19 +102,30 @@ export function describeSystemStatus(
   engineStatus: string,
   wsStatus: string,
   crews: CrewsStatus | null,
+  wsReason: WSReason | null = null,
 ): SystemStatusDescription {
   const online = engineStatus === "connected" && wsStatus === "connected"
+  // The realtime socket lost the backend and is in its fast retries (a
+  // restart, usually). #3783: that is not red, whatever the engine poll says
+  // in the meantime — the engine poll goes "disconnected" after two misses,
+  // well inside a slow deploy.
+  const wsRetrying = wsStatus === "connecting" && wsReason != null
 
   // "degraded" is a single failed poll or a 429 throttle — the engine is not
   // gone, so it must not read like it. "Reconnecting" vs "Connecting" tells a
-  // mid-deploy restart apart from a session that never came up.
+  // mid-deploy restart apart from a session that never came up. Red is kept
+  // for a real outage: the socket's fast retries are spent, or the engine is
+  // down while the socket is not even retrying. A browser without a network
+  // is warn: nothing is wrong with Crewship.
   let connection: { label: string; tone: StatusTone }
   if (online) {
     connection = { label: "Online", tone: "success" }
-  } else if (engineStatus === "degraded") {
+  } else if (engineStatus === "degraded" || wsRetrying) {
     connection = { label: "Reconnecting", tone: "warn" }
   } else if (engineStatus === "checking" || wsStatus === "connecting") {
     connection = { label: "Connecting", tone: "warn" }
+  } else if (wsStatus === "offline" && wsReason === "browser-offline") {
+    connection = { label: "Offline", tone: "warn" }
   } else {
     connection = { label: "Offline", tone: "destructive" }
   }
@@ -182,6 +194,7 @@ const TONE_FILL: Record<StatusTone, string> = {
 export interface SystemStatusPillProps {
   engineStatus: string
   wsStatus: string
+  wsReason?: WSReason | null
   crews: CrewsStatus | null
   /** Workspace whose agents the popover lists when some are in error. */
   workspaceId?: string | null
@@ -194,10 +207,10 @@ const ICON_PATHS: Record<Exclude<StatusIcon, "wifi">, React.ReactNode> = {
   empty: <Bot className="h-3 w-3" aria-hidden />,
 }
 
-export function SystemStatusPill({ engineStatus, wsStatus, crews, workspaceId = null }: SystemStatusPillProps) {
+export function SystemStatusPill({ engineStatus, wsStatus, wsReason = null, crews, workspaceId = null }: SystemStatusPillProps) {
   const wifiRef = React.useRef<WifiIconHandle>(null)
   const [open, setOpen] = React.useState(false)
-  const description = describeSystemStatus(engineStatus, wsStatus, crews)
+  const description = describeSystemStatus(engineStatus, wsStatus, crews, wsReason)
   const { display, ariaLabel } = description
 
   React.useEffect(() => {
@@ -247,6 +260,7 @@ export function SystemStatusPill({ engineStatus, wsStatus, crews, workspaceId = 
           description={description}
           engineStatus={engineStatus}
           wsStatus={wsStatus}
+          wsReason={wsReason}
           crews={crews}
           workspaceId={workspaceId}
           onNavigate={() => setOpen(false)}
@@ -263,10 +277,16 @@ function engineLabel(engineStatus: string) {
   return "Offline"
 }
 
-function realtimeLabel(wsStatus: string) {
-  if (wsStatus === "connected") return "Connected"
-  if (wsStatus === "connecting") return "Connecting…"
-  return "Disconnected"
+/** The Real-time row, in the reconnect banner's words (realtime-outage.ts). */
+function realtimeRow(wsStatus: string, wsReason: WSReason | null): { value: string; tone: StatusTone } {
+  if (wsStatus === "connected") return { value: "Connected", tone: "success" }
+  if (wsStatus === "connecting") return { value: wsReason ? "Reconnecting…" : "Connecting…", tone: "warn" }
+  if (wsStatus === "offline") {
+    return wsReason === "browser-offline"
+      ? { value: "You're offline", tone: "warn" }
+      : { value: "Can't reach · retrying", tone: "destructive" }
+  }
+  return { value: "Not connected", tone: "destructive" }
 }
 
 function StatusRow({ label, value, tone }: { label: string; value: React.ReactNode; tone?: StatusTone }) {
@@ -294,10 +314,11 @@ const TONE_DOT: Record<StatusTone, string> = {
  * agent is broken — names it, so "1 agent error" is one click from the agent
  * rather than a hunt through every crew.
  */
-function SystemStatusPanel({
+export function SystemStatusPanel({
   description,
   engineStatus,
   wsStatus,
+  wsReason = null,
   crews,
   workspaceId,
   onNavigate,
@@ -305,11 +326,13 @@ function SystemStatusPanel({
   description: SystemStatusDescription
   engineStatus: string
   wsStatus: string
+  wsReason?: WSReason | null
   crews: CrewsStatus | null
   workspaceId: string | null
   onNavigate: () => void
 }) {
   const { display, fleetKnown } = description
+  const realtime = realtimeRow(wsStatus, wsReason)
   return (
     <div data-testid="system-status-panel">
       <div className="flex items-center justify-between gap-2 px-4 pt-3.5 pb-2">
@@ -328,8 +351,8 @@ function SystemStatusPanel({
         />
         <StatusRow
           label="Real-time"
-          value={realtimeLabel(wsStatus)}
-          tone={wsStatus === "connected" ? "success" : wsStatus === "connecting" ? "warn" : "destructive"}
+          value={realtime.value}
+          tone={realtime.tone}
         />
         {/* Gated on `fleetKnown`, not on the pill's label: the pill is silent
             on a healthy workspace, and that is exactly when this row is the
@@ -340,7 +363,7 @@ function SystemStatusPanel({
           <StatusRow
             label="Agents"
             value={
-              <span className="font-mono text-micro font-normal tabular-nums">
+              <span className="text-micro font-normal tabular-nums">
                 {crews.total} total · {crews.running} running · {crews.idle} idle
                 {crews.queued > 0 ? ` · ${crews.queued} queued` : ""}
               </span>

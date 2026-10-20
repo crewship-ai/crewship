@@ -113,7 +113,7 @@ crewship agent create --name "Viktor" --crew backend-team --role LEAD
 | `--lead-mode` | `string` | | Lead mode: `active` or `passive`. |
 | `--timeout` | `int` | `0` | Timeout in seconds. |
 | `--avatar-seed` | `string` | _(agent name)_ | Avatar seed for avatar generation. |
-| `--avatar-style` | `string` | | Avatar style: `bottts-neutral`, `adventurer`, `fun-emoji`, `pixel-art`, `micah`, `notionists`, `thumbs`, `lorelei`, `big-smile`, `avataaars`. |
+| `--avatar-style` | `string` | _(the crew's, else `voxel-bot`)_ | Avatar style, one of the [avatar styles](/api-reference/agents#avatar-styles), for example `voxel-bot`, `voxel-art`, `bottts-neutral`, `pixel-art`. An unknown slug fails before anything is sent. |
 
 <Tip>
 Use `@file.txt` syntax with `--system-prompt` to load the prompt from a file:
@@ -160,7 +160,7 @@ crewship agent update <slug-or-id> --role LEAD --memory
 | `--self-learning` | `bool` | `false` | Enable/disable per-agent self-learning. Goes through a separate audited endpoint (`PATCH /api/v1/agents/{id}/learning`), so it cannot be combined with any other field update in one command, and requires `--learning-reason`. |
 | `--learning-reason` | `string` | | Audit reason recorded with the `--self-learning` change (required when `--self-learning` is set). |
 | `--avatar-seed` | `string` | | Avatar seed. |
-| `--avatar-style` | `string` | | Avatar style. |
+| `--avatar-style` | `string` | | Avatar style, one of the [avatar styles](/api-reference/agents#avatar-styles); `""` follows the crew. An unknown slug fails before anything is sent. |
 
 <Note>
 `--self-learning` is applied via its own audited endpoint and cannot be

@@ -4,7 +4,7 @@
 // admin one carried no information at all: eleven identical icons.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react"
 
 import { NotificationsTab } from "../notifications-tab"
 
@@ -65,20 +65,26 @@ describe("Admin → Notifications, grouped and counted", () => {
     expect(await screen.findByRole("region", { name: "Chat" })).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Incident" })).toBeInTheDocument()
     expect(await screen.findByText("2 channels")).toBeInTheDocument()
-    expect(document.querySelector("[data-slot=settings-summary]")).toHaveTextContent("2 of 3 providers allowed")
-    expect(screen.getByRole("link", { name: /Channels live in Integrations/ })).toHaveAttribute("href", expect.stringContaining("/integrations"))
+    // An unused service says so instead of a blank.
+    expect(screen.getAllByText("not used").length).toBeGreaterThan(0)
+    const strip = screen.getByRole("list", { name: "Notifications at a glance" })
+    expect(strip.querySelector("[data-strip=allowed]")).toHaveTextContent("2 of 3")
+    expect(strip.querySelector("[data-strip=email]")).toHaveTextContent("Not set up")
+    // The banner says what the switch does and opens Channels in Integrations.
+    expect(screen.getByText("One switch for the whole Crewship")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Open Channels/ })).toHaveAttribute("href", expect.stringContaining("/integrations"))
   })
 
-  it("asks in the row before silencing a provider channels depend on, and says delivery stops", async () => {
+  it("disabling a used service asks first and names the count", async () => {
     render(<NotificationsTab workspaceId="ws-1" />)
     await screen.findByText("2 channels")
     fireEvent.click(screen.getByRole("switch", { name: /disable slack/i }))
-    // The old copy promised only "rejected at channel-create time", which is
-    // why an operator who switched Discord off kept receiving Discord posts.
-    expect(screen.getByRole("alert")).toHaveTextContent(/2 channels stop delivering/)
+    // The shared confirmation, not an inline row: it names what stops.
+    const dialog = await screen.findByRole("alertdialog", { name: "Switch Slack off?" })
+    expect(dialog).toHaveTextContent(/2 channels stop sending/)
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch off" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Switch off" }))
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
       "/api/v1/notification-providers/slack?workspace_id=ws-1",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
@@ -89,7 +95,7 @@ describe("Admin → Notifications, grouped and counted", () => {
     render(<NotificationsTab workspaceId="ws-1" />)
     await screen.findByText("2 channels")
     fireEvent.click(screen.getByRole("switch", { name: /disable discord/i }))
-    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
       "/api/v1/notification-providers/discord?workspace_id=ws-1",
       expect.objectContaining({ method: "PATCH" }),

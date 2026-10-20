@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Extension } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
@@ -14,10 +14,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { DocumentSaveState } from "./document-save-state"
 import { usePageDocument } from "@/hooks/use-page-document"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentHistory, useDocumentHistoryRestore } from "@/hooks/use-document-history"
 import { DocumentHistory } from "./document-history/document-history"
+import type { DocumentHistoryReview } from "./document-history/types"
+import { DocumentProposals } from "./document-proposals/document-proposals"
+import { createHttpHistoryActions } from "@/lib/documents/history-actions"
+import { createHttpProposalClient } from "@/lib/documents/proposals"
+import { documentReviewActions } from "@/lib/feature-flags"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -76,6 +82,11 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   const [linkAddress, setLinkAddress] = useState("")
   const [actionError, setActionError] = useState<string>()
   const [restoring, setRestoring] = useState(false)
+  const reviewEnabled = documentReviewActions()
+  const revertActions = useMemo(() => createHttpHistoryActions(workspaceId, pageId), [workspaceId, pageId])
+  const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
+  const hasLocalDraft = sync.pending > 0 || sync.recovery
+  const downloadDraft = () => download(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)
   useEffect(() => {
     const changed = (_update: Uint8Array, origin: unknown) => { if (origin !== "remote") localVersion.current++ }
@@ -90,10 +101,31 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
-    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><span role="status" aria-live="polite" className="text-sm">{restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}</span></div>
+    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
-    {(sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>Your local draft is retained in this tab. Download it before reopening the current document.</p><Button onClick={() => download(`${slug}-recovery.json`, JSON.stringify(editor?.getJSON(), null, 2))}>Download unsaved draft</Button><Button variant="outline" onClick={() => window.location.reload()}>Reopen saved document</Button></div>}
+    {!sync.denied && (sync.recovery || (!available && sync.pending > 0)) && <div role="alert" className="space-y-2 border p-4"><p>{sync.storageUnavailable || sync.unverifiedDrafts.length ? "Your unsaved changes are held only in this tab, not stored in this browser. Download them before closing it." : "Your unsaved draft is retained privately in this browser. Download it before discarding it."}</p><Button onClick={() => {
+      try {
+        const recovered = sync.recoveredDrafts.map(draft => {
+          const local = documentSchema.load(draft.snapshot)
+          try { return { schema: draft.schema, content: documentSchema.project(local) } } finally { local.destroy() }
+        })
+        download(`${slug}-recovery.json`, JSON.stringify(recovered.length ? recovered : editor?.getJSON(), null, 2))
+      } catch { setActionError("Could not read the recovery draft. It remains retained in this browser.") }
+    }}>Download unsaved draft</Button><Button variant="outline" onClick={() => {
+      if (sync.recoveredDrafts.length) void sync.discardRecoveredDrafts().catch(() => setActionError("Could not discard the recovery draft."))
+      else window.location.reload()
+    }}>{sync.recoveredDrafts.length ? "Discard recovered drafts and reopen" : "Reopen saved document"}</Button></div>}
+    {!sync.denied && sync.unverifiedDrafts.length > 0 && <div role="status" className="space-y-2 border p-4"><p>An earlier unsent draft is stored in this browser. This browser cannot tell whether another tab of this document is using it, so it was not restored and your edits here are not stored locally. You can keep editing or download the earlier draft; it cannot be deleted from here.</p><Button onClick={() => {
+      try {
+        const earlier = sync.unverifiedDrafts.map(draft => {
+          const local = documentSchema.load(draft.snapshot)
+          try { return { schema: draft.schema, content: documentSchema.project(local) } } finally { local.destroy() }
+        })
+        download(`${slug}-earlier-draft.json`, JSON.stringify(earlier, null, 2))
+      } catch { setActionError("Could not read the earlier draft. It remains stored in this browser.") }
+    }}>Download earlier draft</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
+      review={{ currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: reviewEnabled && sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() }}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}
       onRefused={denied => { if (denied) sync.deny(); setRestoring(false) }}
@@ -101,6 +133,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
         if (localVersion.current !== restoreVersion.current) { setActionError("Restore is confirmed. Recover your local draft before reopening the saved document."); return }
         onRestored()
       }} />
+    {reviewEnabled && sync.state && !sync.denied && <div className="px-3"><DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} /></div>}
     {!sync.denied && <>
     {sync.editable && !restoring && editor && <div aria-label="Document formatting" className="flex flex-wrap gap-1 px-6">
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().setParagraph().run()}>Paragraph</Button>
@@ -116,9 +149,9 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   </section>
 }
 
-function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, onStart, onRestored, onRefused }: {
+function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, review, onStart, onRestored, onRefused }: {
   workspaceId: string; pageId: string; humanId: string; available: boolean; denied: boolean
-  head?: ReturnType<typeof usePageDocument>["state"]; blocked: boolean
+  head?: ReturnType<typeof usePageDocument>["state"]; blocked: boolean; review?: DocumentHistoryReview
   onStart:()=>void; onRestored:()=>void; onRefused:(denied:boolean)=>void
 }) {
   const [open, setOpen] = useState(false)
@@ -138,6 +171,6 @@ function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, 
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} />}
   </div>
 }

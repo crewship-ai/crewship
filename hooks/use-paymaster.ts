@@ -5,10 +5,12 @@ import { useApiResource, type UseApiResourceState } from "@/hooks/use-api-resour
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import {
   agentSpendResponseSchema,
+  credentialSpendResponseSchema,
   crewSpendResponseSchema,
   subscriptionUsageResponseSchema,
   topSpendersResponseSchema,
   type AgentSpendResponse,
+  type CredentialSpendResponse,
   type CrewSpendResponse,
   type PaymasterRange,
   type SubscriptionUsageResponse,
@@ -105,6 +107,20 @@ export function useSubscriptionUsage(
   const { data, loading, error, notConfigured } = useApiResource<SubscriptionUsageResponse>(
     `/api/v1/paymaster/subscriptions?range=${range}`,
     { schema: subscriptionUsageResponseSchema, fallback: { rows: [] }, enabled, resetOnDisable: true, reloadKey: reloadKey + liveKey },
+  )
+  return { data, loading, error, notConfigured }
+}
+
+/**
+ * Metered $ per API key for the calendar month so far (UTC) — the Vault's
+ * "$ this month" on an AI provider card. OWNER/ADMIN only; flat-rate seats
+ * have no $ figure and are not in it.
+ */
+export function useCredentialSpendThisMonth(reloadKey = 0, enabled = true): FetchState<CredentialSpendResponse> {
+  const liveKey = usePaymasterLiveKey()
+  const { data, loading, error, notConfigured } = useApiResource<CredentialSpendResponse>(
+    "/api/v1/paymaster/credential-spend?range=month",
+    { schema: credentialSpendResponseSchema, fallback: { rows: [] }, enabled, resetOnDisable: true, reloadKey: reloadKey + liveKey },
   )
   return { data, loading, error, notConfigured }
 }

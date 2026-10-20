@@ -81,7 +81,7 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"FinalChatList":                  array(object(map[string]any{"id": str(), "agent_id": str(), "workspace_id": str(), "title": str(), "mode": str(), "status": str(), "message_count": integer(), "started_at": str(), "ended_at": str(), "created_at": str(), "origin": str(), "last_activity_at": str(), "unread_count": integer(), "kind": str(), "source": chatSource})),
 		"FinalChatSteer":                 object(map[string]any{"queued": boolean(), "in_flight": boolean()}),
 		"FinalChatParticipants":          object(map[string]any{"participants": array(participant)}),
-		"FinalInboxList": object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer(), "has_more": map[string]any{"type": "boolean"}},
+		"FinalInboxList": object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer(), "has_more": map[string]any{"type": "boolean"}, "next_cursor": str()},
 			// Named by TestOpenAPIRequired_MatchesTheStructsOwnJSONTags, which
 			// reads inboxListResponse's json tags rather than anyone's memory.
 			"rows", "count", "unread_count", "has_more"),

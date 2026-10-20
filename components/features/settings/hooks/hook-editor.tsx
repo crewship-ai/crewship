@@ -8,7 +8,12 @@ import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 
 import {
   HOOK_EVENTS,
@@ -110,14 +115,14 @@ export function HookEditor({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b border-border px-5 py-4">
-          <DialogTitle className="text-base">{editing ? "Edit hook" : "New hook"}</DialogTitle>
-          <DialogDescription className="text-xs">Code this workspace runs when something happens on the platform.</DialogDescription>
-        </DialogHeader>
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="md" onSubmit={() => { if (!saving) void save() }}>
+        <CreateSurfaceHeader
+          title={editing ? "Edit hook" : "New hook"}
+          description="Code this workspace runs when something happens on the platform."
+          onClose={() => onOpenChange(false)}
+        />
 
-        <div className="max-h-[calc(92dvh-9rem)] space-y-6 overflow-y-auto px-5 py-5">
+        <CreateSurfaceBody className="space-y-6">
           {/* 1 · When */}
           <section aria-label="When">
             <h3 className={stepHead}><span className={stepNo}>1</span>When</h3>
@@ -130,13 +135,13 @@ export function HookEditor({
                   </span>
                   <span className="font-mono text-micro text-muted-foreground">{info.id}</span>
                 </span>
-                <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setPickEvent(true)}>Change</Button>
+                <Button type="button" variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => setPickEvent(true)}>Change</Button>
               </div>
             ) : (
             <div className="mt-3 space-y-3">
               {HOOK_GROUPS.map((g) => (
                 <div key={g.id}>
-                  <div className="mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">{g.label}</div>
+                  <div className="mb-1.5 text-micro font-semibold text-muted-foreground-soft">{g.label}</div>
                   <div role="radiogroup" aria-label={g.label} className="grid gap-1.5 sm:grid-cols-2">
                     {HOOK_EVENTS.filter((e) => e.group === g.id).map((e) => {
                       const checked = d.event === e.id
@@ -242,14 +247,16 @@ export function HookEditor({
             </ul>
           )}
           {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}
-        </div>
+        </CreateSurfaceBody>
 
-        <DialogFooter className="border-t border-border px-5 py-3">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button size="sm" onClick={() => void save()} disabled={saving || shellLocked}>{editing ? "Save hook" : "Create hook"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <CreateSurfaceFooter
+          onCancel={() => onOpenChange(false)}
+          primaryLabel={editing ? "Save hook" : "Create hook"}
+          onPrimary={() => void save()}
+          primaryDisabled={shellLocked}
+          busy={saving}
+        />
+    </CreateSurface>
   )
 }
 

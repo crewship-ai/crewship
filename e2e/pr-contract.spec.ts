@@ -15,29 +15,33 @@ test("PR browser contract subset", async ({ page }) => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
     // A cold embedded export hydrates after the workspace request. The CI trace
-    // showed the correct heading just after the former five-second deadline.
-    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible({ timeout: 20_000 })
+    // showed the page just after the former five-second deadline. Harbor 2 has
+    // no "Crews & agents" roster: on a desktop /crews opens the last crew.
+    await expect(page.getByTestId("crew-header")).toBeVisible({ timeout: 20_000 })
   })
 
   await test.step("agent create dialog is reachable", async () => {
-    await page.goto("/crews")
-    await page.getByRole("button", { name: /^Agent$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await expect(page.getByText(/^New agent$/)).toBeVisible()
-    await page.getByRole("button", { name: /Cancel|Close/i }).first().click()
+    // New ▾ is the page's one create action; New agent joins the open crew.
+    await page.goto("/crews?crew=engineering")
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New agent/ }).click()
+    await expect(page.getByRole("dialog", { name: /New agent in / })).toBeVisible()
+    await page.getByRole("dialog").getByRole("button", { name: /Cancel|Close/i }).first().click()
   })
 
   await test.step("create crew via wizard", async () => {
     await page.goto("/crews")
-    await page.getByRole("button", { name: /^Crew$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await page.getByPlaceholder("Engineering", { exact: true }).fill(`E2E Crew ${slug}`)
-    await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Start empty/ }).click()
-    // Purpose → team → review. Environment settings are optional in review.
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Create crew/ }).click()
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New crew/ }).click()
+    const wizard = page.getByRole("dialog", { name: /New crew/ })
+    await expect(wizard).toBeVisible()
+    await wizard.getByPlaceholder("Engineering", { exact: true }).fill(`E2E Crew ${slug}`)
+    await wizard.getByPlaceholder("engineering", { exact: true }).fill(slug)
+    // Name → Agents → Environment. An empty crew needs no provider.
+    await wizard.getByRole("radio", { name: /^Empty crew/ }).click()
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click()
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click()
+    await wizard.getByRole("button", { name: /Create crew/ }).click()
     await expect(page.getByRole("dialog")).not.toBeVisible()
 
     const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
@@ -52,16 +56,17 @@ test("PR browser contract subset", async ({ page }) => {
 
   await test.step("cancel create-crew dialog", async () => {
     await page.goto("/crews")
-    await page.getByRole("button", { name: /^Crew$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await page.getByRole("button", { name: /Cancel|Close/i }).first().click()
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New crew/ }).click()
+    await expect(page.getByRole("dialog", { name: /New crew/ })).toBeVisible()
+    await page.getByRole("dialog").getByRole("button", { name: /Cancel|Close/i }).first().click()
     await expect(page.getByRole("dialog")).not.toBeVisible()
   })
 
   await test.step("create issue and remove the fixture", async () => {
     const title = `E2E issue ${Date.now()}`
     await page.goto("/issues")
-    await page.getByRole("button", { name: "New Issue", exact: true }).click()
+    await page.getByRole("button", { name: "New issue", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
     // Selecting explicitly avoids relying on the modal's asynchronous
     // auto-select when the workspace roster is still loading. The crew this
@@ -75,7 +80,7 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByRole("dialog").getByRole("button").first().click()
     await page.getByRole("option", { name: seeded?.name ?? "", exact: true }).click()
     await page.getByPlaceholder("Issue title").fill(title)
-    const createIssue = page.getByRole("button", { name: "Create issue", exact: true })
+    const createIssue = page.getByRole("button", { name: "Create", exact: true })
     await expect(createIssue).toBeEnabled({ timeout: 15_000 })
     const createResponse = page.waitForResponse(
       (response) => response.request().method() === "POST" && /\/issues(?:\?|$)/.test(response.url()),
@@ -92,9 +97,12 @@ test("PR browser contract subset", async ({ page }) => {
     const rows = Array.isArray(data) ? data : data.rows ?? data.data ?? []
     const identifier = rows.find((issue: { title?: string; identifier?: string }) => issue.title === title)?.identifier
     expect(identifier).toBeTruthy()
-    await page.request.delete(
-      `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
+    // Issues are deleted under their crew; /api/v1/issues/<id> has no DELETE
+    // (405), so this cleanup used to leave every fixture issue behind.
+    const removed = await page.request.delete(
+      `/api/v1/crews/${encodeURIComponent(seeded.id)}/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
     )
+    expect(removed.ok(), await removed.text()).toBeTruthy()
   })
 
   // #2398 / #2403 — a run_needs_human card is acted on from /inbox, against
@@ -187,17 +195,18 @@ test("PR browser contract subset", async ({ page }) => {
     expect(after.state).toBe("resolved")
     expect(after.resolved_action).toBe("answer")
 
-    // The receipt on the issue's event log, read the way a person reads it:
-    // the issue's History tab shows the inbox_acted row.
-    // This contract checks the durable receipt, not the delayed entrance tween.
-    // Reduced motion prevents a delayed 10px translation moving the tab between
-    // Playwright's stable-position check and its physical click.
+    // The receipt on the issue's event log, read the way a person reads it.
+    // Harbor 2 (issues I-FULL) folded the old History tab into the Timeline
+    // card, whose Show segment All · Comments · Activity · Runs narrows it;
+    // Activity is the event log alone, so the inbox_acted row must be there.
+    // Reduced motion (from main): the contract checks the durable receipt, not
+    // the entrance tween.
     await page.emulateMedia({ reducedMotion: "reduce" })
     await page.goto(`/issues/${encodeURIComponent(identifier)}`)
     await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 })
-    const historyTab = page.getByRole("button", { name: /^history$/i })
-    await historyTab.click()
-    await expect(historyTab).toHaveAttribute("aria-pressed", "true")
+    const activityOnly = page.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "Activity", exact: true })
+    await activityOnly.click()
+    await expect(activityOnly).toHaveAttribute("aria-checked", "true")
     await expect(page.getByText(/inbox acted/)).toBeVisible()
     // And as the CLI reads it (`crewship issue events`): the same row, the
     // same seq the receipt named.
@@ -256,17 +265,29 @@ test.describe("PR browser contract subset — phone", () => {
 
     const tabs = page.getByRole("navigation", { name: "Primary" })
     await expect(tabs).toBeVisible()
-    for (const label of ["Dashboard", "Inbox", "Chat", "More"]) {
+    // Harbor 2 tab bar (lib/nav-sections.ts phoneTabs): the Dashboard reads "Home".
+    for (const label of ["Home", "Inbox", "Chat", "Issues", "More"]) {
       await expect(tabs.getByText(label, { exact: true })).toBeVisible()
     }
 
     // More offers every destination the rail carries — the property that drifted.
+    // The Harbor 2 rail (lib/nav-sections.ts, SHL-01) minus Admin, which only
+    // an instance administrator sees. The Journal is no longer a destination
+    // of its own: F-02 merged it into Activity and its row left the rail
+    // (473ef1d95, ODCH-18), so it must not come back here as a second row,
+    // and the old /journal link is checked below to land on Activity.
     await tabs.getByRole("button", { name: "More" }).click()
     const sheet = page.getByRole("dialog")
     await expect(sheet).toBeVisible()
-    for (const label of ["Inbox", "Issues", "Routines", "Artifacts", "Activity", "Journal", "Integrations"]) {
+    for (const label of [
+      "Dashboard", "Inbox", "Chat", "Activity",
+      "Issues", "Routines", "Artifacts", "Calendar",
+      "Crews", "Skills", "Vault", "Integrations",
+      "Settings",
+    ]) {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
+    await expect(sheet.getByText("Journal", { exact: true })).toHaveCount(0)
     await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", "/pages")
 
     // Back closes it in place rather than leaving the page underneath.
@@ -274,6 +295,11 @@ test.describe("PR browser contract subset — phone", () => {
     await page.goBack()
     await expect(sheet).toBeHidden()
     expect(new URL(page.url()).pathname, "back left the page instead of closing the sheet").toBe(before)
+
+    // What used to be the Journal row is still reachable on a phone: the old
+    // link opens Activity, where F-02 moved it.
+    await page.goto("/journal")
+    await expect(page).toHaveURL(/\/activity(?:\?|$)/, { timeout: 15_000 })
 
     // Nothing you can type into renders under 16px, which is what makes iOS
     // zoom the page on focus and never zoom back out.
@@ -289,13 +315,32 @@ test.describe("PR browser contract subset — phone", () => {
     )
     expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
 
+    // The old Incoming link opens the Triggers space (Harbor 2 Integrations,
+    // #3395 N05/N06). On a phone the explorer is the SecondaryPanel sheet,
+    // opened from the top bar, and its search narrows the list on the page.
+    // (Before Harbor 2 the sheet carried the target list itself and said "No
+    // matching targets".) The seed's artifacts are listed under Triggers as
+    // webhook targets, so one of them is the row the search has to find.
     await page.goto("/integrations?tab=incoming")
-    await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
-    await expect(page.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
-    await page.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
-    await expect(page.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
-    await page.getByRole("button", { name: "Close the integrations list" }).click({ position: { x: 330, y: 300 } })
-    await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/[?&]space=triggers/)
+    const targets = page.locator("main").getByRole("button", { name: /^Open webhooks of / })
+    await expect(targets.first(), "the seed lists artifacts as webhook targets").toBeVisible()
+    const name = ((await targets.first().getAttribute("aria-label")) ?? "").replace(/^Open webhooks of /, "")
+    expect(name).not.toBe("")
+    const integrationsSheet = page.getByRole("dialog", { name: "Integrations" })
+    const searchFor = async (query: string) => {
+      await page.getByRole("button", { name: "Integrations", exact: true }).click()
+      const search = integrationsSheet.getByRole("textbox", { name: "Search triggers, routines, agents" })
+      await expect(search).toBeVisible()
+      await search.fill(query)
+      await page.keyboard.press("Escape")
+      await expect(integrationsSheet).toBeHidden()
+    }
+    await searchFor(name)
+    await expect(page.locator("main").getByRole("button", { name: `Open webhooks of ${name}`, exact: true })).toBeVisible()
+    await searchFor("no-such-target-e2e")
+    await expect(targets).toHaveCount(0)
+    await expect(page.locator("main").getByRole("button", { name: /^Open / })).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false)
 
   })

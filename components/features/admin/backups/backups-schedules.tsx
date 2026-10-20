@@ -3,7 +3,7 @@
 import * as React from "react"
 
 import { CalendarClock, CalendarDays, Clock, HardDrive, Layers, Package } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -24,8 +24,8 @@ import {
 import { deletePlan, previewContents, savePlan, useBackupPlans, usePlanCalendar, usePlanNext } from "./use-backup-plans"
 import { runNow } from "./use-backup-runs"
 import { useBackupSettings, useRecipients } from "./use-backup-settings"
-import { perform, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import { perform, performConfirm, performSave } from "./use-backups-data"
+import type { SectionCtx } from "./backups-scope"
 
 export type PlanDraft = Omit<BackupPlan, "next_run_at" | "last_run_at" | "id"> & { id?: string }
 
@@ -271,11 +271,8 @@ function DeletePlan({ plan, ctx, reload }: { plan: BackupPlan; ctx: SectionCtx; 
         consequences={[{ tone: "lost", text: "No more runs on this schedule" }, { tone: "kept", text: "Every backup it made, pinned ones forever" }]}
         confirmLabel="Delete plan"
         onConfirm={async () => {
-          const out = await perform(ctx.demo, () => deletePlan(plan.id), "Plan deleted", "The plan could not be deleted")
-          if (out) {
-            setOpen(false)
-            reload?.()
-          }
+          // A refusal rejects, so the dialog stays open (POP-02).
+          if (await performConfirm(ctx.demo, () => deletePlan(plan.id), "Plan deleted", "The plan could not be deleted")) reload?.()
         }} />
     </SettingsDangerCard>
   )

@@ -202,6 +202,7 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	errs.add("/hooks", validateHooks(dsl))
 	errs.add("/egress_targets", validateEgressTargets(dsl))
 	errs.add("/concurrency_key", validateConcurrencyKey(dsl))
+	errs.add("/concurrency_policy", validateConcurrencyPolicy(dsl))
 	errs.add("", validateTemplates(dsl))
 
 	return errs.asErr()

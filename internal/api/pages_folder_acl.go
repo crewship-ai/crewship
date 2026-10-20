@@ -737,8 +737,7 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 		if m.rec.FolderID != f.ID {
 			m.rec.FolderID = f.ID
 			m.rec.PagesVersion++
-			h.journalFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug)
-			broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": m.rec.ID, "slug": m.rec.Slug})
+			h.publishFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug)
 		}
 		index, err := h.loadPageIndex(r.Context(), wsID, viewer, pageOnly(m.rec.ID))
 		if err != nil {
@@ -787,6 +786,12 @@ func (h *PageHandler) MyPageAccess(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	rec, ok := h.grantPage(w, r, wsID)
 	if !ok {
@@ -816,6 +821,10 @@ func (h *PageHandler) MyPageAccess(w http.ResponseWriter, r *http.Request) {
 		out.Folder = f.Slug
 		out.Shared = folderSharedLabel(index.acl[f.ID])
 	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 

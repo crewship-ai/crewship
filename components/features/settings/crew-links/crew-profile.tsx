@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { motion, useReducedMotion } from "motion/react"
 import { ArrowDown, Bot, Cpu, ExternalLink, Globe, Lock, Package, Plus, User } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -106,17 +105,17 @@ export function CrewProfile({ crew, agents }: { crew: Crew; agents: CrewAgent[] 
 
 // ── Link map ────────────────────────────────────────────────────────────────
 
-const W = 880
-const NODE_W = 210
-const NODE_H = 38
-const ROW = 50
-const CENTRE_W = 190
+const MAP_W = 640
+const ROW_GAP = 36
+const NAME_MAX = 24
+
+const short = (name: string) => (name.length > NAME_MAX ? `${name.slice(0, NAME_MAX - 1)}…` : name)
 
 /**
- * The crew's links at a glance: who hands work to it (left), the crew, and
- * who it hands work to (right). An edge in the ink colour also carries shared
- * files. Edges draw in whenever the crew changes; a node opens that crew.
- * On a phone the three columns stack.
+ * The crew's links at a glance (v67 `.cl-map`): who hands work to it on the
+ * left, the crew as a circle in its own colour, who it hands work to on the
+ * right. A line in green also carries shared files to read, in amber files to
+ * deliver; a name opens that crew. On a phone the three columns stack.
  */
 export function LinkMap({ crew, ins, outs, dirs, agentsByCrew, onSelect, compact = false }: {
   crew: Crew
@@ -127,7 +126,6 @@ export function LinkMap({ crew, ins, outs, dirs, agentsByCrew, onSelect, compact
   onSelect: (c: Crew) => void
   compact?: boolean
 }) {
-  const reduce = useReducedMotion()
   const node = (c: Crew) => (
     <button type="button" onClick={() => onSelect(c)} aria-label={`Open ${c.name}`} title={`${c.name} · ${c.slug}`} data-slot="link-map-node"
       className="flex h-full w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-subtle px-1.5 text-left transition-colors hover:border-foreground/25 hover:bg-accent">
@@ -155,54 +153,39 @@ export function LinkMap({ crew, ins, outs, dirs, agentsByCrew, onSelect, compact
   }
 
   const rows = Math.max(ins.length, outs.length, 1)
-  const H = Math.max(120, rows * ROW + 40)
-  const y = (i: number, n: number) => 34 + ((H - 34) / (n + 1)) * (i + 1)
-  const cx = (W - CENTRE_W) / 2
-  const cy = 34 + (H - 34) / 2
-  const edge = (key: string, x1: number, y1: number, x2: number, y2: number, files: boolean, i: number) => (
-    <motion.path
-      key={key}
-      d={`M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`}
-      fill="none"
-      strokeWidth={1.5}
-      className={files ? "stroke-primary-hover" : "stroke-muted-foreground/50"}
-      markerEnd={files ? "url(#link-map-arrow-ink)" : "url(#link-map-arrow)"}
-      data-files={files || undefined}
-      initial={reduce ? false : { pathLength: 0, opacity: 0 }}
-      animate={{ pathLength: 1, opacity: 1 }}
-      transition={{ duration: 0.55, delay: 0.08 + i * 0.06, ease: [0.2, 0.7, 0.2, 1] }}
-    />
+  const span = Math.max(120, (rows - 1) * ROW_GAP)
+  const cy = 40 + span / 2
+  const H = cy + 100
+  // Each side's crews are spread over the same height, around the circle.
+  const y = (i: number, n: number) => (n <= 1 ? cy : cy - span / 2 + (i * span) / (n - 1))
+  const files = (from: string, to: string) => dirs.get(dirKey(from, to))?.files ?? null
+  const stroke = (f: ReturnType<typeof files>) => (f === "read" ? "stroke-success" : f === "read_write" ? "stroke-warn" : "stroke-primary")
+  const label = (c: Crew, x: number, ly: number, anchor: "start" | "end") => (
+    <g key={c.id} role="button" tabIndex={0} aria-label={`Open ${c.name}`} data-slot="link-map-node" className="cursor-pointer outline-none [&:focus-visible>text]:underline [&:hover>text]:fill-foreground"
+      onClick={() => onSelect(c)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(c) } }}>
+      <title>{`${c.name} · ${c.slug}`}</title>
+      <text x={x} y={ly + 4} textAnchor={anchor} className="fill-muted-foreground text-control">{short(c.name)}</text>
+    </g>
   )
-  const carriesFiles = (from: string, to: string) => {
-    const f = dirs.get(dirKey(from, to))?.files
-    return f === "read" || f === "read_write"
-  }
   return (
-    <section aria-label="Link map" className="rounded-card border border-border bg-card px-3 py-2.5" data-slot="link-map">
-      <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto block h-auto w-full max-w-[880px]" role="group" aria-label={`Links of ${crew.name}`}>
-        <defs>
-          {[["link-map-arrow", "fill-muted-foreground/60"], ["link-map-arrow-ink", "fill-primary-hover"]].map(([id, cls]) => (
-            <marker key={id} id={id} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" className={cls} />
-            </marker>
-          ))}
-        </defs>
-        <text x={0} y={14} className="fill-muted-foreground font-mono text-micro uppercase tracking-[0.08em]">Receives work from</text>
-        <text x={W} y={14} textAnchor="end" className="fill-muted-foreground font-mono text-micro uppercase tracking-[0.08em]">Hands work to</text>
-        <g key={crew.id}>
-          {ins.map((c, i) => edge(`in-${c.id}`, NODE_W, y(i, ins.length), cx - 4, cy, carriesFiles(c.id, crew.id), i))}
-          {outs.map((c, i) => edge(`out-${c.id}`, cx + CENTRE_W, cy, W - NODE_W - 4, y(i, outs.length), carriesFiles(crew.id, c.id), i + ins.length))}
-        </g>
-        {ins.map((c, i) => <foreignObject key={c.id} x={0} y={y(i, ins.length) - NODE_H / 2} width={NODE_W} height={NODE_H}>{node(c)}</foreignObject>)}
-        {outs.map((c, i) => <foreignObject key={c.id} x={W - NODE_W} y={y(i, outs.length) - NODE_H / 2} width={NODE_W} height={NODE_H}>{node(c)}</foreignObject>)}
-        {!ins.length && <text x={0} y={cy + 4} className="fill-muted-foreground text-label">Nobody hands work here yet</text>}
-        {!outs.length && <text x={W} y={cy + 4} textAnchor="end" className="fill-muted-foreground text-label">Hands work to nobody yet</text>}
-        <foreignObject x={cx} y={cy - 24} width={CENTRE_W} height={48}>
-          <div className="flex h-full items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-2 text-sm font-semibold" data-slot="link-map-centre">
-            <CrewTile crew={crew} />
-            <span className="truncate">{crew.name}</span>
-          </div>
-        </foreignObject>
+    <section aria-label="Link map" className="rounded-card border border-border bg-card px-3 py-2" data-slot="link-map">
+      <svg viewBox={`0 0 ${MAP_W} ${H}`} className="mx-auto block h-auto w-full" role="group" aria-label={`Links of ${crew.name}`}>
+        {ins.map((c, i) => {
+          const f = files(c.id, crew.id)
+          return <line key={`in-${c.id}`} x1={150} y1={y(i, ins.length)} x2={290} y2={cy} strokeWidth={2} opacity={0.6} data-files={f ?? undefined} className={stroke(f)} />
+        })}
+        {outs.map((c, i) => {
+          const f = files(crew.id, c.id)
+          return <line key={`out-${c.id}`} x1={350} y1={cy} x2={490} y2={y(i, outs.length)} strokeWidth={2} opacity={0.6} data-files={f ?? undefined} className={stroke(f)} />
+        })}
+        {ins.map((c, i) => label(c, 140, y(i, ins.length), "end"))}
+        {outs.map((c, i) => label(c, 500, y(i, outs.length), "start"))}
+        <circle data-slot="link-map-centre" cx={320} cy={cy} r={30} fill={crew.color || "var(--primary)"} />
+        <text x={320} y={cy + 50} textAnchor="middle" className="fill-foreground text-control font-semibold">{short(crew.name)}</text>
+        <text x={70} y={H - 10} textAnchor="middle" className="fill-muted-foreground-soft text-micro uppercase tracking-[0.04em]">Receives work from</text>
+        <text x={570} y={H - 10} textAnchor="middle" className="fill-muted-foreground-soft text-micro uppercase tracking-[0.04em]">Hands work to</text>
+        {!ins.length && <text x={20} y={cy + 4} className="fill-muted-foreground-soft text-control italic">Nobody hands work here yet</text>}
+        {!outs.length && <text x={620} y={cy + 4} textAnchor="end" className="fill-muted-foreground-soft text-control italic">Hands work to nobody yet</text>}
       </svg>
     </section>
   )

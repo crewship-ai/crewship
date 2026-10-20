@@ -1,18 +1,19 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Activity, Bot, Building2, ChevronRight, Cpu, KeyRound, Link2, Settings as SettingsIcon, Shield, SlidersHorizontal, UserRound, X, type LucideIcon } from "lucide-react"
+import { Activity, Bot, Building2, ChevronRight, Cpu, KeyRound, Link2, Shield, UserRound, X, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { isAdminTier } from "@/lib/permissions/tiers"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
-import { SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
+import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
+import { SidebarSearch } from "@/components/layout/sidebar-kit"
+import { Switch } from "@/components/ui/switch"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { CrewAuditSection } from "@/components/features/settings/sections/crew-audit-section"
-import { LogsHistogram, type BucketRange } from "@/components/features/logs/logs-histogram"
-import type { TimeRange } from "@/components/features/logs/time-range-picker"
-import type { JournalEntry } from "@/lib/types/journal"
+import type { BucketRange } from "@/components/features/logs/logs-histogram"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 
 import {
@@ -23,14 +24,18 @@ import {
   activeFilterChips,
   rangeBounds,
   windowBounds,
-  rangeLabel,
+  shortRangeLabel,
   sourceSupports,
   type AuditSource,
 } from "./audit-filters"
-import { addDays, auditSeverity, facetCounts, tallyByDay, utcDay } from "./audit-activity"
-import { AuditTimePicker } from "./audit-time"
+import { addDays, facetCounts, tallyByDay, utcDay } from "./audit-activity"
+import { AuditHistogram } from "./audit-histogram"
+import { AuditRangeBar, AuditTimePicker } from "./audit-time"
 import { useAuditActivity } from "./use-audit-activity"
 import { useAuditFilters } from "./use-audit-filters"
+import { JournalVerifyBanner } from "./journal-verify-banner"
+import { PageNoAccess } from "@/components/layout/page-state"
+import { formatStatus } from "@/lib/format-status"
 import { useWorkspacePeople } from "./use-workspace-people"
 
 const TRAIL_ICONS: Record<AuditSource, LucideIcon> = { workspace: Building2, crews: Link2, credentials: KeyRound, keeper: Shield }
@@ -60,6 +65,7 @@ const RECENT_DAYS = 35
  */
 export function AuditLogPage() {
   const { workspaceId, role, loading } = useWorkspace()
+  const isMobile = useIsMobile()
   // GET /api/v1/audit is ADMIN+; the Settings row is hidden below that, and a
   // typed-in URL gets a sentence instead of a 403.
   const allowed = loading || isAdminTier(role)
@@ -91,11 +97,11 @@ export function AuditLogPage() {
   // the other filters keep, each with a Journal severity.
   const win = windowBounds(filters, now)
   const customWindow = win.from ? { fromMs: Date.parse(win.from), toMs: win.to ? Date.parse(win.to) : now.getTime() } : null
-  const chartEntries = useMemo(() => activity.events
+  const chartTimes = useMemo(() => activity.events
     .filter((e) => (filters.category === "all" || e.entityType === filters.category)
       && (!filters.userId || e.userId === filters.userId)
       && (!filters.result || e.action === `agent.run.${filters.result}`))
-    .map((e) => ({ ts: e.at, severity: auditSeverity(e.action) }) as unknown as JournalEntry),
+    .map((e) => Date.parse(e.at)),
   [activity.events, filters.category, filters.userId, filters.result])
   const slice: BucketRange | null = filters.sliceFrom && filters.sliceTo ? { fromMs: Date.parse(filters.sliceFrom), toMs: Date.parse(filters.sliceTo) } : null
   const pickSlice = (r: BucketRange | null) => setFilters(r
@@ -118,7 +124,6 @@ export function AuditLogPage() {
   const avatarById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p.avatarUrl])), [people])
   const chips = activeFilterChips(filters, personName)
   const filterCount = chips.filter((c) => c.key !== "range").length
-  const viewChanges = Number(!groupRepeats) + Number(!highlightAccess)
 
   const toolbar = (
     <>
@@ -129,29 +134,13 @@ export function AuditLogPage() {
         aria-label="Search the audit log"
         className={cn(!supports.search && "pointer-events-none opacity-50")}
       />
-      <SidebarFilterPopover label="View options" icon={SlidersHorizontal} triggerLabel="View" activeCount={viewChanges}
-        onClear={() => { setGroupRepeats(true); setHighlightAccess(true) }}>
-        <SidebarFacetOption active={groupRepeats} onToggle={() => setGroupRepeats(!groupRepeats)}>Group repeated events</SidebarFacetOption>
-        <SidebarFacetOption active={highlightAccess} onToggle={() => setHighlightAccess(!highlightAccess)}>Mark access changes</SidebarFacetOption>
-      </SidebarFilterPopover>
     </>
   )
 
   const nav = (
     <>
-      <DrillNavSection label="Trail">
-        {AUDIT_SOURCES.map((s, i) => {
-          const Icon = TRAIL_ICONS[s.value]
-          return (
-            <DrillNavItem key={s.value} index={i} selected={filters.source === s.value} onSelect={() => pickSource(s.value)} label={s.label} sub={s.hint}
-              icon={<span className="icon-tile grid h-6 w-6 shrink-0 place-items-center rounded-md" aria-hidden><Icon className="h-3 w-3" /></span>} />
-          )
-        })}
-      </DrillNavSection>
-
-
       {supports.category && (
-        <DrillNavSection label="Category">
+        <DrillNavSection collapsible={false} label="Category">
           {AUDIT_CATEGORIES.map((c, i) => {
             const count = n(counts.category[c.value])
             return (
@@ -164,7 +153,7 @@ export function AuditLogPage() {
       )}
 
       {supports.person && people.length > 0 && (
-        <DrillNavSection label="People" count={countable ? `${ranked.active.length} active` : people.length}>
+        <DrillNavSection collapsible={false} label="People" count={countable ? `${ranked.active.length} active` : people.length}>
           {[...ranked.active, ...(showIdle ? ranked.idle : [])].map((p, i) => {
             const count = n(counts.person[p.id])
             return (
@@ -189,7 +178,7 @@ export function AuditLogPage() {
       )}
 
       {supports.result && (
-        <DrillNavSection label="Run result">
+        <DrillNavSection collapsible={false} label="Run result">
           {AUDIT_RESULTS.map((r, i) => {
             const count = n(counts.result[r.value])
             return (
@@ -204,6 +193,20 @@ export function AuditLogPage() {
     </>
   )
 
+  // v67: the trails are one card of four rows under the way back, each on its
+  // number key, with no sentence under them (the head says what is shown).
+  const spaces = {
+    label: "Audit trail",
+    value: filters.source,
+    onChange: pickSource,
+    items: AUDIT_SOURCES.map((s) => ({
+      key: s.value,
+      label: s.label,
+      icon: TRAIL_ICONS[s.value],
+      count: s.value === filters.source && filters.source === "workspace" ? n(counts.category.all) : undefined,
+    })),
+  }
+
   const mobileNav = (
     <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="tablist" aria-label="Trail">
       {AUDIT_SOURCES.map((s) => (
@@ -216,24 +219,32 @@ export function AuditLogPage() {
   )
 
   return (
-    <DrillPage
-      parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+    <SettingsDrillPage
+      panelId="drill-audit"
       title="Audit log"
       icon={Activity}
-      description="Every state-changing action, immutably recorded"
+      description="Every state-changing action, immutably recorded."
+      note="Admins and the owner"
+      headless={!allowed}
       toolbar={allowed ? toolbar : undefined}
-      actions={allowed ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} /> : undefined}
+      actions={!allowed ? undefined : isMobile
+        ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} />
+        : <AuditRangeBar filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} />}
+      spaces={allowed ? spaces : undefined}
       nav={allowed ? nav : null}
       mobileNav={mobileNav}
-      filterCount={filterCount}
     >
       <div className="flex flex-col gap-3 p-4 md:p-6">
         {!allowed ? (
-          <p className="rounded-card border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-            The audit log is readable by workspace Admins and the Owner.
-          </p>
+          <PageNoAccess
+            area="Audit log"
+            role={role ? formatStatus(role).label : undefined}
+            needed="Admin"
+            primary={{ label: "Back to Settings", href: "/settings" }}
+          />
         ) : workspaceId && (
           <>
+            <JournalVerifyBanner workspaceId={workspaceId} />
             {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5" data-slot="audit-chips">
               {chips.map((c) => (
                 <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">
@@ -249,12 +260,20 @@ export function AuditLogPage() {
                 <button type="button" onClick={clearFilters} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear filters</button>
               )}
             </div>}
-            {/* The Crew Journal's chart, as is: sixty bars across the range,
-                stacked by severity; a click picks a bar, a drag a range, and
-                that slice narrows the table without changing the range. */}
-            <div className="overflow-hidden rounded-card border border-border bg-card [&>div]:border-b-0 [&>div]:bg-transparent [&>div]:px-4 [&>div]:py-3" data-slot="audit-histogram">
-              <LogsHistogram entries={chartEntries} timeRange={customWindow ? "custom" : filters.range as TimeRange} customRange={customWindow}
-                selected={slice} onSelect={pickSlice} height={72} />
+            {/* v67's chart: solid bars in the accent across the range; a click
+                picks a bar, a drag a slice of time, and that slice narrows the
+                table without changing the range. */}
+            <AuditHistogram times={chartTimes} window={customWindow} endsToday={filters.range !== "custom"} selected={slice} onSelect={pickSlice} />
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-0.5" data-slot="audit-display">
+              <span className="min-w-0 flex-1 text-label text-muted-foreground">{filters.source === "workspace" ? "Every state-changing action" : AUDIT_SOURCES.find((s) => s.value === filters.source)?.hint}</span>
+              <label className="inline-flex items-center gap-2 text-label">
+                <Switch checked={groupRepeats} onCheckedChange={setGroupRepeats} aria-label="Group repeated events" />
+                <span aria-hidden>Group repeated events</span>
+              </label>
+              <label className="inline-flex items-center gap-2 text-label">
+                <Switch checked={highlightAccess} onCheckedChange={setHighlightAccess} aria-label="Mark access changes" />
+                <span aria-hidden>Mark access changes</span>
+              </label>
             </div>
             <CrewAuditSection
               workspaceId={workspaceId}
@@ -266,12 +285,12 @@ export function AuditLogPage() {
               highlightAccess={highlightAccess}
               avatars={avatarById}
               title="Events"
-              description={`${AUDIT_SOURCES.find((s) => s.value === filters.source)?.label ?? ""} trail · ${rangeLabel(filters)}`}
+              description={`${AUDIT_SOURCES.find((s) => s.value === filters.source)?.label ?? ""} trail · ${shortRangeLabel(filters)}`}
             />
           </>
         )}
       </div>
-    </DrillPage>
+    </SettingsDrillPage>
   )
 }
 

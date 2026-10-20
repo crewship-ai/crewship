@@ -20,7 +20,7 @@
 import * as React from "react"
 import { AlertTriangle, Check, ChevronDown, CreditCard, Plus } from "lucide-react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -154,14 +154,16 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   const load = React.useCallback(async () => {
     setLoadError(null)
     try {
+      // A new agent (New agent › Access) has no id and no bindings yet: only
+      // the seats are read, never another agent's bindings.
       const [listRes, bindRes] = await Promise.all([
         apiFetch(`/api/v1/credentials?workspace_id=${ws}&kind=provider_login`),
-        apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`),
+        agentId ? apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`) : null,
       ])
       if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`)
-      if (!bindRes.ok) throw new Error(`HTTP ${bindRes.status}`)
+      if (bindRes && !bindRes.ok) throw new Error(`HTTP ${bindRes.status}`)
       const list = await listRes.json()
-      const body = (await bindRes.json()) as { bindings?: BindingRow[] }
+      const body = (bindRes ? await bindRes.json() : { bindings: [] }) as { bindings?: BindingRow[] }
       setSeats(Array.isArray(list) ? (list as LoginCredential[]).filter((c) => c?.login) : [])
       setBindings(Array.isArray(body?.bindings) ? body.bindings : [])
     } catch (err) {
@@ -287,7 +289,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
           </PopoverTrigger>
           <PopoverContent className="w-[360px] p-0" align="end">
             <div className="border-b border-hairline px-3 py-2">
-              <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">
+              <span className="type-meta font-medium text-muted-foreground-soft">
                 {provider ? `${getBrand(provider).label} seats in scope` : "Seats in scope"}
               </span>
             </div>

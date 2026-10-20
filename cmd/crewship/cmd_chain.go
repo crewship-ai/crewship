@@ -149,6 +149,16 @@ type chainSummary struct {
 	IssueCount int             `json:"issue_count" yaml:"issue_count"`
 	Agents     []chainAgentRef `json:"agents" yaml:"agents"`
 	AgentCount int             `json:"agent_count" yaml:"agent_count"`
+	// Skills the chain's agents called inside their assignment windows.
+	Skills     []chainSkillRef `json:"skills,omitempty" yaml:"skills,omitempty"`
+	SkillCount int             `json:"skill_count" yaml:"skill_count"`
+}
+
+type chainSkillRef struct {
+	ID   string `json:"id" yaml:"id"`
+	Slug string `json:"slug" yaml:"slug"`
+	Name string `json:"name" yaml:"name"`
+	Uses int    `json:"uses" yaml:"uses"`
 }
 
 // chainIssueRef / chainAgentRef mirror internal/api. They exist here for one

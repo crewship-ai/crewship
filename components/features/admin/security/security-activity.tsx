@@ -11,7 +11,7 @@ import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import type { KeeperWsStatus } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
 import { STREAMS, filterActivity, streamOf, type DecisionFilter, type Stream } from "./security-model"
 import { StatusPill } from "@/components/ui/status-pill"
-import type { StatusTone } from "@/lib/format-status"
+import { formatStatus, type StatusTone } from "@/lib/format-status"
 
 const DECISION_TONE: Record<string, StatusTone> = {
   ALLOW: "success",
@@ -22,7 +22,8 @@ const DECISION_TONE: Record<string, StatusTone> = {
 
 export function DecisionChip({ decision }: { decision: string | null | undefined }) {
   const d = decision ?? "PENDING"
-  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={d} />
+  // The stored decision is an enum (ALLOW, DENY); the pill shows its word.
+  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={formatStatus(d).label} />
 }
 
 const when = (iso: string) => new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
@@ -140,7 +141,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error, serve
           <div className="flex items-center gap-3 border-t border-border px-4 py-2 text-label text-muted-foreground" data-slot="activity-paging">
             <span>{server.loading ? "Loading…" : `Showing ${rows.length} of ${server.total}`}</span>
             {rows.length < server.total && !server.loading && (
-              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-label hover:bg-accent coarse:min-h-[2.75rem]">
+              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-label hover:bg-accent coarse:min-h-[44px]">
                 Load more
               </button>
             )}
@@ -190,7 +191,7 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
 function Block({ label, text, mono, empty }: { label: string; text: string | null | undefined; mono?: boolean; empty?: string }) {
   return (
     <section aria-label={label}>
-      <h4 className="mb-1 font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground-soft">{label}</h4>
+      <h4 className="mb-1 text-micro text-muted-foreground-soft">{label}</h4>
       {text ? (
         <pre className={cn("max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2.5 text-label", mono && "font-mono text-micro")}>{redactSecrets(text)}</pre>
       ) : (

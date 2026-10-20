@@ -10,6 +10,8 @@ import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 // Stripe / GitHub reveal secrets once); subsequent fetches return
 // SigningSecretSet boolean only.
 export interface PipelineWebhook {
+  /** Set while a rotation's grace window is open: the old secret still works until then. */
+  previous_secret_expires_at?: string | null
   ingress_profile?: "crewship" | "github"
   id: string
   workspace_id: string
@@ -29,6 +31,15 @@ export interface PipelineWebhook {
   fire_count: number
   created_at: string
   updated_at: string
+}
+
+/** The answer to "what would this sample call do". */
+export interface WebhookDryRun {
+  inputs: Record<string, unknown>
+  /** Template keys dropped because they collide with event, raw or headers. */
+  ignored_template_keys: string[]
+  valid: boolean
+  problem?: string
 }
 
 export interface WebhookSaveBody {
@@ -56,6 +67,8 @@ export interface WebhookUpdateBody {
   enabled?: boolean
   rate_limit_per_min?: number
   rotate_secret?: boolean
+  /** With rotate_secret: keep the replaced secret valid this long (0, 3600, 86400 or 604800). */
+  rotate_grace_seconds?: number
 }
 
 export function usePipelineWebhooks(workspaceId: string | null | undefined) {
@@ -171,6 +184,21 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     [workspaceId, refresh],
   )
 
+  /** Dry run (ODCH-INT-09): what a sample call would hand the routine. Starts nothing. */
+  const test = useCallback(
+    async (id: string, sample: unknown): Promise<WebhookDryRun> => {
+      if (!workspaceId) throw new Error("No workspace")
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks/${id}/test`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sample }),
+      })
+      if (!res.ok) throw await toApiError(res, `test webhook: HTTP ${res.status}`)
+      return (await res.json()) as WebhookDryRun
+    },
+    [workspaceId],
+  )
+
   const remove = useCallback(
     async (id: string): Promise<void> => {
       if (!workspaceId) return
@@ -185,5 +213,5 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     [workspaceId, refresh],
   )
 
-  return { webhooks, loading, error, refresh, create, update, remove }
+  return { webhooks, loading, error, refresh, create, update, test, remove }
 }

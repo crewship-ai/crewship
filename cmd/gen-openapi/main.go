@@ -338,6 +338,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range documentSchemaComponents() {
 		schemas[name] = schema
 	}
+	_, slidesComponents := slidesHumanSchemaCatalog()
+	for name, schema := range slidesComponents {
+		schemas[name] = schema
+	}
 	_, ownershipComponents := workspacePageOwnershipSchemaCatalog()
 	for name, schema := range ownershipComponents {
 		schemas[name] = schema
@@ -348,6 +352,10 @@ func buildDocument(routes []route) map[string]any {
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
 	for name, schema := range providerLoginComponents {
+		schemas[name] = schema
+	}
+	_, routineOrganisationComponents := routineOrganisationSchemaCatalog()
+	for name, schema := range routineOrganisationComponents {
 		schemas[name] = schema
 	}
 	components["securitySchemes"] = map[string]any{
@@ -652,6 +660,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range documentSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	slidesRoutes, _ := slidesHumanSchemaCatalog()
+	for key, schema := range slidesRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	ownershipRoutes, _ := workspacePageOwnershipSchemaCatalog()
 	for key, schema := range ownershipRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -662,6 +674,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()
 	for key, schema := range providerLoginRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	routineOrganisationRoutes, _ := routineOrganisationSchemaCatalog()
+	for key, schema := range routineOrganisationRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
@@ -919,7 +935,7 @@ func responseComponents() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
-		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(),
+		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(), "appearance_default": appearanceDefaultSchema(),
 		"created_at": scalar("string"), "updated_at": scalar("string"),
 		"currentUserRole": nullable("string"), "currentUserCapabilities": array(scalar("string")),
 		"allow_privileged_credentials": scalar("boolean"), "run_retention_days": nullable("integer"),

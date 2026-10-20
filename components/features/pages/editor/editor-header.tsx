@@ -128,7 +128,7 @@ export function PageEditorHeader({ workspaceId, slug, page, capabilities, headin
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5">
-            <Button type="button" variant="outline" size="sm" className="coarse:min-h-11" onClick={onBack}>
+            <Button type="button" variant="outline" size="sm" className="coarse:min-h-[44px]" onClick={onBack}>
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               Back to page
             </Button>

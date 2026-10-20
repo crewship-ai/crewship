@@ -16,6 +16,7 @@ import OrchestrationPage from "./(dashboard)/orchestration/page"
 import WorkPage from "./(dashboard)/work/page"
 import InboxPage from "./(dashboard)/inbox-v2/page"
 import RunsPage from "./(dashboard)/runs/page"
+import PaymasterPage from "./(dashboard)/paymaster/page"
 
 beforeEach(() => { navigation.router.replace.mockClear(); navigation.redirect.mockClear(); window.history.replaceState({}, "", "/") })
 afterEach(() => { cleanup(); window.history.replaceState({}, "", "/") })
@@ -44,12 +45,20 @@ describe("bookmarks after navigation migration", () => {
   view.rerender(<IssuePage />)
   expect(navigation.router.replace).toHaveBeenLastCalledWith("/issues/OPS-6")
  })
- it("keeps project and mission static stubs pointed at replacement surfaces", () => {
+ // Z10: the project id used to be dropped, so an old project link landed on
+ // the whole issue list. It now opens that project on /issues.
+ it.each([
+  ["/orchestration/projects/p_1", "/issues?project=p_1"],
+  ["/orchestration/projects/a%20b/", "/issues?project=a+b"],
+  ["/orchestration/projects/_", "/issues"],
+ ])("opens the project a legacy link %s names", (path, target) => {
   expect(projectParams()).toEqual([{ projectId: "_" }])
+  window.history.replaceState({}, "", path)
+  render(<ProjectPage />)
+  expect(navigation.router.replace).toHaveBeenLastCalledWith(target)
+ })
+ it("keeps the mission static stub pointed at its replacement surface", () => {
   expect(missionParams()).toEqual([{ missionId: "_" }])
-  const project = render(<ProjectPage />)
-  expect(navigation.router.replace).toHaveBeenLastCalledWith("/issues")
-  project.unmount()
   const mission = render(<MissionPage />)
   expect(navigation.router.replace).toHaveBeenLastCalledWith("/activity")
   mission.unmount()
@@ -71,8 +80,12 @@ describe("bookmarks after navigation migration", () => {
   expect(navigation.router.replace).toHaveBeenCalledWith("/inbox?workspace_id=team&filter=unread#event-42")
   expect(screen.getByRole("link", { name: "Open Inbox" })).toHaveAttribute("href", "/inbox")
  })
- it("redirects retired runs to the journal preset before rendering", () => {
-  expect(() => RunsPage()).toThrow("REDIRECT /journal?tab=runs")
-  expect(navigation.redirect).toHaveBeenCalledWith("/journal?tab=runs")
+ it("redirects retired runs to the fleet runs ledger in Activity before rendering", () => {
+  expect(() => RunsPage()).toThrow("REDIRECT /activity?section=runs")
+  expect(navigation.redirect).toHaveBeenCalledWith("/activity?section=runs")
+ })
+ it("sends a /paymaster bookmark to Activity's Spend view (#3618)", () => {
+  expect(() => PaymasterPage()).toThrow("REDIRECT /activity?mode=spend")
+  expect(navigation.redirect).toHaveBeenCalledWith("/activity?mode=spend")
  })
 })

@@ -112,7 +112,7 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	)
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT kr.decision, kr.requesting_agent_id, kr.requesting_crew_id,
-		       kr.credential_id, COALESCE(c.security_level, 1), a.created_by_user_id
+		       kr.credential_id, `+credentialEffectiveLevelSQL("c")+`, a.created_by_user_id
 		  FROM keeper_requests kr
 		  JOIN credentials c ON c.id = kr.credential_id
 		  LEFT JOIN agents a ON a.id = kr.requesting_agent_id

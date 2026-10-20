@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 )
 
 func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +46,10 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 
 	if !body.ResetOverrides && body.AvatarStyle == "" {
 		replyError(w, http.StatusBadRequest, "avatar_style is required")
+		return
+	}
+	if !body.ResetOverrides && !avatarstyle.Valid(body.AvatarStyle) {
+		replyError(w, http.StatusBadRequest, avatarstyle.Problem(body.AvatarStyle))
 		return
 	}
 

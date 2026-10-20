@@ -33,23 +33,23 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 0 }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
-vi.mock("@/components/layout/sidebar-version", () => ({ SidebarVersion: () => null }))
 
 import { AppSidebar, NAV_ICONS } from "@/components/layout/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 
+// Harbor 2 (#3350): Pages sits in the Work group, after Routines.
 function planGroup(): HTMLElement {
-  const label = screen.getByText("Plan")
+  const label = screen.getByText("Work")
   const group = label.closest("[data-sidebar='group']") as HTMLElement | null
-  if (!group) throw new Error("no Plan group")
+  if (!group) throw new Error("no Work group")
   return group
 }
 
 describe("Artifacts in the nav rail", () => {
   beforeEach(() => cleanup())
 
-  it("registers Artifacts in Plan, immediately after Routines", () => {
+  it("registers Artifacts in Work, immediately after Routines", () => {
     render(
       <SidebarProvider>
         <AppSidebar />
@@ -58,7 +58,8 @@ describe("Artifacts in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Dashboard", "Inbox", "Chat", "Issues", "Routines", "Artifacts"])
+    // Calendar (F-01, #3413) follows Artifacts as the last Work row.
+    expect(items).toEqual(["Issues", "Routines", "Artifacts", "Calendar"])
   })
 
   it("points it at /pages", () => {

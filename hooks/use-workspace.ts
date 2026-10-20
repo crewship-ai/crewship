@@ -12,6 +12,9 @@ export interface WorkspaceData {
    *  behind the restricted allowlist, and these are the screens it may open. */
   restricted_session?: boolean
   restricted_surfaces?: string[]
+  /** The workspace default look {style, knobs, accent, theme}, set by an
+   *  OWNER/ADMIN (WSD-01). `{}` or absent: none. */
+  appearance_default?: Record<string, unknown> | null
   pages_theme?: Partial<import("@/lib/pages/theme").PageTheme> | null
   id: string
   name: string

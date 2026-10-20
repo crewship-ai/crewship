@@ -39,6 +39,21 @@ describe("useCrewsSelection", () => {
     setURL("/crews", "")
   })
 
+  describe("following a navigation", () => {
+    it("a router.replace to another ?crew= wins over the crew picked in place", () => {
+      // /crews opens the first crew in place (replaceState); New crew then
+      // navigates to /crews?crew=<new> with next/navigation. The canvas must
+      // open the new crew, not keep the one the layout had picked.
+      setURL("/crews", "new=crew")
+      const { result, rerender } = renderHook(() => useCrewsSelection())
+      act(() => result.current.selectCrew("finance"))
+      expect(result.current.selectedCrewSlug).toBe("finance")
+      act(() => setURL("/crews", "crew=h2-new"))
+      rerender()
+      expect(result.current.selectedCrewSlug).toBe("h2-new")
+    })
+  })
+
   describe("reading URL state", () => {
     it("returns null slugs when query is empty", () => {
       setURL("/crews", "")

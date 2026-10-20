@@ -593,6 +593,18 @@ Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditi
 
 Hovering over a user message reveals an "Edit" button. Editing the message rewrites that turn and **truncates** the conversation — every message after it is dropped. The new edit is sent as a fresh user turn. This matches the ChatGPT/Claude UX and lets operators reroll an agent's response without abandoning the whole session.
 
+## Tool activity and reasoning
+
+Consecutive tool steps in a reply collapse into one group. Each step is matched to its own result, including when several tools ran in parallel. The group title says **Worked** only when every step completed successfully. If a step failed, the title becomes **Activity incomplete**, the group opens by itself and the failed step carries its own label. While steps are still running the group reads **Working**. A reply whose steps have no recorded result reads **Finished**, which is neither success nor failure.
+
+A reasoning block is collapsed by default. Its header shows the first line of the approved safe summary next to the recorded time; redacted or unavailable reasoning shows no summary line.
+
+Subagent steps nest under their parent when the server correlates them, and approval requests stay outside the group.
+
+## Attachments
+
+Files you pick, drop, paste or photograph go into one upload queue per conversation and upload one at a time, in the order you added them. Each file shows its state in words: **Waiting**, **Uploading**, **Failed** or **Cancelled**; none of them counts as attached until it is ready. **Cancel** stops a waiting or running upload and keeps the chip so **Retry** can queue it again; the remove button deletes it. For now a message takes at most 10 files of 25 MB each; these are provisional client limits, not server-approved ones, and will follow the server's stated limits once it provides them. Anything beyond that is refused with the reason. Sending is blocked while a file is waiting or uploading, and while a failed or cancelled file is still in the composer: retry or remove it first. When a pasted clipboard holds both text and a file, the file is attached and the text is still inserted. Pasting plain text behaves as usual; pasting a file attaches it.
+
 ## Message reactions
 
 An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.
@@ -628,7 +640,7 @@ There is no terminal or diff in the chat: what an agent is running is the [Crew 
 
 ## Presence and reconnect
 
-The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, a reconnect banner appears at the top of the chat ("Reconnecting…"), the composer disables sends, and queued user messages are flushed once the socket re-establishes.
+The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, the composer disables sends and queued user messages are flushed once the socket re-establishes. A drop shorter than 4 s shows nothing; after that a neutral bar at the top of the chat says "Reconnecting…" (or "Crewship is restarting · reconnecting…" during a planned restart, or "You're offline · Crewship will reconnect when you're back" when the browser has no network). After about two minutes of failed attempts it turns into a warning, "Can't reach Crewship · retrying every 30 s", with **Retry now**; Crewship keeps retrying on its own, and at once when the network returns, the tab becomes visible or the window regains focus. When the app-wide banner already says the same thing, the chat's bar steps aside, and the bar disappears without a "Reconnected" notice once the socket is back.
 
 Network blips do not lose messages. Sends that were in-flight at disconnect time are retried with the same client-generated `request_id`; the server idempotently dedupes by `request_id` so a retry never duplicates a turn.
 
@@ -779,3 +791,24 @@ Legacy proxy traffic under a hard budget requires the restricted broker even
 when a balance remains; preflight reports that existing constraint.
 
 Changing conversations clears the previous transcript before the new history is loaded, including when the current account and workspace stay the same. Responses from the previous conversation cannot repopulate the new view.
+
+## Sidebar views
+
+Behind `NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS=true` (build time, default off) the chat
+sidebar shows view chips: **All**, **Unreads** and **Agents running**.
+"Agents running" lists agents whose status is running; it does not mean the
+chat you have open is running. The sidebar search applies inside a view; the
+filter menu applies to **All** only. Favorites stay in their own section, so a
+favorite can appear both there and in a view. Your open chat stays in the list,
+marked "Open chat", even when the view would otherwise filter it out; it is not
+counted. An agent row stays disabled until its sessions have loaded, and opens
+the session that has the unread messages.
+
+With the same flag, lists do not move while your pointer or keyboard focus is
+on them: background updates change rows in place, and a **Refresh** button
+appears when the order changed. Your own actions (typing in search, starring,
+opening a row) apply immediately.
+
+Mentions, Threads, Saved, Drafts, Waiting for you and Review are previews on
+sample data, enabled for development only with
+`NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS=true`.

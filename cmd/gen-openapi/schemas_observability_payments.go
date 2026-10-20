@@ -98,6 +98,9 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	chainAgentRef := object(map[string]any{
 		"id": str(), "slug": str(), "name": str(), "assignments": integer(),
 	})
+	chainSkillRef := object(map[string]any{
+		"id": str(), "slug": str(), "name": str(), "uses": integer(),
+	})
 	chainSummary := object(map[string]any{
 		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
 		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
@@ -116,6 +119,9 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"duration_ms": map[string]any{"type": "integer", "nullable": true},
 		"issues":      array(chainIssueRef), "issue_count": integer(),
 		"agents": array(chainAgentRef), "agent_count": integer(),
+		// Skills the chain's agents called inside their assignment windows
+		// (ODCH-SK-14); capped per row (24), skill_count is the full total.
+		"skills": array(chainSkillRef), "skill_count": integer(),
 	})
 	// has_unrecorded_runs is load-bearing the way truncated is on the walk:
 	// runs from before the chain_origin column are absent from the index and
@@ -144,7 +150,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	prefCell := object(map[string]any{"category": str(), "channel_id": str(), "state": map[string]any{"type": "string", "enum": []string{"off", "immediate"}}})
 	timeseriesBucket := object(map[string]any{"ts": dateTime(), "series": map[string]any{"type": "object", "additionalProperties": number()}})
 	timeseries := object(map[string]any{
-		"metric":   map[string]any{"type": "string", "enum": []string{"issues_closed", "cost_usd", "runs_count", "active_missions"}},
+		"metric":   map[string]any{"type": "string", "enum": []string{"issues_closed", "cost_usd", "runs_count", "active_missions", "success_rate", "p95_duration_ms"}},
 		"window":   map[string]any{"type": "string", "enum": []string{"24h", "7d", "30d"}},
 		"bucket":   map[string]any{"type": "string", "enum": []string{"15m", "1h", "1d"}},
 		"group_by": map[string]any{"type": "string", "enum": []string{"crew", "model", "status", "none"}},

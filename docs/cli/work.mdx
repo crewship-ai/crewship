@@ -143,6 +143,23 @@ Two refusals, each with an explanation rather than an opaque failure:
 
 ---
 
+## `crewship work deliveries summary`
+
+Count the recorded calls per endpoint — agent, routine and page triggers alike — split into accepted and ignored. This is the number the Triggers table shows beside each trigger.
+
+```bash
+crewship work deliveries summary
+crewship work deliveries summary --since 7d
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--since` | (unset) | Only deliveries received since then: a duration (`24h`, `7d`) or an RFC3339 time |
+
+**Output columns:** ENDPOINT, KIND, CALLS, ACCEPTED, IGNORED, LAST CALL
+
+---
+
 ## `crewship work deliveries list`
 
 List recorded inbound webhooks, at most 100 per page.

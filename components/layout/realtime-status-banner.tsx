@@ -1,75 +1,49 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Wifi, WifiOff } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { Loader2, WifiOff } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { useRealtime } from "@/hooks/use-realtime"
+import { AppBanner, useAppBannerSlot } from "@/components/layout/app-banners"
+import { outageCopy, realtimeOutage, useAnnouncedOutage } from "@/components/layout/realtime-outage"
 
 /**
- * Shows a banner when WebSocket is disconnected for more than 3 seconds.
- * Auto-hides with a brief "Reconnected" flash when connection is restored.
+ * The realtime banner (#3783): nothing for the first 4 s of an outage, then a
+ * neutral "Reconnecting…" (or "Crewship is restarting · reconnecting…", or
+ * "You're offline…"), and a warning with Retry now only once the fast retries
+ * are spent ("Can't reach Crewship · retrying every 30 s"). When the socket
+ * returns the bar just goes; there is no "Reconnected". Vocabulary in
+ * realtime-outage.ts.
+ *
+ * It holds the app's one banner slot at the highest priority, so a page's own
+ * offline banner and the chat's reconnect banner step aside while it shows.
  *
  * Renders nothing for "unavailable": a restricted session has no realtime by
  * design (the allowlist refuses /ws-token), so there is nothing to reconnect
  * and a banner saying otherwise would be permanent and false.
  */
 export function RealtimeStatusBanner() {
-  const { status } = useRealtime()
-  const [visible, setVisible] = useState(false)
-  const [showReconnected, setShowReconnected] = useState(false)
-  const [wasDisconnected, setWasDisconnected] = useState(false)
+  const { status, reason, retry } = useRealtime()
+  const outage = useAnnouncedOutage(realtimeOutage(status, reason))
+  const slot = useAppBannerSlot("realtime", outage !== null)
+  if (!slot || !outage) return null
 
-  useEffect(() => {
-    if (status === "disconnected" || status === "error") {
-      setShowReconnected(false)
-      setVisible(false)
-      // Show banner after 3 seconds of being disconnected
-      const timer = setTimeout(() => {
-        setVisible(true)
-        setWasDisconnected(true)
-      }, 3000)
-      return () => clearTimeout(timer)
-    }
-
-    if (status === "connected" && wasDisconnected) {
-      // Show brief "Reconnected" flash
-      setVisible(true)
-      setShowReconnected(true)
-      const timer = setTimeout(() => {
-        setVisible(false)
-        setShowReconnected(false)
-        setWasDisconnected(false)
-      }, 2000)
-      return () => clearTimeout(timer)
-    }
-
-    setVisible(false)
-  }, [status, wasDisconnected])
-
-  if (!visible || status === "unavailable") return null
-
-  if (showReconnected) {
-    return (
-      <div role="status" aria-live="polite" aria-atomic="true" className="bg-success/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2">
-        <Wifi className="h-3.5 w-3.5" />
-        Reconnected
-      </div>
-    )
-  }
-
+  const copy = outageCopy(outage)
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="bg-warn/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2 animate-pulse">
-      {status === "error" ? (
-        <>
-          <WifiOff className="h-3.5 w-3.5" />
-          Connection lost. Retrying...
-        </>
-      ) : (
-        <>
-          <Spinner className="h-3.5 w-3.5" />
-          Reconnecting...
-        </>
-      )}
-    </div>
+    <AppBanner
+      tone={copy.tone}
+      icon={copy.spinner ? Loader2 : WifiOff}
+      className={copy.spinner ? "[&>svg:first-child]:animate-spin" : undefined}
+      data-state={outage}
+      data-testid="realtime-banner"
+      action={
+        copy.retry && retry ? (
+          <Button size="sm" variant="outline" className="page-banner-action" onClick={retry}>
+            Retry now
+          </Button>
+        ) : undefined
+      }
+    >
+      {copy.text}
+    </AppBanner>
   )
 }

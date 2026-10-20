@@ -159,17 +159,17 @@ func workAgentCell(agent *workLedgerAgent, id string) string {
 }
 
 type workAttemptRow struct {
-	RunID          string  `json:"run_id" yaml:"run_id"`
-	Attempt        int     `json:"attempt" yaml:"attempt"`
-	Generation     int64   `json:"generation" yaml:"generation"`
-	LeaseOwner     string  `json:"lease_owner" yaml:"lease_owner"`
-	LeaseExpiresAt string  `json:"lease_expires_at" yaml:"lease_expires_at"`
-	RuntimeLocator string  `json:"runtime_locator" yaml:"runtime_locator"`
-	StartedAt      string  `json:"started_at" yaml:"started_at"`
-	EndedAt        *string `json:"ended_at" yaml:"ended_at"`
-	EndReason      string  `json:"end_reason" yaml:"end_reason"`
-	ExitEvidence   string  `json:"exit_evidence" yaml:"exit_evidence"`
-	CostUSD        float64 `json:"cost_usd" yaml:"cost_usd"`
+	RunID          string   `json:"run_id" yaml:"run_id"`
+	Attempt        int      `json:"attempt" yaml:"attempt"`
+	Generation     int64    `json:"generation" yaml:"generation"`
+	LeaseOwner     string   `json:"lease_owner" yaml:"lease_owner"`
+	LeaseExpiresAt string   `json:"lease_expires_at" yaml:"lease_expires_at"`
+	RuntimeLocator string   `json:"runtime_locator" yaml:"runtime_locator"`
+	StartedAt      string   `json:"started_at" yaml:"started_at"`
+	EndedAt        *string  `json:"ended_at" yaml:"ended_at"`
+	EndReason      string   `json:"end_reason" yaml:"end_reason"`
+	ExitEvidence   string   `json:"exit_evidence" yaml:"exit_evidence"`
+	CostUSD        *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 }
 
 type workEventRow struct {
@@ -435,9 +435,9 @@ conversation. Its fingerprint is.`,
 			// and that is exactly when somebody is reading this by eye.
 			fmt.Fprintln(w, "#\tRUN\tGEN\tOWNER\tLOCATOR\tSTARTED\tENDED\tCOST\tEND REASON")
 			for _, a := range detail.Attempts {
-				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%.4f\t%s\n",
+				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					a.Attempt, workShortID(f, a.RunID), a.Generation, a.LeaseOwner, a.RuntimeLocator,
-					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), a.CostUSD, a.EndReason)
+					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), usdOrDash("%.4f", a.CostUSD), a.EndReason)
 			}
 			_ = w.Flush()
 			if len(detail.Attempts) == 0 {
@@ -638,6 +638,59 @@ id is only unique within an endpoint, so --source-id on its own is refused.`,
 	},
 }
 
+type workDeliverySummaryRow struct {
+	EndpointID     string `json:"endpoint_id" yaml:"endpoint_id"`
+	EndpointKind   string `json:"endpoint_kind" yaml:"endpoint_kind"`
+	Calls          int    `json:"calls" yaml:"calls"`
+	Accepted       int    `json:"accepted" yaml:"accepted"`
+	Ignored        int    `json:"ignored" yaml:"ignored"`
+	LastReceivedAt string `json:"last_received_at" yaml:"last_received_at"`
+}
+
+var workDeliveriesSummaryCmd = &cobra.Command{
+	Use:   "summary",
+	Short: "Count webhook calls per trigger",
+	Long: `Count the recorded inbound webhook calls for every endpoint — agent, routine
+and page triggers alike — split into accepted and ignored. This is the number
+the Triggers table shows beside each trigger.`,
+	Example: `  crewship work deliveries summary
+  crewship work deliveries summary --since 7d`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := workClient()
+		if err != nil {
+			return err
+		}
+		query := url.Values{}
+		if err := workSinceParam(cmd, query); err != nil {
+			return err
+		}
+		path := workspacePath(client, "/webhook-deliveries/summary")
+		if encoded := query.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+		var body struct {
+			Items []workDeliverySummaryRow `json:"items" yaml:"items"`
+		}
+		if err := workGetJSON(client, path, &body); err != nil {
+			return err
+		}
+		f := resolvedFormatter(cmd)
+		return f.AutoHuman(body, func() {
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ENDPOINT\tKIND\tCALLS\tACCEPTED\tIGNORED\tLAST CALL")
+			for _, s := range body.Items {
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\n", sanitizeTerminal(s.EndpointID), s.EndpointKind,
+					s.Calls, s.Accepted, s.Ignored, workShortTime(s.LastReceivedAt))
+			}
+			_ = w.Flush()
+			if len(body.Items) == 0 {
+				fmt.Println("(no deliveries)")
+			}
+		})
+	},
+}
+
 var workDeliveriesGetCmd = &cobra.Command{
 	Use:   "get <delivery-id>",
 	Short: "Show one webhook delivery",
@@ -748,6 +801,8 @@ func init() {
 
 	workDeliveriesCmd.AddCommand(workDeliveriesListCmd)
 	workDeliveriesCmd.AddCommand(workDeliveriesGetCmd)
+	workDeliveriesSummaryCmd.Flags().String("since", "", "Only deliveries received since then: a duration (24h, 7d) or an RFC3339 time")
+	workDeliveriesCmd.AddCommand(workDeliveriesSummaryCmd)
 
 	workCmd.AddCommand(workListCmd)
 	workCmd.AddCommand(workGetCmd)

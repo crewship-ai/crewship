@@ -228,6 +228,15 @@ func statusWord(s string) string {
 	}
 }
 
+// derefUSD reads a withholdable amount; withheld (#3590) reads as 0, which
+// costOrDash renders as "—".
+func derefUSD(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 func costOrDash(c float64) string {
 	if c <= 0 {
 		return "—"
@@ -288,7 +297,7 @@ func gatherReport(client *cli.Client, ctx context.Context, runID string, clientM
 		Status:          detail.Status,
 		Inputs:          detail.Inputs,
 		FinalOutput:     detail.Output,
-		TotalCostUSD:    detail.CostUSD,
+		TotalCostUSD:    derefUSD(detail.CostUSD),
 		TotalDurationMs: detail.DurationMs,
 		Error:           detail.ErrorMessage,
 		Client:          clientMode,

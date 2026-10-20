@@ -56,7 +56,7 @@ function ToolbarButton({
         // target. The toolbar sits above the project brief on a phone, so
         // every one of these is a control someone has to hit.
         // min-h-12, not min-h-11: `--spacing: 0.23rem` makes h-11 40.5px.
-        "coarse:min-h-12 coarse:min-w-12 max-sm:p-3",
+        "coarse:min-h-[44px] coarse:min-w-[44px] max-sm:p-3",
         "hover:bg-foreground/[0.08] disabled:pointer-events-none disabled:opacity-30",
         active
           ? "bg-primary/20 text-primary"
@@ -193,7 +193,7 @@ function CodeBlockView({ node, updateAttributes }: any) {
         />
       </div>
       {lang && (
-        <div className="absolute right-2 top-2 text-[10px] font-mono text-muted-foreground/30 uppercase group-hover:opacity-0 transition-opacity pointer-events-none">
+        <div className="absolute right-2 top-2 text-micro font-mono text-muted-foreground/30 group-hover:opacity-0 transition-opacity pointer-events-none">
           {LANGUAGES.find((l) => l.value === lang)?.label || lang}
         </div>
       )}

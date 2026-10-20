@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import { SchedulesBody } from "../backups-schedules"
 import { plansFixture } from "../__fixtures__/backups"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 
 // Admin › Backups › a plan, on the nested page: the side panel lists the
 // plans, so the page opens the one it picked and carries its actions — on/off,
@@ -120,6 +120,20 @@ describe("Schedules on the nested page", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete plan" }))
     await waitFor(() => expect(calls("DELETE", "/backups/plans/plan-complete")).toHaveLength(1))
     await waitFor(() => expect(reload).toHaveBeenCalled())
+  })
+
+  it("delete keeps dialog open on error", async () => {
+    h.apiFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+      init?.method === "DELETE" ? new Response(JSON.stringify({ error: "the plan is running" }), { status: 409 }) : new Response("{}", { status: 404 }))
+    const { reload } = show(ctxOf())
+    fireEvent.click(screen.getByRole("button", { name: "Delete…" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete plan" }))
+    await waitFor(() => expect(calls("DELETE", "/backups/plans/plan-complete")).toHaveLength(1))
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+    // Refused: the person stays where they were, and nothing reloads.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it("marks each calendar entry with an icon and a word", () => {

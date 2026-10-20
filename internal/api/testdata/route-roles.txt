@@ -34,12 +34,14 @@ DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId} roleSelf
 DELETE /api/v1/checkpoints/{id} roleCreate
 DELETE /api/v1/conversations/{conversationId}/agents/{agentId} roleSelf
 DELETE /api/v1/conversations/{conversationId}/participants/{userId} roleSelf
+DELETE /api/v1/credential-folders/{folderId} roleManage
 DELETE /api/v1/credential-rotations/{rotationId} roleInline
 DELETE /api/v1/credentials/bindings/{bindingId} roleManage
 DELETE /api/v1/credentials/{credentialId} roleManage
 DELETE /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 DELETE /api/v1/crew-connections/{connectionId} roleCreate
 DELETE /api/v1/crews/{crewId} roleManage
+DELETE /api/v1/crews/{crewId}/budget roleManage
 DELETE /api/v1/crews/{crewId}/escalations roleManage
 DELETE /api/v1/crews/{crewId}/files/delete roleCreate
 DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -88,7 +90,9 @@ DELETE /api/v1/workspaces/{workspaceId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/logo roleManage
 DELETE /api/v1/workspaces/{workspaceId}/members/{memberId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-folders/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/pipeline-templates/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft roleCreate
@@ -113,6 +117,7 @@ PATCH /api/v1/agents/{agentId}/learning roleManage
 PATCH /api/v1/agents/{agentId}/peers/{userId} roleSelf
 PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/chats/{chatId}/proposals/{sourceId} roleInline
+PATCH /api/v1/credential-folders/{folderId} roleInline
 PATCH /api/v1/credentials/{credentialId} roleCreate
 PATCH /api/v1/crews/{crewId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -143,6 +148,7 @@ PATCH /api/v1/workflow-templates/{id} roleCreate
 PATCH /api/v1/workspaces/{workspaceId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/members/{memberId} roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities roleManage
+PATCH /api/v1/workspaces/{workspaceId}/pipeline-folders/{id} roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
@@ -203,6 +209,7 @@ POST /api/v1/agents/{agentId}/credentials roleManage
 POST /api/v1/agents/{agentId}/integrations roleCreate
 POST /api/v1/agents/{agentId}/persona/suggest roleCreate
 POST /api/v1/agents/{agentId}/rehire roleCreate
+POST /api/v1/agents/{agentId}/release roleCreate
 POST /api/v1/agents/{agentId}/restricted-cli-chats roleSelf
 POST /api/v1/agents/{agentId}/skills roleCreate
 POST /api/v1/agents/{agentId}/stop roleCreate
@@ -241,6 +248,7 @@ POST /api/v1/conversations/{conversationId}/messages roleSelf
 POST /api/v1/conversations/{conversationId}/mute roleSelf
 POST /api/v1/conversations/{conversationId}/participants roleSelf
 POST /api/v1/conversations/{conversationId}/read roleSelf
+POST /api/v1/credential-folders roleInline
 POST /api/v1/credentials roleInline
 POST /api/v1/credentials/bindings roleManage
 POST /api/v1/credentials/test roleSelf
@@ -340,6 +348,7 @@ POST /api/v1/pages/{slug}/project/restore roleSelf
 POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
+POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/webhooks roleSelf
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
@@ -366,11 +375,16 @@ POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
 POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply roleManage
 POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview roleManage
 POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID} roleManage
+POST /api/v1/workspaces/{workspaceId}/pipeline-folders roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-folders/move roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules roleInline
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-templates roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/drafts roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/import roleCreate
@@ -401,6 +415,8 @@ POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleInline
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive roleManage
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore roleManage
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
@@ -430,6 +446,7 @@ PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
 PUT /api/v1/crews/{crewId} roleManage
+PUT /api/v1/crews/{crewId}/budget roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate
 PUT /api/v1/crews/{crewId}/persona roleCreate

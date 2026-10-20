@@ -191,11 +191,11 @@ describe("useWebSocket", () => {
     expect(mockInstances[1].url).not.toContain("token=")
   })
 
-  it("reconnect attempts capped — surfaces transport error, NOT session-expired", async () => {
-    // Backend down ≠ auth dead. The retry-cap branch must NOT fire
+  it("past the fast budget — offline and still retrying, NOT session-expired", async () => {
+    // Backend down ≠ auth dead. The end of the fast budget must NOT fire
     // auth:session-expired (which would bounce the user to /login on
-    // every restart-induced outage); status flips to "error" and we
-    // stop retrying.
+    // every restart-induced outage). #3783: nor does it stop — status is
+    // "offline" and the hook keeps trying every 30 s.
     const authHandler = vi.fn()
     addAuthHandler(authHandler)
 
@@ -213,7 +213,16 @@ describe("useWebSocket", () => {
     }
 
     expect(authHandler).not.toHaveBeenCalled()
-    expect(result.current.status).toBe("error")
+    expect(result.current.status).toBe("offline")
+    expect(result.current.reason).toBe("unreachable")
+    // The latest attempt fails too; the next one comes 30 s later.
+    const sockets = mockInstances.length
+    act(() => { mockInstances[sockets - 1].close(1006) })
+    expect(result.current.status).toBe("offline")
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000) })
+    expect(mockInstances.length).toBe(sockets)
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(mockInstances.length).toBe(sockets + 1)
   })
 
   it("getToken rejection schedules backoff retry, not termination", async () => {
@@ -267,11 +276,14 @@ describe("useWebSocket", () => {
   })
   it("ignores already queued callbacks from an old authority socket", async () => {
     const oldHandler = vi.fn(), newHandler = vi.fn(), connected = vi.fn()
+    const expired = addAuthHandler(vi.fn())
     const hook = renderHook(({ enabled, handler }) => useWebSocket({ enabled, url: "ws://localhost/ws", getToken: tokenFn("synthetic"), onMessage: handler, onConnect: connected }), { initialProps: { enabled: true, handler: oldHandler } })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     const old = mockInstances[0]
     act(() => old.simulateOpen())
-    const queued = { message: old.onmessage!, close: old.onclose!, error: old.onerror!, open: old.onopen! }
+    const queued = { message: old.onmessage!, close: old.onclose!, error: old.onerror, open: old.onopen! }
+    // Error events have no handler: the following close decides retry/auth.
+    expect(queued.error).toBeNull()
     hook.rerender({ enabled: false, handler: newHandler })
     hook.rerender({ enabled: true, handler: newHandler })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -280,11 +292,17 @@ describe("useWebSocket", () => {
     const connectedCount = connected.mock.calls.length
     act(() => {
       queued.message({ data: JSON.stringify({ type: "chat_event", payload: "old private" }) })
-      queued.error(); queued.open(); queued.close({ code: 4401, reason: "" })
+      queued.error?.(); queued.open(); queued.close({ code: 4401, reason: "" })
     })
     expect(newHandler).not.toHaveBeenCalled()
     expect(connected).toHaveBeenCalledTimes(connectedCount)
     expect(hook.result.current.status).toBe("connected")
+    expect(expired).not.toHaveBeenCalled()
+    expect(old.sent).toHaveLength(1) // stale open must not send another auth frame
+    act(() => current.simulateError())
+    expect(hook.result.current.status).toBe("connected")
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500) })
+    expect(mockInstances).toHaveLength(2) // no stale callback schedules a new socket
     act(() => current.simulateMessage({ type: "current" }))
     expect(newHandler).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "current" }))
   })

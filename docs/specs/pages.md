@@ -307,6 +307,20 @@ engine retains its trusted-account gate: this metadata check does not enable
 Document content access for a globally restricted custodian. Private mutation
 checks retain their separate trusted-account requirement.
 
+Metadata detail, export, versions, grants and Page/subject access reports retain
+one read snapshot for classification, custody, role and the emitted metadata.
+Ordinary reads use a read-only transaction without acquiring the SQLite writer
+lock. Private reads restart with fresh authorization inside a writer transaction;
+subject access re-prepares its final page once and audits only private entries
+actually emitted. Required audit inserts and the complete final batch are checked
+natively and committed before metadata is released. A later audit insert removing
+an earlier row, an ignored insert or commit failure withholds the response.
+Document engine reads retain their separately captured actual-read custodian;
+this metadata boundary does not replace that identity with a later owner lookup.
+Project/publication source and panel-history reads are not newly qualified by
+these metadata consumers.
+
+
 
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant
@@ -1325,3 +1339,23 @@ are not required to build, test or use the product.
 
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+
+### Folder membership event privacy
+
+Folder add, move, remove and batch move retain their canonical journal target
+Page ID and summary. Their workspace invalidations use the existing Page output
+classification: private chat audiences disclose no Page identity; Documents and
+empty human staging Pages expose only opaque IDs. Failed or missing native
+classification discloses neither identity nor descriptive metadata.
+
+Folder membership journal producers record two internal boolean classifications.
+The shared public projection removes these markers and preserves canonical input.
+It is applied to journal List/Get/SSE/WS serialization, before automation preview
+matching and before runtime automation matching/rendering. Only newly classified
+ordinary events retain their public descriptive metadata. Historical unclassified
+(including ordinary), missing or malformed classifications receive a generic
+projection without Page identity. Full-text List/Count excludes private-output and
+unclassified folder entries before matching, preventing title confirmation.
+Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
+this does not introduce Page folder ACL mutation auditing or change its atomicity.

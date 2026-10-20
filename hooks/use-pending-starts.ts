@@ -36,7 +36,9 @@ export function usePendingStarts(workspaceId: string | null | undefined) {
       })
       if (ctrl.signal.aborted) return
       if (!res.ok) throw new Error("Could not load scheduled starts")
-      const rows: PendingStart[] = (await res.json()) ?? []
+      const body: unknown = await res.json()
+      // A body that is not a list (an older or a broken server) is no starts, not a crash.
+      const rows: PendingStart[] = Array.isArray(body) ? body : []
       if (ctrl.signal.aborted) return
       setStarts(rows)
       setError(null)

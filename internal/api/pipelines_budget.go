@@ -67,7 +67,7 @@ func (h *PipelineHandler) GetBudget(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "failed to compute monthly spend")
 		return
 	}
-	writeJSON(w, http.StatusOK, toBudgetResponse(slug, p.MonthlyBudgetUSD, spent, monthStart))
+	writeCostAwareJSON(w, r, http.StatusOK, toBudgetResponse(slug, p.MonthlyBudgetUSD, spent, monthStart))
 }
 
 // budgetUpdateBody is the PATCH payload for SetBudget.
@@ -135,7 +135,10 @@ func (h *PipelineHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
 
 // budgetSummaryRow is one line of the workspace roll-up.
 type budgetSummaryRow struct {
-	Slug             string  `json:"slug"`
+	Slug string `json:"slug"`
+	// HasBudget and OverBudget are the state every role sees; the amounts
+	// and pct_used are OWNER/ADMIN only (#3590, writeCostAwareJSON).
+	HasBudget        bool    `json:"has_budget"`
 	MonthlyBudgetUSD float64 `json:"monthly_budget_usd"`
 	SpentUSD         float64 `json:"spent_usd"`
 	PctUsed          float64 `json:"pct_used,omitempty"`
@@ -182,7 +185,7 @@ func (h *PipelineHandler) GetBudgetSummary(w http.ResponseWriter, r *http.Reques
 		if p.MonthlyBudgetUSD <= 0 && spent <= 0 {
 			continue
 		}
-		row := budgetSummaryRow{Slug: p.Slug, MonthlyBudgetUSD: p.MonthlyBudgetUSD, SpentUSD: spent}
+		row := budgetSummaryRow{Slug: p.Slug, HasBudget: p.MonthlyBudgetUSD > 0, MonthlyBudgetUSD: p.MonthlyBudgetUSD, SpentUSD: spent}
 		if p.MonthlyBudgetUSD > 0 {
 			row.PctUsed = spent / p.MonthlyBudgetUSD * 100
 			row.OverBudget = spent > p.MonthlyBudgetUSD
@@ -191,5 +194,5 @@ func (h *PipelineHandler) GetBudgetSummary(w http.ResponseWriter, r *http.Reques
 		resp.TotalBudgetUSD += p.MonthlyBudgetUSD
 		resp.TotalSpentUSD += spent
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeCostAwareJSON(w, r, http.StatusOK, resp)
 }

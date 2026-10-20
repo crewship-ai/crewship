@@ -119,6 +119,12 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	rec, ok := h.grantPage(w, r, wsID)
 	if !ok {
@@ -135,6 +141,10 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 

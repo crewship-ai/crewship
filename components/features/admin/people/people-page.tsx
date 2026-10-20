@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Building2, ChevronDown, ChevronRight, Grid3x3, House, Plus, Shield, Trash2, UserPlus, Users, X } from "lucide-react"
+import { Ban, Building2, ChevronDown, ChevronRight, Grid3x3, House, Plus, Shield, Trash2, TriangleAlert, UserPlus, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
@@ -13,9 +14,7 @@ import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarAction, selectionBarButton } from "@/components/features/settings/shared"
 import { MembersAttention } from "@/components/features/settings/members/members-attention"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
   FACETS, byAttentionThenName, displayName, facetMatches, isEmptyWorkspace, isPersonal, membersOf, personMatches, personStatus,
@@ -27,7 +26,7 @@ import { PersonProfile } from "./person-profile"
 import { WorkspaceProfile } from "./workspace-profile"
 import { AddPersonDialog, NewWorkspaceDialog } from "./people-dialogs"
 import { usePeople } from "./use-people"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 /** "accounts" is the personal accounts, under People: it has no tab of its own. */
 type View = "people" | "accounts" | "workspaces" | "access"
@@ -108,8 +107,9 @@ export function PeoplePage() {
     const targets = workspaces.filter((w) => pickedWs.has(w.id) && isPersonal(w) && isEmptyWorkspace(w))
     let done = 0
     for (const w of targets) if (await actions.deleteWorkspace(w.id, w.slug, "")) done++
+    // Every one refused: the confirmation stays open (each refusal toasted).
+    if (targets.length > 0 && done === 0) throw new Error("nothing removed")
     setPickedWs(new Set())
-    setConfirmDelete(false)
     if (done) toast.success(`Removed ${done} empty personal ${done === 1 ? "account" : "accounts"}`)
   }
   const attention = people.filter((p) => personStatus(p) !== "active").length
@@ -185,7 +185,7 @@ export function PeoplePage() {
   if (loading) {
     body = <div className="space-y-3"><Skeleton className="h-8 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
   } else if (error) {
-    body = <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error} <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>
+    body = <PageBanner tone="bad" icon={TriangleAlert} action={<Button variant="outline" size="sm" onClick={() => void reload()}>Retry</Button>}>{error}</PageBanner>
   } else if (person) {
     // An instance admin may belong to no workspace: the profile opens all the
     // same, and what is per workspace picks one of the person's (below).
@@ -234,20 +234,15 @@ export function PeoplePage() {
             Only empty ones can be removed — no crews, no agents, no runs. The person keeps signing in and keeps every workspace they belong to. Open one to turn it into a workspace instead.
           </p>
         </SettingsCard>
-        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Remove {pickedWs.size} empty personal {pickedWs.size === 1 ? "account" : "accounts"}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                {workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. Nothing is in them. The people keep signing in and keep every workspace they belong to. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void deletePicked() }}>Remove</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} destructive
+          title={`Remove ${pickedWs.size} empty personal ${pickedWs.size === 1 ? "account" : "accounts"}?`}
+          description={`${workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. This cannot be undone.`}
+          consequences={[
+            { tone: "lost", text: "The personal accounts picked. Only accounts with no crews, agents or data are removed." },
+            { tone: "kept", text: "The people keep signing in and keep every workspace they belong to." },
+          ]}
+          confirmLabel="Remove"
+          onConfirm={deletePicked} />
       </>
     )
   } else if (view === "access") {
@@ -296,6 +291,7 @@ export function PeoplePage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-people"
       title="People & workspaces"
       icon={Users}
       description="Who can sign in, and where they work"
@@ -305,7 +301,7 @@ export function PeoplePage() {
       filterCount={Number(Boolean(q.trim())) + Number(facet !== "all")}
       actions={
         <>
-          {/* Icons only on a phone, so the sub-bar keeps room for Filters. */}
+          {/* Icons only on a phone, so the actions fit the sub-bar. */}
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New workspace" onClick={() => setDialog("workspace")}>
             <Building2 /><span className="max-md:hidden">New workspace</span>
           </Button>
@@ -357,14 +353,15 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
   const suspendAll = async () => {
     let ok = 0
     for (const p of people) if (await actions.suspend(p.id, "Suspended from People & workspaces", "")) ok++
+    // Every one refused: the confirmation stays open (each refusal toasted).
+    if (ok === 0) throw new Error("nobody suspended")
     toast.success(`Suspended ${ok} of ${people.length}`)
-    setSuspending(false)
     onClear()
   }
   return (
     <div role="toolbar" aria-label="Change the selected people" data-slot="people-bulk"
       className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:gap-1.5 max-sm:px-2")}>
-      <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{people.length}</span> selected</span>
+      <span className="px-1 text-xs"><span className="font-semibold tabular-nums">{people.length}</span> selected</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button size="sm" className={selectionBarAction} disabled={workspaces.length === 0}><Building2 />Add to workspace<ChevronDown className="h-3 w-3" /></Button>
@@ -381,18 +378,15 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
       </Popover>
       <Button variant="outline" size="sm" className={selectionBarButton} onClick={() => setSuspending(true)}><Ban />Suspend</Button>
       <Button variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={onClear}><X className="h-3.5 w-3.5" /></Button>
-      <AlertDialog open={suspending} onOpenChange={setSuspending}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Suspend {people.length} {people.length === 1 ? "person" : "people"}?</AlertDialogTitle>
-            <AlertDialogDescription>{people.map(displayName).join(", ")} can no longer sign in; their sessions end now. Their access is kept for when you reactivate them.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void suspendAll() }}>Suspend</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog open={suspending} onOpenChange={setSuspending} destructive
+        title={`Suspend ${people.length} ${people.length === 1 ? "person" : "people"}?`}
+        description={`${people.map(displayName).join(", ")} can no longer sign in.`}
+        consequences={[
+          { tone: "lost", text: "Their sessions end first, then sign-in is refused" },
+          { tone: "kept", text: "Their access is kept for when you reactivate them" },
+        ]}
+        confirmLabel={`Suspend ${people.length}`}
+        onConfirm={suspendAll} />
     </div>
   )
 }

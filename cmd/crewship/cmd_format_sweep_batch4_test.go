@@ -116,6 +116,29 @@ func TestJournalLookupRunE_DefaultStaysHuman(t *testing.T) {
 	}
 }
 
+// #3636: the lookup also names the workspace's people, so a journal row's
+// actor_id resolves to a name on the CLI as it does in Activity.
+func TestJournalLookupRunE_ListsPeople(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/journal/lookup", clitest.JSONResponse(200, map[string]any{
+		"crews":    []map[string]any{},
+		"agents":   []map[string]any{},
+		"missions": []map[string]any{},
+		"people":   []map[string]any{{"id": "usr_jana", "name": "Jana Nováková"}},
+	}))
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = journalLookupCmd.RunE(journalLookupCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{"People (1)", "usr_jana", "Jana Nováková"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
 func TestJournalGetRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
 	stub.OnGet("/api/v1/journal/j_abc", clitest.JSONResponse(200, map[string]any{
