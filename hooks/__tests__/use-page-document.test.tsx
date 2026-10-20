@@ -141,14 +141,14 @@ it("stops on malformed saved binary and preserves a recovery state",async()=>{
  try{await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.error).toContain("Confirmed document content rejected");expect(result.current.editable).toBe(false);await act(async()=>{await new Promise(resolve=>setTimeout(resolve,600))});expect(fetchMock).toHaveBeenCalledTimes(1)}finally{unmount();server.destroy()}
 })
 
-it("fails closed when private durable storage is unavailable",async()=>{
+it("still loads the server document when private durable storage is unavailable",async()=>{
  journal.open.mockRejectedValue(new (await import("@/lib/document-queue")).DocumentStorageError("Private document storage is unavailable."))
  const server=model();fetchMock.mockImplementation(()=>response(state(server)))
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
  try{
-  await waitFor(()=>expect(result.current.status).not.toBe("Loading document…"))
-  expect(result.current.editable).toBe(false)
-  expect(result.current.status).toContain("storage")
+  await waitFor(()=>expect(result.current.status).toBe("Saved"))
+  expect(result.current.editable).toBe(true)
+  expect(content(result.current.doc).toString()).toBe("base")
   expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
  }finally{unmount();server.destroy()}
 })

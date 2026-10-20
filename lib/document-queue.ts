@@ -16,17 +16,28 @@ export interface DocumentDraftStore {
   close(): void
 }
 export class DocumentStorageError extends Error {}
+/** A browser that never answers an open (blocked profile, stuck upgrade) must not stall the editor. */
+export const STORAGE_OPEN_TIMEOUT_MS = 2000
 const message = "Private document storage is unavailable. Changes are unsaved; recover your draft."
 
 export async function openDocumentDrafts(human: string, workspace: string, page: string): Promise<DocumentDraftStore> {
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("crewship-document-drafts", 1)
-    request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
-    request.onerror = () => reject(new DocumentStorageError(message))
-    request.onblocked = () => reject(new DocumentStorageError(message))
-    request.onsuccess = () => resolve(request.result)
+    let settled = false
+    const timer = setTimeout(() => { settled = true; reject(new DocumentStorageError(message)) }, STORAGE_OPEN_TIMEOUT_MS)
+    const fail = () => { if (settled) return; settled = true; clearTimeout(timer); reject(new DocumentStorageError(message)) }
+    try {
+      const request = indexedDB.open("crewship-document-drafts", 1)
+      request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
+      request.onerror = fail
+      request.onblocked = fail
+      request.onsuccess = () => {
+        // Arrived after the timeout: nobody will use it.
+        if (settled) { request.result.close(); return }
+        settled = true; clearTimeout(timer); resolve(request.result)
+      }
+    } catch { fail() }
   }).catch(() => { throw new DocumentStorageError(message) })
   db.onversionchange = () => db.close()
   const keys = new Map<string, [string, string]>()
