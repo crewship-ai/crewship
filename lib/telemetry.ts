@@ -166,7 +166,7 @@ export const CHAT_EVENT_SCHEMA = {
      */
     reason: {
       kind: "enum",
-      values: ["http_error", "network", "too_large", "unsupported_type", "rate_limited", "unknown"],
+      values: ["http_error", "network", "too_large", "unsupported_type", "rate_limited", "empty", "too_many", "unknown"],
     },
     status: { kind: "num", optional: true },
   },

@@ -132,6 +132,8 @@ export interface WirePage {
   /** Explicit server classification, independent of folder or owner. */
   private_audience?: boolean
   has_document?: boolean
+  /** Proposed (FE-REQ-F5-6): the Page stores a native Slides deck. Absent today. */
+  has_slides?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -479,6 +481,8 @@ export interface PageView {
   privateAudience?: boolean
   /** Confirmed native Document descriptor; missing means a legacy Page. */
   hasDocument?: boolean
+  /** Confirmed native Slides descriptor; only read when the Slides editor mount flag is on. */
+  hasSlides?: boolean
   id: string
   slug: string
   name: string
@@ -627,6 +631,7 @@ export function toPageView(raw: WirePage): PageView {
     immutablePageId: typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(raw.id) ? raw.id : undefined,
     hasDocument: raw.has_document === true,
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
+    hasSlides: raw.has_slides === true,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),

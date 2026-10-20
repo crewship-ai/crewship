@@ -13,6 +13,7 @@ import { z } from "zod"
 import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
+import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -148,6 +149,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (result.kind === "settled") {
         if (gen !== refreshGen.current) return
         purgeOtherE2Recovery(result.session?.user.id ?? null)
+        await purgeOtherDocumentDrafts(result.session?.user.id ?? null)
+        if (gen !== refreshGen.current) return
         setSession(result.session)
         setStatus(result.session ? "authenticated" : "unauthenticated")
         return
@@ -185,10 +188,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (typeof window === "undefined") return
 
     let redirected = false
-    const goLoginExpired = () => {
+    const goLoginExpired = async () => {
       if (redirected) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
+      await purgeOtherDocumentDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
       const params = new URLSearchParams({ reason: "expired" })
@@ -202,14 +207,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       window.location.replace(`/login?${params.toString()}`)
     }
-    const goLoginSignedOutElsewhere = () => {
+    const goLoginSignedOutElsewhere = async () => {
       if (redirected) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
+      await purgeOtherDocumentDrafts(null)
       window.location.replace("/login")
     }
 
-    const expiredHandler = () => goLoginExpired()
+    const expiredHandler = () => { void goLoginExpired() }
     window.addEventListener(AUTH_EVENT, expiredHandler)
 
     let channel: BroadcastChannel | null = null
@@ -217,8 +224,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
-          if (ev.data?.type === "session-expired") goLoginExpired()
-          else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
+          if (ev.data?.type === "session-expired") void goLoginExpired()
+          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere()
         }
       } catch {
         channel = null
@@ -289,7 +296,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!serverAcknowledged) {
       return
     }
+    ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
+    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
+    await purgeOtherDocumentDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.

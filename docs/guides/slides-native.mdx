@@ -1,0 +1,93 @@
+---
+title: Native Slides initialization and reads
+description: "Save a native presentation and read its confirmed head or an exact revision."
+stability: experimental
+tag: Experimental
+---
+
+The schema-1 native Slides adapter can initialize a populated presentation on an
+existing empty private Page and read its saved head or an exact revision.
+The routes are disabled by default. Enable `slides.enabled: true` in the server
+configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
+This switch does not require the separate Document engine and does not enable
+agent authoring or unsupported editing operations.
+
+The human endpoints are `GET /api/v1/pages/{slug}/slides`,
+`GET /api/v1/pages/{slug}/slides/revisions/{revision}` and
+`POST /api/v1/pages/{slug}/slides/initialize`. A slug or the encoded `@PAGE_ID`
+form addresses the same immutable Page. Disabled routes return 404. An enabled
+route still requires a current human credential and workspace context.
+
+Use a current human session or CLI token. Initialization requires the Page's
+current human custodian and `pages:write`; reading requires current private
+access and `pages:read`. Another unrestricted workspace OWNER can read with a
+mandatory private-access audit. An ADMIN role or ordinary Page grant does not
+widen a private Page's audience. Agent, internal and acting-agent credentials
+are refused. For another private Page, malformed input returns the same 404 as
+a missing Page; validation errors cannot disclose that the Page exists.
+
+```bash
+crewship slides initialize @PAGE_ID --file initialization.json
+crewship slides read @PAGE_ID
+crewship slides at-rev @PAGE_ID 1
+```
+
+The singular `slide` command remains an alias. The initialization file uses the
+existing strict Slides contract: `page_id`,
+`schema_version: 1`, `base_rev: 0`, `mutation_id` and a complete `deck` whose `deck_id` equals
+`page_id`. Geometry, text, shape, table, notes and theme use the bounded typed
+schema. Read the shared [schema fixture](https://github.com/crewship-ai/crewship/blob/02177faaf803b92080e40ae47b5538dacf3ee7dc/testdata/slides-schema-v1.json)
+for the deck structure. The CLI validates this request before transport.
+
+Retain the exact initialization file after an unknown outcome. Repeating it
+with the same current actor returns the original revision and content hash with
+`duplicate: true`. Reusing its mutation ID with changed content or actor fails.
+The immutable Page ID prevents an old initialization from targeting a new Page
+that reuses the same slug. The command accepts a slug for lookup; use `@PAGE_ID`
+when retaining a durable reference.
+
+The server commits head, immutable revision, receipt and object identities in
+one transaction, with current credential, membership and Page custody checks
+under the writer fence. A storage failure rolls back the entire initialization.
+Existing Document, static artifact, Board, project or panel content blocks this
+path. It creates neither a Page nor a permission grant.
+
+Schema 2 and future schemas remain unavailable, including on reads: no partial
+text, image metadata or hashes are returned. Retained stored data is preserved.
+Patch, reorder, restore, history, image upload, agent creation, editor, Present
+and export are outside this adapter. This delivery makes no canonical-format or
+Office/headless export qualification claim.
+
+## Read the confirmed deck
+
+`GET /api/v1/pages/{slug}/slides`
+
+Authentication: current human session or CLI token with `pages:read`, current
+membership and private access. Request: Page slug or immutable `@ID`, workspace
+context, no body. Response 200: `schema_version`, `revision`, `order_version`,
+`content_hash` and `deck`. Statuses: 200 state; 401 invalid credential;
+403 workspace or scope boundary; 404 disabled, missing or private Page;
+409 unsupported schema; 500 storage or audit failure. `Cache-Control: no-store`.
+
+## Read an exact saved revision
+
+`GET /api/v1/pages/{slug}/slides/revisions/{revision}`
+
+Authentication: the same current human read access, never historical permissions.
+Request: Page selector and positive integer `revision`, no body. Response 200:
+the same state envelope for that immutable revision. Statuses: 200 state;
+400 invalid revision; 401 invalid credential; 403 workspace or scope boundary;
+404 disabled, missing or private Page or revision; 409 unsupported schema;
+500 storage or audit failure. `Cache-Control: no-store`.
+
+## Initialize the populated deck
+
+`POST /api/v1/pages/{slug}/slides/initialize`
+
+Authentication: current human custodian with `pages:write` and live membership.
+Request: the closed five-field initialization object described above, at most
+2 MiB. Response 200: `mutation_id`, `revision`, `order_version`, `content_hash`
+and `duplicate`. Statuses: 200 receipt; 400 invalid request; 401 invalid credential;
+403 workspace or scope boundary; 404 disabled, missing or inaccessible Page;
+409 conflicting identity, mutation or schema; 429 retained capacity exhausted;
+500 storage failure. `Cache-Control: no-store`.

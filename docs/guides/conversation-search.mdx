@@ -179,3 +179,29 @@ SQLite FTS5 external-content index. Search joins the index, filters by the
 agent set the API resolved, and orders by BM25. The JSONL files remain authoritative; the
 index is a rebuildable mirror, so a transient write failure costs at most the
 searchability of a single turn, never the turn itself.
+
+## Searching from the chat sidebar
+
+The chat sidebar has a search button, and **Ctrl/Cmd+Shift+F** opens the same dialog. The shortcut
+is on for everyone (it is not behind a flag): it works only outside text fields, never while Alt is held, and
+it never fires inside the message box, so it does not take over typing. If your browser or operating system
+already uses that combination, use the button instead. Ctrl/Cmd+K stays the global palette. The dialog has three tabs:
+
+- **This chat** — matches inside the open agent session.
+- **All chats** — every agent conversation you can see.
+- **Files** — not available yet; the tab says so rather than showing zero results. (Developers can enable sample data with `NEXT_PUBLIC_CHAT_SEARCH_FILES_FIXTURES=true`; the tab is then labelled "Sample data — file search is not available yet" and its rows are disabled, not links. It is not real file search.)
+
+Type free text plus optional filters: `from:agent` (any agent's replies), `from:ada` (that agent's own replies),
+`in:ada` (one agent), `has:link`, `has:code`, `has:tool`, `after:2026-10-01`,
+`before:2026-10-31`. An unknown filter is reported, not ignored. Use the arrow
+keys to move through results (Left/Right switches tabs) and Enter to open the exact message; Escape closes.
+
+`from:` matches a hit only when it is an agent reply, so `from:ada` never returns your own messages in Ada's chat. `from:me` (also `user` and `you`) is not supported yet: group agent chats are searched too and a hit does not say which person wrote it, so the dialog says it needs the message author from the server instead of guessing. An agent's name or slug wins over all the keywords (`agent`, `assistant`, `user`, `you`, `me`), so an agent called Agent or User can be selected.
+
+Only `in:` is applied by the server. `from:`, `has:`, the date filters and
+**This chat** are applied to the server's 50 best matches, so when that page
+was full the dialog says the result is **partial** instead of claiming nothing
+matched. A full page of 50 (the requested limit; the response has no has-more flag) with nothing filtered out is shown as **First 50 results, more may exist**, because search has no next page yet. An unsupported `from:` value is reported, not ignored. Rooms and direct messages with people are not covered by this search
+yet.
+
+`after:` is inclusive and `before:` is exclusive, both at 00:00 UTC of the given date, while result dates are shown in your local time. `in:` cannot be combined with **This chat**. If the matched message is not shown as its own entry in the open conversation (for example it was merged into an earlier reply), the dialog says it could not locate it rather than saying it is gone.

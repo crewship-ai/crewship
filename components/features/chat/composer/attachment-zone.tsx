@@ -12,8 +12,26 @@ import {
 import { Button } from "@/components/ui/button"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
+import {
+  abortIfPending,
+  clearAbort,
+  currentScopeEpoch,
+  identityConfirmed,
+  queueFor,
+  registerAbort,
+  untilConfirmed,
+} from "@/lib/chat-attachment-jobs"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
+import {
+  PROVISIONAL_ATTACHMENT_LIMITS,
+  filesFromClipboard,
+  textFromClipboard,
+  refusalMessage,
+  uploadFailureLabel,
+  validateAttachmentBatch,
+} from "@/lib/chat-attachment-queue"
 
 /** Where the bytes came from. Four controls, one upload path. */
 export type AttachmentSource = "picker" | "drop" | "paste" | "camera"
@@ -23,6 +41,8 @@ type UploadFailureReason =
   | "network"
   | "too_large"
   | "unsupported_type"
+  | "empty"
+  | "too_many"
   | "rate_limited"
   | "unknown"
 
@@ -32,8 +52,9 @@ type UploadFailureReason =
  *
  * The two are deliberately different things and only one of them is recorded:
  * `message` is the server's own words and can name a path or echo a driver
- * error, which is why the composer already keeps it out of the DOM. `reason`
- * is a closed set, and it is what telemetry gets.
+ * error; it is stored for debugging and never rendered (no text, title or
+ * aria-*). `reason` is a closed set: telemetry gets it, and the chip and notice
+ * show its sanitized label (uploadFailureLabel).
  */
 class UploadFailure extends Error {
   constructor(
@@ -46,10 +67,8 @@ class UploadFailure extends Error {
   }
 }
 
-// 25 MB cap — best practice for chat attachments. Bigger than the
-// previous 10 MB which was too small for screenshots / log dumps but
-// well under the multipart parsing slowdown threshold.
-const MAX_SIZE = 25 * 1024 * 1024
+// Limits (25 MB per file, file count per message) live in
+// lib/chat-attachment-queue.ts; every entry point validates through there.
 
 interface AttachmentZoneProps {
   agentId: string
@@ -70,22 +89,6 @@ interface AttachmentZoneProps {
    * the sheet, next to the field that asked for it.
    */
   showChips?: boolean
-}
-
-// Module-level abort registry, keyed by `${sessionId}::${attachmentId}`.
-// Both AttachmentZone (drop) and AttachmentButton (file picker) write
-// here when they kick off an upload; the user-removal handler in
-// AttachmentZone reads here to cancel in-flight requests so deleted
-// files can't sneak through to the server side.
-const abortRegistry = new Map<string, AbortController>()
-const abortKey = (sessionId: string, id: string) => `${sessionId}::${id}`
-
-function abortIfPending(sessionId: string, id: string) {
-  const ac = abortRegistry.get(abortKey(sessionId, id))
-  if (ac) {
-    ac.abort()
-    abortRegistry.delete(abortKey(sessionId, id))
-  }
 }
 
 function isAbortError(err: unknown): boolean {
@@ -183,30 +186,6 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * The toast for one refused file.
- *
- * Two rules, both learned from the dev2 report where two failed uploads
- * produced one visible message:
- *
- *   · The id is the ATTACHMENT's. Sonner replaces a toast that reuses an id,
- *     so a shared or absent id is how two files collapse into one statement —
- *     and per-attachment means a second failed retry updates that file's toast
- *     instead of stacking a third.
- *   · It says what to do. "invoice.pdf: permission denied" tells a user what
- *     broke and nothing about what is now true (the file is NOT attached) or
- *     what they can do about it (retry it, or send without it).
- *
- * The toast is still only the announcement. The durable statement is the chip,
- * which stays on screen saying "Upload failed" long after this has expired.
- */
-function toastUploadFailure(sessionId: string, att: ComposerAttachment, reason: string) {
-  toast.error(`${att.name} was not attached`, {
-    id: `attachment-upload-failed:${sessionId}:${att.id}`,
-    description: `${reason}. The file is not on the agent — press Retry on the chip, or remove it and send without it.`,
-  })
-}
-
-/**
  * The one upload path for chat attachments.
  *
  * Drop, paperclip and camera all land here. This used to be two verbatim
@@ -225,16 +204,26 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   const updateAttachment = useComposerStore((s) => s.updateAttachment)
   const { workspaceId } = useWorkspace()
   const ensureChatSession = useContext(EnsureChatSessionContext)
+  const { key: storeKey, ready } = useAttachmentScope(sessionId)
 
   /** One file, start to finish. The chip already exists in the store and is
    *  patched IN PLACE — never removed and re-added, which would move it to the
    *  end of the list and reorder both the chips and the paths the message
    *  names. */
   const runUpload = useCallback(
-    async (att: ComposerAttachment, file: File, wsId: string, source?: AttachmentSource) => {
-      const key = abortKey(sessionId, att.id)
+    async (att: ComposerAttachment, file: File, wsId: string, epoch: number, source?: AttachmentSource) => {
+      // Cancelled while it waited in the queue: stay cancelled.
+      // The scope this job was queued under is gone (other human, other
+      // workspace, signed out - even if the same person is back since).
+      const stale = () => currentScopeEpoch() !== epoch
+      // Identity unknown (session unread): keep the file, send nothing, wait
+      // for the same identity to be confirmed. A different one ends the wait.
+      if (!(await untilConfirmed(epoch))) return
+      const current = (useComposerStore.getState().attachments[storeKey] ?? []).find((a) => a.id === att.id)
+      if (!current || current.status === "cancelled" || stale()) return
+      updateAttachment(storeKey, att.id, { status: "uploading", error: undefined, failureLabel: undefined })
       const ac = new AbortController()
-      abortRegistry.set(key, ac)
+      registerAbort(storeKey, att.id, ac)
       const startedAt = Date.now()
       // User removal is authoritative — if the chip was deleted while the
       // upload was in flight, neither outcome may put it back. `updateAttachment`
@@ -244,17 +233,23 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         // creates the conversation; on one that already exists it is a cached
         // `true` and costs nothing. Failing here throws into the same handler
         // a refused upload uses, so a conversation that could not be started
-        // produces an error chip and a named toast rather than a chip that
+        // produces an error chip and the inline notice rather than a chip that
         // reads as an attached file — and the endpoint is never called with a
         // chat id it would 404 on.
         if (ensureChatSession && !(await ensureChatSession())) {
           throw new UploadFailure("the conversation could not be started", "unknown")
         }
+        // The identity can change, or become unknown, while the row is created.
+        for (;;) {
+          if (!(await untilConfirmed(epoch))) return
+          if (identityConfirmed()) break // re-read synchronously right before sending
+        }
+        if (stale() || ac.signal.aborted || !(useComposerStore.getState().attachments[storeKey] ?? []).some((a) => a.id === att.id)) return
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
         // outgoing message names — without it the file lands in the
         // container and nothing ever tells the agent it is there.
-        updateAttachment(sessionId, att.id, {
+        updateAttachment(storeKey, att.id, {
           status: "ready",
           url: agent_path,
           path,
@@ -286,52 +281,54 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         // No path and no url: a failed upload has no file behind it, so there
         // is nothing for `sendableAttachments` to name even by accident. The
         // File is KEPT — it is what Retry re-sends.
-        updateAttachment(sessionId, att.id, {
+        updateAttachment(storeKey, att.id, {
           status: "error",
           path: undefined,
           url: undefined,
           error: reason,
+          failureLabel: uploadFailureLabel(err instanceof UploadFailure ? err.reason : "network"),
           file,
         })
-        // Only announce a failure for a chip the user can still see. A file
-        // they removed mid-upload failing afterwards is not news.
-        const stillThere = (useComposerStore.getState().attachments[sessionId] ?? []).some(
-          (a) => a.id === att.id,
-        )
-        if (stillThere) toastUploadFailure(sessionId, att, reason)
+        // No toast: a toast sits over the chip row and can cover the very
+        // Retry/Remove the person needs next. The chip says "Upload failed",
+        // and the composer's inline notice says why Send is off and what to do.
       } finally {
-        abortRegistry.delete(key)
+        clearAbort(storeKey, att.id)
       }
     },
-    [agentId, sessionId, updateAttachment, ensureChatSession],
+    [agentId, sessionId, storeKey, updateAttachment, ensureChatSession],
   )
 
   const upload = useCallback(
     async (files: File[], source?: AttachmentSource) => {
-      if (!workspaceId) {
-        toast.error("Workspace not loaded yet — try again in a moment")
+      if (!workspaceId || !ready) {
+        toast.error("Still signing in — try again in a moment")
         return
       }
+      const epoch = currentScopeEpoch()
       // Optimistically add chips with status: uploading; flip to ready
       // (with the server-side path) on success or to error on fail.
       // Pair each chip with its source File so a skipped (oversized)
       // file can't shift indices and mismatch chip ↔ file.
       const queued: Array<{ att: ComposerAttachment; file: File }> = []
-      for (const f of files) {
-        if (f.size > MAX_SIZE) {
-          toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
-          // A refusal that never reached the network is still a failed
-          // attachment to the person holding the phone, and it is the one the
-          // server-side logs can never show.
-          emitChatEvent("attachment_upload_failed", {
-            session_id: sessionId,
-            mime_kind: mimeKind(f.type),
-            size_bytes: f.size,
-            source,
-            reason: "too_large",
-          })
-          continue
-        }
+      const counted = (useComposerStore.getState().attachments[storeKey] ?? []).filter(
+        (a) => a.status !== "cancelled" && a.status !== "error",
+      ).length
+      const { accepted, rejected } = validateAttachmentBatch(counted, files)
+      for (const { file: f, reason } of rejected) {
+        toast.error(refusalMessage(f.name, reason, PROVISIONAL_ATTACHMENT_LIMITS))
+        // A refusal that never reached the network is still a failed
+        // attachment to the person holding the phone, and it is the one the
+        // server-side logs can never show.
+        emitChatEvent("attachment_upload_failed", {
+          session_id: sessionId,
+          mime_kind: mimeKind(f.type),
+          size_bytes: f.size,
+          source,
+          reason,
+        })
+      }
+      for (const f of accepted) {
         queued.push({
           file: f,
           att: {
@@ -339,18 +336,18 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
             name: f.name,
             size: f.size,
             type: f.type || "application/octet-stream",
-            status: "uploading",
+            status: "validating",
             file: f,
           },
         })
       }
       if (queued.length === 0) return
-      addAttachments(sessionId, queued.map(({ att }) => att))
-      for (const { att, file } of queued) {
-        await runUpload(att, file, workspaceId, source)
-      }
+      addAttachments(storeKey, queued.map(({ att }) => att))
+      await Promise.all(
+        queued.map(({ att, file }) => queueFor(storeKey).enqueue(att.id, () => runUpload(att, file, workspaceId, epoch, source))),
+      )
     },
-    [sessionId, workspaceId, addAttachments, runUpload],
+    [sessionId, storeKey, workspaceId, ready, addAttachments, runUpload],
   )
 
   /** Re-send a chip whose upload was refused, keeping its id and its place in
@@ -358,30 +355,49 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
    *  that fails is a failure again, not a silent no-op. */
   const retry = useCallback(
     async (id: string) => {
-      if (!workspaceId) {
-        toast.error("Workspace not loaded yet — try again in a moment")
+      if (!workspaceId || !ready) {
+        toast.error("Still signing in — try again in a moment")
         return
       }
-      const att = (useComposerStore.getState().attachments[sessionId] ?? []).find(
+      const epoch = currentScopeEpoch()
+      const att = (useComposerStore.getState().attachments[storeKey] ?? []).find(
         (a) => a.id === id,
       )
       // Already running — the Retry control is only rendered on an error chip,
       // but two calls for one chip would mean two POSTs of the same file and
       // two abort controllers under one key.
-      if (!att || att.status === "uploading") return
+      if (!att || att.status === "uploading" || att.status === "validating") return
       // No File means the page was reloaded out from under the chip. Say so
       // rather than spinning: the user has to pick the file again.
       if (!att.file) {
         toast.error("Attach the file again — the browser no longer has it to retry.")
         return
       }
-      updateAttachment(sessionId, id, { status: "uploading", error: undefined })
-      await runUpload(att, att.file, workspaceId)
+      const others = (useComposerStore.getState().attachments[storeKey] ?? []).filter(
+        (a) => a.id !== id && a.status !== "cancelled" && a.status !== "error",
+      ).length
+      if (others >= PROVISIONAL_ATTACHMENT_LIMITS.maxCount) {
+        toast.error(refusalMessage(att.name, "too_many", PROVISIONAL_ATTACHMENT_LIMITS))
+        return
+      }
+      updateAttachment(storeKey, id, { status: "validating", error: undefined, failureLabel: undefined })
+      await queueFor(storeKey).enqueue(id, () => runUpload(att, att.file as File, workspaceId, epoch))
     },
-    [sessionId, workspaceId, updateAttachment, runUpload],
+    [storeKey, workspaceId, ready, updateAttachment, runUpload],
   )
 
-  return { upload, retry }
+  /** Stop a queued or running upload but keep the chip (as cancelled) so the
+   *  file can be retried. Removing the chip is a separate action. */
+  const cancel = useCallback(
+    (id: string) => {
+      queueFor(storeKey).cancel(id)
+      updateAttachment(storeKey, id, { status: "cancelled", error: undefined })
+      abortIfPending(storeKey, id)
+    },
+    [storeKey, updateAttachment],
+  )
+
+  return { upload, retry, cancel }
 }
 
 export function AttachmentZone({
@@ -393,29 +409,56 @@ export function AttachmentZone({
   // Subscribe only to THIS session's attachment list — the whole-store
   // subscription re-rendered every mounted zone on any session's draft or
   // attachment write.
-  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[sessionId])
+  const { key: storeKey } = useAttachmentScope(sessionId)
+  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[storeKey])
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []
 
-  const { upload, retry } = useAttachmentUpload(agentId, sessionId)
+  const { upload, retry, cancel } = useAttachmentUpload(agentId, sessionId)
 
   const handleFiles = useCallback((files: File[]) => void upload(files, "drop"), [upload])
   const handleRetry = useCallback((id: string) => void retry(id), [retry])
+  // Pasted files take the same queue as the picker. Capture phase so the
+  // textarea's own paste handler (which keeps files in a channel nothing
+  // reads) never sees them; a text-only paste is left alone.
+  const handlePasteCapture = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = filesFromClipboard(e.clipboardData)
+      if (files.length === 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      // A clipboard can carry text next to the file (spreadsheet cells, rich
+      // content). Attach the file and still insert the text.
+      const text = textFromClipboard(e.clipboardData)
+      const target = e.target
+      if (text && target instanceof HTMLTextAreaElement) {
+        // The native setter bypasses React's value tracker, so the input
+        // event below is seen as a real change by the controlled textarea.
+        const { selectionStart: from, selectionEnd: to, value } = target
+        const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+        setValue?.call(target, value.slice(0, from) + text + value.slice(to))
+        target.setSelectionRange(from + text.length, from + text.length)
+        target.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+      void upload(files, "paste")
+    },
+    [upload],
+  )
 
   // Wrap user removal so an in-flight upload is aborted before the
   // chip disappears from the store. Without this, a deleted file can
   // still finish uploading server-side.
   const handleRemove = useCallback(
     (id: string) => {
-      abortIfPending(sessionId, id)
-      removeAttachment(sessionId, id)
+      abortIfPending(storeKey, id)
+      removeAttachment(storeKey, id)
     },
-    [sessionId, removeAttachment],
+    [storeKey, removeAttachment],
   )
 
   return (
     <div className="flex flex-col gap-2">
-      <AttachmentDropZone onFiles={handleFiles} className="rounded-xl">
+      <AttachmentDropZone onFiles={handleFiles} onPasteCapture={handlePasteCapture} className="rounded-xl">
         {children}
       </AttachmentDropZone>
       {showChips && sessionAttachments.length > 0 && (
@@ -423,6 +466,7 @@ export function AttachmentZone({
           attachments={sessionAttachments}
           onRemove={handleRemove}
           onRetry={handleRetry}
+          onCancel={cancel}
           className="px-2"
         />
       )}

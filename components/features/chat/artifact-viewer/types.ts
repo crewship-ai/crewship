@@ -28,4 +28,6 @@ export interface DocumentViewerProps<Content = unknown> {
   onClose: () => void
   onExpandedChange: (expanded: boolean) => void
   openerRef?: RefObject<HTMLElement | null>
+  /** Optional host controls under the title (linked-item switcher). Absent leaves the header unchanged. */
+  headerExtra?: ReactNode
 }
