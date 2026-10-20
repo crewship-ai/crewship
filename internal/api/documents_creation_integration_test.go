@@ -21,6 +21,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
@@ -645,6 +648,107 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// A later author turn targets this existing Page after the creation cursor
+		// has become stale. Reuse the running sidecar: agtv2 registers the new
+		// run on first use, without changing its immutable boot IPC context.
+		token = freshToken
+		if denied, err := executeDoc("draft", "view"); err == nil || !bytes.Contains(denied, []byte("403")) || bytes.Contains(denied, []byte("Human intervening content")) {
+			t.Fatalf("ungranted follow-up inherited creation rights: %v %s", err, denied)
+		}
+		receipt, err := chataudience.CaptureTrusted(t.Context(), h.db, f.a.ChatID, owner, nil)
+		if err != nil || receipt == nil {
+			t.Fatalf("follow-up human receipt: %v", err)
+		}
+		followup := documents.IterationIntent{SubmissionID: "managed-followup", PageID: created.PageID, Schema: 3, Rev: saved.Rev, Generation: view.Generation}
+		if page, err := router.pages.AuthorizeDocumentIteration(t.Context(), receipt, followup); err != nil || page.PageID != created.PageID {
+			t.Fatalf("production preappend seal: %+v %v", page, err)
+		}
+		const followupMessage, followupRun = "managed-followup-message", "managed-followup-run"
+		transcript := conversation.NewStore(filepath.Join(dir, "followup-transcript"), newTestLogger(), conversation.WithDB(h.db))
+		t.Cleanup(transcript.Close)
+		if err := transcript.Append(t.Context(), receipt.ChatID, conversation.Message{ID: followupMessage, AgentID: receipt.AgentID, Role: conversation.RoleUser, AuthorUserID: owner, Content: "Update the existing introduction", Metadata: map[string]any{documents.IterationMetadataKey: followup}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := transcript.SyncSession(t.Context(), receipt.ChatID); err != nil {
+			t.Fatal(err)
+		}
+		if err := router.pages.PersistDocumentIteration(t.Context(), receipt, followupMessage, followup); err != nil {
+			t.Fatal(err)
+		}
+		admission := map[string]any{"id": followupRun, "agent_id": f.a.AgentID, "workspace_id": workspace, "chat_id": receipt.ChatID, "trigger_type": "USER", "human_authority": receipt, "trigger_message_id": followupMessage, "document_iteration_intent": followup}
+		if raw, status, err := request(host.URL, "POST", "/api/v1/internal/runs", "", h.artifactMasterToken, admission); err != nil || status != 201 {
+			t.Fatalf("production host follow-up admission: HTTP%d %v %s", status, err, raw)
+		}
+		token = internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, f.a.CrewID), workspace, f.a.AgentID, followupRun)
+		followupView, err := executeDoc("draft", "view")
+		if err != nil || json.Unmarshal(followupView, &view) != nil || view.PageID != created.PageID || view.Rev != followup.Rev || view.Generation != followup.Generation {
+			t.Fatalf("actual targeted dispatcher scope: %v %s", err, followupView)
+		}
+		var followupTarget DocumentOutlineBlock
+		for _, candidate := range view.Targets {
+			if candidate.ID == target.ID && candidate.Text == "Human intervening content" {
+				followupTarget = candidate
+			}
+		}
+		if followupTarget.ID == "" {
+			t.Fatal("follow-up did not receive the current original target")
+		}
+		followupPrepared, err := executeDoc("draft", "prepare", "--file", writeJSONFile("followup-prepare.json", map[string]any{"view": json.RawMessage(followupView), "target": followupTarget.ID, "text": "TARGETED-C confirmed existing Page", "mutation_id": "managed-followup-c"}))
+		var followupPacket preparedDraft
+		if err != nil || json.Unmarshal(followupPrepared, &followupPacket) != nil || followupPacket.Status != "prepared_unsaved" {
+			t.Fatalf("targeted preparation: %v %s", err, followupPrepared)
+		}
+		foreign := followupPacket
+		foreign.Packet.Patch.PageID, foreign.Packet.Checkpoint.PageID = "another-page", "another-page"
+		if raw, err := executeDoc("draft", "apply", "--file", writeJSONFile("followup-other-page.json", foreign)); err == nil || !bytes.Contains(raw, []byte("409")) {
+			t.Fatalf("targeted packet escaped its immutable Page: %v %s", err, raw)
+		}
+		followupFile := filepath.Join(dir, "followup-immutable.json")
+		if err := os.WriteFile(followupFile, followupPrepared, 0600); err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			raw, err := executeDoc("draft", "apply", "--file", followupFile)
+			var result appliedDraft
+			if err != nil || json.Unmarshal(raw, &result) != nil || result.Status != "checkpointed" || result.Patch.ID != "managed-followup-c" || result.Patch.Rev != followup.Rev+1 || result.Patch.Actor != "agent:"+f.a.AgentID+":"+followupRun || result.Checkpoint.Checkpoint != "managed-followup-c-checkpoint" {
+				t.Fatalf("targeted apply/retry%d: %v %s", attempt, err, raw)
+			}
+		}
+		assertFollowup := func() {
+			t.Helper()
+			raw, status, err := request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
+			if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil || saved.Rev != followup.Rev+1 || !bytes.Contains(raw, []byte("TARGETED-C confirmed existing Page")) || bytes.Contains(raw, []byte("UNCONFIRMED-B")) {
+				t.Fatalf("targeted persisted head: HTTP%d %v %s", status, err, raw)
+			}
+			for _, check := range []struct {
+				query string
+				want  int64
+			}{
+				{`SELECT count(*) FROM document_creations`, 1},
+				{`SELECT count(*) FROM documents`, 1},
+				{`SELECT count(*) FROM document_creation_consents WHERE run_id='managed-followup-run'`, 0},
+				{`SELECT count(*) FROM document_receipts WHERE id='managed-followup-c'`, 1},
+				{`SELECT count(*) FROM document_checkpoints WHERE id='managed-followup-c-checkpoint'`, 1},
+				{`SELECT draft_rev FROM document_iteration_intents WHERE run_id='managed-followup-run'`, followup.Rev + 1},
+			} {
+				var count int64
+				if err := h.db.QueryRow(check.query).Scan(&count); err != nil || count != check.want {
+					t.Fatalf("targeted durable state %s: %d want%d %v", check.query, count, check.want, err)
+				}
+			}
+		}
+		assertFollowup()
+		if raw, err := os.ReadFile(followupFile); err != nil || !bytes.Equal(raw, followupPrepared) {
+			t.Fatal("targeted retry changed the original packet")
+		}
+		mustExec(t, h.db, `UPDATE document_iteration_intents SET revoked_at='2026-10-20T00:00:00Z' WHERE run_id=?`, followupRun)
+		for _, args := range [][]string{{"draft", "view"}, {"draft", "apply", "--file", followupFile}} {
+			if raw, err := executeDoc(args...); err == nil || !bytes.Contains(raw, []byte("403")) || bytes.Contains(raw, []byte("TARGETED-C confirmed existing Page")) {
+				t.Fatalf("revoked iteration fell back to creation: %v %s", err, raw)
+			}
+		}
+		assertFollowup()
+		t.Log("actual CLI/sidecar/production Router/Node24/Store: new host-admitted targeted run updates the existing Page, exact retry one mutation, no creation grant fallback; provider/model acceptance not exercised")
 		// A formerly readable checkpoint cannot outlive its human credential.
 		if err := sessions.NewDBStore(h.db).Revoke(t.Context(), session.ID, "history reader revoked"); err != nil {
 			t.Fatal(err)
