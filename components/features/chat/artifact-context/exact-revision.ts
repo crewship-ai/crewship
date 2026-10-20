@@ -1,4 +1,5 @@
-import type { LinkedViewerTarget } from "./linked-viewer-targets"
+import { documentSchema } from "@/lib/documents/schema"
+import { validLinkedTarget, type LinkedViewerTarget } from "./linked-viewer-targets"
 
 type Pinned = Extract<LinkedViewerTarget, { mode: "revision" }>
 
@@ -20,17 +21,31 @@ export interface CheckpointFetcher {
 
 /** Exact reads use the checkpoint reader only. The document endpoint ignores a revision query and returns latest. */
 export const checkpointPath = (target: Pinned) =>
-  `/api/v1/pages/${encodeURIComponent("@" + target.pageId)}/document/checkpoints/${encodeURIComponent(target.checkpointId)}`
+  `/api/v1/pages/${encodeURIComponent("@" + target.pageId)}/document/checkpoints/${encodeURIComponent(target.checkpointId)}?${new URLSearchParams({ workspace_id: target.workspaceId })}`
+
+/** Only the schema versions this reader can render, with content that validates against that schema. */
+function validContent(version: unknown, content: unknown): boolean {
+  if (version !== 2 && version !== 3) return false
+  try {
+    documentSchema.validateJSON(content, version)
+    const schema = documentSchema.schemaFor(version)
+    const node = schema.nodeFromJSON(content)
+    node.check()
+    return node.type === schema.topNodeType
+  } catch { return false }
+}
 
 /** Accepts a response only when page, checkpoint and revision all match the pin. */
 export function acceptCheckpoint(target: Pinned, body: unknown): ExactRevisionRead {
   const value = body as Partial<CheckpointBody> | null
   if (!value || value.page_id !== target.pageId || value.id !== target.checkpointId || value.rev !== target.revision
-    || !Number.isSafeInteger(value.schema) || value.content === undefined || value.content === null) return { status: "unavailable" }
+    || !validContent(value.schema, value.content)) return { status: "unavailable" }
   return { status: "ready", target, schema: value.schema as number, content: value.content }
 }
 
 export async function readExactRevision(fetcher: CheckpointFetcher, target: Pinned, signal?: AbortSignal): Promise<ExactRevisionRead> {
+  // An id outside the backend's bounded shape is never requested.
+  if (!validLinkedTarget(target)) return { status: "unavailable" }
   try {
     const response = await fetcher(checkpointPath(target), signal)
     if (response.status === 401 || response.status === 403) return { status: "denied" }
