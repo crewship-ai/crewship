@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -58,6 +59,17 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	if agent, _ := pageGrantCallerIsAgent(r); agent {
 		replyError(w, 403, "human document credentials required")
 		return
+	}
+	if !mutate {
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			replyError(w, 400, "invalid Document read query")
+			return
+		}
+		if query.Has("revision") {
+			replyError(w, 400, "selected revision reads are not enabled")
+			return
+		}
 	}
 	if r.URL.Query().Has("block_id") {
 		replyError(w, 400, "selected block reads are not enabled")
