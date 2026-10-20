@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
@@ -217,8 +217,7 @@ describe("review blockers", () => {
     render(<ChatComposer {...props} />)
     fireEvent.change(document.querySelector("textarea")!, { target: { value: "hello" } })
     fireEvent.submit(document.querySelector("form")!)
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(String(toastError.mock.calls[0][0])).toContain("gone.txt")
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join()).toContain("gone.txt"))
     expect(props.sendMessage).not.toHaveBeenCalled()
   })
 })
@@ -232,65 +231,125 @@ describe("blocked send explains itself", () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  const failed = (status: "error" | "cancelled" = "error") => ({
-    id: "f", name: "bad.txt", size: 5, type: "text/plain", status, file: file("bad.txt"),
+  const failed = (status: "error" | "cancelled" = "error", name = "bad.txt") => ({
+    id: `f-${name}`, name, size: 5, type: "text/plain", status, file: file(name),
     error: status === "error" ? "Upload failed" : undefined,
   })
   const typeHello = () =>
     fireEvent.change(document.querySelector("textarea")!, { target: { value: "hello" } })
+  const send = () => screen.getByLabelText("Submit") as HTMLButtonElement
+  /** The state every blocked test starts from, asserted before acting. */
+  const expectBlocked = () => {
+    expect(send().getAttribute("aria-disabled")).toBe("true")
+    const id = send().getAttribute("aria-describedby")
+    expect(id).toBeTruthy()
+    const notice = document.getElementById(id!)
+    expect(notice).toBeTruthy()
+    expect(notice!.textContent).toMatch(/Send is off/i)
+    return notice!
+  }
+  const expectUnblocked = () => {
+    expect(send().getAttribute("aria-disabled")).toBeNull()
+    expect(send().getAttribute("aria-describedby")).toBeNull()
+    expect(screen.queryByText(/Send is off/i)).toBeNull()
+  }
 
   it.each(["error", "cancelled"] as const)(
-    "a %s attachment disables Send and shows a linked inline reason",
+    "a %s attachment blocks Send and shows a linked inline reason in words",
     (status) => {
       useComposerStore.setState({ attachments: { [sid]: [failed(status)] } })
       render(<ChatComposer {...props} />)
       typeHello()
-      const send = screen.getByLabelText("Submit") as HTMLButtonElement
-      expect(send.disabled).toBe(true)
-      const reasonId = send.getAttribute("aria-describedby")
-      expect(reasonId).toBeTruthy()
-      const reason = document.getElementById(reasonId!)!
-      expect(reason.textContent).toContain("bad.txt")
-      expect(reason.textContent).toMatch(/Retry or Remove/)
-      expect(reason.textContent).toMatch(/Send is off/i) // stated in words, not colour
+      const notice = expectBlocked()
+      expect(notice.textContent).toContain("bad.txt")
+      expect(notice.textContent).toMatch(/Retry or Remove/)
     },
   )
 
-  it("Retry and Remove are real buttons with names, reachable by keyboard", () => {
+  it("Send stays focusable and a click or Enter does not send but announces the reason", async () => {
     useComposerStore.setState({ attachments: { [sid]: [failed()] } })
     render(<ChatComposer {...props} />)
-    for (const name of ["Retry bad.txt", "Remove bad.txt"]) {
-      const b = screen.getByLabelText(name) as HTMLButtonElement
-      expect(b.tagName).toBe("BUTTON")
-      expect(b.tabIndex).toBeGreaterThanOrEqual(0)
-    }
+    typeHello()
+    expect(send().disabled).toBe(false) // aria-disabled, so it can take focus
+    send().focus()
+    expect(document.activeElement).toBe(send())
+    const live = () => screen.getAllByRole("status").map((e) => e.textContent).join()
+    fireEvent.click(send())
+    await waitFor(() => expect(live()).toContain("Send is off"))
+    expect(props.sendMessage).not.toHaveBeenCalled()
+    fireEvent.keyDown(document.querySelector("textarea")!, { key: "Enter" })
+    await waitFor(() => expect(live()).toContain("bad.txt"))
+    expect(props.sendMessage).not.toHaveBeenCalled()
   })
 
-  it("Retry restarts the upload and keeps Send blocked until it is attached", async () => {
+  it("the live region is mounted before the block and filled when it starts", () => {
+    render(<ChatComposer {...props} />)
+    const region = screen.getByRole("status")
+    expect(region.textContent).toBe("")
+    act(() => {
+      useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    })
+    expect(screen.getByRole("status")).toBe(region)
+    expect(region.textContent).toContain("bad.txt")
+  })
+
+  it("names at most two files, then a count", () => {
+    useComposerStore.setState({
+      attachments: { [sid]: ["a", "b", "c", "d"].map((x) => failed("error", `${x}.txt`)) },
+    })
+    render(<ChatComposer {...props} />)
+    const text = expectBlocked().textContent!
+    expect(text).toContain("a.txt, b.txt and 2 more")
+    expect(text).not.toContain("c.txt")
+  })
+
+  it("two composers get distinct notice ids", () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<><ChatComposer {...props} /><ChatComposer {...props} /></>)
+    const ids = screen.getAllByLabelText("Submit").map((b) => b.getAttribute("aria-describedby"))
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it("Retry is a focusable native button and restarts the upload", async () => {
     const g = gatedFetch()
     vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
     useComposerStore.setState({ attachments: { [sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     typeHello()
-    fireEvent.click(screen.getByLabelText("Retry bad.txt"))
+    expectBlocked()
+    const retry = screen.getByRole("button", { name: "Retry bad.txt" })
+    // jsdom has no Tab order or Enter-on-button synthesis (and user-event is not
+    // a dependency): assert what makes both work in a browser. A native, enabled,
+    // non-negative-tabindex button takes focus and activates on Enter/Space.
+    expect(retry.tagName).toBe("BUTTON")
+    expect(retry.getAttribute("tabindex")).not.toBe("-1")
+    expect((retry as HTMLButtonElement).disabled).toBe(false)
+    retry.focus()
+    expect(document.activeElement).toBe(retry)
+    fireEvent.click(retry)
     await waitFor(() => expect(g.calls).toHaveLength(1))
     expect(g.calls[0].name).toBe("bad.txt")
-    expect((screen.getByLabelText("Submit") as HTMLButtonElement).disabled).toBe(false) // pending: pressing explains
     g.calls[0].release()
     await waitFor(() => expect(list()[0].status).toBe("ready"))
-    expect((screen.getByLabelText("Submit") as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getByLabelText("Submit").getAttribute("aria-describedby")).toBeNull()
-    expect(screen.queryByText(/Send is off/i)).toBeNull()
+    expectUnblocked()
   })
 
-  it("Remove clears the block and the explanation", () => {
+  it("Remove is a focusable native button and clears the block", async () => {
     useComposerStore.setState({ attachments: { [sid]: [failed()] } })
     render(<ChatComposer {...props} />)
     typeHello()
-    fireEvent.click(screen.getByLabelText("Remove bad.txt"))
-    const send = screen.getByLabelText("Submit") as HTMLButtonElement
-    expect(send.disabled).toBe(false)
-    expect(send.getAttribute("aria-describedby")).toBeNull()
-    expect(screen.queryByText(/Send is off/i)).toBeNull()
+    expectBlocked()
+    const remove = screen.getByRole("button", { name: "Remove bad.txt" })
+    // jsdom has no Tab order or Enter-on-button synthesis (and user-event is not
+    // a dependency): assert what makes both work in a browser. A native, enabled,
+    // non-negative-tabindex button takes focus and activates on Enter/Space.
+    expect(remove.tagName).toBe("BUTTON")
+    expect(remove.getAttribute("tabindex")).not.toBe("-1")
+    expect((remove as HTMLButtonElement).disabled).toBe(false)
+    remove.focus()
+    expect(document.activeElement).toBe(remove)
+    fireEvent.click(remove)
+    expect(list()).toHaveLength(0)
+    expectUnblocked()
   })
 })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { AlertTriangle, FilePlus2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -115,6 +115,12 @@ const NO_ATTACHMENTS: ComposerAttachment[] = []
  * The border and radius live on the input group the prompt input renders,
  * so the form reaches it by its data-slot instead of drawing a second box.
  */
+/** At most two names, then a count: a long list would bury the instruction. */
+function summarizeNames(names: string[]): string {
+  if (names.length <= 2) return names.join(", ")
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`
+}
+
 const COMPOSER_SHELL = [
   "[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
   "[&_[data-slot=input-group]]:transition-[border-color,box-shadow]",
@@ -228,6 +234,25 @@ export function ChatComposer({
   // retry — and the typed path must not clear the box for the same reason.
   const sentRef = useRef(false)
 
+  const unattached = unattachedAttachments(sessionAttachments)
+  const sendBlocked = !isStreaming && unattached.length > 0
+  const blockReasonId = `${useId()}-send-block`
+  const blockReasonText = sendBlocked
+    ? `Send is off: ${summarizeNames(unattached.map((a) => a.name))} ${
+        unattached.length === 1 ? "is" : "are"
+      } not attached. Use Retry or Remove on ${unattached.length === 1 ? "it" : "each"}, then send.`
+    : ""
+  const [announcement, setAnnouncement] = useState("")
+  // Set (not inserted pre-filled) when the block starts, cleared when it ends.
+  useEffect(() => {
+    setAnnouncement(blockReasonText)
+  }, [blockReasonText])
+  const announceBlocked = useCallback(() => {
+    // Clear first so a repeated attempt is announced again.
+    setAnnouncement("")
+    setTimeout(() => setAnnouncement(blockReasonText), 50)
+  }, [blockReasonText])
+
   // Only fires when the message actually went out — a size-guard rejection
   // must leave the draft intact so the user can trim and resend.
   //
@@ -267,6 +292,11 @@ export function ChatComposer({
   const handleTypedSubmit = useCallback(
     async (message: SubmittedMessage) => {
       sentRef.current = false
+      // Enter in the textarea lands here; answer it instead of returning silently.
+      if (sendBlocked) {
+        announceBlocked()
+        return
+      }
       let outgoing = message
       if (createDocument) {
         const content = composeMessageWithAttachments(message.text, sessionAttachments)
@@ -284,7 +314,7 @@ export function ChatComposer({
       setInput("")
       if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments],
+    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments, sendBlocked, announceBlocked],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -379,25 +409,36 @@ export function ChatComposer({
     sendableAttachments(sessionAttachments).length > 0 ||
     hasPendingUploads(sessionAttachments)
   // Owner decision: a failed or cancelled attachment keeps Send off until the
-  // user retries or removes it. The reason is on screen (not only a toast) and
-  // tied to the button, so a screen reader hears it on focus.
-  const unattached = unattachedAttachments(sessionAttachments)
-  const sendBlocked = !isStreaming && unattached.length > 0
-  const submitDisabled = !isStreaming && (!hasContent || !canSend || sendBlocked)
-  const blockReasonId = `send-block-${sessionId}`
-  const submitDescribedBy = sendBlocked ? blockReasonId : undefined
-  const blockReason = sendBlocked ? (
-    <Alert id={blockReasonId} role="status" variant="destructive" className="py-2">
-      <AlertTriangle aria-hidden="true" />
-      <AlertDescription>
-        <p>
-          Send is off: {unattached.map((a) => a.name).join(", ")}{" "}
-          {unattached.length === 1 ? "is" : "are"} not attached. Use Retry or Remove on{" "}
-          {unattached.length === 1 ? "it" : "each"}, then send.
-        </p>
-      </AlertDescription>
-    </Alert>
-  ) : null
+  // user retries or removes it. The reason is on screen (not only a toast).
+  // Send uses aria-disabled rather than disabled: it stays focusable, so the
+  // reason linked by aria-describedby reaches keyboard users, and an attempt
+  // (click or Enter) is answered through an always-mounted live region.
+  const submitDisabled = !isStreaming && (!hasContent || !canSend)
+  const blockReason = (
+    <>
+      {sendBlocked && (
+        <Alert id={blockReasonId} role="note" variant="destructive" className="mt-2 py-2">
+          <AlertTriangle aria-hidden="true" />
+          <AlertDescription>
+            <p>{blockReasonText}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+    </>
+  )
+  const submitBlockProps = sendBlocked
+    ? {
+        "aria-disabled": true as const,
+        "aria-describedby": blockReasonId,
+        onClick: (e: React.MouseEvent) => {
+          e.preventDefault()
+          announceBlocked()
+        },
+      }
+    : {}
   const creationControl = canCreateDocument ? (
     <>
     <Button
@@ -453,11 +494,11 @@ export function ChatComposer({
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
                 {creationControl}
               </div>
-              <PromptInputSubmit disabled={submitDisabled} aria-describedby={submitDescribedBy} status={chatStatus} onStop={stopGeneration} />
+              <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} onStop={stopGeneration} />
             </PromptInputFooter>
           </PromptInput>
         </AttachmentZone>
-        {blockReason && <div className="mt-2">{blockReason}</div>}
+        {blockReason}
       </div>
       </EnsureChatSessionProvider>
     )
@@ -487,11 +528,11 @@ export function ChatComposer({
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
               {creationControl}
             </div>
-            <PromptInputSubmit disabled={submitDisabled} aria-describedby={submitDescribedBy} status={chatStatus} onStop={stopGeneration} />
+            <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} onStop={stopGeneration} />
           </PromptInputFooter>
         </PromptInput>
       </AttachmentZone>
-      {blockReason && <div className="mt-2">{blockReason}</div>}
+      {blockReason}
     </div>
     </EnsureChatSessionProvider>
   )
