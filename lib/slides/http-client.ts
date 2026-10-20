@@ -12,10 +12,17 @@ const object = (value: unknown): value is Record<string, unknown> => Boolean(val
 const MISMATCH = { status: "error", retryable: false, message: "The presentation does not belong to this Page." } as const
 const clip = (text: string) => (text.length > 200 ? `${text.slice(0, 200)}…` : text)
 
-function snapshotOf(body: unknown): SlidesSnapshot | null {
-  if (!object(body) || !Number.isSafeInteger(body.rev) || (body.rev as number) < 0 || !Number.isSafeInteger(body.order_version) || (body.order_version as number) < 0) return null
+// The read answers `revision` (backend branch feat/slides-human-read-create-adapter, no page_id);
+// the proposed PATCH answers `rev`. Either is accepted, and both must agree when both are present.
+function snapshotOf(body: unknown, pageId: string): SlidesSnapshot | typeof MISMATCH | null {
+  if (!object(body)) return null
+  const rev = body.revision ?? body.rev
+  if (body.revision !== undefined && body.rev !== undefined && body.revision !== body.rev) return null
+  if (!Number.isSafeInteger(rev) || (rev as number) < 0 || !Number.isSafeInteger(body.order_version) || (body.order_version as number) < 0) return null
   try { validateSlideDeck(body.deck) } catch { return null }
-  return { deck: body.deck as SlideDeck, rev: body.rev as number, orderVersion: body.order_version as number }
+  // The Page binding comes from the request path and deck_id; a page_id field, when sent, must agree.
+  if ((body.deck as SlideDeck).deck_id !== pageId || (body.page_id !== undefined && body.page_id !== pageId)) return MISMATCH
+  return { deck: body.deck as SlideDeck, rev: rev as number, orderVersion: body.order_version as number }
 }
 
 const json = async (response: Response): Promise<unknown> => { try { return await response.json() } catch { return undefined } }
@@ -40,8 +47,8 @@ export function createHttpSlidesClient(workspaceId: string): SlidesSaveClient {
       let response: Response
       try { response = await apiFetch(url(pageId), { cache: "no-store" }) } catch { return { status: "error", retryable: true, message: "The presentation could not be loaded." } }
       if (!response.ok) return failure(response)
-      const snapshot = snapshotOf(await json(response))
-      if (snapshot && snapshot.deck.deck_id !== pageId) return MISMATCH
+      const snapshot = snapshotOf(await json(response), pageId)
+      if (snapshot === MISMATCH) return MISMATCH
       return snapshot ?? { status: "error", retryable: false, message: "The server returned a presentation this editor cannot read." }
     },
     async patch(request: PatchRequest) {
@@ -49,14 +56,14 @@ export function createHttpSlidesClient(workspaceId: string): SlidesSaveClient {
       try { response = await apiFetch(url(request.page_id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }) } catch { return { status: "error", retryable: true, message: "Saving failed." } }
       const body = await json(response)
       if (response.status === 409) {
-        const current = snapshotOf(body)
-        if (current && current.deck.deck_id !== request.page_id) return MISMATCH
+        const current = snapshotOf(body, request.page_id)
+        if (current === MISMATCH) return MISMATCH
         return current ? { status: "conflict", current } : { status: "error", retryable: false, message: "The presentation changed and the latest version could not be read." }
       }
       if (response.status === 400) return { status: "error", retryable: false, message: object(body) && typeof body.error === "string" && body.error.trim() ? clip(body.error) : "The server rejected this change." }
       if (!response.ok) return failure(response)
-      const snapshot = snapshotOf(body)
-      if (snapshot && snapshot.deck.deck_id !== request.page_id) return MISMATCH
+      const snapshot = snapshotOf(body, request.page_id)
+      if (snapshot === MISMATCH) return MISMATCH
       // A 2xx that is not a verifiable acknowledgement is never reported as saved.
       if (!snapshot || !object(body) || body.mutation_id !== request.mutation_id || snapshot.rev <= request.base_rev) return { status: "error", retryable: true, message: "Saving could not be confirmed. Try again." }
       return { status: "saved", snapshot, mutationId: request.mutation_id }

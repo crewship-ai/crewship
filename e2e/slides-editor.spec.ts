@@ -30,7 +30,8 @@ async function mockPage(page: Page, server: Server | "missing", seen: string[] =
     const request = route.request()
     seen.push(`${request.method()} ${new URL(request.url()).pathname}`)
     if (server === "missing") return text404(route)
-    if (request.method() === "GET") { const head = server.head(); return route.fulfill({ json: { deck: head.deck, rev: head.rev, order_version: head.orderVersion } }) }
+    if (request.method() === "GET") { const head = server.head(); // Read shape of backend branch feat/slides-human-read-create-adapter: `revision`, no page_id.
+      return route.fulfill({ json: { schema_version: 1, revision: head.rev, order_version: head.orderVersion, content_hash: "0".repeat(64), deck: head.deck } }) }
     const result = await server.patch(request.postDataJSON())
     if (result.status === "saved") return route.fulfill({ json: { deck: result.snapshot.deck, rev: result.snapshot.rev, order_version: result.snapshot.orderVersion, mutation_id: result.mutationId } })
     if (result.status === "conflict") return route.fulfill({ status: 409, json: { deck: result.current.deck, rev: result.current.rev, order_version: result.current.orderVersion } })
