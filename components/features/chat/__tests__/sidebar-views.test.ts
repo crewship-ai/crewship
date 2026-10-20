@@ -60,6 +60,23 @@ describe("useStableOrder", () => {
     expect(result.current.items.map((x) => x.id)).toEqual(["c", "b", "a"])
     expect(result.current.pending).toBe(false)
   })
+  it("a row removed from the data disappears at once while held; the rest keep their order", () => {
+    const { result, rerender } = renderHook(({ items, hold }) => useStableOrder(items, (x) => x.id, hold), { initialProps: { items: [a, b, c], hold: false } })
+    rerender({ items: [a, b, c], hold: true })
+    rerender({ items: [c, a], hold: true })
+    expect(result.current.items.map((x) => x.id)).toEqual(["a", "c"])
+    expect(result.current.pending).toBe(true)
+    rerender({ items: [a, c], hold: true })
+    expect(result.current.items.map((x) => x.id)).toEqual(["a", "c"])
+    expect(result.current.pending).toBe(false)
+  })
+  it("a reorder alone is held", () => {
+    const { result, rerender } = renderHook(({ items, hold }) => useStableOrder(items, (x) => x.id, hold), { initialProps: { items: [a, b], hold: false } })
+    rerender({ items: [a, b], hold: true })
+    rerender({ items: [b, a], hold: true })
+    expect(result.current.items.map((x) => x.id)).toEqual(["a", "b"])
+    expect(result.current.pending).toBe(true)
+  })
   it("resets immediately when the user caused the change, even while held", () => {
     const { result, rerender } = renderHook(({ items, hold, key }) => useStableOrder(items, (x) => x.id, hold, key), { initialProps: { items: [a, b], hold: true, key: "" } })
     rerender({ items: [b], hold: true, key: "search:b" })
