@@ -1,8 +1,6 @@
 package journal
 
-import (
-	"time"
-)
+import "time"
 
 // SerializeEntry turns one Entry into the JSON-friendly map that both the
 // SSE stream (internal/api journal handler) and the WebSocket journal
