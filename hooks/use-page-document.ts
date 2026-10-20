@@ -74,11 +74,14 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     let requiredRev = 0
     let active = true, epoch: string | undefined, polling = false, blocked = false
     let storage: DocumentDraftStore | undefined, schema = 0, durableOff = false
+    let opening: Promise<void> | undefined, retryAt = 0, retryDelay = 5000, tried = false
+    const stored = new Set<string>()
     let restored: DocumentDraft[] = []
     let persistence: Promise<void> = Promise.resolve()
     const queue: DocumentDraft[] = []
     const persist = (batch: DocumentDraft) => {
       if (durableOff) return
+      stored.add(batch.id)
       // Capture immutable bytes now; later edits must not alter a queued write.
       const saved = structuredClone(batch)
       setJournalWrites(count => count + 1)
@@ -102,13 +105,14 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       const draft = queue.at(-1)!
       draft.snapshot = encodeUpdate(Y.encodeStateAsUpdate(doc))
       persist(draft)
-      setPending(queue.length); setStatus("Saving…")
+      setPending(total()); setStatus("Saving…")
     }
     doc.on("update", local)
+    const total = () => queue.length + restored.length
     function accept(next: DocumentState): boolean {
         if (!active || authorizationLost.current) return false
         if (next.rev < requiredRev) throw new Error("The acknowledged revision is not yet available. Your update is confirmed; refreshing saved content.")
-        setPending(queue.length)
+        setPending(total())
         if (!Number.isSafeInteger(next.rev) || next.rev<0 || typeof next.epoch!=="string" || !next.epoch || next.epoch.length>256 || typeof next.snapshot!=="string" || typeof next.can_write!=="boolean" || (next.updates!==undefined && (!Array.isArray(next.updates) || next.updates.some(update=>typeof update!=="string")))) throw new DocumentAPIError("Invalid confirmed document metadata; content preserved.",400)
         if (![1,2,3].includes(next.schema)) { blocked = true; setRecovery(queue.length > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
         if (next.page_id !== pageId) throw new DocumentAPIError("The original Page identity changed. Recover your draft before reopening.",409)
@@ -127,6 +131,25 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         return true
     }
     const read = () => client.fetchQuery({queryKey,staleTime:0,gcTime:0,retry:false,queryFn:({signal})=>documentRequest<DocumentState>(workspace,endpoint.current,"",undefined,signal)})
+    async function attemptOpen() {
+      try {
+        const opened = await openDocumentDrafts(human,workspace,pageId)
+        let rows: DocumentDraft[]
+        try { rows = await opened.load() } catch (cause) { opened.close(); throw cause }
+        if (!active) { opened.close(); return }
+        storage = opened; restored = rows
+        if (durableOff) {
+          durableOff = false; setStorageOff(false)
+          // Edits made while storage was away join the journal next to any held draft.
+          for (const draft of queue) persist(draft)
+          setPending(total())
+        }
+      } catch {
+        if (!active) return
+        durableOff = true; restored = []; setStorageOff(true)
+        retryAt = Date.now() + retryDelay; retryDelay = Math.min(retryDelay * 2, 30000)
+      }
+    }
     async function poll() {
       if (!workspace || !pageId || !active || authorizationLost.current || polling || (blocked && !restored.length)) return
       polling = true
@@ -134,34 +157,21 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         let next = await read()
         if (!accept(next)) return
         if (!storage) {
-          // Opened after the first authorized read so a missing or hanging
-          // store can never keep the document from loading. A failed open is
-          // retried on later polls: an earlier unsent draft may still exist.
-          try {
-            const opened = await openDocumentDrafts(human,workspace,pageId)
-            try { restored = await opened.load() } catch (cause) { opened.close(); throw cause }
-            if (!active) { opened.close(); return }
-            storage = opened
-            if (durableOff) {
-              durableOff = false; setStorageOff(false)
-              // Edits made while storage was away join the journal, unless a held draft must be resolved first.
-              if (!restored.length) for (const draft of queue) persist(draft)
-            }
-          } catch {
-            if (!active) return
-            durableOff = true; restored = []; setStorageOff(true)
-          }
+          // The first open gates only the editor becoming writable. Later
+          // retries run in the background with backoff and never hold a send.
+          if (!tried) { tried = true; await attemptOpen() }
+          else if (!opening && Date.now() >= retryAt) { opening = attemptOpen().finally(() => { opening = undefined }) }
         }
         if (restored.length) {
           // Read authorization must succeed before exposing any private
           // baseline from this browser. Regrant still never enables replay.
           const drafts = restored
-          setRecoveredDrafts(drafts);setPending(drafts.length)
+          setRecoveredDrafts(drafts);setPending(total())
           discardRecovery.current = async () => {
             if (!active || authorizationLost.current) return
             for (const draft of drafts) await storage!.remove(draft.id)
             if (!active) return
-            restored=[];setRecoveredDrafts([]);setPending(0);setRecovery(false)
+            restored=[];setRecoveredDrafts([]);setPending(queue.length);setRecovery(false)
             blocked=false;setStorageReady(true)
             void poll()
           }
@@ -186,18 +196,18 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           if (!active) return
           // Retain the receipt fence even if journal cleanup fails: this mount
           // must never recommit acknowledged content.
-          queue.shift();setPending(queue.length)
-          await storage?.remove(batch.id)
+          queue.shift();setPending(total())
+          if (storage && stored.has(batch.id)) await storage.remove(batch.id)
           // The receipt confirms durability, but the pre-write read is stale.
           // Refresh authorized head metadata before enabling checkpoints.
           next = await read()
           if (!accept(next)) return
-          setPending(queue.length)
+          setPending(total())
         }
         setError(undefined); setStatus(queue.length ? "Saving…" : next.can_write ? "Saved" : "Read only")
       } catch (cause) {
         if (!active) return
-        setPending(queue.length)
+        setPending(total())
         if (cause instanceof DocumentStorageError) {
           blocked=true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (cause instanceof UnconfirmedReceipt) {

@@ -17,13 +17,14 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
 const store = () => ({ load: journal.load, put: journal.put, remove: journal.remove, close: () => {} })
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] }) // only the clock the retry backoff reads
   journal.rows.clear()
   journal.put.mockReset().mockImplementation(async draft => { journal.rows.set(draft.id, structuredClone(draft)) })
   journal.remove.mockReset().mockImplementation(async id => { journal.rows.delete(id) })
   journal.load.mockReset().mockImplementation(async () => [...journal.rows.values()])
   journal.open.mockReset().mockImplementation(async () => store())
 })
-afterEach(() => { vi.restoreAllMocks(); fetchMock.mockReset() })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); fetchMock.mockReset() })
 
 const renderHook: typeof baseRenderHook = (callback, options) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -39,6 +40,7 @@ const heldDraft = (server: Y.Doc) => {
   const draft = { id: "d1", update: btoa(b), attempted: false, schema: 3, epoch: "epoch", snapshot: documentSchema.snapshot(other) }
   other.destroy(); return draft
 }
+const later = (ms = 6000) => vi.setSystemTime(Date.now() + ms)
 const storageError = async () => new (await import("@/lib/document-queue")).DocumentStorageError("down")
 
 it("confirms a save by the server in no-journal mode and says the browser storage is unavailable", async () => {
@@ -81,8 +83,10 @@ it("retries the open and surfaces a held draft, keeping in-memory edits and send
   try {
     await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
     act(() => text(result.current.doc).insert(4, " mem"))
+    later()
     await waitFor(() => expect(result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
     expect(result.current.durability).toBe("held")
+    expect(result.current.pending).toBe(2)
     expect(result.current.storageUnavailable).toBe(false)
     expect(result.current.recovery).toBe(true)
     expect(result.current.editable).toBe(false)
@@ -101,8 +105,86 @@ it("journals queued in-memory edits when a retry finds no held draft", async () 
   try {
     await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
     act(() => text(result.current.doc).insert(4, " mem"))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true))
+    later()
     await waitFor(() => expect(result.current.storageUnavailable).toBe(false), { timeout: 4000 })
     await waitFor(() => expect(result.current.durability).toBe("local"), { timeout: 4000 })
     expect(journal.rows.size).toBe(1)
+    const [row] = [...journal.rows.values()] as { id: string; attempted: boolean; request?: { id: string } }[]
+    expect(row.attempted).toBe(true)
+    expect(row.request?.id).toBe(row.id)
+  } finally { unmount(); server.destroy() }
+})
+
+it("backs off the retry: an instantly rejecting store is not reopened on every poll", async () => {
+  journal.open.mockRejectedValue(await storageError())
+  const server = model()
+  fetchMock.mockImplementation(() => response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1600)) })
+    expect(journal.open).toHaveBeenCalledTimes(1)
+    later(); // first backoff step is 5 s
+    await waitFor(() => expect(journal.open).toHaveBeenCalledTimes(2))
+    later(6000) // the next step is longer than 6 s
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)) })
+    expect(journal.open).toHaveBeenCalledTimes(2)
+  } finally { unmount(); server.destroy() }
+})
+
+it("stops retrying after unmount", async () => {
+  journal.open.mockRejectedValue(await storageError())
+  const server = model()
+  fetchMock.mockImplementation(() => response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+  unmount()
+  later(120000)
+  await new Promise(resolve => setTimeout(resolve, 1200))
+  expect(journal.open).toHaveBeenCalledTimes(1)
+  server.destroy()
+})
+
+it("sends queued edits while a slow retry is pending, then recovers and clears the unavailable text", async () => {
+  const server = model()
+  let finish: ((value: ReturnType<typeof store>) => void) | undefined
+  journal.open.mockRejectedValueOnce(await storageError()).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  let rev = 4
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+    later()
+    await waitFor(() => expect(finish).toBeDefined())
+    act(() => text(result.current.doc).insert(4, " x"))
+    await waitFor(() => expect(result.current.pending).toBe(0), { timeout: 3000 }) // sent while the open is still hanging
+    expect(result.current.durability).toBe("confirmed")
+    await act(async () => finish!(store()))
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(false))
+    await waitFor(() => expect(result.current.editable).toBe(true))
+  } finally { unmount(); server.destroy() }
+})
+
+it("keeps session edits in the pending count and sends them once the held draft is discarded", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  journal.open.mockRejectedValueOnce(await storageError())
+  let rev = 4
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
+    fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response({ ...head(server), rev }))
+    act(() => text(result.current.doc).insert(4, " mem"))
+    later()
+    await waitFor(() => expect(result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
+    expect(result.current.pending).toBe(2)
+    fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+    await act(async () => { await result.current.discardRecoveredDrafts() })
+    await waitFor(() => expect(result.current.pending).toBe(0), { timeout: 4000 })
+    expect(result.current.recoveredDrafts).toHaveLength(0)
+    expect(journal.rows.has("d1")).toBe(false)
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true)
   } finally { unmount(); server.destroy() }
 })

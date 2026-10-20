@@ -28,4 +28,6 @@ it("bounds load() with the same timeout when the transaction never completes", a
   const loaded = expect(store.load()).rejects.toBeInstanceOf(DocumentStorageError)
   await vi.advanceTimersByTimeAsync(STORAGE_OPEN_TIMEOUT_MS + 1)
   await loaded
+  store.close()
+  expect(db.close).toHaveBeenCalledTimes(1)
 })
