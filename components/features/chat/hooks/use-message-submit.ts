@@ -8,6 +8,7 @@ import {
   composeMessageWithAttachments,
   hasPendingUploads,
   sendableAttachments,
+  unattachedAttachments,
   type OutgoingAttachment,
 } from "@/lib/attachment-message"
 
@@ -195,9 +196,7 @@ export function useMessageSubmit({
 
         // A failed or cancelled chip is not attached. Sending quietly without
         // it would let the user believe the agent has the file.
-        const notAttached = items.filter(
-          (a) => !a.owner && (a.status === "error" || a.status === "cancelled"),
-        )
+        const notAttached = unattachedAttachments(items)
         if (notAttached.length > 0) {
           toast.error(
             `Not attached: ${notAttached.map((a) => a.name).join(", ")}`,

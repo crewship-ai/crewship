@@ -222,3 +222,75 @@ describe("review blockers", () => {
     expect(props.sendMessage).not.toHaveBeenCalled()
   })
 })
+
+describe("blocked send explains itself", () => {
+  beforeEach(() => {
+    sid = `sess-${++n}`
+    props.sendMessage.mockClear()
+    useComposerStore.setState({ attachments: {}, drafts: {} })
+    toastError.mockClear()
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  const failed = (status: "error" | "cancelled" = "error") => ({
+    id: "f", name: "bad.txt", size: 5, type: "text/plain", status, file: file("bad.txt"),
+    error: status === "error" ? "Upload failed" : undefined,
+  })
+  const typeHello = () =>
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: "hello" } })
+
+  it.each(["error", "cancelled"] as const)(
+    "a %s attachment disables Send and shows a linked inline reason",
+    (status) => {
+      useComposerStore.setState({ attachments: { [sid]: [failed(status)] } })
+      render(<ChatComposer {...props} />)
+      typeHello()
+      const send = screen.getByLabelText("Submit") as HTMLButtonElement
+      expect(send.disabled).toBe(true)
+      const reasonId = send.getAttribute("aria-describedby")
+      expect(reasonId).toBeTruthy()
+      const reason = document.getElementById(reasonId!)!
+      expect(reason.textContent).toContain("bad.txt")
+      expect(reason.textContent).toMatch(/Retry or Remove/)
+      expect(reason.textContent).toMatch(/Send is off/i) // stated in words, not colour
+    },
+  )
+
+  it("Retry and Remove are real buttons with names, reachable by keyboard", () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    for (const name of ["Retry bad.txt", "Remove bad.txt"]) {
+      const b = screen.getByLabelText(name) as HTMLButtonElement
+      expect(b.tagName).toBe("BUTTON")
+      expect(b.tabIndex).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it("Retry restarts the upload and keeps Send blocked until it is attached", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    typeHello()
+    fireEvent.click(screen.getByLabelText("Retry bad.txt"))
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    expect(g.calls[0].name).toBe("bad.txt")
+    expect((screen.getByLabelText("Submit") as HTMLButtonElement).disabled).toBe(false) // pending: pressing explains
+    g.calls[0].release()
+    await waitFor(() => expect(list()[0].status).toBe("ready"))
+    expect((screen.getByLabelText("Submit") as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByLabelText("Submit").getAttribute("aria-describedby")).toBeNull()
+    expect(screen.queryByText(/Send is off/i)).toBeNull()
+  })
+
+  it("Remove clears the block and the explanation", () => {
+    useComposerStore.setState({ attachments: { [sid]: [failed()] } })
+    render(<ChatComposer {...props} />)
+    typeHello()
+    fireEvent.click(screen.getByLabelText("Remove bad.txt"))
+    const send = screen.getByLabelText("Submit") as HTMLButtonElement
+    expect(send.disabled).toBe(false)
+    expect(send.getAttribute("aria-describedby")).toBeNull()
+    expect(screen.queryByText(/Send is off/i)).toBeNull()
+  })
+})

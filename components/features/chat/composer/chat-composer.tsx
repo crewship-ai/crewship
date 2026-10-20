@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { FilePlus2 } from "lucide-react"
+import { AlertTriangle, FilePlus2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 import {
   PromptInput,
@@ -17,6 +18,7 @@ import {
   composeMessageWithAttachments,
   hasPendingUploads,
   sendableAttachments,
+  unattachedAttachments,
 } from "@/lib/attachment-message"
 import { useMessageSubmit, type SubmittedMessage } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
@@ -376,7 +378,26 @@ export function ChatComposer({
     !!input.trim() ||
     sendableAttachments(sessionAttachments).length > 0 ||
     hasPendingUploads(sessionAttachments)
-  const submitDisabled = !isStreaming && (!hasContent || !canSend)
+  // Owner decision: a failed or cancelled attachment keeps Send off until the
+  // user retries or removes it. The reason is on screen (not only a toast) and
+  // tied to the button, so a screen reader hears it on focus.
+  const unattached = unattachedAttachments(sessionAttachments)
+  const sendBlocked = !isStreaming && unattached.length > 0
+  const submitDisabled = !isStreaming && (!hasContent || !canSend || sendBlocked)
+  const blockReasonId = `send-block-${sessionId}`
+  const submitDescribedBy = sendBlocked ? blockReasonId : undefined
+  const blockReason = sendBlocked ? (
+    <Alert id={blockReasonId} role="status" variant="destructive" className="py-2">
+      <AlertTriangle aria-hidden="true" />
+      <AlertDescription>
+        <p>
+          Send is off: {unattached.map((a) => a.name).join(", ")}{" "}
+          {unattached.length === 1 ? "is" : "are"} not attached. Use Retry or Remove on{" "}
+          {unattached.length === 1 ? "it" : "each"}, then send.
+        </p>
+      </AlertDescription>
+    </Alert>
+  ) : null
   const creationControl = canCreateDocument ? (
     <>
     <Button
@@ -432,10 +453,11 @@ export function ChatComposer({
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
                 {creationControl}
               </div>
-              <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
+              <PromptInputSubmit disabled={submitDisabled} aria-describedby={submitDescribedBy} status={chatStatus} onStop={stopGeneration} />
             </PromptInputFooter>
           </PromptInput>
         </AttachmentZone>
+        {blockReason && <div className="mt-2">{blockReason}</div>}
       </div>
       </EnsureChatSessionProvider>
     )
@@ -465,10 +487,11 @@ export function ChatComposer({
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
               {creationControl}
             </div>
-            <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
+            <PromptInputSubmit disabled={submitDisabled} aria-describedby={submitDescribedBy} status={chatStatus} onStop={stopGeneration} />
           </PromptInputFooter>
         </PromptInput>
       </AttachmentZone>
+      {blockReason && <div className="mt-2">{blockReason}</div>}
     </div>
     </EnsureChatSessionProvider>
   )

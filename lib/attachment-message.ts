@@ -100,6 +100,15 @@ export function sendableAttachments(attachments: OutgoingAttachment[]): Outgoing
   return attachments.filter((a) => isSendableAttachment(a) && !a.owner)
 }
 
+/** Chips that failed or were cancelled: not on the agent, and the reason Send
+ *  stays blocked until the user retries or removes them. Same `owner` filter
+ *  as `sendableAttachments` — a form field's chip is the sheet's to explain. */
+export function unattachedAttachments(attachments: OutgoingAttachment[]): OutgoingAttachment[] {
+  return attachments.filter(
+    (a) => !a.owner && (a.status === "error" || a.status === "cancelled"),
+  )
+}
+
 /** True while at least one upload is still running. The composer refuses to
  *  send in that window rather than sending a message that names some of the
  *  files the user attached — which is the same defect this module fixes,
