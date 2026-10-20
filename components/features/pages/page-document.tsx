@@ -101,10 +101,10 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
         })
         download(`${slug}-recovery.json`, JSON.stringify(recovered.length ? recovered : editor?.getJSON(), null, 2))
       } catch { setActionError("Could not read the recovery draft. It remains retained in this browser.") }
-    }}>Download unsaved draft</Button><Button variant="outline" onClick={() => {
+    }}>Download unsaved draft</Button>{sync.recoveredDrafts.length > 0 && !sync.canDiscardRecovered ? <p className="text-sm">This browser cannot confirm that no other tab is using these drafts, so they can only be downloaded.</p> : <Button variant="outline" onClick={() => {
       if (sync.recoveredDrafts.length) void sync.discardRecoveredDrafts().catch(() => setActionError("Could not discard the recovery draft."))
       else window.location.reload()
-    }}>{sync.recoveredDrafts.length ? "Discard recovered drafts and reopen" : "Reopen saved document"}</Button></div>}
+    }}>{sync.recoveredDrafts.length ? "Discard recovered drafts and reopen" : "Reopen saved document"}</Button>}</div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}

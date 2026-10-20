@@ -16,7 +16,7 @@ beforeEach(() => {
  journal.rows.clear()
  journal.put.mockReset().mockImplementation(async (draft) => { journal.rows.set(draft.id,structuredClone(draft)) })
  journal.remove.mockReset().mockImplementation(async id => { journal.rows.delete(id) })
- journal.open.mockReset().mockImplementation(async()=>({load:async()=>[...journal.rows.values()],put:journal.put,remove:journal.remove,close:()=>{}}))
+ journal.open.mockReset().mockImplementation(async()=>({load:async()=>[...journal.rows.values()],put:journal.put,remove:journal.remove,close: () => {}, exclusive: true}))
 })
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "document-test-human" } } }) }))
@@ -177,7 +177,7 @@ it("retains exact lost-ACK bytes after unmount and offers recovery without repla
   expect(second.result.current.editable).toBe(false)
   expect(second.result.current.pending).toBe(1)
   expect(JSON.stringify(second.result.current.recoveredDrafts[0].request)).toBe(original)
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(fetchMock).toHaveBeenCalledTimes(2) // the read, then the re-read after the awaited store open
   expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
  }finally{second.unmount();server.destroy()}
 })

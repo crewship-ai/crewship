@@ -14,12 +14,15 @@ export interface DocumentDraftStore {
   put(draft: DocumentDraft): Promise<void>
   remove(id: string): Promise<void>
   close(): void
+  /** True when this tab holds the Page's journal lock, so every row in it is an orphan. */
+  exclusive: boolean
 }
 export class DocumentStorageError extends Error {}
 /** Another tab of this browser is the active writer of this Page's journal. */
 export class DocumentStorageBusy extends DocumentStorageError {}
 /** A browser that never answers an open (blocked profile, stuck upgrade) must not stall the editor. */
 export const STORAGE_OPEN_TIMEOUT_MS = 2000
+export const STORAGE_LOCK_WAIT_MS = 1000
 const message = "Private document storage is unavailable. Changes are unsaved; recover your draft."
 
 export async function openDocumentDrafts(human: string, workspace: string, page: string): Promise<DocumentDraftStore> {
@@ -29,14 +32,19 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
   // closed tab and may be offered as recovery; rows of an active tab never are.
   let releaseLock: (() => void) | undefined
   if (typeof navigator !== "undefined" && navigator.locks) {
-    const acquired = await new Promise<(() => void) | null>(resolve => {
-      navigator.locks.request(`crewship-document-drafts:${owner}`, { ifAvailable: true }, lock => {
-        if (!lock) { resolve(null); return }
-        return new Promise<void>(release => resolve(release))
-      }).catch(() => resolve(null))
+    // Wait briefly: a same-tab remount releases its own lock a moment after the
+    // new instance starts. Only a lock that stays held is another live tab.
+    const wait = new AbortController()
+    const timer = setTimeout(() => wait.abort(), STORAGE_LOCK_WAIT_MS)
+    const outcome = await new Promise<{ release: () => void } | "busy" | "none">(resolve => {
+      navigator.locks.request(`crewship-document-drafts:${owner}`, { signal: wait.signal }, () => new Promise<void>(release => resolve({ release }))).catch(cause => {
+        // A refused request (SecurityError, ...) means no lock is available, not that another tab holds one.
+        resolve(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
+      })
     })
-    if (!acquired) throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
-    releaseLock = acquired
+    clearTimeout(timer)
+    if (outcome === "busy") throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
+    if (outcome !== "none") releaseLock = outcome.release
   }
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     let settled = false
@@ -94,6 +102,7 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       await transaction("readwrite", store => store.delete(key))
       keys.delete(id)
     },
+    exclusive: Boolean(releaseLock),
     close() { db.close(); releaseLock?.() },
   }
 }

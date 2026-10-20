@@ -15,7 +15,7 @@ vi.mock("@/lib/document-queue", async importOriginal => ({
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
-const store = () => ({ load: journal.load, put: journal.put, remove: journal.remove, close: () => {} })
+const store = () => ({ load: journal.load, put: journal.put, remove: journal.remove, close: () => {}, exclusive: true })
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] }) // only the clock the retry backoff reads
   journal.rows.clear()
@@ -264,5 +264,67 @@ it("coalesces rapid edits into few journal writes and keeps every edit", async (
     Y.applyUpdate(probe, Uint8Array.from(atob(rows.at(-1)!.snapshot), c => c.charCodeAt(0)))
     expect(text(probe).toString().match(/x/g)).toHaveLength(30)
     probe.destroy()
+  } finally { unmount(); server.destroy() }
+})
+
+it("re-reads the server after the awaited open: access revoked meanwhile exposes no recovered rows", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  let finish: ((value: ReturnType<typeof store>) => void) | undefined
+  journal.open.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  let reads = 0
+  fetchMock.mockImplementation(() => response(++reads === 1 ? head(server) : { error: "Page unavailable" }, reads === 1 ? 200 : 404))
+  const seen: number[] = []
+  const { result, unmount } = renderHook(() => { const r = usePageDocument("w", "slug", "page"); seen.push(r.recoveredDrafts.length); return r })
+  try {
+    await waitFor(() => expect(finish).toBeDefined())
+    await act(async () => finish!(store()))
+    await waitFor(() => expect(result.current.denied).toBe(true))
+    expect(Math.max(...seen)).toBe(0) // never exposed, not merely cleared afterwards
+    expect(result.current.recoveredDrafts).toHaveLength(0)
+    expect(result.current.state).toBeUndefined()
+    expect(result.current.editable).toBe(false)
+  } finally { unmount(); server.destroy() }
+})
+
+it("writes the journal row before the first send and resends byte-identical request bytes", async () => {
+  const server = model()
+  const events: string[] = []
+  let release: (() => void) | undefined
+  journal.put.mockImplementation(async draft => { events.push("put:start"); if (draft.request) await new Promise<void>(resolve => { release = resolve }); journal.rows.set(draft.id, structuredClone(draft)); events.push("put:done") })
+  const bodies: string[] = []
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { events.push("post"); bodies.push(JSON.parse(init.body as string).update); return response({ error: "offline" }, 503) } return response(head(server)) })
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => text(result.current.doc).insert(4, " x"))
+    await waitFor(() => expect(release).toBeDefined())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)) })
+    expect(events).not.toContain("post") // the barrier holds while the put is pending
+    await act(async () => release!())
+    await waitFor(() => expect(bodies.length).toBeGreaterThanOrEqual(2), { timeout: 4000 })
+    expect(events.indexOf("post")).toBeGreaterThan(events.lastIndexOf("put:done") - 1)
+    expect(new Set(bodies).size).toBe(1)
+    // An unchanged attempted row is not rewritten on every poll.
+    expect(journal.put.mock.calls.filter(([draft]) => draft.request).length).toBe(1)
+  } finally { unmount(); server.destroy() }
+})
+
+it("discard keeps blocks that have another cause and waits for pending journal writes", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  let epoch = "epoch"
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response({ ...head(server), epoch }))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.recoveredDrafts).toHaveLength(1))
+    epoch = "other-epoch"
+    await waitFor(() => expect(result.current.status).toContain("reopened"), { timeout: 4000 })
+    await act(async () => { await result.current.discardRecoveredDrafts() })
+    expect(result.current.recovery).toBe(true) // the epoch change still needs a reopen
+    expect(result.current.editable).toBe(false)
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").length
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)) })
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").length).toBe(posts)
   } finally { unmount(); server.destroy() }
 })

@@ -10,7 +10,7 @@ const fetchMock = vi.hoisted(() => vi.fn())
 const journal = vi.hoisted(() => ({ rows: new Map<string, unknown>(), put: vi.fn(), remove: vi.fn() }))
 vi.mock("@/lib/document-queue", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/document-queue")>(),
-  openDocumentDrafts: async () => ({ load: async () => [...journal.rows.values()], put: journal.put, remove: journal.remove, close: () => {} }),
+  openDocumentDrafts: async () => ({ load: async () => [...journal.rows.values()], put: journal.put, remove: journal.remove, close: () => {}, exclusive: true }),
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
