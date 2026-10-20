@@ -31,7 +31,7 @@ export function SidebarViewList({ label, items, activeId, hold, onHold, onOpen }
   onHold: (hold: boolean) => void
   onOpen: (item: ViewItem) => void
 }) {
-  const stable = useStableOrder(items, (item) => item.id, hold, "", sameItem)
+  const stable = useStableOrder(items, (item) => item.id, hold, activeId ?? "", sameItem)
   // Unmounting with the pointer inside never fires pointerleave; release the hold ourselves.
   useEffect(() => () => onHold(false), [onHold])
   return <section aria-label={label} onPointerEnter={() => onHold(true)} onPointerLeave={() => onHold(false)} onFocus={(event) => { if (isKeyboardFocus(event.target)) onHold(true) }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onHold(false) }}>

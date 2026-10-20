@@ -70,6 +70,14 @@ describe("useStableOrder", () => {
     expect(result.current.items.map((x) => x.id)).toEqual(["a", "c"])
     expect(result.current.pending).toBe(false)
   })
+  it("content of a held row refreshes (new title shown, order kept)", () => {
+    const { result, rerender } = renderHook(({ items, hold }) => useStableOrder(items, (x) => x.id, hold), { initialProps: { items: [a, b], hold: false } })
+    rerender({ items: [a, b], hold: true })
+    const a2 = { id: "a", n: 9 }
+    rerender({ items: [a2, b], hold: true })
+    expect(result.current.items[0]).toBe(a2)
+    expect(result.current.pending).toBe(false)
+  })
   it("a reorder alone is held", () => {
     const { result, rerender } = renderHook(({ items, hold }) => useStableOrder(items, (x) => x.id, hold), { initialProps: { items: [a, b], hold: false } })
     rerender({ items: [a, b], hold: true })

@@ -6,8 +6,8 @@ import type { ViewItem } from "../sidebar-views"
 const item = (id: string, over: Partial<ViewItem> = {}): ViewItem => ({ id, kind: "room", title: id, unread: 1, running: false, ...over })
 afterEach(cleanup)
 
-function Harness({ items, hold = false, onHold = () => {}, onOpen = () => {} }: { items: ViewItem[]; hold?: boolean; onHold?: (h: boolean) => void; onOpen?: (i: ViewItem) => void }) {
-  return <SidebarViewList label="Unreads" items={items} activeId="room:open" hold={hold} onHold={onHold} onOpen={onOpen} />
+function Harness({ items, activeId = "room:open", hold = false, onHold = () => {}, onOpen = () => {} }: { items: ViewItem[]; activeId?: string; hold?: boolean; onHold?: (h: boolean) => void; onOpen?: (i: ViewItem) => void }) {
+  return <SidebarViewList label="Unreads" items={items} activeId={activeId} hold={hold} onHold={onHold} onOpen={onOpen} />
 }
 
 it("keeps rows still while held, offers Refresh and marks the kept open chat", () => {
@@ -33,4 +33,18 @@ it("does not open preview or not-yet-loaded rows, and releases the hold on unmou
   expect(onOpen).toHaveBeenCalledTimes(1)
   unmount()
   expect(onHold).toHaveBeenLastCalledWith(false)
+})
+
+it("a chat opened (search, shortcut) while the pointer is in the list shows at once, without Refresh", () => {
+  const { rerender } = render(<Harness hold activeId="room:a" items={[item("room:a"), item("room:b")]} />)
+  rerender(<Harness hold activeId="room:z" items={[item("room:a"), item("room:b"), item("room:z", { kept: true })]} />)
+  expect(screen.getByRole("button", { name: /room:z/ })).toHaveAttribute("aria-current", "page")
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull()
+})
+
+it("a title change on a held row shows at once", () => {
+  const { rerender } = render(<Harness hold items={[item("room:a"), item("room:b")]} />)
+  rerender(<Harness hold items={[item("room:a", { title: "Renamed" }), item("room:b")]} />)
+  expect(screen.getByRole("button", { name: /Renamed/ })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull()
 })
