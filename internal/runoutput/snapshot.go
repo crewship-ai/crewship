@@ -3,6 +3,7 @@ package runoutput
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Snapshot describes the validated committed prefix, not process liveness.
@@ -20,6 +21,12 @@ func (s Snapshot) Validate() error {
 		return errors.New("invalid retained result envelope")
 	}
 	if s.Result != nil {
+		// Historical records omitted this field. Absence remains unknown.
+		if s.Result.CompletedAt != "" {
+			if at, err := time.Parse(time.RFC3339Nano, s.Result.CompletedAt); err != nil || at.IsZero() {
+				return errors.New("invalid retained completion time")
+			}
+		}
 		if s.Sequence < 2 || s.Result.ExitCode < -1 || s.Result.ExitCode > 255 || len(s.Result.Reason) > 512 {
 			return errors.New("invalid retained terminal result")
 		}
@@ -52,7 +59,7 @@ func Inspect(ctx context.Context, dir string) (Snapshot, error) {
 			return err
 		}
 		if record.Kind == "exit" {
-			result = &Result{ExitCode: record.ExitCode, Reason: record.Reason}
+			result = &Result{ExitCode: record.ExitCode, Reason: record.Reason, CompletedAt: record.CompletedAt}
 		}
 		return nil
 	})

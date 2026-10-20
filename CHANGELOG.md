@@ -14,6 +14,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 on a phone: Inbox and Settings pilot.** On a phone an Inbox item's header is Back, the item's name in two lines and a ⋯ with Previous, Next, Archive and Mark unread; Back returns to the list with its search, filters and scroll — also after the browser's Back or a reload — and after a direct link it goes to the Inbox, never out of the app. A workspace switch starts the list clean. Active filters get **Clear filters** beside their chips; a search that finds nothing says what and where; a failed load shows Retry in the list. A Settings section is a step in the browser history, so Back returns to the section list and asks first when a form has unsaved edits. Save bars dock on every phone width and ride above the on-screen keyboard; the tab bar steps aside while you type; toasts sit above both. Header buttons are real 44 × 44 targets on touch screens. On the approval detail the decision note sits above the buttons, Approve keeps its size while it works, run steps no longer wrap letter by letter, and denying an approval shows "Denied · <routine> stopped" instead of a red failure.
 - **Animated Voxel avatars, the new default (#3789).** The avatar picker offers DiceBear's **Voxel Bot** and **Voxel Art**, marked New, and new agents start on Voxel Bot — from the dashboard, the CLI, the API or a template. Drawn at 32 px or larger they blink and stretch now and then; smaller ones stay still, and so do all of them with Reduce motion On, with the new **Settings → Appearance → Animated avatars** switch off (on by default, synced with the other appearance choices; per viewer, so a workspace default never sets it), or when the operating system asks for reduced motion. The picker says so in one line when an animated style is chosen. **Existing agents keep their face:** upgrading pins every agent that was drawn with the old default to Bottts Neutral by name (the picker now shows it as Bottts Neutral rather than "Follow the crew"); agents with their own style or a styled crew are untouched. The voxel styles come from DiceBear 10, loaded beside 9.4 only for them (CC0 1.0); the other 25 styles stay on 9.4. Voxel avatars are always drawn live, never stored, and **Store missing avatars** counts them as such. `crewship agent create|update --avatar-style` and `crewship crew apply-avatar-style --style` accept `voxel-bot` and `voxel-art` and list every style in `--help`. ⚠️ **Behaviour change:** an unknown avatar style slug is now refused — `400` from the API, an error from the CLI before anything is sent — instead of being stored and drawn as the default.
 
+- **Composer artifact context and conversation library, behind the same flag.** An attached item needs an explicit create, update or reply-only choice, shows executor, location and the real audience before sending, and blocks on an ambiguous target. The library lists only explicitly linked items, with restricted links shown anonymously. Updating an attached document from chat stays disabled until the server confirms the chat's audience (no such signal exists yet); a reply-only or plain message is unaffected.
+
+- **Chat result cards and viewer switching, behind `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` (off by default).** Result cards report server run state, saved content and freshness separately, and give revoked access, lost connection, unknown result, conflict, stopped run, missing runtime and broken preview each their own next action. The side viewer header switches only between accessible conversation links and keeps an exact revision distinct from an explicit latest. These components are not mounted in this change and no backend serves their endpoints yet.
+
+- ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
+
+- **Chat shows the model the chat is configured to use.** The composer's model control read a path the server never served and always offered a built-in list, silently treating its first entry as selected. It now shows the model the chat run preview reports, lists the provider's models from the server labelled as live or curated, says plainly when the list cannot be loaded, and states that a listed model is not proof of access or of what a run will use. Choosing a model from the list is not offered yet.
+
+- Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
+- Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
+- **The Document save status separates "saved locally" from "confirmed by server".** While work is unsent the header says whether the browser has kept a copy, is still writing it, or could not store it; only a server receipt shows "Confirmed by server".
+- **Unconfirmed Document edits survive browser reloads.** Pending human edits are retained privately per signed-in user and document before transmission; reopening offers explicit recovery after current access is checked. Unavailable browser storage prevents editing, and restored drafts never replay an old write grant automatically. The browser copy is deleted when access to the document is lost (401, 403, 404) and on sign-out, session expiry or a change of signed-in user, so a shared browser keeps no private text.
+
+- **Chat search with filters.** The chat sidebar has a search dialog (Ctrl/Cmd+Shift+F) with This chat / All chats / Files tabs and `from:`, `in:`, `has:`, `after:`, `before:` filters. Results open the exact message; `from:` matches only the message's author (agent or an agent's own replies; `from:me` waits for the server to return the author), a full page of 50 says more may exist, a full page narrowed on the client, an unavailable source or an error is shown as such and never as a clean zero. The Ctrl/Cmd+Shift+F shortcut is on for everyone but never fires inside text fields. Files search and room/DM search wait for backend support.
+- **Chat sidebar views (behind `NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS`, default off).** With the flag on, the chat sidebar has Unreads and Agents running views, and lists hold still under the pointer or keyboard focus: background updates change rows in place and a Refresh button applies new order, while your own actions (search, favourites, opening a row) apply at once. The open chat stays listed, marked "Open chat", when a view would filter it out. Mentions, Threads, Saved, Drafts, Waiting for you and Review are sample-data previews behind `NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS`.
+
+- Prepare the native Slides editor interactions: select (Shift for several), drag, resize and keyboard-nudge elements, layer commands, undo/redo, empty/loading/error/conflict states and a read-only phone preview. The editor is not mounted yet and edits stay a local draft until the Slides save route exists.
+
+- Read and initialize native Slides through the server's `GET .../slides` and `POST .../slides/initialize` contract (behind `CREWSHIP_SLIDES_ENABLED`): the read must name the requested Page in `deck.deck_id` and carry exactly the five documented fields, and an initialize receipt is checked field by field. The Pages route mounts the editor behind `NEXT_PUBLIC_SLIDES_EDITOR`; edits are a labelled local draft because the server has no save route yet.
+
+- Prepare a client-side mirror of the strict native Slides operation contract (hashes, validation, atomic batch apply and diff-to-patch) with a proposed save client contract; no editor or save route is exposed yet.
+
+- Prepare a static App preview boundary with scripts, navigation and external resources disabled, pinned revisions and immediate removal on access loss; it is not mounted in app routes and stays behind `NEXT_PUBLIC_STATIC_APP_PREVIEW` until a Page endpoint serves publication HTML.
+
+- **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
+- **Filter My space.** The private Document catalog can be narrowed by type, scope, owner and state; groups that cannot vary on the list are hidden. Counts only reflect items the server returned.
+- Move to a working folder (who gains content and history, same ID, a result per item) and Duplicate are built behind `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` and stay hidden until the server routes exist.
+- Show a personal view of private Documents and display the private creation audience before sending a chat request.
+
+- **Tool activity in chat no longer shows failures as success.** A group of tool steps says "Worked" only when every step succeeded; a failed step is labelled, opens the group and is never green, and parallel tool calls are matched to their own results. A finished reply with steps that have no recorded result reads "Finished" rather than success. A reasoning block shows its approved safe summary line next to the recorded time.
+
+- Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
+
 - **Workspace default look.** An owner or admin can set a default style, accent and theme for the workspace (Settings › Appearance › Workspace default, `crewship workspace update --appearance-default`, `PATCH /api/v1/workspaces/{id}` field `appearance_default`). Members inherit every value they have not chosen themselves; Appearance shows which is which and offers Use workspace default. Appearance sync now saves only values you changed, instead of your whole look. Personal appearance changes save as you make them and the last one can be undone from the toast that follows.
 
 - **Harbor 2: Settings details.** Appearance › Sidebar now uses the rail's own names (Expanded, Expand on hover, Collapsed). An old `/settings?tab=audit` link opened by a Member or Manager lands on the Audit log page, which says who may read it, instead of silently showing Profile. The Account security page for restricted sessions uses the same 820 px column as the rest of Settings. The CLI calls behind Members, Crew links and the journal check are now covered by acceptance tests.
@@ -104,6 +137,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Harbor 2 kit, filters and panels.** Filters open inside a page's side panel, under its Filter button, with at most six values per facet and "All N…" for the rest; on a tablet the side panel starts closed and opens over the page from the top bar. Wizards show every step done when finished, and confirmation lists name what is lost, kept or at risk in words for screen readers. ⚠️ **Behaviour change:** at 768–1279 px the side panel no longer takes a column; open it with the panel button in the top bar.
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
+- **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back. A failed or cancelled file keeps Send off with a visible reason and Retry/Remove on the chip; uploads are kept per person and workspace, continue while you switch to another chat, and stop when you leave the chat page.
+
+### Upgrade and recovery notes
+
+- Before downgrading across the durable routine-start migration, stop incoming triggers and drain queued and in-flight starts. Otherwise use a forward fix; downgrading with outstanding work and upgrading again can repeat accepted work.
+- Resuming a routine body provides at-least-once execution: an interrupted step can repeat external effects. This is not an exactly-once guarantee. An uncertain interrupted setup hook remains visible as interrupted rather than being automatically repeated.
+- If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
+
 ### Fixed
 
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
@@ -116,9 +157,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - ⚠️ **Behaviour change: cost figures are readable by workspace OWNER and ADMIN only.** `GET /api/v1/paymaster/spend/by-crew`, `spend/by-agent/{crewId}`, `spend/by-mission/{missionId}`, `top-spenders` and `GET /api/v1/journal/spend` (and so `crewship cost`, `crewship paymaster` and `crewship spend`) now answer `403` to MANAGER, MEMBER, VIEWER and GUEST; before, the web app hid Spend but any member could read it from the API. An empty window returns `"rows": []` instead of `null`. The dashboard and Activity no longer ask for, or show, spend for other roles.
+
+- Preserve captured run completion timestamps across retained-output recovery and terminal replay; legacy records retain their original replay identity.
+- Restore a confirmed Document checkpoint as a new version after explicit human confirmation; exact retries preserve the receipt and older write mandates remain fenced.
+
+- Keep newly added members’ canonical initial rights out of automation previews, matching and inputs. ⚠️ **Behaviour change:** `member.added` free-text journal search now matches summary only, including historical events; canonical audit payloads and keyed hashes are retained.
+
+- Workspace member addition and account provisioning now commit their chained audit atomically, recheck live administrator authority, and keep initial rights and setup material out of public journal frames.
+- Crew member additions, removals and role override changes now commit with their old/new membership audit or roll back, with notifications only after commit.
+- Keep private authorization audit snapshots out of automation previews, matching and template inputs as well as shared journal feeds; retain the canonical keyed audit unchanged. ⚠️ **Behaviour change:** Protected authorization events now search summary only (including historical rows and formerly public payload fields); exact transactional audit readback refuses post-insert deletion or tampering.
+- Dispatch due manual backups reliably across fractional-second timestamp boundaries, while keeping future busy retries queued until their exact deadline.
+
+- Wait for provider sign-in recovery to release its database connection before server shutdown finishes.
+
+- Accepted routine webhooks keep a durable run identity while waiting for capacity or recovering after restart. Webhook capacity waits expire after 24 hours; uncertain deduplicated starts stay visible for inspection instead of linking a nonexistent run.
+
+- Record routine starts before setup hooks, so interrupted setup remains visible and cannot be mistaken for work that never started.
+- Keep private Document output private in its source conversation, live delivery and agent diagnostics; audit foreign OWNER inspection before returning copied data.
+- Refuse workspace replacement and forced recovery that would discard newer private conversation classification while retaining diagnostic log copies.
+
+- Retain private artifact conversation classification across recovery and result deletion; refuse restores that would lose its original audience.
+- Keep private Page grant administration and production limited to the custodian and workspace OWNER, including when legacy grants exist.
+
 - **Guest Page catalogs keep working when private chat Documents exist.** Unauthorized private entries are omitted without failing the listing; private editing, OWNER access and the Guest route allowlist remain separate checks.
 - Audit private Document reads against the custodian authorized by the fenced read, and withhold content when the required audit cannot be recorded.
 - Clear saved Document previews and chat-result titles on page deletion, and ignore responses started before the deletion.
+- Rate-limited shared issue searches no longer fill workspace capacity with unused project buckets or refresh their idle lifetime.
+- Workspace role updates now commit with a chained audit event and the existing Settings audit record or roll back. Capability audit events retain the previous and resulting effective sets while keeping those values out of the general journal feed.
+- Isolate stream admission revocation epochs by credential and user, so another user's logout cannot reject valid requests; repeated signout of an already revoked session no longer sends another revocation notification.
 
 - Open saved Document cards in the native editor with an immutable Page reference. Every read retains the original identity and current access checks, so reusing a deleted document's address cannot open a replacement. Query-only navigation follows the new reference.
 - Document reads and initialization retries reject unsupported saved schemas before returning content, while preserving their confirmed data and authorization checks.
@@ -129,9 +195,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: credential revocation ends open client streams.** Browser and CLI WebSockets, journal SSE and run NDJSON stop authorizing frames after logout, session/token revocation or credential expiry. Request a fresh ticket and reconnect with a valid credential; running routines retain their separate grant/account authority.
 - **Credential history survives retirement and name reuse.** Integration cleanup and failed credential proposals retain tombstones instead of deleting audit history. Reusing a retired name creates a new ID and adds a recoverable ID suffix to the old historical label; audit references now prevent accidental hard deletion. ⚠️ Workspace replacement now refuses changes that would orphan out-of-scope legacy audit history instead of silently erasing it.
 
+- Scheduled routines retain at most one waiting occurrence per schedule when capacity is full. Later capacity-blocked occurrences are recorded as skipped/missed, without failure alerts or circuit-breaker trips.
+
 ### Added
 
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
+
+- Prepare scoped native Slides initialization with atomic receipts and caller-owned transactions; API and editor activation follow separately.
 
 - Open saved Documents beside their conversation with fresh human read checks; mobile back navigation and desktop dismissal preserve the unsent chat message. Modified clicks retain native page links.
 
@@ -139,9 +209,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add controlled native Slides editor and presentation components with explicit unsaved state and a schema-1-only rendering boundary. Persistence and application integration remain separate.
 - Add strict native Slides operation contracts and atomic in-memory candidates for future transactional presentation writers.
 
+- Browse retained Document checkpoints in a separate read-only history view without replacing the live draft or editor. Every API and CLI history read rechecks current human access.
+
 - Add a scoped document viewer shell with explicit unavailable states, keyboard dismissal and focus restoration. Chat integration remains separate.
 
 - Prepare a shared read-only saved Document and checkpoint renderer that rejects non-Document roots and handles serialization failures without retaining stale content; production history and panel wiring remain separate.
+- Read retained Document checkpoint lists and exact saved bodies through the API and `doc checkpoints` / `doc checkpoint`, without restoring or changing the current draft.
 
 - Record member capability changes and workspace member removals in the chained journal atomically with their mutations. Audit failures roll back the change; capability values remain restricted to the existing administration endpoint.
 
@@ -152,6 +225,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Workspace owners can control document creation by agents.** The workspace policy API and CLI expose an explicit creation switch, disabled by default; run authority remains bound to the requesting human and current permissions.
 
 - **Documents can be created and edited with durable save feedback.** When document support is enabled, create an empty document in the UI or CLI, edit it and reopen the confirmed saved content. Opening saved content does not add a paragraph or trigger a write.
+
+- Render versioned chat progress with stable replay identities, explicit partial and tool outcomes, permitted reasoning summaries and persisted timing. Keep provider accounting separate from confirmed completion and clear protected transcript state on identity changes.
 - Read versioned chat source references through the existing authorized agent-session and workspace-room message APIs and CLI, preserving original identities without sending messages.
 
 - Protect run-admission restore targets and bundle callbacks, including generated reserved metadata columns and distinct FilesOnly destinations.
@@ -204,6 +279,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
 
 - Prepare nullable durable routine identities and start phases; dispatch behavior is unchanged.
+
+- Deferred routine receipts expose stable waiting reasons in API, CLI and Plan, including neutral legacy causes and recovery attention.
 
 ### Added
 

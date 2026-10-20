@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AuthProvider } from "@/hooks/use-auth"
 import { Toaster } from "@/components/ui/sonner"
 import { ConfirmHost } from "@/components/ui/confirm-host"
+import { AttachmentScopeSync } from "@/components/features/chat/composer/attachment-scope-sync"
 import { useMotionChoice } from "@/hooks/use-appearance"
 import { DEFAULT_THEME, motionConfigValue } from "@/lib/theme/appearance"
 
@@ -51,6 +52,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           choice is the data-motion attribute (app/globals.css). */}
       <MotionConfig reducedMotion={motionConfigValue(reducedMotion)}>
         <AuthProvider>
+          <AttachmentScopeSync />
           {children}
           <Toaster />
           <ConfirmHost />

@@ -52,7 +52,7 @@ vi.mock("@/hooks/use-smooth-text", () => ({
 vi.mock("@/components/ai-elements/tool", () => ({
   Tool: ({ children }: { children: React.ReactNode }) => <div data-testid="tool">{children}</div>,
   ToolContent: ({ children }: { children: React.ReactNode }) => <div data-testid="tool-content">{children}</div>,
-  ToolHeader: ({ children, title }: { children: React.ReactNode; title?: string }) => <div data-testid="tool-header" title={title}>{children}</div>,
+  ToolHeader: ({ children, title, state, statusLabel }: { children: React.ReactNode; title?: string; state?: string; statusLabel?: string }) => <div data-testid="tool-header" data-state={state} data-label={statusLabel ?? ""} title={title}>{children}</div>,
 }))
 
 vi.mock("@/components/ai-elements/code-block", () => ({
@@ -86,6 +86,7 @@ import { AssistantTurn } from "../assistant-turn"
 
 function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart {
   return {
+    ...partial,
     id: partial.id ?? `p-${Math.random().toString(36).slice(2, 8)}`,
     type: partial.type,
     content: partial.content ?? "",
@@ -97,6 +98,7 @@ function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart
 
 function turn(parts: TurnPart[], overrides: Partial<ChatTurn> = {}): ChatTurn {
   return {
+    ...overrides,
     id: overrides.id ?? "t-1",
     runId: overrides.runId,
     role: "assistant",
@@ -202,7 +204,7 @@ describe("AssistantTurn dispatch", () => {
   })
 
   it("renders thinking part via Reasoning with isStreaming passed through", () => {
-    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "Pondering", isStreaming: true })])} onCopy={onCopy} onFileClick={onFileClick} />)
+    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "legacy ignored", isStreaming: true, thinking: { visibility: "summary", state: "running", summary: "Pondering" } })])} onCopy={onCopy} onFileClick={onFileClick} />)
     const reasoning = screen.getByTestId("reasoning")
     expect(reasoning.getAttribute("data-streaming")).toBe("true")
     // ThinkingBlock appends a trailing space while streaming on purpose
@@ -390,4 +392,73 @@ describe("authorized run image mount", () => {
     view.rerender(<AssistantTurn turn={turn([], { runId: "run-chart", isStreaming: true })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
     expect(screen.queryByTestId("run-images")).toBeNull()
   })
+})
+
+describe("safe canonical activity and reasoning", () => {
+  beforeEach(() => cleanup())
+  it("never renders legacy raw thinking", () => {
+    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning" })])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.queryByText("private legacy reasoning")).toBeNull()
+  })
+  it("renders only the typed safe summary, ignoring the legacy content field", () => {
+    render(<AssistantTurn turn={turn([part({ type: "thinking", content: "private legacy reasoning", thinking: { visibility: "summary", state: "completed", summary: "Checked the public sources" } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getByText("Checked the public sources")).toBeTruthy()
+    expect(screen.queryByText("private legacy reasoning")).toBeNull()
+  })
+  it.each(["failed", "denied", "interrupted"] as const)("does not label %s activity Completed", state => {
+    render(<AssistantTurn turn={turn([part({ type: "tool_call", content: "Read", activity: { kind: "read", state }, metadata: { completed: true } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getByTestId("tool-header").getAttribute("data-state")).not.toBe("output-available")
+    expect(screen.getByText(state === "failed" ? "Failed" : state === "denied" ? "Denied" : "Interrupted")).toBeTruthy()
+  })
+})
+
+describe("honest activity completion", () => {
+  beforeEach(() => cleanup())
+  it("does not invent running progress for an unknown group", () => {
+    const view = render(<AssistantTurn turn={turn([
+      part({ id: "a", type: "activity", tool_call_id: "a", activity: { kind: "read", state: "unknown" } }),
+      part({ id: "b", type: "activity", tool_call_id: "b", activity: { kind: "read", state: "succeeded" } }),
+    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
+    expect(screen.queryByText("Working")).toBeNull()
+    expect(view.container.querySelector(".animate-spin")).toBeNull()
+  })
+  it("marks a legacy single failed result's call as failed", () => {
+    render(<AssistantTurn turn={turn([
+      part({ id: "a", type: "tool_call", metadata: { tool_id: "a", tool_name: "Read" } }),
+      part({ id: "r", type: "tool_result", content: "Failed to read", metadata: { tool_id: "a", is_error: true } }),
+    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getAllByTestId("tool-header").map(header => header.getAttribute("data-state"))).toEqual(["output-error", "output-error"])
+  })
+})
+
+describe("typed safe activity details", () => {
+  beforeEach(() => cleanup())
+  it("shows only typed output/diff and an explicit truncation marker", () => {
+    render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "safe-call", content: "raw legacy detail", metadata: { input: { command: "raw legacy detail" } }, activity: { kind: "read", state: "succeeded", output: "Safe bounded output", diff: "-before\n+after", truncated: true } })])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getByText("Safe bounded output")).toBeTruthy()
+    expect(screen.getAllByTestId("code-block").map(block => block.textContent)).toContain("-before\n+after")
+    expect(screen.getByText("Details truncated")).toBeTruthy()
+    expect(screen.queryByText(/raw legacy detail/)).toBeNull()
+  })
+  it("never falls back to a legacy result body for a typed activity", () => {
+    render(<AssistantTurn turn={turn([
+      part({ type: "activity", tool_call_id: "safe-call", activity: { kind: "read", state: "succeeded" } }),
+      part({ type: "tool_result", content: "raw legacy detail", metadata: { tool_id: "safe-call" } }),
+    ])} onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.queryByText("raw legacy detail")).toBeNull()
+  })
+})
+
+it("does not revive legacy Task input or running status inside a typed failed activity", () => {
+  cleanup()
+  render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "task", metadata: { tool_name: "Task", input: { description: "raw legacy task detail" } }, activity: { kind: "task", name: "Task", state: "failed" } })])} onCopy={() => {}} onFileClick={() => {}} />)
+  expect(screen.getByText("Failed")).toBeTruthy()
+  expect(screen.queryByText("raw legacy task detail")).toBeNull()
+  expect(screen.queryByText("Working")).toBeNull()
+})
+
+it("labels an incomplete canonical stream without claiming recovery or completion", () => {
+  render(<AssistantTurn turn={turn([part({ type: "text", content: "partial answer" })], { streamIncomplete: true, isStreaming: true })} onCopy={vi.fn()} onFileClick={vi.fn()} />)
+  expect(screen.getByRole("status")).toHaveTextContent("Partial response — stream recovery pending")
 })

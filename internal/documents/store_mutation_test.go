@@ -136,7 +136,9 @@ func TestLogQuotaDoesNotLoseHistory(t *testing.T) {
 	if _, e := s.Commit(ctx, key, commit(l, "one", 0), allow); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.Commit(ctx, key, commit(l, "two", 1), allow); !errors.Is(e, ErrQuota) {
+	oversized := commit(l, "two", 1)
+	oversized.Update = make([]byte, 16)
+	if _, e := s.Commit(ctx, key, oversized, allow); !errors.Is(e, ErrQuota) {
 		t.Fatal(e)
 	}
 	v, e := s.Read(ctx, key, allow)

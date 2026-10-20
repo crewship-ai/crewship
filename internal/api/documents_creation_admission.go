@@ -39,6 +39,10 @@ func bindDocumentCreationRunTx(r *http.Request, db *sql.DB, tx *sql.Tx, run, mes
 	if err != nil || current == nil || *current != *receipt {
 		return errors.New("document creation human admission changed")
 	}
+	var author string
+	if err := tx.QueryRowContext(ctx, `SELECT created_by FROM chats WHERE id=? AND workspace_id=? AND agent_id=? AND visibility='private'`, receipt.ChatID, receipt.WorkspaceID, receipt.AgentID).Scan(&author); err != nil || author != receipt.UserID {
+		return errors.New("document creation requires the private conversation author")
+	}
 	var a artifactRunAuthority
 	var expires string
 	if err := tx.QueryRowContext(ctx, `SELECT run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,expires_at FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND human_user_id=? AND chat_id=? AND message_id=? AND slides_request_origin IS NULL`, run, receipt.WorkspaceID, receipt.AgentID, receipt.UserID, receipt.ChatID, message).Scan(&a.RunID, &a.WorkspaceID, &a.AgentID, &a.CrewID, &a.HumanUserID, &a.ChatID, &a.MessageID, &expires); err != nil {

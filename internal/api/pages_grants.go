@@ -461,6 +461,9 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 // (pages_grants_authz.go) — the same standing, asked twice, once when the
 // grant is written and once every time it is read.
 func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
+	if rec.PrivateAudience {
+		return privatePageViewer(rec, &pageViewer{UserID: userID, Role: role})
+	}
 	if canRole(role, "manage") {
 		return true
 	}

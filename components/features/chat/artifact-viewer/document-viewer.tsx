@@ -16,7 +16,7 @@ function sameTarget(a: ViewerTarget, b: ViewerTarget) {
 }
 
 /** Controlled presentation only. The host owns resolution, current authority and placement. */
-export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, layout, expanded, onClose, onExpandedChange, openerRef }: DocumentViewerProps<Content>) {
+export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, layout, expanded, onClose, onExpandedChange, openerRef, headerExtra }: DocumentViewerProps<Content>) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const identity = target ? JSON.stringify([scopeKey, target.workspaceId, target.pageId, target.type, target.mode]) : null
   const previousIdentity = useRef(identity)
@@ -74,6 +74,7 @@ export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, la
       <div className="min-w-0 flex-1">
         <h2 className="truncate font-semibold">{authorized ? authorized.title : "Document preview"}</h2>
         <p className="text-xs text-muted-foreground">Current saved document</p>
+        {headerExtra}
       </div>
       {!mobile && <Button type="button" variant="ghost" size="icon" className="coarse:min-h-[44px] coarse:min-w-[44px]"
         aria-label={expanded ? "Show chat alongside" : "Expand document preview"} aria-pressed={expanded}

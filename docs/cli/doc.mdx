@@ -103,6 +103,42 @@ schema 2; initialization does not silently upgrade an existing document.
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
 an operation whose confirmation was lost.
 
+The native editor's **History** button opens a separate read-only view of retained
+checkpoints. Selecting an older checkpoint and closing history preserve your
+current editor and unsaved draft. Browsing does not restore or overwrite content.
+
+## `crewship doc checkpoints <page-slug>`
+
+`crewship doc checkpoints <page-slug>` lists at most the latest 1,000 retained
+checkpoint pins, ordered by revision and identity. Checkpoints are explicit saved
+pins, not every editor keystroke. Older pins remain retained and can be read by ID.
+
+## `crewship doc checkpoint <page-slug> <checkpoint-id>`
+
+Read that exact confirmed
+body with its Page ID, checkpoint ID, revision and schema. Both commands accept
+`@<page-id>` and the standard JSON, YAML and NDJSON output formats.
+
+These commands use current human read access, including the private audience;
+an old run or checkpoint ID grants no access. Reads never restore content or
+change a draft. The public response omits binary snapshots and writer fences.
+
+## `crewship doc restore <page-slug> --file request.json`
+
+Restore one retained checkpoint as a new confirmed revision. The original JSON
+packet contains `page_id`, a unique operation `id`, the current `schema`, opaque
+`epoch`, current `ifRev`, and the retained `checkpoint` ID. Read the current
+Document first and confirm the intended checkpoint. Keep the exact same packet
+for a retry after uncertain confirmation; never refresh its revision or epoch.
+The server checks current human write access. A successful restore increments
+the revision and generation and invalidates the previous writer epoch.
+
+The native History view requires explicit confirmation. Restore is unavailable
+while a local draft is pending or requires recovery. An uncertain result keeps
+the editor locked and offers the original retry, without claiming success.
+Browsing history still preserves the live draft. Restore does not reactivate an
+old agent run or its authority. Unsupported history content remains unavailable.
+
 ## `crewship doc read <page-slug>`
 
 For a saved Document identity, `crewship doc read @<page-id>` keeps the original
@@ -166,6 +202,17 @@ audience. Legacy public Page links cannot publish it. Storage limits continue
 to count the whole workspace. If its owner leaves, removal returns 409 until
 the workspace OWNER explicitly selects an active human successor.
 
+The source conversation keeps that private audience from the original creation
+consent, even if creation fails or the execution permission later expires.
+Its stored tool results and live messages cannot expose the output to an ADMIN;
+OWNER inspection is audited before delivery. Existing transcript-sharing links
+cannot publish this protected conversation. Create new private documents from
+your own private conversation; administrative chat access is not creation consent.
+Deleting a protected source conversation currently returns 409: retained log
+copies still depend on its privacy record. Ordinary chat deletion is unaffected.
+Configured chat retention also keeps protected source conversations and excludes
+them from its deletion preview while those copies depend on their privacy record.
+
 The run creates a populated document and returns its saved link. Reopening a
 result does not grant a later run permission to edit it. Repeating an uncertain
 operation must reuse the original request, rather than issuing a new chat task.
@@ -179,3 +226,9 @@ saved links and provenance, without document contents or transcript text.
 
 A completed or recovered run does not erase its saved result. The command
 rechecks your current access; the original run does not regain permission.
+
+Agent-wide logs and diagnostics can contain copies from several conversations.
+They are available only when the reader may inspect every protected conversation
+represented by that agent; a document author does not gain access to another
+author's private output. Foreign OWNER inspection is audited before copies are
+returned. Unavailable required auditing prevents disclosure.

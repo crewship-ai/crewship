@@ -1677,6 +1677,8 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 
 ### `pending list`
 
+The `REASON` column and `reason_code` in JSON/get expose stable server codes; old servers without a code display `unknown`. `recovery_unknown` calls for inspecting run history and server logs before another start, not automatic replay.
+
 ```bash
 crewship routine pending list
 ```

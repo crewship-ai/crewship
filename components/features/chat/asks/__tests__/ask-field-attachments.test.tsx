@@ -20,6 +20,12 @@ import { render, screen, fireEvent, waitFor, within, act } from "@testing-librar
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 
 const toastError = vi.fn()
 vi.mock("sonner", () => ({
@@ -103,7 +109,7 @@ function plain(id: string, name: string): ComposerAttachment {
 
 function seed(...items: ComposerAttachment[]) {
   act(() => {
-    useComposerStore.setState({ attachments: { [SESSION]: items } })
+    useComposerStore.setState({ attachments: { [K + SESSION]: items } })
   })
 }
 
@@ -185,7 +191,7 @@ describe("an upload answers the field it was dropped into", () => {
 
     expect(within(slot("contract")).queryByText("contract.pdf")).toBeNull()
     expect(within(slot("identity")).getByText("id.jpg")).toBeInTheDocument()
-    const left = useComposerStore.getState().attachments[SESSION] ?? []
+    const left = useComposerStore.getState().attachments[K + SESSION] ?? []
     expect(left.map((a) => a.id)).toEqual(["att-2"])
   })
 
@@ -331,7 +337,7 @@ describe("an upload answers the field it was dropped into", () => {
     // The chip is owned from the moment it exists, not once the upload lands:
     // an in-flight upload has to be attributable to the field that started it.
     await waitFor(() => {
-      const list = useComposerStore.getState().attachments[SESSION] ?? []
+      const list = useComposerStore.getState().attachments[K + SESSION] ?? []
       expect(list).toHaveLength(1)
       expect(list[0].owner).toEqual({ formId: FORM_ID, field: "contract" })
     })
@@ -358,7 +364,7 @@ describe("an upload answers the field it was dropped into", () => {
 
     unmount()
 
-    expect((useComposerStore.getState().attachments[SESSION] ?? []).map((a) => a.id)).toEqual([
+    expect((useComposerStore.getState().attachments[K + SESSION] ?? []).map((a) => a.id)).toEqual([
       "att-9",
     ])
   })

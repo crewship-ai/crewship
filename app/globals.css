@@ -2247,3 +2247,10 @@ body {
 .auth-panel-shade {
   background: linear-gradient(to bottom right, transparent 55%, rgb(3 20 60 / 0.3) 100%);
 }
+
+/* A search result's target message: outline only, so it never touches React-owned classes. */
+[data-search-target="true"] {
+  outline: 2px solid color-mix(in oklab, var(--primary, currentColor) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}

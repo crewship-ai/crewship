@@ -1,6 +1,48 @@
 {
   "components": {
     "schemas": {
+      "AcceptedPipelineRun": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pending_id": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "QUEUED",
+              "FAILED",
+              "EXPIRED",
+              "CANCELLED"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "pipeline_id",
+          "pipeline_slug",
+          "status",
+          "pending_id",
+          "reason_code"
+        ],
+        "type": "object"
+      },
       "AccessMeDecision": {
         "properties": {
           "reason": {
@@ -2914,6 +2956,184 @@
         ],
         "type": "object"
       },
+      "ChatSourceAuthor": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChatSourceConversationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "agent_session",
+              "workspace_room"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "source_kind",
+          "source_id"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "alternative_parent": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "author": {
+            "$ref": "#/components/schemas/ChatSourceAuthor"
+          },
+          "content": {
+            "type": "string"
+          },
+          "message_ref": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/ChatSourceOrder"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSourcePart"
+            },
+            "type": "array"
+          },
+          "reply_to": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "thread_root": {
+            "$ref": "#/components/schemas/ChatSourceMessageRef"
+          }
+        },
+        "required": [
+          "message_ref",
+          "role",
+          "author",
+          "occurred_at",
+          "order",
+          "reply_to",
+          "thread_root",
+          "alternative_parent",
+          "content",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessageRef": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "conversation_ref": {
+            "$ref": "#/components/schemas/ChatSourceConversationRef"
+          },
+          "source_message_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_ref",
+          "source_message_id"
+        ],
+        "type": "object"
+      },
+      "ChatSourceMessages": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "conversation_ref": {
+            "$ref": "#/components/schemas/ChatSourceConversationRef"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSourceMessage"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "snapshot_complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "conversation_ref",
+          "messages"
+        ],
+        "type": "object"
+      },
+      "ChatSourceOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "source_position": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_sequence": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ChatSourcePart": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "tool_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
       "Connector": {
         "properties": {
           "auth_mode": {
@@ -5790,6 +6010,87 @@
         ],
         "type": "object"
       },
+      "DocumentCheckpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/DocumentNode"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "rev": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "id",
+          "rev",
+          "schema",
+          "content"
+        ],
+        "type": "object"
+      },
+      "DocumentCheckpointList": {
+        "additionalProperties": false,
+        "properties": {
+          "checkpoints": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actor": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                  "type": "string"
+                },
+                "rev": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "rev",
+                "schema",
+                "actor",
+                "created_at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "checkpoints"
+        ],
+        "type": "object"
+      },
       "DocumentInitializationState": {
         "properties": {
           "blocks": {
@@ -6067,6 +6368,50 @@
           "id",
           "rev",
           "epoch"
+        ],
+        "type": "object"
+      },
+      "DocumentRestoreReceipt": {
+        "properties": {
+          "duplicate": {
+            "type": "boolean"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "restore"
+            ],
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "rev": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "id",
+          "rev",
+          "epoch",
+          "kind"
         ],
         "type": "object"
       },
@@ -11618,6 +11963,31 @@
           "next_cursor"
         ],
         "type": "object"
+      },
+      "PipelineRunDetail": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PipelineRun"
+              },
+              {
+                "required": [
+                  "id",
+                  "workspace_id",
+                  "pipeline_id",
+                  "pipeline_slug",
+                  "status",
+                  "mode",
+                  "started_at"
+                ]
+              }
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/AcceptedPipelineRun"
+          }
+        ]
       },
       "PipelineRunList": {
         "properties": {
@@ -19708,22 +20078,40 @@
         "type": "object"
       },
       "WorkspaceConversationMessages": {
-        "properties": {
-          "has_more": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "properties": {
+                  "has_more": {
+                    "type": "boolean"
+                  },
+                  "messages": {
+                    "items": {
+                      "$ref": "#/components/schemas/WorkspaceConversationMessage"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "messages",
+                  "has_more"
+                ],
+                "type": "object"
+              },
+              {
+                "not": {
+                  "required": [
+                    "contract_version"
+                  ]
+                }
+              }
+            ]
           },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/WorkspaceConversationMessage"
-            },
-            "type": "array"
+          {
+            "$ref": "#/components/schemas/ChatSourceMessages"
           }
-        },
-        "required": [
-          "messages",
-          "has_more"
-        ],
-        "type": "object"
+        ]
       },
       "WorkspaceConversationMuteRequest": {
         "additionalProperties": false,
@@ -20124,6 +20512,9 @@
           "priority": {
             "type": "integer"
           },
+          "reason_code": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -20151,7 +20542,8 @@
           "run_id",
           "dispatch_attempts",
           "last_error",
-          "can_cancel"
+          "can_cancel",
+          "reason_code"
         ],
         "type": "object"
       },
@@ -20199,6 +20591,9 @@
             "priority": {
               "type": "integer"
             },
+            "reason_code": {
+              "type": "string"
+            },
             "run_id": {
               "type": "string"
             },
@@ -20226,7 +20621,8 @@
             "run_id",
             "dispatch_attempts",
             "last_error",
-            "can_cancel"
+            "can_cancel",
+            "reason_code"
           ],
           "type": "object"
         },
@@ -60795,6 +61191,17 @@
             }
           },
           {
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "enum": [
+                "source_v1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -60809,40 +61216,58 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "messages": {
-                      "items": {
-                        "properties": {
-                          "author_user_id": {
-                            "nullable": true,
-                            "type": "string"
+                  "oneOf": [
+                    {
+                      "allOf": [
+                        {
+                          "properties": {
+                            "messages": {
+                              "items": {
+                                "properties": {
+                                  "author_user_id": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "content": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "session_id": {
+                                    "type": "string"
+                                  },
+                                  "tool_summary": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "ts": {
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
                           },
-                          "content": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "role": {
-                            "type": "string"
-                          },
-                          "session_id": {
-                            "type": "string"
-                          },
-                          "tool_summary": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "ts": {
-                            "type": "string"
-                          }
+                          "type": "object"
                         },
-                        "type": "object"
-                      },
-                      "type": "array"
+                        {
+                          "not": {
+                            "required": [
+                              "contract_version"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatSourceMessages"
                     }
-                  },
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -67580,6 +68005,17 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "enum": [
+                "source_v1"
+              ],
+              "type": "string"
             }
           },
           {
@@ -116673,6 +117109,11 @@
                             },
                             "type": "object"
                           },
+                          "private_audience": {
+                            "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                            "readOnly": true,
+                            "type": "boolean"
+                          },
                           "publication_version": {
                             "type": "integer"
                           },
@@ -117978,6 +118419,11 @@
                           },
                           "type": "object"
                         },
+                        "private_audience": {
+                          "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "publication_version": {
                           "type": "integer"
                         },
@@ -118310,6 +118756,11 @@
                             }
                           },
                           "type": "object"
+                        },
+                        "private_audience": {
+                          "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                          "readOnly": true,
+                          "type": "boolean"
                         },
                         "publication_version": {
                           "type": "integer"
@@ -118655,6 +119106,11 @@
                               }
                             },
                             "type": "object"
+                          },
+                          "private_audience": {
+                            "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                            "readOnly": true,
+                            "type": "boolean"
                           },
                           "publication_version": {
                             "type": "integer"
@@ -119085,6 +119541,11 @@
                         },
                         "type": "object"
                       },
+                      "private_audience": {
+                        "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                        "readOnly": true,
+                        "type": "boolean"
+                      },
                       "publication_version": {
                         "type": "integer"
                       },
@@ -119174,6 +119635,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "500": {
             "content": {
@@ -123766,6 +124245,500 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/document/checkpoints": {
+      "get": {
+        "description": "List page document checkpoints (GET /api/v1/pages/{slug}/document/checkpoints).",
+        "operationId": "get_api_v1_pages_slug_document_checkpoints",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCheckpointList"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page document checkpoints",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/document/checkpoints/{checkpoint}": {
+      "get": {
+        "description": "Get page document checkpoint (GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}).",
+        "operationId": "get_api_v1_pages_slug_document_checkpoints_checkpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "checkpoint",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCheckpoint"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page document checkpoint",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/document/initialize": {
       "post": {
         "description": "Submit page document initialize (POST /api/v1/pages/{slug}/document/initialize).",
@@ -125070,6 +126043,605 @@
           }
         ],
         "summary": "Submit page document patch",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/restore": {
+      "post": {
+        "description": "Restore page document (POST /api/v1/pages/{slug}/document/restore).",
+        "operationId": "post_api_v1_pages_slug_document_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "checkpoint": {
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "epoch": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "ifRev": {
+                    "maximum": 9007199254740990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "page_id": {
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      2,
+                      3
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "id",
+                  "schema",
+                  "epoch",
+                  "ifRev",
+                  "checkpoint"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRestoreReceipt"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Restore page document",
         "tags": [
           "pages"
         ],
@@ -145806,6 +147378,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -145824,6 +147408,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -146060,6 +147656,9 @@
                     "duplicate": {
                       "type": "boolean"
                     },
+                    "pending_id": {
+                      "type": "string"
+                    },
                     "reason": {
                       "type": "string"
                     },
@@ -146092,6 +147691,9 @@
                     },
                     "duplicate": {
                       "type": "boolean"
+                    },
+                    "pending_id": {
+                      "type": "string"
                     },
                     "reason": {
                       "type": "string"
@@ -153605,7 +155207,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineRun"
+                  "$ref": "#/components/schemas/PipelineRunDetail"
                 }
               }
             },
@@ -153664,24 +155266,6 @@
               }
             },
             "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Not Found"
           },
           "500": {
             "content": {

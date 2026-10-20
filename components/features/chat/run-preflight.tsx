@@ -19,10 +19,10 @@ export interface ChatRunPreflight {
 
 // Advisory configured-model snapshot. Launch and provider admission keep their
 // own live authorization checks; this component never grants or reserves work.
-export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
+export function useChatRunPreflight({ chatId, workspaceId, userId, enabled }: {
   chatId: string; workspaceId: string; userId: string; enabled: boolean
 }) {
-  const query = useQuery({
+  return useQuery({
     queryKey: ["chat-run-preflight", workspaceId, chatId, userId],
     enabled: enabled && !!chatId && !!workspaceId && !!userId,
     retry: false, gcTime: 0, staleTime: 0,
@@ -35,6 +35,12 @@ export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
       return body
     },
   })
+}
+
+export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
+  chatId: string; workspaceId: string; userId: string; enabled: boolean
+}) {
+  const query = useChatRunPreflight({ chatId, workspaceId, userId, enabled })
   if (!enabled || (query.isError && query.error.message === "denied")) return null
   if (!query.data || query.isError) return <p role="status" className="text-xs text-muted-foreground">Current budget and gate are unavailable. Price is unknown.</p>
   const data = query.data

@@ -15,6 +15,7 @@ import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
+import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -168,6 +169,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearTimeout(unreachableTimer.current)
     unreachableTimer.current = undefined
     purgeOtherE2Recovery(next?.user.id ?? null)
+    void purgeOtherDocumentDrafts(next?.user.id ?? null)
     setUnreachable(null)
     setSession(next)
     setStatus(next ? "authenticated" : "unauthenticated")
@@ -266,6 +268,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!isKnownAppPath(window.location.pathname)) return
       redirected = true
       purgeOtherE2Recovery(null)
+      void purgeOtherDocumentDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -290,6 +293,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (redirected) return
       redirected = true
       purgeOtherE2Recovery(null)
+      void purgeOtherDocumentDrafts(null)
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -378,6 +382,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return false
     }
     purgeOtherE2Recovery(null)
+    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
+    await purgeOtherDocumentDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.

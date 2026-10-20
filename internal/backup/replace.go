@@ -75,6 +75,10 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 		return map[string]int{}, nil
 	}
 
+	if err := rejectPrivateArtifactTargetReplacement(ctx, tx, targetIDs); err != nil {
+		return nil, err
+	}
+
 	// Discover the FK-scoped table set and apply intent.
 	scoped, err := discoverScopedTablesTx(ctx, tx)
 	if err != nil {

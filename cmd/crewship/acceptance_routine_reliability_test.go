@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -87,11 +88,23 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 	}
 	router.PipelinesHandler.SetScheduleStore(pipeline.NewScheduleStore(db))
 	router.PipelinesHandler.SetWebhookStore(pipeline.NewWebhookStore(db))
-	router.PipelinesHandler.SetRunStore(pipeline.NewRunStore(db))
-	// FireWebhook 503s without a runner even though dispatch never reaches
-	// it for the synchronous 202 this test checks (the run starts in a
-	// background goroutine) — see FireWebhook's doc comment.
-	router.PipelinesHandler.SetRunner(unusedAgentRunner{})
+	runStore := pipeline.NewRunStore(db)
+	runs := pipeline.NewRunRegistry()
+	runner := unusedAgentRunner{}
+	router.PipelinesHandler.SetRunStore(runStore)
+	router.PipelinesHandler.SetRunRegistry(runs)
+	router.PipelinesHandler.SetRunner(runner)
+	// Webhook acceptance only commits durable pending work. Match the
+	// production consumer so accepted agentless recipes actually execute.
+	executor := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+		Store: pipeline.NewStore(db), Resolver: pipeline.NewResolver(db),
+		Runner: runner, DB: db, RunStore: runStore, Runs: runs,
+		Preflight: router.PipelinesHandler.RunPreflight(),
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	dispatcher := pipeline.NewPendingRunDispatcher(pipeline.NewPendingRunStore(db), executor, logger)
+	dispatcher.Start(ctx)
+	t.Cleanup(func() { cancel(); dispatcher.Stop() })
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

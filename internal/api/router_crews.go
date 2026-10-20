@@ -36,6 +36,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
+	crews.policyJournal = r.journal
 	crewSocket := r.socketPath
 	if crewSocket == "" {
 		crewSocket = config.DefaultSocketPath()
@@ -555,8 +556,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/provider-logins/device", roleInline, providerLogins.Start)
 	r.mux.Handle("GET /api/v1/provider-logins/device/{deviceId}", authed(http.HandlerFunc(providerLogins.Status)))
 	resumeDone := beginBackgroundWork()
+	// Register before launch so shutdown also joins the initial recovery query.
+	providerLogins.wg.Add(1)
 	go func() {
 		defer resumeDone()
+		defer providerLogins.wg.Done()
 		providerLogins.ResumePending(providerLogins.ctx)
 	}()
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
