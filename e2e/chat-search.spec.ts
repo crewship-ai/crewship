@@ -189,7 +189,7 @@ test("Ctrl+Shift+F opens search; a plain query returns user and assistant hits",
   await dialog.getByRole("combobox", { name: "Search query" }).fill(T.general)
   await expect(options(page)).toHaveCount(seed.assistantCount + seed.userCount, { timeout: TIMEOUT })
   const labels = await options(page).evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? ""))
-  expect(labels.filter((l) => l === "You")).toHaveLength(seed.userCount)
+  expect(labels.filter((l) => l === "User")).toHaveLength(seed.userCount)
 })
 
 test("from:agent returns only assistant messages", async ({ page }) => {
@@ -197,7 +197,7 @@ test("from:agent returns only assistant messages", async ({ page }) => {
   await dialog.getByRole("combobox", { name: "Search query" }).fill(`${T.general} from:agent`)
   await expect(options(page)).toHaveCount(seed.assistantCount, { timeout: TIMEOUT })
   const labels = await options(page).evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? ""))
-  expect(labels).not.toContain("You")
+  expect(labels).not.toContain("User")
   // The two agents that wrote them are both named.
   expect(new Set(labels).size).toBe(2)
 })
