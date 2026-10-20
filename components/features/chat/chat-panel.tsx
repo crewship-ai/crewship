@@ -792,6 +792,15 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return ok
   }, [canChat,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
 
+  /** The chat row, and nothing else, for an upload. Unlike the send path it
+   *  neither probes the execution profile nor waits for the socket, and it does
+   *  not give up when the person has moved to another chat: an upload queued
+   *  here finishes in the background and must still reach THIS chat. */
+  const ensureSessionForUpload = useCallback(async (): Promise<boolean> => {
+    if (!canChat) return false
+    return ensureSession()
+  }, [canChat, ensureSession])
+
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
   // cannot change until a send produces a render, so two clicks inside that
@@ -1413,6 +1422,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
+          ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}
@@ -1545,6 +1555,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           draftSendable={draftSendable}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
+          ensureSessionForUpload={ensureSessionForUpload}
           sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}

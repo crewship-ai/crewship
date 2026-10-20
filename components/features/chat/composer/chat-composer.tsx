@@ -61,6 +61,11 @@ interface ChatComposerProps {
    *  converse, so it creates the row exactly as the first message does — one
    *  creation path, idempotent per session. */
   ensureSession: () => Promise<boolean>
+  /** Row-only variant for uploads. The send path's `ensureSession` also waits
+   *  for the connection and refuses once the person has left this chat, which is
+   *  wrong for an upload that finishes in the background. Defaults to
+   *  `ensureSession`. */
+  ensureSessionForUpload?: () => Promise<boolean>
   /** useChat's send. The second argument is metadata that rides WITH the
    *  message rather than inside it (the ask-form submission envelope today);
    *  `text` is identical whether or not it is present.
@@ -139,6 +144,7 @@ export function ChatComposer({
   draftSendable = false,
   stopGeneration,
   ensureSession,
+  ensureSessionForUpload,
   sendMessage,
   onSend,
   onSent,
@@ -500,7 +506,7 @@ export function ChatComposer({
     // an upload is visible rather than a black hole) and puts a camera next to
     // the paperclip. The same mention picker also supports touch selection.
     return (
-      <EnsureChatSessionProvider ensureSession={ensureSession}>
+      <EnsureChatSessionProvider ensureSession={ensureSessionForUpload ?? ensureSession}>
       {askSheet}
       <div className="p-3 shrink-0">
         <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
@@ -535,7 +541,7 @@ export function ChatComposer({
   }
 
   return (
-    <EnsureChatSessionProvider ensureSession={ensureSession}>
+    <EnsureChatSessionProvider ensureSession={ensureSessionForUpload ?? ensureSession}>
     {askSheet}
     <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
       <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>

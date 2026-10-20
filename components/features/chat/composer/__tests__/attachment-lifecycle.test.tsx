@@ -17,7 +17,7 @@ vi.mock("@/hooks/use-workspace", () => ({
 }))
 vi.mock("../mention-autocomplete", () => ({ MentionAutocomplete: () => null }))
 const toastError = vi.fn()
-vi.mock("sonner", () => ({ toast: { error: (m: string) => toastError(m), success: vi.fn(), info: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { error: (m: string, o?: unknown) => toastError(m, o), success: vi.fn(), info: vi.fn() } }))
 
 import { ChatComposer } from "../chat-composer"
 import { AttachmentLifecycle } from "../attachment-lifecycle"
@@ -46,13 +46,15 @@ const tree = (variant: "desktop" | "mobile", opts: { sessionId?: string; key?: s
 const file = (name: string) => new File([new Uint8Array(7)], name, { type: "text/plain" })
 
 function gatedFetch() {
-  const calls: Array<{ name: string; release: () => void; signal?: AbortSignal | null }> = []
-  const impl = vi.fn((_url: string, init?: RequestInit) => {
+  const calls: Array<{ name: string; url: string; release: () => void; fail: () => void; signal?: AbortSignal | null }> = []
+  const impl = vi.fn((url: string, init?: RequestInit) => {
     const name = ((init?.body as FormData).get("file") as File).name
     return new Promise((resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
       calls.push({
         name,
+        url,
+        fail: () => resolve({ ok: false, status: 500, json: async () => ({ error: "boom" }) }),
         signal: init?.signal,
         release: () =>
           resolve({ ok: true, status: 200, json: async () => ({ path: `attachments/${SID}/${name}`, agent_path: `/o/${name}` }) }),
@@ -189,6 +191,8 @@ describe("attachment job lifecycle", () => {
     expect(statuses()).not.toContain("cancelled")
     g.calls[0].release()
     await waitFor(() => expect(g.calls).toHaveLength(2)) // the queued file still runs
+    // ...and it goes to the chat it was added to, not the one now open
+    expect(g.calls[1].url).toContain("/chats/chat-1/attachments")
     g.calls[1].release()
     await waitFor(() => expect(statuses()).toEqual(["ready", "ready"]))
     rerender(tree("desktop")) // back to the first chat
@@ -303,5 +307,54 @@ describe("attachment job lifecycle", () => {
     await tick()
     expect(g.calls).toHaveLength(0)
     expect(all()).toHaveLength(1) // not dropped: only the epoch guard acted
+  })
+
+  it("a queued file after a chat switch uploads even when the send-path ensure refuses", async () => {
+    // ChatPanel's send-path ensure returns false once the person has moved on
+    // (scope-ref check); the upload must not depend on it.
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    const refusing = vi.fn(async () => false)
+    const withUpload = (sessionId: string) => (
+      <>
+        <AttachmentLifecycle />
+        <ChatComposer {...base} sessionId={sessionId} variant="desktop" ensureSession={refusing} ensureSessionForUpload={async () => true} />
+      </>
+    )
+    const { rerender } = render(withUpload(SID))
+    pick([file("a.txt"), file("b.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    rerender(withUpload("chat-2"))
+    g.calls[0].release()
+    await waitFor(() => expect(g.calls).toHaveLength(2))
+    g.calls[1].release()
+    await waitFor(() => expect(statuses()).toEqual(["ready", "ready"]))
+    expect(refusing).not.toHaveBeenCalled()
+  })
+
+  it("a background failure in another chat raises no toast; the chip says Failed on return", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    const { rerender } = render(tree("desktop"))
+    pick([file("a.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    rerender(tree("desktop", { sessionId: "chat-2" }))
+    g.calls[0].fail()
+    await waitFor(() => expect(statuses()).toEqual(["error"]))
+    expect(toastError).not.toHaveBeenCalled()
+    rerender(tree("desktop")) // back
+    expect(screen.getByText(/Upload failed/)).toBeTruthy()
+    expect(screen.getByRole("note").textContent).toMatch(/Send is off/)
+  })
+
+  it("a failure in the open chat still raises its toast", async () => {
+    const g = gatedFetch()
+    vi.spyOn(globalThis, "fetch").mockImplementation(g.impl as never)
+    render(tree("desktop"))
+    pick([file("a.txt")])
+    await waitFor(() => expect(g.calls).toHaveLength(1))
+    g.calls[0].fail()
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(String(toastError.mock.calls[0][0])).toContain("a.txt")
   })
 })

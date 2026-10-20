@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useRef } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef } from "react"
 import { Camera } from "lucide-react"
 import { toast } from "sonner"
 
@@ -17,6 +17,8 @@ import {
   abortIfPending,
   clearAbort,
   currentScopeEpoch,
+  isChatOpen,
+  markChatOpen,
   queueFor,
   registerAbort,
 } from "@/lib/chat-attachment-jobs"
@@ -306,7 +308,9 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         const stillThere = (useComposerStore.getState().attachments[storeKey] ?? []).some(
           (a) => a.id === att.id,
         )
-        if (stillThere) toastUploadFailure(storeKey, att, reason)
+        // Only when this chat is on screen: a failure in a chat the person has
+        // left would be a toast with no context. Its chip says Failed on return.
+        if (stillThere && isChatOpen(storeKey)) toastUploadFailure(storeKey, att, reason)
       } finally {
         clearAbort(storeKey, att.id)
       }
@@ -425,6 +429,7 @@ export function AttachmentZone({
   // subscription re-rendered every mounted zone on any session's draft or
   // attachment write.
   const { key: storeKey } = useAttachmentScope(sessionId)
+  useEffect(() => markChatOpen(storeKey), [storeKey])
   const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[storeKey])
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []

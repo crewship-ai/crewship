@@ -63,6 +63,23 @@ export function cancelJobsForScope(prefix: string) {
   }
 }
 
+// Which chats have a composer on screen right now (a count, because the phone
+// and desktop trees can overlap for a moment). A failure in a chat that is not
+// open must not raise a toast with no context: the chip says Failed when the
+// person comes back.
+const openChats = new Map<string, number>()
+export function markChatOpen(key: string): () => void {
+  openChats.set(key, (openChats.get(key) ?? 0) + 1)
+  return () => {
+    const n = (openChats.get(key) ?? 1) - 1
+    if (n <= 0) openChats.delete(key)
+    else openChats.set(key, n)
+  }
+}
+export function isChatOpen(key: string): boolean {
+  return (openChats.get(key) ?? 0) > 0
+}
+
 // The scope the app is currently in, and a counter that moves every time it
 // changes. A job remembers the epoch it was queued under and refuses to touch
 // the network if it has moved on - including A -> B -> A, where the prefix
@@ -108,4 +125,5 @@ export function __resetForTests() {
   scopePrefix = null
   scopeUserId = null
   epoch = 0
+  openChats.clear()
 }

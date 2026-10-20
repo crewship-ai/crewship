@@ -20,7 +20,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CLI token changes are auditable.** Creation and revocation now commit together with instance-level, keyed audit records; administrators can see per-entry integrity without exposing token values or inventing proofs for legacy history.
 
-- **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back.
+- **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back. A failed or cancelled file keeps Send off with a visible reason and Retry/Remove on the chip; uploads are kept per person and workspace, continue while you switch to another chat, and stop when you leave the chat page.
 
 ### Upgrade and recovery notes
 
