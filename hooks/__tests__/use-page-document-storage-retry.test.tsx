@@ -15,7 +15,7 @@ vi.mock("@/lib/document-queue", async importOriginal => ({
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
-const store = () => ({ load: journal.load, put: journal.put, remove: journal.remove, close: () => {}, exclusive: true })
+const store = (exclusive = true) => ({ load: journal.load, put: journal.put, remove: journal.remove, close: () => {}, exclusive })
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] }) // only the clock the retry backoff reads
   journal.rows.clear()
@@ -376,5 +376,37 @@ it("(c) discard keeps a failed-journal block", async () => {
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").length
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)) })
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").length).toBe(posts)
+  } finally { unmount(); server.destroy() }
+})
+
+it("bounds full snapshots when keystrokes arrive in separate tasks", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    journal.put.mockClear()
+    for (let i = 0; i < 30; i++) await act(async () => { text(result.current.doc).insert(4, "x"); await new Promise(resolve => setTimeout(resolve, 10)) })
+    await waitFor(() => expect(result.current.durability).toBe("local"), { timeout: 4000 })
+    expect(journal.put.mock.calls.length).toBeLessThanOrEqual(4)
+    const probe = new Y.Doc({ gc: false })
+    Y.applyUpdate(probe, Uint8Array.from(atob((journal.put.mock.calls.at(-1)![0] as { snapshot: string }).snapshot), c => c.charCodeAt(0)))
+    expect(text(probe).toString().match(/x/g)).toHaveLength(30)
+    probe.destroy()
+  } finally { unmount(); server.destroy() }
+})
+
+it("publishes earlier rows of an unlocked journal only after the fresh read is accepted", async () => {
+  const server = model()
+  journal.rows.set("d1", heldDraft(server))
+  journal.open.mockImplementation(async () => store(false))
+  let reads = 0
+  fetchMock.mockImplementation(() => { reads++; return reads === 1 ? response(head(server)) : new Promise(resolve => setTimeout(() => resolve({ ok: false, status: 404, json: async () => ({ error: "gone" }) }), 300)) })
+  const seen: number[] = []
+  const { result, unmount } = renderHook(() => { const r = usePageDocument("w", "slug", "page"); seen.push(r.unverifiedDrafts.length); return r })
+  try {
+    await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 4000 })
+    expect(Math.max(...seen)).toBe(0)
+    expect(result.current.unverifiedDrafts).toHaveLength(0)
   } finally { unmount(); server.destroy() }
 })

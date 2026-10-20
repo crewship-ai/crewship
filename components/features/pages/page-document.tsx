@@ -105,7 +105,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
       if (sync.recoveredDrafts.length) void sync.discardRecoveredDrafts().catch(() => setActionError("Could not discard the recovery draft."))
       else window.location.reload()
     }}>{sync.recoveredDrafts.length ? "Discard recovered drafts and reopen" : "Reopen saved document"}</Button></div>}
-    {!sync.denied && sync.unverifiedDrafts.length > 0 && <div role="status" className="space-y-2 border p-4"><p>An earlier unsent draft is stored in this browser. This browser cannot tell whether another tab of this document is using it, so it was not restored and your edits here are not stored locally. You can keep editing, download the earlier draft, or discard it.</p><Button onClick={() => {
+    {!sync.denied && sync.unverifiedDrafts.length > 0 && <div role="status" className="space-y-2 border p-4"><p>An earlier unsent draft is stored in this browser. This browser cannot tell whether another tab of this document is using it, so it was not restored and your edits here are not stored locally. You can keep editing or download the earlier draft; it cannot be deleted from here.</p><Button onClick={() => {
       try {
         const earlier = sync.unverifiedDrafts.map(draft => {
           const local = documentSchema.load(draft.snapshot)
@@ -113,9 +113,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
         })
         download(`${slug}-earlier-draft.json`, JSON.stringify(earlier, null, 2))
       } catch { setActionError("Could not read the earlier draft. It remains stored in this browser.") }
-    }}>Download earlier draft</Button><Button variant="outline" onClick={() => {
-      if (window.confirm("Make sure no other tab of this document is open. If another tab is still using it, its unsent edits will be lost. Discard?")) void sync.discardUnverifiedDrafts().catch(() => setActionError("Could not discard the earlier draft."))
-    }}>Discard earlier draft</Button></div>}
+    }}>Download earlier draft</Button></div>}
     <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
       head={sync.state} blocked={sync.pending > 0 || sync.recovery || !sync.editable || restoring}
       onStart={() => { if (!restoring) restoreVersion.current = localVersion.current; editor?.setEditable(false); setRestoring(true) }}

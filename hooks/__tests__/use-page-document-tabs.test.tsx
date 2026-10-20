@@ -87,28 +87,29 @@ it("tab B sees tab A's unconfirmed batch as recovery only after tab A closes", a
   } finally { b.unmount(); server.destroy() }
 })
 
-it("without a lock the page stays editable in memory; earlier rows are download-only until an explicit discard", async () => {
+it("without Web Locks a live tab A's journal survives tab B entirely: B only downloads, never deletes", async () => {
   vi.stubGlobal("navigator", {})
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
-  const a = baseRenderHook(() => usePageDocument("w", "slug", "page"), { wrapper: ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, children) })
+  const wrap = (client: QueryClient) => ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children)
+  const a = baseRenderHook(() => usePageDocument("w", "slug", "page"), { wrapper: wrap(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) })
   await waitFor(() => expect(a.result.current.editable).toBe(true), { timeout: 4000 })
   act(() => text(a.result.current.doc).insert(4, " a"))
   await waitFor(() => expect(a.result.current.durability).toBe("local"), { timeout: 4000 })
-  a.unmount()
-  const b = renderHook(() => usePageDocument("w", "slug", "page"), { wrapper: Fragment })
+  const live = [...rows.keys()]
+  expect(live).toHaveLength(1)
+  const b = baseRenderHook(() => usePageDocument("w", "slug", "page"), { wrapper: wrap(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) })
   try {
     await waitFor(() => expect(b.result.current.unverifiedDrafts).toHaveLength(1), { timeout: 4000 })
     expect(b.result.current.editable).toBe(true)
     expect(b.result.current.recovery).toBe(false)
     expect(b.result.current.recoveredDrafts).toHaveLength(0)
     expect(b.result.current.storageUnavailable).toBe(true)
-    expect(rows.size).toBe(1)
+    expect("discardUnverifiedDrafts" in b.result.current).toBe(false) // there is no shared delete without a lock
     act(() => text(b.result.current.doc).insert(4, " b"))
     await waitFor(() => expect(b.result.current.durability).toBe("unsaved"))
-    expect(rows.size).toBe(1) // nothing of this mount is written next to rows of unknown owner
-    await act(async () => { await b.result.current.discardUnverifiedDrafts() })
-    expect(b.result.current.unverifiedDrafts).toHaveLength(0)
-    expect(rows.size).toBe(0)
-  } finally { b.unmount(); server.destroy() }
+    b.unmount()
+    expect([...rows.keys()]).toEqual(live) // A's journal is untouched while A is still mounted
+    expect(a.result.current.durability).toBe("local")
+  } finally { a.unmount(); server.destroy() }
 })
