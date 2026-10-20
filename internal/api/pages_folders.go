@@ -730,8 +730,7 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = f.ID
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.publishFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
 	h.replyFolderPage(w, r, wsID, viewer, rec, false)
 }
 
@@ -791,8 +790,7 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = ""
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.publishFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
 	// A `w` holder who just removed a page they reached only through the
 	// folder no longer reaches it: the row comes back with an empty reach,
 	// which is the honest answer to their own action, not a 404.
@@ -989,7 +987,29 @@ func (h *PageHandler) journalFolderChange(ctx context.Context, wsID string, acto
 	}
 }
 
-func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string) {
+// Preserve the canonical audit target while sharing one conservative classification
+// between its public projection and the workspace invalidation.
+func (h *PageHandler) publishFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string) {
+	public := map[string]any{}
+	if rec != nil && rec.ID != "" && !rec.PrivateAudience {
+		current := *rec
+		var hasPanels bool
+		// Read current ownership and extensions together, not a stale pre-move
+		// HasDocument flag. Missing identity or failed classification hides even ID.
+		if err := h.db.QueryRowContext(ctx, `SELECT p.private_audience,COALESCE(p.owner_user_id,''),
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_project_live WHERE page_id=p.id AND published=1),
+ EXISTS(SELECT 1 FROM page_panels WHERE page_id=p.id)
+ FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
+			public = pageWorkspaceInvalidation(&current, hasPanels)
+		}
+	}
+	h.journalFolderMembership(ctx, wsID, actor, rec, op, from, to, public)
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", public)
+}
+
+func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string, public map[string]any) {
 	if h.journal == nil {
 		return
 	}
@@ -999,6 +1019,8 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 	} else if from != "" {
 		summary = fmt.Sprintf("%s moved page %s from folder %s into folder %s", actor.Email, rec.Slug, from, to)
 	}
+	_, publicID := public["page_id"]
+	_, publicSlug := public["slug"]
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryPageFolderMembershipChanged,
@@ -1009,6 +1031,7 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 		Payload: map[string]any{
 			"page": rec.Slug, "page_id": rec.ID, "op": op, "from": from, "to": to,
 			"pages_version": rec.PagesVersion, "actor_user_id": actor.ID,
+			"private_audience": !publicID, "private_output_metadata": !publicSlug,
 		},
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: folder membership change was not journalled", "page", rec.Slug, "op", op, "error", err)

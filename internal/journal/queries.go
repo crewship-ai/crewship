@@ -234,6 +234,7 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 	from := "FROM journal_entries"
 	if match := fts5Query(q.FTSQuery); match != "" {
+		conds = append(conds, publicFolderSearchSQL)
 		// Protected authorization events contain canonical-only snapshots.
 		// Search their summary only, including historical public payload fields.
 		// Keep MATCH in separate SELECTs: FTS5 cannot safely plan it under OR.

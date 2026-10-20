@@ -737,8 +737,7 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 		if m.rec.FolderID != f.ID {
 			m.rec.FolderID = f.ID
 			m.rec.PagesVersion++
-			h.journalFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug)
-			broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": m.rec.ID, "slug": m.rec.Slug})
+			h.publishFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug)
 		}
 		index, err := h.loadPageIndex(r.Context(), wsID, viewer, pageOnly(m.rec.ID))
 		if err != nil {
