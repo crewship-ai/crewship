@@ -25,3 +25,14 @@ export function crewsUnifiedUI(): boolean {
 export function legacyMcpIntegrations(): boolean {
   return process.env.NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS === "true"
 }
+
+/**
+ * Gates Duplicate and the atomic move into a working folder. Both need
+ * endpoints that are only proposed (coordination entries FE-REQ-F4-1/2), so
+ * the controls stay hidden until the server ships them.
+ *
+ * Set `NEXT_PUBLIC_ARTIFACT_COPY_MOVE=true` at build time to show them.
+ */
+export function artifactCopyMove(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACT_COPY_MOVE === "true"
+}
