@@ -1,10 +1,12 @@
 import { test, expect, type Page } from "@playwright/test"
+import { requireThrowawayServer } from "./throwaway-guard"
 
 // The chat's model indicator and catalogue, against a REAL backend.
 //
 // Runs only on a disposable instance from scripts/throwaway-server.sh (a fresh
 // seeded database, own port and data directory), never on a shared dev slot or
-// stage: it sends a message and so creates a conversation.
+// stage: it sends a message and so creates a conversation. The guard in
+// ./throwaway-guard skips it unless CREWSHIP_THROWAWAY_MANIFEST is set.
 //
 // Nothing is mocked. The chat's model is whatever the server's run-preflight
 // reports for the agent; the list comes from GET /api/v1/models for the
@@ -12,6 +14,7 @@ import { test, expect, type Page } from "@playwright/test"
 // /api/v1/llm/models path and must never present a catalogue entry as the
 // model in effect. A seeded offline-demo instance has no provider credential,
 // so the server answers from its curated set and the page must say so.
+requireThrowawayServer()
 test.describe.configure({ mode: "serial" })
 
 const TIMEOUT = 20_000
@@ -67,18 +70,20 @@ async function checkFlow(page: Page, nth: number) {
   // The list is requested only when the menu opens.
   await expect(page.getByRole("button", { name: /^Model: / })).toBeVisible({ timeout: TIMEOUT })
   expect(requests.some((u) => u.includes("/api/v1/models"))).toBe(false)
-  const catalogue = provider
-    ? page.waitForResponse((r) => r.url().includes("/api/v1/models?"), { timeout: TIMEOUT })
-    : null
   if (!snapshot.model) {
     // An agent with no llm_model: say so, do not invent a model.
     await page.getByRole("button", { name: "Model: not set" }).click()
     await expect(page.getByText("No model is set on the agent; the provider default may apply.")).toBeVisible()
     return
   }
+  const catalogue = provider
+    ? page.waitForResponse((r) => r.url().includes("/api/v1/models?"), { timeout: TIMEOUT })
+    : null
   const trigger = page.getByRole("button", { name: `Model: ${snapshot.model}` })
   await expect(trigger).toBeVisible({ timeout: TIMEOUT })
-  await trigger.click()
+  // Open with the keyboard, as a keyboard user does.
+  await trigger.focus()
+  await page.keyboard.press("Enter")
   await expect(page.getByText(`Configured for this chat: ${snapshot.model}`)).toBeVisible()
 
   if (provider && catalogue) {
@@ -90,6 +95,11 @@ async function checkFlow(page: Page, nth: number) {
     const label = body.source === "live" ? "Live list" : "Curated list"
     if (body.models.length) {
       await expect(page.getByText(new RegExp(`${label} from `))).toBeVisible({ timeout: TIMEOUT })
+      // The list is a labelled, focusable scroll region the keyboard reaches.
+      const list = page.getByRole("list", { name: `Models listed for ${provider}` })
+      await expect(list).toBeVisible()
+      await list.focus()
+      await expect(list).toBeFocused()
     } else {
       await expect(page.getByText(/No models are listed for /)).toBeVisible({ timeout: TIMEOUT })
     }
@@ -101,7 +111,9 @@ async function checkFlow(page: Page, nth: number) {
   expect(requests.some((u) => u.includes("/llm/models"))).toBe(false)
   // Opening the list did not change the chat's model.
   await page.keyboard.press("Escape")
-  await expect(page.getByRole("button", { name: `Model: ${snapshot.model}` })).toBeVisible()
+  await expect(page.getByText(/does not mean you may use it/)).toHaveCount(0)
+  // Escape returns focus to the control and leaves the model unchanged.
+  await expect(page.getByRole("button", { name: `Model: ${snapshot.model}` })).toBeFocused()
 }
 
 test("desktop: configured model is current and the catalogue is labelled", async ({ page }) => {

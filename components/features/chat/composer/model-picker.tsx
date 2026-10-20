@@ -5,12 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Check, ChevronDown, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { apiFetch } from "@/lib/api-fetch"
 
 import { useChatRunPreflight } from "../run-preflight"
@@ -55,29 +50,29 @@ export function ModelPicker({ chatId, workspaceId, userId }: {
   const label = configured ? `Model: ${configured}` : modelUnset ? "Model: not set" : "Model: unknown"
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button type="button" variant="ghost" size="sm" aria-label={label}
           className="h-7 max-w-full gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground coarse:min-h-12">
           <Sparkles className="h-3 w-3" />
           <span className="truncate font-mono">{configured || (modelUnset ? "Model not set" : "Model unknown")}</span>
           <ChevronDown className="h-3 w-3" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-[60vh] min-w-[260px] max-w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">
-        <DropdownMenuLabel className="text-xs">
+      </PopoverTrigger>
+      <PopoverContent align="start" aria-label="Chat model and provider model list" className="w-80 space-y-1 p-2 text-xs">
+        <p className="px-2 py-1.5 font-medium">
           {configured
             ? `Configured for this chat: ${configured}`
             : modelUnset
               ? "No model is set on the agent; the provider default may apply."
               : "The configured model could not be read."}
-        </DropdownMenuLabel>
+        </p>
         <CatalogueBody provider={provider} configured={configured} query={catalogue} preflightPending={preflight.isPending} />
         <p className="px-2 py-1.5 text-xs text-muted-foreground">
           A listed model does not mean you may use it or that this chat will run it.
         </p>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -104,7 +99,7 @@ function CatalogueBody({ provider, configured, query, preflightPending }: {
       {configured && !models.some((m) => m.id === configured) && (
         <p className={note}>{configured} is not in this list.</p>
       )}
-      <ul>
+      <ul tabIndex={0} aria-label={`Models listed for ${provider}`} className="max-h-[50vh] overflow-y-auto rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
         {models.map((m) => (
           <li key={m.id} className="flex items-start gap-2 px-2 py-1.5">
             <div className="min-w-0 flex-1">
@@ -113,7 +108,12 @@ function CatalogueBody({ provider, configured, query, preflightPending }: {
                 <span className="block truncate font-mono text-xs text-muted-foreground">{m.id}</span>
               )}
             </div>
-            {m.id === configured && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-label="Configured for this chat" />}
+            {m.id === configured && (
+              <span className="mt-0.5 shrink-0 text-primary">
+                <Check className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Configured for this chat</span>
+              </span>
+            )}
           </li>
         ))}
       </ul>

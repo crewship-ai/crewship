@@ -27,10 +27,12 @@ function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(<QueryClientProvider client={client}><ModelPicker chatId="chat" workspaceId="ws" userId="u" /></QueryClientProvider>)
 }
+// jsdom cannot turn Enter into a click; the real keyboard path is in the e2e.
 // The trigger's name is "Model: unknown" until run-preflight answers.
 const open = async (name: RegExp = /Model: (?!unknown)/) => {
   const trigger = await screen.findByRole("button", { name })
-  fireEvent.keyDown(trigger, { key: "Enter" })
+  trigger.focus()
+  fireEvent.click(trigger)
 }
 const modelCalls = () => fetch.mock.calls.map(([u]) => String(u)).filter((u) => !u.includes("run-preflight"))
 
@@ -86,6 +88,7 @@ it("does not claim the listed models are permitted or in effect", async () => {
   await open()
   expect(await screen.findByText(/does not mean you may use it/)).toBeInTheDocument()
   expect(await screen.findAllByRole("listitem")).toHaveLength(2)
+  expect(screen.queryAllByRole("menu")).toHaveLength(0)
   expect(screen.queryAllByRole("menuitem")).toHaveLength(0)
   expect(screen.getByText(/not a permission check/)).toBeInTheDocument()
 })
@@ -151,4 +154,36 @@ it("says the configured model could not be read when preflight fails", async () 
   setup()
   await open(/Model: unknown/)
   expect(await screen.findByText("The configured model could not be read.")).toBeInTheDocument()
+})
+
+it("offers a focusable, labelled, scrollable list and marks the configured row in text", async () => {
+  route(() => json(preflight()), () => json(catalogue("curated", ["claude-sonnet-4-6", "other"])))
+  setup()
+  await open()
+  const list = await screen.findByRole("list", { name: "Models listed for ANTHROPIC" })
+  expect(list).toHaveAttribute("tabindex", "0")
+  expect(list.className).toContain("overflow-y-auto")
+  list.focus()
+  expect(list).toHaveFocus()
+  expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Configured for this chat")
+  expect(screen.getAllByRole("listitem")[1]).not.toHaveTextContent("Configured for this chat")
+})
+
+it("closes on Escape and returns focus to the trigger", async () => {
+  route(() => json(preflight()), () => json(catalogue("curated", ["claude-sonnet-4-6"])))
+  setup()
+  await open()
+  const list = await screen.findByRole("list", { name: /Models listed/ })
+  list.focus()
+  fireEvent.keyDown(list, { key: "Escape" })
+  await waitFor(() => expect(screen.queryByRole("list", { name: /Models listed/ })).not.toBeInTheDocument())
+  expect(screen.getByRole("button", { name: /Model: claude-sonnet-4-6/ })).toHaveFocus()
+})
+
+it("keeps status and notes readable inside the panel", async () => {
+  route(() => json(preflight()), () => json({ detail: "x" }, 502))
+  setup()
+  await open()
+  const status = await screen.findByText(/Provider unreachable/)
+  expect(status.closest('[role="dialog"]')).not.toBeNull()
 })
