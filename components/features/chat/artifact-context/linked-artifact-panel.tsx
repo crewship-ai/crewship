@@ -2,8 +2,7 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react"
 import { ArrowLeft, Maximize2, Minimize2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
-import { DocumentViewer } from "../artifact-viewer/document-viewer"
+import { SavedDocumentPanel } from "../artifacts/saved-document-panel"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { checkpointFetcher } from "./client"
 import { readExactRevision, type ExactRevisionRead } from "./exact-revision"
@@ -90,9 +89,9 @@ export function LinkedArtifactPanel(props: PanelProps) {
   return <LatestPanel {...props} extra={extra} />
 }
 
+/** The explicit latest of a linked item: the same saved-document panel as a saved Document, with the linked-item controls in its header. */
 function LatestPanel({ workspaceId, chatId, currentUserId, active, layout, expanded, onExpandedChange, onClose, openerRef, extra }: PanelProps & { extra: (ready: boolean) => React.ReactNode }) {
   const viewerTarget = useMemo(() => ({ workspaceId: active.target.workspaceId, pageId: active.target.pageId, type: "document" as const, mode: "latest" as const }), [active.target])
-  const { scopeKey, read } = useDocumentViewerRead({ workspaceId, chatId, currentUserId, activationKey: String(active.activation), target: viewerTarget, enabled: true })
-  return <DocumentViewer target={viewerTarget} scopeKey={scopeKey} read={read} layout={layout} expanded={expanded} onExpandedChange={onExpandedChange} onClose={onClose} openerRef={openerRef} headerExtra={extra(read.status === "ready")}
-    renderBody={body => <DocumentReadonly schema={body.content.schema} content={body.content.content} accessibleLabel="Saved document body" />} />
+  return <SavedDocumentPanel workspaceId={workspaceId} chatId={chatId} currentUserId={currentUserId} activationKey={String(active.activation)} target={viewerTarget} enabled
+    layout={layout} expanded={expanded} onExpandedChange={onExpandedChange} onClose={onClose} openerRef={openerRef} headerExtra={extra} />
 }
