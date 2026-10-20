@@ -386,7 +386,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Share
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && (
+            {selectedSlug && !editing && !nativeDocument && !nativeSlides && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}

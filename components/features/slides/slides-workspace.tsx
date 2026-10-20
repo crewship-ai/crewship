@@ -80,7 +80,8 @@ export function SlidesWorkspace({ pageId, client, saveEnabled = slidesEditorSave
       if (result.status === "conflict") return { ...current, save: "failed", conflict: result.current }
       // A missing route is not a revoked page: the draft stays and nothing is claimed as saved.
       if (result.status === "unavailable" && result.reason === "not_implemented") return { ...current, save: "failed", message: "Saving is not available on this server yet. Your changes were not saved; the draft is kept here." }
-      if (result.status === "unavailable") return { name: "unavailable" }
+      // The page may be gone or revoked, but the draft is the user's work: keep it with a neutral message.
+      if (result.status === "unavailable") return { ...current, save: "failed", message: result.reason === "signed_out" ? "Your session has ended. Sign in again to save; the draft is kept here." : "You can't save this presentation. Your changes were not saved; the draft is kept here." }
       return { ...current, save: "failed", message: result.retryable ? "Saving failed. Your draft is kept; try again." : `This change cannot be saved: ${result.message}` }
     })
   }
