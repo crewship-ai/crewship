@@ -23,6 +23,8 @@ CREATE TABLE document_iteration_intents (
  CHECK((run_id IS NULL)=(expires_at IS NULL))
 );
 CREATE INDEX document_iteration_page ON document_iteration_intents(workspace_id,page_id);
+CREATE INDEX document_iteration_chat ON document_iteration_intents(chat_id);
+CREATE INDEX document_iteration_human ON document_iteration_intents(human_user_id);
 CREATE TRIGGER document_iteration_identity_immutable BEFORE UPDATE OF message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,schema_version,document_generation,original_rev,pages_version,policy_version,member_id,member_revision,chat_generation,chat_revision ON document_iteration_intents
 BEGIN SELECT RAISE(ABORT,'document iteration identity is immutable'); END;
 CREATE TRIGGER document_iteration_binding_immutable BEFORE UPDATE OF run_id,expires_at ON document_iteration_intents
