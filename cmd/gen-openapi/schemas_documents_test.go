@@ -34,3 +34,34 @@ func TestHumanDocumentOperationsHaveVersionedWireContracts(t *testing.T) {
 		})
 	}
 }
+
+// Restore retries must retain the original immutable scope and CAS, rather than
+// recapture the current head after an uncertain acknowledgement.
+func TestDocumentRestoreRequiresOriginalPacketContract(t *testing.T) {
+	c, ok := documentSchemaCatalog()["POST /api/v1/pages/{slug}/document/restore"]
+	if !ok {
+		t.Fatal("restore has no versioned wire contract")
+	}
+	if c.Response["$ref"] != "#/components/schemas/DocumentRestoreReceipt" || !c.RequestRequired {
+		t.Fatal("restore receipt or required request missing")
+	}
+	props, ok := c.Request["properties"].(map[string]any)
+	if !ok || len(props) != 6 || c.Request["additionalProperties"] != false {
+		t.Fatal("restore packet must be closed")
+	}
+	required, ok := c.Request["required"].([]string)
+	if !ok || len(required) != 6 {
+		t.Fatal("all six original fields must be required")
+	}
+	for _, key := range []string{"page_id", "id", "schema", "epoch", "ifRev", "checkpoint"} {
+		found := false
+		for _, name := range required {
+			if key == name {
+				found = true
+			}
+		}
+		if !found || props[key] == nil {
+			t.Fatalf("missing original %s", key)
+		}
+	}
+}

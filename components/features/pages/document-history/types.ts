@@ -30,4 +30,11 @@ export interface DocumentHistoryProps {
   snapshot: HistoryRead<DocumentCheckpointSnapshot>
   onSelect: (checkpointId: string) => void
   onClose: () => void
+  restore?: {
+    allowed: boolean
+    baseKey?: string
+    status: "idle" | "pending" | "uncertain" | "error" | "denied"
+    onConfirm: () => void
+    onRetry: () => void
+  }
 }

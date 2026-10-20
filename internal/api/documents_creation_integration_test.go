@@ -645,6 +645,49 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// Restore through the real human binary, Router, Node and Store. This is
+		// deterministic engine qualification, not a model or browser acceptance.
+		invokeHuman := func(args ...string) []byte {
+			t.Helper()
+			out, err := callHistory(args...)
+			if err != nil {
+				t.Fatalf("actual human restore CLI: %v %s", err, out)
+			}
+			return out
+		}
+		beforeRaw := invokeHuman("read", "@"+created.PageID)
+		var beforeRestore DocumentStateResponse
+		if json.Unmarshal(beforeRaw, &beforeRestore) != nil {
+			t.Fatal("read before restore")
+		}
+		restorePacket := map[string]any{"page_id": created.PageID, "id": "human-restore-pin", "schema": beforeRestore.Schema, "epoch": beforeRestore.Epoch, "ifRev": beforeRestore.Rev, "checkpoint": packet.Checkpoint.ID}
+		restoreRaw, _ := json.Marshal(restorePacket)
+		restoreFile := filepath.Join(dir, "human-restore.json")
+		if err := os.WriteFile(restoreFile, restoreRaw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			out := invokeHuman("restore", "@"+created.PageID, "--file", restoreFile)
+			var receipt documentRestoreResponse
+			if json.Unmarshal(out, &receipt) != nil || receipt.PageID != created.PageID || receipt.ID != "human-restore-pin" || receipt.Rev != beforeRestore.Rev+1 || receipt.Kind != "restore" || receipt.Epoch == beforeRestore.Epoch {
+				t.Fatal("restore/replay lacked exact new revision receipt")
+			}
+		}
+		var restored DocumentStateResponse
+		if out := invokeHuman("read", "@"+created.PageID); json.Unmarshal(out, &restored) != nil || restored.Rev != beforeRestore.Rev+1 || restored.Generation != beforeRestore.Generation+1 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
+			t.Fatal("restored head/projection/generation differ")
+		}
+		oldPatch := map[string]any{"id": "pre-restore-human-write", "schema": beforeRestore.Schema, "epoch": beforeRestore.Epoch, "kind": "human", "update": "", "page_id": created.PageID}
+		if _, status, err := request(host.URL, "POST", "/api/v1/pages/@"+created.PageID+"/document/patch", human, "", oldPatch); err != nil || status != 409 {
+			t.Fatalf("old write epoch survived restore: %d %v", status, err)
+		}
+		var receipts, writerLength int
+		if err := h.db.QueryRow(`SELECT count(*) FROM document_receipts WHERE page_id=? AND id='human-restore-pin'`, created.PageID).Scan(&receipts); err != nil || receipts != 1 {
+			t.Fatal("restore retry created duplicate receipt")
+		}
+		if err := h.db.QueryRow(`SELECT length(writer) FROM documents WHERE page_id=?`, created.PageID).Scan(&writerLength); err != nil || writerLength != 0 {
+			t.Fatal("restore retained the old writer lease")
+		}
 		// A formerly readable checkpoint cannot outlive its human credential.
 		if err := sessions.NewDBStore(h.db).Revoke(t.Context(), session.ID, "history reader revoked"); err != nil {
 			t.Fatal(err)

@@ -31,6 +31,7 @@ func documentSchemaComponents() map[string]any {
 	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
 	selected["additionalProperties"] = false
 	return map[string]any{
+		"DocumentRestoreReceipt":      obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "epoch": str(), "kind": map[string]any{"type": "string", "enum": []string{"restore"}}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "duplicate": boolean()}, "page_id", "id", "rev", "epoch", "kind"),
 		"DocumentCheckpointList":      history,
 		"DocumentCheckpoint":          selected,
 		"DocumentChatResults":         obj(map[string]any{"results": map[string]any{"type": "array", "maxItems": 20, "items": result}}, "results"),
@@ -58,6 +59,19 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	get(base, "DocumentState")
 	get(base+"/checkpoints", "DocumentCheckpointList")
 	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
+	out["POST "+base+"/restore"] = DomainSchema{
+		Request: map[string]any{"type": "object", "additionalProperties": false,
+			"required": []string{"page_id", "id", "schema", "epoch", "ifRev", "checkpoint"},
+			"properties": map[string]any{
+				"page_id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "epoch": map[string]any{"type": "string", "minLength": 1, "maxLength": 256}, "checkpoint": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"},
+				"schema": map[string]any{"type": "integer", "enum": []int{2, 3}},
+				"ifRev":  map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740990},
+			}},
+		RequestRequired: true, Response: ref("DocumentRestoreReceipt"),
+		SuccessStatuses: []string{"200"},
+		ErrorStatuses:   []string{"400", "401", "403", "404", "409", "413", "422", "429", "500", "502", "503"},
+		SuccessHeaders:  map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
+	}
 	for _, path := range []string{base + "/checkpoints", base + "/checkpoints/{checkpoint}"} {
 		contract := out["GET "+path]
 		contract.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
