@@ -323,6 +323,7 @@ func buildDocument(routes []route) map[string]any {
 		memberAccessSchemaComponents(), presetSelectionSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
 		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		chatSourceSchemaComponents(),
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -738,6 +739,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range presetRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range chatSourceSchemaRoutes() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+
 	return result
 }
 

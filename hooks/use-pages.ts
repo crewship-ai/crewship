@@ -129,6 +129,8 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  /** Explicit server classification, independent of folder or owner. */
+  private_audience?: boolean
   has_document?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
@@ -471,6 +473,10 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  /** Actual validated wire ID only; never the legacy slug-derived row key. */
+  immutablePageId?: string
+  /** Unknown on legacy servers; never infer from ownership or folder. */
+  privateAudience?: boolean
   /** Confirmed native Document descriptor; missing means a legacy Page. */
   hasDocument?: boolean
   id: string
@@ -618,7 +624,9 @@ export function toPageView(raw: WirePage): PageView {
   const slug = trimmed(raw.slug) ?? ""
   return {
     id: trimmed(raw.id) ?? slug,
+    immutablePageId: typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(raw.id) ? raw.id : undefined,
     hasDocument: raw.has_document === true,
+    privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
@@ -1004,7 +1012,7 @@ export const pagesKeys = {
   all: (workspaceId: string) => ["pages", workspaceId] as const,
   // Omitting the human retains the existing invalidation prefix; reads always
   // append their authenticated human so private metadata cannot cross sessions.
-  list: (workspaceId: string, humanId?: string) => ["pages", workspaceId, { view: "list" }, ...(humanId === undefined ? [] : [humanId])] as const,
+  list: (workspaceId: string, humanId?: string, audience?: "personal") => ["pages", workspaceId, { view: "list" }, ...(humanId === undefined ? [] : [humanId]), ...(audience ? [{ audience }] : [])] as const,
   detail: (workspaceId: string, slug: string, humanId?: string) => ["pages", workspaceId, { slug }, ...(humanId === undefined ? [] : [humanId])] as const,
 }
 
@@ -1090,15 +1098,16 @@ export interface UsePagesResult {
  * query string, the same way the CLI appends it and the same way `/api/v1/inbox`
  * is called from this app.
  */
-export function usePages(workspaceId: string | null | undefined): UsePagesResult {
+export function usePages(workspaceId: string | null | undefined, audience?: "personal"): UsePagesResult {
   const qc = useQueryClient()
   const { humanId, current } = usePagesHumanIdentity()
-  const queryKey = pagesKeys.list(workspaceId ?? "", humanId ?? "")
+  const queryKey = pagesKeys.list(workspaceId ?? "", humanId ?? "", audience)
   const query = useQuery({
     queryKey,
     queryFn: async ({ signal }) => {
       if (!humanId || current.current !== humanId) throw new PagesRequestError(401, "Current human required.")
       const params = new URLSearchParams({ workspace_id: workspaceId! })
+      if (audience) params.set("audience", audience)
       const body = await fetchJSON(`/api/v1/pages?${params.toString()}`, signal, "pages", () => qc.setQueryData(queryKey, []))
       return normalizePageList(body)
     },

@@ -88,7 +88,7 @@ func TestProviderBindingSurvivesReconstructionAndSeparatesHumans(t *testing.T) {
 func TestProviderRevocationCannotBeUndoneByRegrant(t *testing.T) {
 	for name, statements := range map[string][]string{
 		"credential status":             {`UPDATE credentials SET status='EXPIRED' WHERE id='key'`, `UPDATE credentials SET status='ACTIVE' WHERE id='key'`},
-		"credential soft delete":        {`UPDATE credentials SET deleted_at='now' WHERE id='key'`, `UPDATE credentials SET deleted_at=NULL WHERE id='key'`},
+		"credential soft delete":        {`UPDATE credentials SET deleted_at='now' WHERE id='key'`, `DELETE FROM agent_credentials WHERE id='grant'`, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant','a','key','OPENAI_API_KEY')`},
 		"credential rotate and restore": {`UPDATE credentials SET encrypted_value='different' WHERE id='key'`, `UPDATE credentials SET encrypted_value=(SELECT encrypted_value FROM saved_key) WHERE id='key'`},
 		"grant replace same id":         {`INSERT OR REPLACE INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant','a','key','OPENAI_API_KEY')`},
 		"grant delete reinsert":         {`DELETE FROM agent_credentials WHERE id='grant'`, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant','a','key','OPENAI_API_KEY')`},
@@ -117,8 +117,23 @@ func TestProviderRevocationCannotBeUndoneByRegrant(t *testing.T) {
 					t.Fatal("old provider secret revived")
 				}
 			}
+			freshID := "key"
+			if name == "credential soft delete" {
+				// A new account is legitimate; restoring the erased old secret is not.
+				cipher, err := encryption.Encrypt("fresh-synthetic-key")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := a.Store.DB.ExecContext(t.Context(), `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('fresh-key','w','Fresh key',?,'API_KEY','OPENAI','owner')`, cipher); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := a.Store.DB.ExecContext(t.Context(), `DELETE FROM agent_credentials WHERE id='grant'; INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('fresh-grant','a','fresh-key','OPENAI_API_KEY')`); err != nil {
+					t.Fatal(err)
+				}
+				freshID = "fresh-key"
+			}
 			fresh, _ := prepareProvider(t, a, "h1", "c1", "", 128)
-			if _, err := a.BrokerSecret(t.Context(), fresh, "key"); err != nil {
+			if _, err := a.BrokerSecret(t.Context(), fresh, freshID); err != nil {
 				t.Fatal("fresh authorized attempt denied", err)
 			}
 		})

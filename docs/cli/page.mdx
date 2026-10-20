@@ -39,7 +39,7 @@ exception in the other direction: it prints YAML unless you ask for
 
 | Command | Purpose |
 |---|---|
-| `list` | List pages in the workspace |
+| `list [--audience all\|personal] [--limit <1-500>] [--offset <n>]` | List authorized pages; personal includes only your explicitly private Pages, excluding foreign OWNER custody |
 | `get <slug>` | Show one page's definition and panels; `get @<page-id>` reads an immutable identity with the same access checks |
 | `create --file <file>` | Create a page from a YAML definition |
 | `update <slug>` | Change an existing page's definition, or its icon and colour |
@@ -107,7 +107,14 @@ Backed by `GET /api/v1/pages`. Returns the pages you may see — a page you
 have no `read` grant for and no crew membership on any of its panels for is
 not in the list.
 
-`list` takes no flags of its own. Columns are `SLUG  NAME  PANELS  STATE
+Optional `--audience personal|all` selects your private human-owned Pages or
+the usual visible catalog. `personal` does not include another author’s private
+Pages reachable through the OWNER override. Optional `--limit` (1–500) and
+`--offset` (zero or greater) enable bounded pagination. With no options, the
+legacy unpaged JSON array is preserved. Counts and pagination follow current
+authorization; no hidden private title is included.
+
+Columns are `SLUG  NAME  PANELS  STATE
 OWNER  REACH  LAST DATA`, where `PANELS` counts every panel on the page
 including the ones sealed to you, and `REACH` says how *you* reach the page —
 `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`,

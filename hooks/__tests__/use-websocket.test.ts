@@ -265,4 +265,41 @@ describe("useWebSocket", () => {
     expect(mockInstances[0].sent[0]).toBe(JSON.stringify({ type: "auth", token: "t" }))
     expect(mockInstances[0].sent[1]).toBe(JSON.stringify({ type: "ping" }))
   })
+  it("ignores already queued callbacks from an old authority socket", async () => {
+    const oldHandler = vi.fn(), newHandler = vi.fn(), connected = vi.fn()
+    const hook = renderHook(({ enabled, handler }) => useWebSocket({ enabled, url: "ws://localhost/ws", getToken: tokenFn("synthetic"), onMessage: handler, onConnect: connected }), { initialProps: { enabled: true, handler: oldHandler } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const old = mockInstances[0]
+    act(() => old.simulateOpen())
+    const queued = { message: old.onmessage!, close: old.onclose!, error: old.onerror!, open: old.onopen! }
+    hook.rerender({ enabled: false, handler: newHandler })
+    hook.rerender({ enabled: true, handler: newHandler })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const current = mockInstances[1]
+    act(() => current.simulateOpen())
+    const connectedCount = connected.mock.calls.length
+    act(() => {
+      queued.message({ data: JSON.stringify({ type: "chat_event", payload: "old private" }) })
+      queued.error(); queued.open(); queued.close({ code: 4401, reason: "" })
+    })
+    expect(newHandler).not.toHaveBeenCalled()
+    expect(connected).toHaveBeenCalledTimes(connectedCount)
+    expect(hook.result.current.status).toBe("connected")
+    act(() => current.simulateMessage({ type: "current" }))
+    expect(newHandler).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "current" }))
+  })
+
+  it("does not let an older deferred ticket replace the current authority socket", async () => {
+    let resolveOld!: (value: string) => void
+    const pending = new Promise<string>(resolve => { resolveOld = resolve })
+    const oldTicket = vi.fn(() => pending)
+    const hook = renderHook(({ enabled, getToken }) => useWebSocket({ enabled, getToken, url: "ws://localhost/ws" }), { initialProps: { enabled: true, getToken: oldTicket as () => Promise<string> } })
+    hook.rerender({ enabled: false, getToken: tokenFn("new") as () => Promise<string> })
+    hook.rerender({ enabled: true, getToken: tokenFn("new") as () => Promise<string> })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(mockInstances).toHaveLength(1)
+    await act(async () => { resolveOld("old"); await Promise.resolve() })
+    expect(mockInstances).toHaveLength(1)
+  })
+
 })

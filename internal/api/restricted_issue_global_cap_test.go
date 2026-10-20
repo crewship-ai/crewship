@@ -66,9 +66,9 @@ func TestSharedSearchGlobalCleanupAndNoDeniedCharge(t *testing.T) {
 	now = now.Add(time.Minute)
 	take("b", "p2", true)
 	now = now.Add(3 * time.Minute)
-	take("b", "p4", false) // Recent denied request keeps the account active, not its old buckets.
+	take("b", "p4", false) // A refusal does not refresh the account or its old buckets.
 	now = now.Add(2 * time.Minute)
-	take("b", "p4", true) // Both old buckets expire inside active account b.
+	take("b", "p4", true) // The idle account and both old buckets can now expire.
 	if s.total != 1 {
 		t.Fatal("partial account cleanup retained expired audiences")
 	}

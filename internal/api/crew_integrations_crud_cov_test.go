@@ -188,10 +188,9 @@ func TestCovCIC_Delete_OAuthCredentialCascade(t *testing.T) {
 
 }
 
-// TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds — the
-// credential retirement UPDATE fails (trigger) but the integration delete
-// still completes (warn-only contract).
-func TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds(t *testing.T) {
+// Retirement failure must preserve the integration and its bindings; deletion
+// cannot report success while leaving its credential live without an audit.
+func TestCovCIC_Delete_SoloCredentialDeleteBlocked_RollsBack(t *testing.T) {
 	h, userID, wsID, crewID := covCICFixture(t)
 	db := h.db
 	covCfgSeedCrewServer(t, db, "covcic-d3", crewID, "covcicd3", "stdio", "")
@@ -207,13 +206,13 @@ func TestCovCIC_Delete_SoloCredentialDeleteBlocked_WarnsAndProceeds(t *testing.T
 		BEGIN SELECT RAISE(ABORT, 'covcic forced'); END`)
 
 	rr := covCICDelete(h, userID, wsID, crewID, "covcic-d3")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (credential delete is best-effort); body=%s",
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (credential retirement is atomic); body=%s",
 			rr.Code, rr.Body.String())
 	}
 	var n int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id = 'covcic-d3'`).Scan(&n); err != nil || n != 0 {
-		t.Errorf("server rows = %d err=%v, want deleted", n, err)
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM crew_mcp_servers WHERE id = 'covcic-d3'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("server rows = %d err=%v, want preserved", n, err)
 	}
 }
 
