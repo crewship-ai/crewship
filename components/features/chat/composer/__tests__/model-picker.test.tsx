@@ -25,11 +25,14 @@ function route(pf: () => Response, models: () => Response | Promise<Response>) {
 }
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  return render(<QueryClientProvider client={client}><ModelPicker chatId="chat" workspaceId="ws" userId="u" /></QueryClientProvider>)
+  const ui = (userId: string) => <QueryClientProvider client={client}><ModelPicker chatId="chat" workspaceId="ws" userId={userId} /></QueryClientProvider>
+  const view = render(ui("u"))
+  return { ...view, client, as: (userId: string) => view.rerender(ui(userId)) }
 }
+const cached = (client: QueryClient) => client.getQueryCache().findAll({ queryKey: ["model-catalogue"] })
 // jsdom cannot turn Enter into a click; the real keyboard path is in the e2e.
-// The trigger's name is "Model: unknown" until run-preflight answers.
-const open = async (name: RegExp = /Model: (?!unknown)/) => {
+// The trigger's name is "Configured model: unknown" until run-preflight answers.
+const open = async (name: RegExp = /Configured model: (?!unknown)/) => {
   const trigger = await screen.findByRole("button", { name })
   trigger.focus()
   fireEvent.click(trigger)
@@ -51,10 +54,10 @@ it("never calls the dead /llm/models path and asks /models for the configured pr
 it("shows the configured model from run-preflight as current and does not pick models[0]", async () => {
   route(() => json(preflight({ model: "claude-sonnet-4-6" })), () => json(catalogue("live", ["aaa-first", "claude-sonnet-4-6"])))
   setup()
-  expect(await screen.findByRole("button", { name: /Model: claude-sonnet-4-6/ })).toBeInTheDocument()
+  expect(await screen.findByRole("button", { name: /Configured model: claude-sonnet-4-6/ })).toBeInTheDocument()
   await open()
   await screen.findByText(/Live list/)
-  expect(screen.getByRole("button", { name: /Model: claude-sonnet-4-6/, hidden: true })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: /Configured model: claude-sonnet-4-6/, hidden: true })).toBeInTheDocument()
   expect(useComposerStore.getState().modelId).toBeNull()
 })
 
@@ -63,8 +66,8 @@ it("keeps the configured model and says so when the catalogue fails", async () =
   setup()
   await open()
   expect(await screen.findByText(/Could not load the model list/)).toBeInTheDocument()
-  expect(screen.getByText(/still uses claude-sonnet-4-6/)).toBeInTheDocument()
-  expect(screen.getByRole("button", { name: /Model: claude-sonnet-4-6/, hidden: true })).toBeInTheDocument()
+  expect(screen.getByText(/Configured model: claude-sonnet-4-6\./)).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: /Configured model: claude-sonnet-4-6/, hidden: true })).toBeInTheDocument()
   expect(useComposerStore.getState().modelId).toBeNull()
 })
 
@@ -118,7 +121,7 @@ it("renders nothing when the chat is not readable", async () => {
 it("makes no /models request until the menu opens", async () => {
   route(() => json(preflight()), () => json(catalogue("curated", ["claude-sonnet-4-6"])))
   setup()
-  await screen.findByRole("button", { name: /Model: claude-sonnet-4-6/ })
+  await screen.findByRole("button", { name: /Configured model: claude-sonnet-4-6/ })
   expect(modelCalls()).toEqual([])
   await open()
   await screen.findByText(/Curated list/)
@@ -138,13 +141,13 @@ it("says the provider is unreachable (502)", async () => {
   setup()
   await open()
   expect(await screen.findByText(/Provider unreachable\./)).toBeInTheDocument()
-  expect(screen.getByText(/still uses claude-sonnet-4-6/)).toBeInTheDocument()
+  expect(screen.getByText(/Configured model: claude-sonnet-4-6\./)).toBeInTheDocument()
 })
 
 it("distinguishes an agent with no model set from a preflight failure", async () => {
   route(() => json(preflight({ model: "" })), () => json(catalogue("curated", ["x"])))
   setup()
-  await open(/Model: not set/)
+  await open(/Configured model: not set/)
   expect(await screen.findByText("No model is set on the agent; the provider default may apply.")).toBeInTheDocument()
   expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument()
 })
@@ -152,7 +155,7 @@ it("distinguishes an agent with no model set from a preflight failure", async ()
 it("says the configured model could not be read when preflight fails", async () => {
   route(() => json({ error: "x" }, 503), () => json(catalogue("curated", ["x"])))
   setup()
-  await open(/Model: unknown/)
+  await open(/Configured model: unknown/)
   expect(await screen.findByText("The configured model could not be read.")).toBeInTheDocument()
 })
 
@@ -177,7 +180,7 @@ it("closes on Escape and returns focus to the trigger", async () => {
   list.focus()
   fireEvent.keyDown(list, { key: "Escape" })
   await waitFor(() => expect(screen.queryByRole("list", { name: /Models listed/ })).not.toBeInTheDocument())
-  expect(screen.getByRole("button", { name: /Model: claude-sonnet-4-6/ })).toHaveFocus()
+  expect(screen.getByRole("button", { name: /Configured model: claude-sonnet-4-6/ })).toHaveFocus()
 })
 
 it("keeps status and notes readable inside the panel", async () => {
@@ -186,4 +189,53 @@ it("keeps status and notes readable inside the panel", async () => {
   await open()
   const status = await screen.findByText(/Provider unreachable/)
   expect(status.closest('[role="dialog"]')).not.toBeNull()
+})
+
+it("keys the catalogue by user: a different principal does not reuse the cached list", async () => {
+  route(() => json(preflight()), () => json(catalogue("curated", ["claude-sonnet-4-6"])))
+  const { client, as } = setup()
+  await open()
+  await screen.findByText(/Curated list/)
+  expect(modelCalls()).toHaveLength(1)
+  as("other")
+  await waitFor(() => expect(modelCalls()).toHaveLength(2))
+  expect(cached(client).map((q) => q.queryKey[1])).toContain("other")
+})
+
+it("drops the cached catalogue and shows nothing after the chat becomes inaccessible", async () => {
+  let denied = false
+  route(() => (denied ? json({ error: "no" }, 403) : json(preflight())), () => json(catalogue("curated", ["claude-sonnet-4-6"])))
+  const { client, container } = setup()
+  await open()
+  await screen.findByText(/Curated list/)
+  expect(cached(client)).toHaveLength(1)
+  denied = true
+  await client.invalidateQueries({ queryKey: ["chat-run-preflight"] })
+  await waitFor(() => expect(container).toBeEmptyDOMElement())
+  expect(cached(client)).toHaveLength(0)
+  expect(screen.queryByText(/Curated list/)).not.toBeInTheDocument()
+})
+
+it("cancels a catalogue request that is still in flight when access is denied", async () => {
+  let denied = false
+  let release: (r: Response) => void = () => {}
+  route(() => (denied ? json({ error: "no" }, 404) : json(preflight())), () => new Promise<Response>((r) => { release = r }))
+  const { client, container } = setup()
+  await open()
+  await screen.findByText(/Loading models/)
+  denied = true
+  await client.invalidateQueries({ queryKey: ["chat-run-preflight"] })
+  await waitFor(() => expect(container).toBeEmptyDOMElement())
+  release(json(catalogue("curated", ["late-model"])))
+  await new Promise((r) => setTimeout(r, 20))
+  expect(screen.queryByText(/late-model/)).not.toBeInTheDocument()
+  expect(cached(client)).toHaveLength(0)
+})
+
+it("describes the configured snapshot and does not promise what a run will use", async () => {
+  route(() => json(preflight()), () => json({ detail: "x" }, 500))
+  setup()
+  await open()
+  expect(await screen.findByText(/A run may use a different model/)).toBeInTheDocument()
+  expect(screen.queryByText(/still uses/)).not.toBeInTheDocument()
 })

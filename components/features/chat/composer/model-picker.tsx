@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronDown, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -22,14 +22,32 @@ interface Catalogue { provider: string; source: string; models: CatalogueModel[]
 export function ModelPicker({ chatId, workspaceId, userId }: {
   chatId: string; workspaceId: string; userId: string
 }) {
-  const [open, setOpen] = useState(false)
+  const queryClient = useQueryClient()
   const preflight = useChatRunPreflight({ chatId, workspaceId, userId, enabled: true })
+  const denied = preflight.isError && preflight.error.message === "denied"
+  // Access to the chat is gone: the panel below unmounts (stopping a list that
+  // is still in flight) and whatever was fetched under this principal is
+  // dropped. The key carries the user, so a different principal never reads
+  // this one's cached list either.
+  useEffect(() => {
+    if (!denied) return
+    void queryClient.cancelQueries({ queryKey: ["model-catalogue", userId] })
+    queryClient.removeQueries({ queryKey: ["model-catalogue", userId] })
+  }, [denied, queryClient, userId])
+  if (denied) return null
+  return <ModelPanel workspaceId={workspaceId} userId={userId} preflight={preflight} />
+}
+
+function ModelPanel({ workspaceId, userId, preflight }: {
+  workspaceId: string; userId: string; preflight: ReturnType<typeof useChatRunPreflight>
+}) {
+  const [open, setOpen] = useState(false)
   const configured = preflight.data?.model || ""
   const modelUnset = !!preflight.data && !configured
   const provider = preflight.data?.payer.provider?.trim() || ""
 
   const catalogue = useQuery({
-    queryKey: ["model-catalogue", workspaceId, provider],
+    queryKey: ["model-catalogue", userId, workspaceId, provider],
     // Only when the menu is open: the list is reference, not needed to render.
     enabled: open && !!provider && !!workspaceId,
     retry: false, staleTime: 5 * 60_000,
@@ -46,8 +64,7 @@ export function ModelPicker({ chatId, workspaceId, userId }: {
     },
   })
 
-  if (preflight.isError && preflight.error.message === "denied") return null
-  const label = configured ? `Model: ${configured}` : modelUnset ? "Model: not set" : "Model: unknown"
+  const label = configured ? `Configured model: ${configured}` : modelUnset ? "Configured model: not set" : "Configured model: unknown"
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -62,7 +79,7 @@ export function ModelPicker({ chatId, workspaceId, userId }: {
       <PopoverContent align="start" aria-label="Chat model and provider model list" className="w-80 space-y-1 p-2 text-xs">
         <p className="px-2 py-1.5 font-medium">
           {configured
-            ? `Configured for this chat: ${configured}`
+            ? `Configured for this chat: ${configured}. A run may use a different model.`
             : modelUnset
               ? "No model is set on the agent; the provider default may apply."
               : "The configured model could not be read."}
@@ -86,9 +103,9 @@ function CatalogueBody({ provider, configured, query, preflightPending }: {
   if (!provider) return <p role="status" className={note}>No model list: the provider is not reported for this chat.</p>
   if (query.isPending) return <p role="status" className={note}>Loading models…</p>
   if (query.error?.message === "unsupported") return <p role="status" className={note}>No model list is available for this provider.</p>
-  if (query.error?.message === "unreachable") return <p role="status" className={note}>Provider unreachable.{configured ? ` This chat still uses ${configured}.` : ""}</p>
+  if (query.error?.message === "unreachable") return <p role="status" className={note}>Provider unreachable.{configured ? ` Configured model: ${configured}.` : ""}</p>
   if (query.isError || !query.data) {
-    return <p role="status" className={note}>Could not load the model list.{configured ? ` This chat still uses ${configured}.` : ""}</p>
+    return <p role="status" className={note}>Could not load the model list.{configured ? ` Configured model: ${configured}.` : ""}</p>
   }
   const { models, source } = query.data
   if (!models.length) return <p role="status" className={note}>No models are listed for {provider}.</p>

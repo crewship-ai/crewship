@@ -1,12 +1,21 @@
 import { test, expect, type Page } from "@playwright/test"
-import { requireThrowawayServer } from "./throwaway-guard"
+import { readFileSync } from "node:fs"
+import { throwawayRefusal } from "./throwaway-guard"
 
 // The chat's model indicator and catalogue, against a REAL backend.
 //
 // Runs only on a disposable instance from scripts/throwaway-server.sh (a fresh
 // seeded database, own port and data directory), never on a shared dev slot or
-// stage: it sends a message and so creates a conversation. The guard in
-// ./throwaway-guard skips it unless CREWSHIP_THROWAWAY_MANIFEST is set.
+// stage: it sends a message and so creates a conversation. ./throwaway-guard
+// (the same file as the chat-search suite's) skips it unless the manifest is a
+// running throwaway instance and the base URL is that instance's own server.
+// Run (the server's embedded UI must be a build of this checkout):
+//
+//   scripts/throwaway-server.sh run NAME --binary PATH -- sh -c \
+//     'E2E_CREWSHIP_DATA_DIR=$(jq -r .data_dir "$CREWSHIP_THROWAWAY_MANIFEST") \
+//      PLAYWRIGHT_BASE_URL=$CREWSHIP_SERVER pnpm exec playwright test \
+//        -c playwright.nightly.config.ts e2e/chat-model-picker.spec.ts'
+//
 //
 // Nothing is mocked. The chat's model is whatever the server's run-preflight
 // reports for the agent; the list comes from GET /api/v1/models for the
@@ -14,7 +23,19 @@ import { requireThrowawayServer } from "./throwaway-guard"
 // /api/v1/llm/models path and must never present a catalogue entry as the
 // model in effect. A seeded offline-demo instance has no provider credential,
 // so the server answers from its curated set and the page must say so.
-requireThrowawayServer()
+/** Data dirs of the shared dev slots, from the host's environment registry when present. */
+function sharedSlotDataDirs(): string[] {
+  try {
+    const envs = JSON.parse(readFileSync("/etc/crewship/environments.json", "utf8")) as Record<string, Record<string, unknown>>
+    return Object.values(envs).flatMap((e) => ["state_root", "data_dir", "dataDir"].map((k) => e?.[k]).filter((v): v is string => typeof v === "string"))
+  } catch { return [] }
+}
+
+// Fails closed: the manifest must be a running throwaway instance whose data
+// dir, port and server are the ones this run uses, and the browser's base URL
+// must be that instance's own server (host and port).
+const REFUSAL = throwawayRefusal(process.env, process.env.PLAYWRIGHT_BASE_URL ?? "", sharedSlotDataDirs())
+test.skip(REFUSAL !== "", `chat-model-picker e2e sends messages and only runs on a verified throwaway server: ${REFUSAL}`)
 test.describe.configure({ mode: "serial" })
 
 const TIMEOUT = 20_000
@@ -44,7 +65,7 @@ async function openWithPreflight(page: Page, slug: string) {
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: COLD_ROUTE })
   // A draft has no conversation yet, so there is no configured model to show
   // and the control must not invent one.
-  await expect(page.getByRole("button", { name: /^Model: / })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Configured model: / })).toHaveCount(0)
   // Sending creates the conversation; the seeded instance has no provider, so
   // the agent will not answer, which this test does not need. The reload then
   // opens the saved conversation the way a returning user does.
@@ -68,23 +89,23 @@ async function checkFlow(page: Page, nth: number) {
   // The current model is the configured one, not the first catalogue entry.
   const provider: string | undefined = snapshot.payer?.provider
   // The list is requested only when the menu opens.
-  await expect(page.getByRole("button", { name: /^Model: / })).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("button", { name: /^Configured model: / })).toBeVisible({ timeout: TIMEOUT })
   expect(requests.some((u) => u.includes("/api/v1/models"))).toBe(false)
   if (!snapshot.model) {
     // An agent with no llm_model: say so, do not invent a model.
-    await page.getByRole("button", { name: "Model: not set" }).click()
+    await page.getByRole("button", { name: "Configured model: not set" }).click()
     await expect(page.getByText("No model is set on the agent; the provider default may apply.")).toBeVisible()
     return
   }
   const catalogue = provider
     ? page.waitForResponse((r) => r.url().includes("/api/v1/models?"), { timeout: TIMEOUT })
     : null
-  const trigger = page.getByRole("button", { name: `Model: ${snapshot.model}` })
+  const trigger = page.getByRole("button", { name: `Configured model: ${snapshot.model}` })
   await expect(trigger).toBeVisible({ timeout: TIMEOUT })
   // Open with the keyboard, as a keyboard user does.
   await trigger.focus()
   await page.keyboard.press("Enter")
-  await expect(page.getByText(`Configured for this chat: ${snapshot.model}`)).toBeVisible()
+  await expect(page.getByText(new RegExp(`Configured for this chat: ${snapshot.model}`))).toBeVisible()
 
   if (provider && catalogue) {
     const listed = await catalogue
@@ -113,7 +134,7 @@ async function checkFlow(page: Page, nth: number) {
   await page.keyboard.press("Escape")
   await expect(page.getByText(/does not mean you may use it/)).toHaveCount(0)
   // Escape returns focus to the control and leaves the model unchanged.
-  await expect(page.getByRole("button", { name: `Model: ${snapshot.model}` })).toBeFocused()
+  await expect(page.getByRole("button", { name: `Configured model: ${snapshot.model}` })).toBeFocused()
 }
 
 test("desktop: configured model is current and the catalogue is labelled", async ({ page }) => {
