@@ -26,6 +26,21 @@ export interface DocumentProposalClient {
   reject(id: string, requestId: string): Promise<ProposalDecision>
 }
 
+const STATUSES: readonly string[] = ["open", "accepted", "rejected", "conflict", "stale"]
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
+
+/** The wire is snake_case (FE-REQ-F3-4); anything that does not match is unreadable, never guessed. */
+function proposalFromWire(value: unknown): DocumentProposal {
+  if (!isObject(value)) throw new Error("proposals unreadable")
+  const { id, author, run_id: runId, target, base_rev: baseRev, status, created_at: createdAt } = value
+  const ids = isObject(target) && Array.isArray(target.block_ids) ? target.block_ids : undefined
+  const scope = target === "document" || (isObject(target) && target.kind === "document") ? { kind: "document" as const }
+    : ids && ids.every(item => typeof item === "string") ? { kind: "blocks" as const, blockIds: ids as string[] } : undefined
+  if (typeof id !== "string" || typeof author !== "string" || !scope || !Number.isSafeInteger(baseRev) || typeof status !== "string" || !STATUSES.includes(status) || typeof createdAt !== "string"
+    || (runId !== undefined && runId !== null && typeof runId !== "string")) throw new Error("proposals unreadable")
+  return { id, author, ...(typeof runId === "string" ? { runId } : {}), target: scope, baseRev: baseRev as number, status: status as ProposalStatus, createdAt }
+}
+
 const statusOf = (code: number): ProposalDecision => code === 409 ? { status: "conflict" } : [401, 403, 404].includes(code) ? { status: "denied" } : code === 503 ? { status: "unavailable" } : code >= 500 ? { status: "unknown" } : { status: "error" }
 
 export function createHttpProposalClient(workspaceId: string, pageId: string): DocumentProposalClient {
@@ -45,8 +60,12 @@ export function createHttpProposalClient(workspaceId: string, pageId: string): D
     } catch { return { status: "unknown" } }
   }
   return {
-    list: async () => { const value = await get(""); if (!Array.isArray(value?.proposals)) throw new Error("proposals unreadable"); return value.proposals as DocumentProposal[] },
-    read: async id => await get(`/${encodeURIComponent(id)}`) as DocumentProposalDetail,
+    list: async () => { const value = await get(""); if (!Array.isArray(value?.proposals)) throw new Error("proposals unreadable"); return value.proposals.map(proposalFromWire) },
+    read: async id => {
+      const value = await get(`/${encodeURIComponent(id)}`)
+      if (!isObject(value) || !("base_content" in value) || !("proposed_content" in value)) throw new Error("proposals unreadable")
+      return { ...proposalFromWire(value), baseContent: value.base_content, proposedContent: value.proposed_content }
+    },
     accept: (id, expectedRev, requestId) => decide(`/${encodeURIComponent(id)}/accept`, { expected_rev: expectedRev }, requestId),
     reject: (id, requestId) => decide(`/${encodeURIComponent(id)}/reject`, {}, requestId),
   }

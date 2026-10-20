@@ -37,4 +37,22 @@ describe("proposal client", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ expected_rev: 4, request_id: "rq" })
     reply(200, { rev: 7 }); expect(await client.accept("p1", 4, "rq")).toEqual({ status: "done", rev: 7 })
   })
+  // The wire is the snake_case contract in FE-REQ-F3-4, not the UI model.
+  const wire = { id: "p1", author: "Research agent", run_id: "run-1", target: { block_ids: ["a", "b"] }, base_rev: 4, status: "open", created_at: "2026-10-19T10:00:00Z" }
+  it("reads the listed proposals from the snake_case contract", async () => {
+    reply(200, { proposals: [wire, { ...wire, id: "p2", run_id: undefined, target: "document" }] })
+    expect(await createHttpProposalClient("w", "page").list()).toEqual([
+      { id: "p1", author: "Research agent", runId: "run-1", target: { kind: "blocks", blockIds: ["a", "b"] }, baseRev: 4, status: "open", createdAt: "2026-10-19T10:00:00Z" },
+      { id: "p2", author: "Research agent", target: { kind: "document" }, baseRev: 4, status: "open", createdAt: "2026-10-19T10:00:00Z" },
+    ])
+  })
+  it("reads one proposal with its base and proposed content", async () => {
+    const base = { type: "doc", content: [] }, proposed = { type: "doc", content: [{ type: "paragraph" }] }
+    reply(200, { ...wire, base_content: base, proposed_content: proposed })
+    expect(await createHttpProposalClient("w", "page").read("p1")).toMatchObject({ id: "p1", baseRev: 4, baseContent: base, proposedContent: proposed })
+  })
+  it.each([[{ ...wire, base_rev: "4" }], [{ ...wire, status: "weird" }], [{ ...wire, target: { block_ids: [1] } }], [{ ...wire, id: 7 }]])("rejects a malformed proposal %#", async bad => {
+    reply(200, { proposals: [bad] })
+    await expect(createHttpProposalClient("w", "page").list()).rejects.toThrow("proposals unreadable")
+  })
 })
