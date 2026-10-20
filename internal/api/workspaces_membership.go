@@ -637,7 +637,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// departWorkspace removes a person from a workspace: their pages move first
+// departWorkspaceAuthorized removes a person from a workspace: their pages move first
 // (§7.1 rule 1b), then the membership row and every crew membership they held
 // there go in one transaction. The OWNER check is the caller's — the
 // workspace route refuses to remove an owner at all, the instance route only
@@ -647,10 +647,6 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 // alsoInTx run inside the departure's transaction, before it commits; the
 // instance route writes its audit entry there so the removal and its record
 // land together.
-func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, alsoInTx ...func(*sql.Tx) error) error {
-	return departWorkspaceAuthorized(ctx, db, j, actorID, workspaceID, memberUserID, nil, alsoInTx...)
-}
-
 func departWorkspaceAuthorized(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, authorize func(*sql.Tx) error, alsoInTx ...func(*sql.Tx) error) error {
 	// The page transfer comes first, inside the departure's transaction — a
 	// precondition, not a cleanup step, exactly as admin_gdpr.go's erasure

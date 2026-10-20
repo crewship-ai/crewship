@@ -517,7 +517,7 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "crew.member_changed": "crew member",
   "member.role_changed": "role",
   "member.removed": "member removed",
-  "workspace.deleted": "workspace deleted",
+  "workspace.deleted": "workspace−",
   "provisioning.queued": "prov·queue",
   "provisioning.building": "prov·build",
   "provisioning.complete": "prov·done",
