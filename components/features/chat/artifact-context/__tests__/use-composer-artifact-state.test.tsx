@@ -8,7 +8,7 @@ beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers() })
 const target = (pageId: string): LinkedViewerTarget => ({ workspaceId: "w", pageId, mode: "latest" })
 const preview = (rev: number) => ({ status: "ok" as const, data: { create: { audience: { kind: "personal" as const }, resultType: "Document" }, update: { audience: { kind: "personal" as const }, resultType: "Document", expected: { schema: 3, rev, generation: 1 } } } })
-const input = { workspaceId: "w", chatId: "c", executor: "Ada", online: true, chatPrivacy: "private" as const }
+const input = { workspaceId: "w", chatId: "c", executor: "Ada", online: true, chatPrivacy: "private" as const, serverConfirmedPrivate: true }
 
 async function setup(rev = 5) {
   vi.spyOn(client, "fetchArtifactPreview").mockResolvedValue(preview(rev))
@@ -79,4 +79,18 @@ it("shows a not-confirmed state when no echo comes, and a retry sends the same r
   act(() => { vi.advanceTimersByTime(9000) })
   expect(hook.result.current.context.unconfirmed).toBe(true)
   expect(intentOf(hook, "Shorten it")).toEqual(first)
+})
+it("a plain message with no artifact context ends an older pending send, so no stale 'not confirmed' appears for it", async () => {
+  const hook = await setup()
+  vi.useFakeTimers()
+  const first = intentOf(hook, "Shorten it")!
+  act(() => hook.result.current.markSent("Shorten it", first))
+  act(() => hook.result.current.detach(hook.result.current.context.attachments[0].id))
+  expect(hook.result.current.context.mode).toBeNull()
+  act(() => hook.result.current.markSent("Hello there", null))
+  act(() => { vi.advanceTimersByTime(20000) })
+  expect(hook.result.current.context.unconfirmed).toBe(false)
+  // The older request is no longer waiting for an echo either.
+  act(() => hook.result.current.confirmEcho("Shorten it", { author_user_id: "me" }))
+  expect(hook.result.current.context.unconfirmed).toBe(false)
 })

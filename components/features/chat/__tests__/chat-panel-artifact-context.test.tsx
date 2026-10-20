@@ -24,6 +24,9 @@ vi.mock("../composer/slash-palette", () => ({ SlashPalette: () => null }))
 vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ sendMessage }: { sendMessage: (text: string) => unknown }) => <button type="button" onClick={() => sendMessage("Please update it")}>Send message</button> }))
 vi.mock("../turn-renderer", () => ({ TurnRenderer: () => null }))
 vi.mock("sonner", () => ({ toast }))
+// The server visibility field does not exist yet, so the real seam is always false. These tests stand in for the day it lands.
+const seam = vi.hoisted(() => ({ confirmed: true }))
+vi.mock("../artifact-context/use-server-chat-visibility", () => ({ useServerConfirmedPrivate: () => seam.confirmed }))
 
 import { ChatPanel } from "../chat-panel"
 
@@ -50,6 +53,7 @@ const SERVED: Route = path => {
 
 beforeEach(() => {
   calls.length = 0
+  seam.confirmed = true
   overrides = []
   chat.sendMessage.mockReset()
   Object.values(toast).forEach(fn => fn.mockReset())
@@ -129,7 +133,7 @@ it("flag on: result card opens the exact revision through the checkpoint reader 
   expect(chat.sendMessage).not.toHaveBeenCalled()
   expect(toast.error).toHaveBeenCalledWith("Choose what the agent should do with the attached item.")
   fireEvent.click(screen.getByLabelText("Update attached"))
-  await waitFor(() => expect(strip).toHaveTextContent("Saved to My space. Only you can see it."))
+  await waitFor(() => expect(strip).toHaveTextContent("Saved to My space. Workspace owners and admins can still read it."))
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
   expect(chat.sendMessage).toHaveBeenCalledTimes(1)
   const [text, metadata] = chat.sendMessage.mock.calls[0]
@@ -268,6 +272,9 @@ it.each([
   ["more than one human participant", [participants(["user-1", "user-2"])], "needs a private chat"],
   ["a failed participants read", [(path: string) => path.includes("/participants") ? "reject" as const : undefined], "Could not verify this chat is private"],
   ["a non-ok participants read", [(path: string) => path.includes("/participants") ? json({ error: "boom" }, 500) : undefined], "Could not verify this chat is private"],
+  ["a 200 that is not a participants list", [(path: string) => path.includes("/participants") ? json({}) : undefined], "Could not verify this chat is private"],
+  ["a 200 whose participants field is odd", [(path: string) => path.includes("/participants") ? json({ participants: "nobody" }) : undefined], "Could not verify this chat is private"],
+  ["a participants row without a user id", [(path: string) => path.includes("/participants") ? json({ participants: [{ email: "x@y" }] }) : undefined], "Could not verify this chat is private"],
   ["a participants read that has not answered", [(path: string) => path.includes("/participants") ? "hang" as const : undefined], "Checking chat visibility…"],
 ])("flag on: Update is not offered with %s", async (_name, routes, reason) => {
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
@@ -300,4 +307,16 @@ it("flag on: switching session forgets the earlier chat's participants and check
   const second = await attachFirstItem()
   await waitFor(() => expect(second).toHaveTextContent("Checking chat visibility…"))
   expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+})
+
+it("flag on, as shipped today (no server visibility signal): Update is disabled with the honest reason and nothing is sent as an edit", async () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
+  seam.confirmed = false
+  mount()
+  const strip = await attachFirstItem()
+  await waitFor(() => expect(strip).toHaveTextContent("Updating a document from chat is not available yet: the server does not confirm this chat's audience."))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+  fireEvent.click(screen.getByLabelText("Reply only"))
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+  expect(chat.sendMessage.mock.calls[0]).toEqual(["Please update it"])
 })

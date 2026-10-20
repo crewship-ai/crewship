@@ -75,7 +75,8 @@ import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
 import { useComposerArtifactState } from "./artifact-context/use-composer-artifact-state"
-import { deriveChatPrivacy, type ParticipantsLoad } from "./artifact-context/chat-privacy"
+import { useServerConfirmedPrivate } from "./artifact-context/use-server-chat-visibility"
+import { PARTICIPANTS_MAX_AGE_MS, deriveChatPrivacy, type ParticipantsLoad } from "./artifact-context/chat-privacy"
 import { useConversationLinks } from "./artifact-context/use-artifact-context-data"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
@@ -643,14 +644,18 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // What this session's participants read said, for this session only. Nothing is assumed from a missing or failed read.
   const [participantsLoad, setParticipantsLoad] = useState<ParticipantsLoad | null>(null)
   const participantsScope = `${workspaceId ?? ""}:${sessionId ?? ""}`
-  const chatPrivacy = deriveChatPrivacy({ scope: participantsScope, sessionKind, sharedRestricted: sharedRestrictedChat, probeSettled: profileProbeSettled, profileKnown: executionProfile !== "pending", participants: participantsLoad, currentUserId })
+  const privacyInput = { scope: participantsScope, sessionKind, sharedRestricted: sharedRestrictedChat, probeSettled: profileProbeSettled, profileKnown: executionProfile !== "pending", participants: participantsLoad, currentUserId }
+  const privacyInputRef = useRef(privacyInput)
+  privacyInputRef.current = privacyInput
+  const chatPrivacy = deriveChatPrivacy(privacyInput)
   // Artifact context (flag off: inert). The strip's choices ride with the next send as one stable submission.
-  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", chatPrivacy })
+  const artifactComposer = useComposerArtifactState({ workspaceId: workspaceId ?? "", chatId: sessionId ?? "", executor: agentName ?? null, online: connectionStatus === "connected", chatPrivacy, serverConfirmedPrivate: useServerConfirmedPrivate(sessionId ?? "") })
   const { prepareSend: prepareArtifactSend, markSent: artifactMarkSent, confirmEcho: artifactConfirmEcho } = artifactComposer
   artifactEchoRef.current = artifactConfirmEcho
   // Only the composer's own send may spend the one-time artifact submission; chips, auto-send and other callers go through sendMessageWithPage untouched.
   const sendFromComposer = useCallback((text: string, metadata?: Record<string, unknown>) => {
-    const prepared = prepareArtifactSend(text, metadata)
+    // Privacy is judged at the moment of sending, from a participants read that is not stale.
+    const prepared = prepareArtifactSend(text, metadata, deriveChatPrivacy({ ...privacyInputRef.current, now: Date.now() }))
     if (!prepared.ok) { toast.error(prepared.message); return false }
     const sent = sendMessageWithPage(text, prepared.metadata)
     if (sent !== false) artifactMarkSent(text, prepared.intent)
@@ -665,19 +670,26 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (!sessionSegment) return
     let cancelled = false
     const scope = `${workspaceId}:${sessionId}`
-    apiFetch(`/api/v1/chats/${sessionSegment}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
-      .then(async (r) => ({ ok: r.ok, data: r.ok ? await r.json() : { participants: [] } }))
-      .then(({ ok, data }: { ok: boolean; data: { participants?: { user_id: string; email?: string; full_name?: string }[] } }) => {
-        if (cancelled) return
-        const map: Record<string, string> = {}
-        for (const p of data?.participants ?? []) {
-          map[p.user_id] = p.full_name || p.email || "Teammate"
-        }
-        setParticipantNames(map)
-        setParticipantsLoad({ scope, status: ok ? "ok" : "error", userIds: Object.keys(map) })
-      })
-      .catch(() => { if (!cancelled) setParticipantsLoad({ scope, status: "error", userIds: [] }) /* no attribution; privacy stays unverified */ })
-    return () => { cancelled = true }
+    // Read again now and then and on focus: membership changes, so a value captured once is not a signal.
+    const load = () => {
+      apiFetch(`/api/v1/chats/${sessionSegment}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
+        .then(async (r) => ({ ok: r.ok, data: r.ok ? await r.json().catch(() => undefined) : undefined }))
+        .then(({ ok, data }: { ok: boolean; data: { participants?: unknown } | undefined }) => {
+          if (cancelled) return
+          // A 200 that does not look like a participants list is not a confirmation of anything.
+          const list = ok && data && Array.isArray(data.participants) ? data.participants as { user_id?: unknown; email?: string; full_name?: string }[] : null
+          if (!list || list.some(p => !p || typeof p.user_id !== "string" || !p.user_id)) { setParticipantsLoad({ scope, status: "error", userIds: [], at: Date.now() }); return }
+          const map: Record<string, string> = {}
+          for (const p of list) map[p.user_id as string] = p.full_name || p.email || "Teammate"
+          setParticipantNames(map)
+          setParticipantsLoad({ scope, status: "ok", userIds: Object.keys(map), at: Date.now() })
+        })
+        .catch(() => { if (!cancelled) setParticipantsLoad({ scope, status: "error", userIds: [], at: Date.now() }) /* no attribution; privacy stays unverified */ })
+    }
+    load()
+    const interval = window.setInterval(load, PARTICIPANTS_MAX_AGE_MS / 2)
+    window.addEventListener("focus", load)
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener("focus", load) }
   }, [sessionId, workspaceId])
 
   const resolveAuthorName = useCallback(

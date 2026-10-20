@@ -117,7 +117,7 @@ for (const width of [1280, 390]) {
   test.describe(`chat artifact context at ${width}px`, () => {
     test.beforeEach(async ({ page }) => { await page.setViewportSize({ width, height: 900 }) })
 
-    test("result card, exact revision, linked switch, composer target, send and library", async ({ page }) => {
+    test("result card, exact revision, linked switch, composer target (update disabled), plain send and library", async ({ page }) => {
       const sent = captureSends(page)
       const mock = await mockContract(page)
       await openChat(page)
@@ -152,17 +152,19 @@ for (const width of [1280, 390]) {
       await expect(strip).toContainText("Roadmap", { timeout: TIMEOUT })
       if (width < 600) await expect(page.getByRole("region", { name: "Document preview" })).toHaveCount(0)
       await expect(strip.getByText("Choose what the agent should do")).toBeVisible()
-      await strip.getByLabel("Update attached").check()
-      await expect(strip).toContainText("Saved to My space. Only you can see it.", { timeout: TIMEOUT })
+      // Updating a document from chat stays off until the server confirms the chat's audience (BE 2026-10-20 11:04 UTC):
+      // the option is disabled and says why, even in a chat the participants read says is private.
+      await expect(strip.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+      await expect(strip).toContainText("Updating a document from chat is not available yet: the server does not confirm this chat's audience.")
+      await strip.getByLabel("Reply only").check()
       await expect(strip).toContainText("Executor")
 
-      // 5. The send carries the intent.
-      await composer(page).fill("Add a risks section")
+      // 5. A reply-only send is a plain message: it carries no edit mandate.
+      await composer(page).fill("What changed in the roadmap?")
       await composer(page).press("Enter")
       await expect.poll(() => sent.length, { timeout: TIMEOUT }).toBe(1)
-      expect(sent[0].content).toBe("Add a risks section")
-      // Exactly the backend's five flat fields; no mode, principal or title travels with it.
-      expect(sent[0].metadata?.document_iteration_intent).toEqual({ submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/), page_id: "page-b", schema: 3, rev: 7, generation: 3 })
+      expect(sent[0].content).toBe("What changed in the roadmap?")
+      expect(Object.keys(sent[0].metadata ?? {})).not.toContain("document_iteration_intent")
       expect(Object.keys(sent[0].metadata ?? {})).not.toContain("artifact_submission")
       // The context is spent only when the server echoes the saved message.
       await expect(page.getByRole("region", { name: "Artifact context" })).toHaveCount(0, { timeout: TIMEOUT })

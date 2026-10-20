@@ -35,13 +35,19 @@ export interface ComposerArtifactContext {
   createAudience: Audience
   createResultType: string
   online: boolean
-  /** Targeted edits are accepted only in a private chat. Anything not positively verified is not private. */
+  /**
+   * The ONLY thing that can enable an update: the server confirmed this chat's audience is private. It comes from a
+   * server field that does not exist yet (BE 2026-10-20 11:04 UTC), so it is false today. A successful document read or
+   * any client-side estimate never sets it.
+   */
+  serverConfirmedPrivate: boolean
+  /** Client-side privacy estimate. It can only add a block on top of serverConfirmedPrivate; it never enables an update. */
   chatPrivacy: ChatPrivacy
   /** A send was handed to the socket and the server has not confirmed it; sending again retries the same request. */
   unconfirmed: boolean
 }
 
-export type SendBlock = "chat_checking" | "chat_unverified" | "chat_not_private" | "need_instruction" | "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
+export type SendBlock = "server_unconfirmed" | "chat_checking" | "chat_unverified" | "chat_not_private" | "need_instruction" | "shared_folder" | "attachment_lost" | "offline" | "state_unknown" | "choose_mode" | "need_attachment" | "choose_target" | "no_executor" | "audience_unknown" | null
 
 export const attachmentId = (target: LinkedViewerTarget) => targetKey(target)
 
@@ -50,7 +56,9 @@ export function addAttachment(ctx: ComposerArtifactContext, item: AttachedArtifa
 }
 /** Detaching the chosen update target clears the choice; it never slides onto another item. */
 export function detachAttachment(ctx: ComposerArtifactContext, id: string): ComposerArtifactContext {
-  return { ...ctx, attachments: ctx.attachments.filter(item => item.id !== id), updateTargetId: ctx.updateTargetId === id ? null : ctx.updateTargetId }
+  const attachments = ctx.attachments.filter(item => item.id !== id)
+  // With nothing attached there is nothing to act on: the choice goes too, so the strip does not linger empty.
+  return { ...ctx, attachments, mode: attachments.length ? ctx.mode : null, updateTargetId: ctx.updateTargetId === id ? null : ctx.updateTargetId }
 }
 
 /** The attachment an update would change, once the choice is unambiguous. */
@@ -67,6 +75,7 @@ export function sendBlock(ctx: ComposerArtifactContext, instruction?: string): S
   if (ctx.mode === null) return "choose_mode"
   if (ctx.mode === "reply_only") return null
   if (ctx.mode === "update") {
+    if (!ctx.serverConfirmedPrivate) return "server_unconfirmed"
     if (ctx.chatPrivacy === "checking") return "chat_checking"
     if (ctx.chatPrivacy === "unverified") return "chat_unverified"
     if (ctx.chatPrivacy !== "private") return "chat_not_private"
@@ -86,6 +95,7 @@ export function sendBlock(ctx: ComposerArtifactContext, instruction?: string): S
 }
 
 export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
+  server_unconfirmed: "Updating a document from chat is not available yet: the server does not confirm this chat's audience.",
   chat_checking: "Checking chat visibility…",
   chat_unverified: "Could not verify this chat is private.",
   chat_not_private: "Editing an item needs a private chat, and this conversation is not one.",
@@ -103,7 +113,7 @@ export const BLOCK_TEXT: Record<Exclude<SendBlock, null>, string> = {
 
 export function audienceText(audience: Audience, mode: EditMode | null): string {
   if (mode === "reply_only") return "No item is changed. Only the reply appears in this chat."
-  if (audience.kind === "personal") return "Saved to My space. Only you can see it."
+  if (audience.kind === "personal") return "Saved to My space. Workspace owners and admins can still read it."
   if (audience.kind === "folder") return `Saved to ${audience.name}. ${audience.people} ${audience.people === 1 ? "person" : "people"} can see it.${mode === "update" ? " Editing an item in a shared folder is not available yet." : ""}`
   return "Audience unknown."
 }

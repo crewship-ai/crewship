@@ -9,7 +9,7 @@ const item = (pageId: string, revision?: number, patch: Partial<AttachedArtifact
   const target = revision === undefined ? { workspaceId: "w", pageId, mode: "latest" as const } : { workspaceId: "w", pageId, mode: "revision" as const, revision, checkpointId: `cp-${pageId}-${revision}` }
   return { id: attachmentId(target), target, title: pageId.toUpperCase(), access: "readable", resultType: "Document", audience: { kind: "personal" }, expected: { schema: 3, rev: revision ?? 5, generation: 2 }, ...patch }
 }
-const ctx = (patch: Partial<ComposerArtifactContext> = {}): ComposerArtifactContext => ({ attachments: [item("a", 3)], mode: null, updateTargetId: null, executor: "Ada", chatPrivacy: "private", unconfirmed: false, createAudience: { kind: "personal" }, createResultType: "Document", online: true, ...patch })
+const ctx = (patch: Partial<ComposerArtifactContext> = {}): ComposerArtifactContext => ({ attachments: [item("a", 3)], mode: null, updateTargetId: null, executor: "Ada", chatPrivacy: "private", serverConfirmedPrivate: true, unconfirmed: false, createAudience: { kind: "personal" }, createResultType: "Document", online: true, ...patch })
 const noop = () => {}
 const strip = (c: ComposerArtifactContext, h: Partial<Parameters<typeof ComposerArtifactContextStrip>[0]> = {}) =>
   render(<ComposerArtifactContextStrip context={c} onModeChange={noop} onUpdateTargetChange={noop} onDetach={noop} {...h} />)
@@ -73,7 +73,7 @@ it("shows the audience of the chosen item, not one shared value", () => {
   strip(ctx({ attachments: two, mode: "update", updateTargetId: two[1].id }))
   expect(screen.getByText(/Saved to Finance\. 5 people can see it\. Editing an item in a shared folder is not available yet/)).toBeTruthy()
   expect(screen.getByRole("alert").textContent).toMatch(/shared folder/)
-  expect(screen.queryByText(/Only you can see it/)).toBeNull()
+  expect(screen.queryByText(/Workspace owners and admins can still read it/)).toBeNull()
   expect(screen.getByText("Sheet")).toBeTruthy()
 })
 it("shows result type for create and warns when updating a pinned revision", () => {
@@ -155,4 +155,24 @@ it("says why editing is not offered while chat visibility is unknown", () => {
 it("tells the sender when a send is not confirmed", () => {
   strip(ctx({ mode: "update", unconfirmed: true }))
   expect(screen.getByRole("status").textContent).toMatch(/not confirmed.*same request/i)
+})
+
+it("an update is enabled only when the server confirmed a private chat AND the local checks pass; the local estimate never enables it", () => {
+  const update = (patch: Partial<ComposerArtifactContext>) => ctx({ mode: "update", ...patch })
+  // Seam true and local checks pass: available.
+  expect(sendBlock(update({}), "Shorten it")).toBeNull()
+  // Seam false: blocked whatever the client thinks, with the honest reason.
+  expect(sendBlock(update({ serverConfirmedPrivate: false, chatPrivacy: "private" }), "Shorten it")).toBe("server_unconfirmed")
+  expect(buildIterationIntent(update({ serverConfirmedPrivate: false }), "s")).toBeNull()
+  // Seam true but a local check fails: still blocked (defence in depth).
+  expect(sendBlock(update({ chatPrivacy: "not_private" }), "Shorten it")).toBe("chat_not_private")
+  expect(sendBlock(update({ chatPrivacy: "unverified" }), "Shorten it")).toBe("chat_unverified")
+  expect(sendBlock(update({ attachments: [item("a", undefined, { audience: { kind: "folder", name: "F", people: 2 } })] }), "Shorten it")).toBe("shared_folder")
+  // The radio follows the same rule and says why.
+  const off = strip(ctx({ serverConfirmedPrivate: false }))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeDisabled()
+  expect(screen.getByText("Updating a document from chat is not available yet: the server does not confirm this chat's audience.")).toBeTruthy()
+  off.unmount()
+  strip(ctx({}))
+  expect(screen.getByRole("radio", { name: "Update attached" })).toBeEnabled()
 })

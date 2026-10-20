@@ -1,8 +1,8 @@
 import { expect, it } from "vitest"
-import { deriveChatPrivacy, type ParticipantsLoad } from "../chat-privacy"
+import { PARTICIPANTS_MAX_AGE_MS, deriveChatPrivacy, type ParticipantsLoad } from "../chat-privacy"
 
 const base = { scope: "w:c1", sessionKind: "direct", sharedRestricted: false, probeSettled: true, profileKnown: true, currentUserId: "me" }
-const loaded = (patch: Partial<ParticipantsLoad> = {}): ParticipantsLoad => ({ scope: "w:c1", status: "ok", userIds: [], ...patch })
+const loaded = (patch: Partial<ParticipantsLoad> = {}): ParticipantsLoad => ({ scope: "w:c1", status: "ok", userIds: [], at: 1000, ...patch })
 
 it("is private only on positive signals: this session's participants loaded ok and nobody else in the chat", () => {
   expect(deriveChatPrivacy({ ...base, participants: loaded() })).toBe("private")
@@ -27,4 +27,8 @@ it("an unanswered profile probe is unverified; a restricted group or a non-direc
 })
 it("without a known current user nothing is private", () => {
   expect(deriveChatPrivacy({ ...base, currentUserId: null, participants: loaded() })).toBe("unverified")
+})
+it("a participants read older than the limit no longer counts, so a value captured once is not a signal", () => {
+  expect(deriveChatPrivacy({ ...base, participants: loaded(), now: 1000 + PARTICIPANTS_MAX_AGE_MS })).toBe("private")
+  expect(deriveChatPrivacy({ ...base, participants: loaded(), now: 1001 + PARTICIPANTS_MAX_AGE_MS })).toBe("checking")
 })
