@@ -372,25 +372,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		var erased bool
 		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM credentials
 		 WHERE id=? AND workspace_id=? AND deleted_at IS NOT NULL AND
-            COALESCE(encrypted_value,'')='' AND
-            COALESCE(oauth_resource,'')='' AND
-            COALESCE(oauth_issuer,'')='' AND
-            COALESCE(encrypted_refresh_token,'')='' AND
-            COALESCE(oauth_client_secret_enc,'')='' AND
-            COALESCE(oauth_refresh_token_enc,'')='' AND
-            COALESCE(username,'')='' AND
-            COALESCE(account_email,'')='' AND
-            COALESCE(account_label,'')='' AND
-            COALESCE(description,'')='' AND
-            COALESCE(last_error,'')='' AND
-            COALESCE(last_used_ips,'')='' AND
-            COALESCE(tags,'')='' AND
-            COALESCE(oauth_client_id,'')='' AND
-            COALESCE(oauth_auth_url,'')='' AND
-            COALESCE(oauth_token_url,'')='' AND
-            COALESCE(oauth_scopes,'')='' AND
-            COALESCE(oauth_token_expires_at,'')='' AND
-            COALESCE(token_expires_at,'')='') AND NOT EXISTS(SELECT 1 FROM credential_fields WHERE credential_id=?) AND NOT EXISTS(SELECT 1 FROM oauth_states WHERE credential_id=?)`, cid, workspaceID, cid, cid).Scan(&erased); err != nil || !erased {
+            `+retiredCredentialErasedMaterialSQL+`) AND NOT EXISTS(SELECT 1 FROM credential_fields WHERE credential_id=?) AND NOT EXISTS(SELECT 1 FROM oauth_states WHERE credential_id=?)`, cid, workspaceID, cid, cid).Scan(&erased); err != nil || !erased {
 			replyInternalError(w, h.logger, "verify retired OAuth credential", fmt.Errorf("retirement postcondition failed: %v", err))
 			return
 		}

@@ -34,6 +34,25 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
 
+Artifact-era chat bundles must retain their source conversation classification.
+If an older bundle lacks it, restore refuses the ambiguous chats before changing
+data or fencing existing services; upgrade the source and create a fresh bundle.
+This also applies to dry-run validation. Instance recovery must complete the
+privacy backfill with the original vault key before discarding runtime consents.
+Retaining this classification never restores permission to execute a run.
+Workspace backup operations retain their OWNER requirement while classified
+private conversations remain, even after creation fails or a Document is deleted.
+Crew bundles without the classification also require source migration evidence
+that they predate Document creation; missing evidence is refused, not inferred
+from omitted tables. Protected bundles require a migrated target schema.
+
+A valid older bundle cannot remove newer private conversation classification
+from its target. Workspace `--replace` refuses a target with retained private
+artifact conversations. Offline `recover --force` checks the existing database
+before replacing it and refuses such a target too; recover into an empty data
+directory instead. These operations do not replace per-agent diagnostic logs,
+so the retained audience proof must remain available.
+
 ## Key concepts
 
 | Term | What it means here |
@@ -1073,6 +1092,11 @@ its categories, and a restore with `--replace` from a custom bundle is
 refused, because replacing would delete everything the bundle does not hold.
 
 ### When plans run
+
+Queued manual runs and busy retries become eligible at their exact stored UTC
+deadline, including equality. Dispatch compares parsed instants after selecting
+candidates, so older variable-precision timestamps neither delay due work nor
+start a future retry early. Stored timestamp formats remain unchanged.
 
 - **Timezone.** `time_of_day` is a wall-clock time in the plan's IANA
   `timezone`, so 03:00 stays 03:00 across daylight-saving changes. Cadence is
