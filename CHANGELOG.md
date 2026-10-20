@@ -10,6 +10,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - ⚠️ **Behaviour change: credential retirement irreversibly erases vault material.** Existing and newly retired credentials retain their IDs and audit history, while secret/refresh values, account metadata, custom fields and pending OAuth state are cleared, including historical restore/fork imports. Active credentials remain unchanged. Integration removal now rolls back if credential retirement or its audit cannot be completed.
+
+- **Chat shows the model the chat is configured to use.** The composer's model control read a path the server never served and always offered a built-in list, silently treating its first entry as selected. It now shows the model the chat run preview reports, lists the provider's models from the server labelled as live or curated, says plainly when the list cannot be loaded, and states that a listed model is not proof of access or of what a run will use. Choosing a model from the list is not offered yet.
+
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
