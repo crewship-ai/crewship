@@ -1323,6 +1323,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       else cursor.state ??= "running"
       const controls = pendingControlsRef.current.get(next.run_id)
       if (controls?.turnId === next.turn_id) pendingControlsRef.current.delete(next.run_id)
+      const stopRequested = stopPendingRef.current
       setTurns(previous => {
         const at = previous.findIndex(turn => turn.role === "assistant" && (turn.id === next.turn_id || (turn.runId === next.run_id && turn.parts.some(part => part.turn_id === next.turn_id))))
         const prior = at >= 0 ? previous[at] : undefined
@@ -1340,7 +1341,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
           parts = old ? parts.map(value => value.id === part.id ? part : value) : [...parts, part]
         }
         if (terminal) parts = parts.map(part => ({ ...part, isStreaming: false }))
-        const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal, ...(stopPendingRef.current && !terminal ? { cancelRequested: true } : {}) }
+        const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal, ...(stopRequested && !terminal ? { cancelRequested: true } : {}) }
         return at < 0 ? [...previous, turn] : previous.map((value, index) => index === at ? turn : value)
       })
       setIsStreaming(!terminalTurn(cursor.state))
@@ -1917,7 +1918,10 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         return cursor ? { ...turn, streamIncomplete: cursor.pending.size > 0 || cursor.resetThrough !== undefined } : turn
       })
     })
-    setIsStreaming(loaded.some(turn => turn.isStreaming) || [...canonicalRef.current.values()].some(cursor => cursor.state !== undefined && !terminalTurn(cursor.state)))
+    const live = loaded.some(turn => turn.isStreaming) || [...canonicalRef.current.values()].some(cursor => cursor.state !== undefined && !terminalTurn(cursor.state))
+    setIsStreaming(live)
+    // History can be what confirms the stop: nothing left running ends it.
+    if (!live) { stopPendingRef.current = false; setStopPending(false) }
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     // History is now the base. Release any in-flight run events that arrived via

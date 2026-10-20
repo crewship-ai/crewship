@@ -104,6 +104,17 @@ describe("canonical live ingestion", () => {
     act(() => hook.result.current.stopGeneration())
     expect(socket.send.mock.calls.filter(([frame]) => frame.type === "cancel_message")).toHaveLength(1)
   })
+  it("a history reload that shows nothing running ends a pending stop", () => {
+    const hook = setup()
+    send(envelope(1))
+    act(() => hook.result.current.stopGeneration())
+    act(() => hook.result.current.loadHistory([{ id: "message-1", role: "assistant", content: "same", timestamp: new Date(), runId: "run-1",
+      checkpoint: { version: 1, run_id: "run-1", turn_id: "turn-1", through_seq: 2, turn_state: "cancelled" },
+      parts: [{ id: "part-a", type: "text", content: "same", run_id: "run-1", turn_id: "turn-1", first_seq: 1, last_seq: 1 }] }]))
+    expect(hook.result.current.stopping).toBe(false)
+    send({ ...envelope(1), turn_id: "turn-2", run_id: "run-2", part_id: "part-2" })
+    expect(hook.result.current.turns.at(-1)?.cancelRequested).toBeUndefined()
+  })
   it("requests authorized history for a gap without skipping to the live tail", () => {
     const hook = setup()
     send(envelope(2, "second"))
