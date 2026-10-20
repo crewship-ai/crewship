@@ -138,7 +138,8 @@ it("reads confirmed content without write authority",async()=>{
 it("stops on malformed saved binary and preserves a recovery state",async()=>{
  const server=model();fetchMock.mockImplementation(()=>response({...state(server),snapshot:"%%%invalid%%%"}))
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
- try{await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.error).toContain("Confirmed document content rejected");expect(result.current.editable).toBe(false);await act(async()=>{await new Promise(resolve=>setTimeout(resolve,600))});expect(fetchMock).toHaveBeenCalledTimes(1)}finally{unmount();server.destroy()}
+ try{await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.error).toContain("Confirmed document content rejected");expect(result.current.editable).toBe(false);await act(async()=>{await new Promise(resolve=>setTimeout(resolve,600))});// Blocked mounts keep a read-only authority check (GET only); nothing is sent or accepted.
+ expect(fetchMock.mock.calls.every(([,init])=>init?.method!=="POST")).toBe(true);expect(result.current.recovery).toBe(true);expect(result.current.editable).toBe(false)}finally{unmount();server.destroy()}
 })
 
 it("still loads the server document when private durable storage is unavailable",async()=>{

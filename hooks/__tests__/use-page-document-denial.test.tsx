@@ -102,3 +102,42 @@ it.each([
     expect(result.current[mode.expect]).toHaveLength(0)
   } finally { unmount(); server.destroy() }
 })
+
+it("keeps checking authority after the journal broke: a later 404 clears the content", async () => {
+  const server = model()
+  let deny = false
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : deny ? response({ error: "gone" }, 404) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    journal.put.mockRejectedValue(new DocumentStorageError("quota"))
+    act(() => text(result.current.doc).insert(7, " x"))
+    await waitFor(() => expect(result.current.durability).toBe("unsaved"))
+    expect(result.current.state).toBeDefined()
+    deny = true
+    await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 3000 })
+    expect(result.current.state).toBeUndefined()
+    expect(result.current.status).toBe("Document access is unavailable.")
+  } finally { unmount(); server.destroy() }
+})
+
+it("a 200 while blocked neither resumes editing nor journals nor sends", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "offline" }, 503) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    journal.put.mockRejectedValue(new DocumentStorageError("quota"))
+    act(() => text(result.current.doc).insert(7, " x"))
+    await waitFor(() => expect(result.current.durability).toBe("unsaved"))
+    const gets = () => fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST").length
+    const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").length
+    const before = { gets: gets(), puts: journal.put.mock.calls.length, posts: posts() }
+    await waitFor(() => expect(gets()).toBeGreaterThan(before.gets + 1), { timeout: 3000 })
+    expect(journal.put.mock.calls.length).toBe(before.puts)
+    expect(posts()).toBe(before.posts)
+    expect(result.current.editable).toBe(false)
+    expect(result.current.denied).toBe(false)
+    expect(result.current.durability).toBe("unsaved")
+  } finally { unmount(); server.destroy() }
+})

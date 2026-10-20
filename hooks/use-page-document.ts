@@ -194,9 +194,15 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     // Private rows of an unlocked journal become visible only after a fresh authorized read.
     function publishUnverified() { if (unverifiedStaged && active && !authorizationLost.current) { setUnverified(unverifiedStaged); unverifiedStaged = undefined } }
     async function poll() {
-      if (!workspace || !pageId || !active || authorizationLost.current || polling || (blocked && !restored.length)) return
+      if (!workspace || !pageId || !active || authorizationLost.current || polling) return
       polling = true
       try {
+        if (blocked && !restored.length) {
+          // Read-only authority check: a blocked mount (broken journal, rejection, epoch change) never journals,
+          // sends or accepts content again, but it must still notice a revocation.
+          await read()
+          return
+        }
         let next = await read()
         if (!accept(next)) return
         publishUnverified()
