@@ -106,7 +106,7 @@ it("flag on: result card opens the exact revision through the checkpoint reader 
   // The read-only body rebuilds its DOM on re-render, so assert by polling rather than on a found node.
   await waitFor(() => expect(screen.getByText("Body at revision two")).toBeInTheDocument())
   expect(screen.getByTestId("viewer-target-label")).toHaveTextContent("Revision 2")
-  expect(calls.some(path => path.includes("/document/checkpoints/cp-2"))).toBe(true)
+  expect(calls.some(path => path.includes("/document/checkpoints/cp-2?workspace_id=ws-test"))).toBe(true)
   expect(calls.some(path => path.includes("revision="))).toBe(false)
   // The pinned view never falls back to the latest body.
   expect(screen.queryByText("Body at latest")).toBeNull()

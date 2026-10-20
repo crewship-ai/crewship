@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
+import { checkpointPath } from "../exact-revision"
 import { checkpointFetcher, fetchArtifactPreview, fetchLinks, fetchWorkCards, parseLibrary, parseLinks, parseWorkCards } from "../client"
 
 afterEach(() => vi.restoreAllMocks())
@@ -51,9 +52,9 @@ it("library rows without a name or flagged restricted carry only their id", () =
     { status: "restricted", linkId: "b" }, { status: "restricted", linkId: "c" },
   ])
 })
-it("the checkpoint reader is called without a revision query", async () => {
+it("the checkpoint reader is called with the workspace and without a revision query", async () => {
   const spy = respond(200, { page_id: "p" })
-  await checkpointFetcher("w")("/api/v1/pages/%40p/document/checkpoints/cp-1")
-  const url = String(spy.mock.calls[0][0])
-  expect(url).toBe("/api/v1/pages/%40p/document/checkpoints/cp-1?workspace_id=w")
+  const target = { workspaceId: "w", pageId: "p", mode: "revision" as const, revision: 1, checkpointId: "cp-1" }
+  await checkpointFetcher(checkpointPath(target))
+  expect(String(spy.mock.calls[0][0])).toBe("/api/v1/pages/%40p/document/checkpoints/cp-1?workspace_id=w")
 })
