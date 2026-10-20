@@ -1,61 +1,139 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Check, ChevronDown, Sparkles } from "lucide-react"
 
-import { ModelSelector, type ModelOption } from "@/components/ai-elements/model-selector"
-import { useComposerStore } from "@/stores/composer-store"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { apiFetch } from "@/lib/api-fetch"
-import { providerDefaultModel, providerModels } from "@/lib/model-catalog"
 
-// What the menu shows before — or instead of — the server's answer: the
-// catalog's Anthropic rows minus legacy ones, the OpenAI default, and the
-// first local suggestion. It used to be a hand-typed list of six that named
-// gpt-4o; now it cannot disagree with the pickers elsewhere in the app.
-const FALLBACK_MODELS: ModelOption[] = [
-  ...providerModels("anthropic")
-    .filter((m) => m.category !== "legacy")
-    .map((m) => ({
-      id: m.id,
-      label: m.label.replace(/^Claude /, ""),
-      provider: "Anthropic",
-      badge: m.role === "default" ? "Default" : m.role === "top" ? "Pro" : undefined,
-    })),
-  ...providerModels("openai")
-    .filter((m) => m.id === providerDefaultModel("openai"))
-    .map((m) => ({ id: m.id, label: m.label, provider: "OpenAI" })),
-  ...providerModels("ollama")
-    .slice(0, 1)
-    .map((m) => ({ id: m.id, label: m.label, provider: "Ollama", description: "Local model" })),
-]
+import { useChatRunPreflight } from "../run-preflight"
 
-export function ModelPicker() {
-  const { modelId, setModel } = useComposerStore()
-  const [models, setModels] = useState<ModelOption[]>(FALLBACK_MODELS)
+interface CatalogueModel { id: string; display_name?: string; provider?: string }
+interface Catalogue { provider: string; source: string; models: CatalogueModel[] }
 
+// The chat's model is the one run-preflight reports for the configured agent.
+// GET /api/v1/models lists what a provider can serve (live when a credential
+// allows it, otherwise curated). It is neither proof that this user may use a
+// model nor of what a run will use, so it is shown as reference only and
+// choosing from it is not offered until the server can state effective
+// capabilities.
+export function ModelPicker({ chatId, workspaceId, userId }: {
+  chatId: string; workspaceId: string; userId: string
+}) {
+  const queryClient = useQueryClient()
+  const preflight = useChatRunPreflight({ chatId, workspaceId, userId, enabled: true })
+  const denied = preflight.isError && preflight.error.message === "denied"
+  // Access to the chat is gone: the panel below unmounts (stopping a list that
+  // is still in flight) and whatever was fetched under this principal is
+  // dropped. The key carries the user, so a different principal never reads
+  // this one's cached list either.
   useEffect(() => {
-    const ac = new AbortController()
-    apiFetch("/api/v1/llm/models", { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { models?: ModelOption[] } | null) => {
-        if (!data?.models?.length) return
-        setModels(data.models)
-        // Keep the composer store in sync with the loaded list. If the
-        // persisted modelId is null or no longer offered by the server,
-        // fall back to the first option so the visible selection in
-        // ModelSelector matches what `submit` will actually send.
-        if (!modelId || !data.models.some((m) => m.id === modelId)) {
-          setModel(data.models[0].id)
-        }
-      })
-      .catch(() => {})
-    return () => ac.abort()
-  }, [modelId, setModel])
+    if (!denied) return
+    void queryClient.cancelQueries({ queryKey: ["model-catalogue", userId] })
+    queryClient.removeQueries({ queryKey: ["model-catalogue", userId] })
+  }, [denied, queryClient, userId])
+  if (denied) return null
+  return <ModelPanel workspaceId={workspaceId} userId={userId} preflight={preflight} />
+}
+
+function ModelPanel({ workspaceId, userId, preflight }: {
+  workspaceId: string; userId: string; preflight: ReturnType<typeof useChatRunPreflight>
+}) {
+  const [open, setOpen] = useState(false)
+  const configured = preflight.data?.model || ""
+  const modelUnset = !!preflight.data && !configured
+  const provider = preflight.data?.payer.provider?.trim() || ""
+
+  const catalogue = useQuery({
+    queryKey: ["model-catalogue", userId, workspaceId, provider],
+    // Only when the menu is open: the list is reference, not needed to render.
+    enabled: open && !!provider && !!workspaceId,
+    retry: false, staleTime: 5 * 60_000,
+    queryFn: async ({ signal }): Promise<Catalogue> => {
+      const response = await apiFetch(`/api/v1/models?provider=${encodeURIComponent(provider)}&workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+      // 400: the server has no model listing for this provider (e.g. CLI-routed
+      // ones). 502: the provider could not be reached.
+      if (response.status === 400) throw new Error("unsupported")
+      if (response.status === 502) throw new Error("unreachable")
+      if (!response.ok) throw new Error("unavailable")
+      const body = await response.json() as Partial<Catalogue>
+      if (!Array.isArray(body.models)) throw new Error("unavailable")
+      return { provider: body.provider || provider, source: body.source || "", models: body.models }
+    },
+  })
+
+  const label = configured ? `Configured model: ${configured}` : modelUnset ? "Configured model: not set" : "Configured model: unknown"
 
   return (
-    <ModelSelector
-      models={models}
-      value={modelId ?? models[0]?.id}
-      onModelChange={setModel}
-    />
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" aria-label={label}
+          className="h-7 max-w-full gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground coarse:min-h-12">
+          <Sparkles className="h-3 w-3" />
+          <span className="truncate font-mono">{configured || (modelUnset ? "Model not set" : "Model unknown")}</span>
+          <ChevronDown className="h-3 w-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" aria-label="Chat model and provider model list" className="w-80 space-y-1 p-2 text-xs">
+        <p className="px-2 py-1.5 font-medium">
+          {configured
+            ? `Configured for this chat: ${configured}. A run may use a different model.`
+            : modelUnset
+              ? "No model is set on the agent; the provider default may apply."
+              : "The configured model could not be read."}
+        </p>
+        <CatalogueBody provider={provider} configured={configured} query={catalogue} preflightPending={preflight.isPending} />
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          A listed model does not mean you may use it or that this chat will run it.
+        </p>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function CatalogueBody({ provider, configured, query, preflightPending }: {
+  provider: string; configured: string
+  query: { isPending: boolean; isError: boolean; error: Error | null; data?: Catalogue }
+  preflightPending: boolean
+}) {
+  const note = "px-2 py-1.5 text-xs text-muted-foreground"
+  if (preflightPending) return <p role="status" className={note}>Loading models…</p>
+  if (!provider) return <p role="status" className={note}>No model list: the provider is not reported for this chat.</p>
+  if (query.isPending) return <p role="status" className={note}>Loading models…</p>
+  if (query.error?.message === "unsupported") return <p role="status" className={note}>No model list is available for this provider.</p>
+  if (query.error?.message === "unreachable") return <p role="status" className={note}>Provider unreachable.{configured ? ` Configured model: ${configured}.` : ""}</p>
+  if (query.isError || !query.data) {
+    return <p role="status" className={note}>Could not load the model list.{configured ? ` Configured model: ${configured}.` : ""}</p>
+  }
+  const { models, source } = query.data
+  if (!models.length) return <p role="status" className={note}>No models are listed for {provider}.</p>
+  const kind = source === "live" ? "Live list" : source === "curated" ? "Curated list" : "List"
+  return (
+    <>
+      <p className={note}>{kind} from {provider} (not a permission check)</p>
+      {configured && !models.some((m) => m.id === configured) && (
+        <p className={note}>{configured} is not in this list.</p>
+      )}
+      <ul tabIndex={0} aria-label={`Models listed for ${provider}`} className="max-h-[50vh] overflow-y-auto rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+        {models.map((m) => (
+          <li key={m.id} className="flex items-start gap-2 px-2 py-1.5">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{m.display_name || m.id}</span>
+              {m.display_name && m.display_name !== m.id && (
+                <span className="block truncate font-mono text-xs text-muted-foreground">{m.id}</span>
+              )}
+            </div>
+            {m.id === configured && (
+              <span className="mt-0.5 shrink-0 text-primary">
+                <Check className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Configured for this chat</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }

@@ -67,6 +67,7 @@ import { SlashActionModal } from "./composer/slash-action-modal"
 import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
+import { ModelPicker } from "./composer/model-picker"
 import { RunPreflight } from "./run-preflight"
 import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
@@ -1493,6 +1494,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {pageContextChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1629,6 +1631,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {pageContextChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
