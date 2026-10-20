@@ -179,8 +179,8 @@ export const fetchArtifactPreview = (workspaceId: string, chatId: string, pageId
 
 /* ---- exact revision (FE-REQ-F2-3-UPDATE) ---- */
 
-/** Reads through the checkpoint reader only; the document endpoint ignores a revision query. */
-export const checkpointFetcher = (workspaceId: string): CheckpointFetcher => async (path, signal) => {
-  const response = await apiFetch(`${path}?${new URLSearchParams({ workspace_id: workspaceId })}`, { signal, cache: "no-store" })
+/** Reads through the checkpoint reader only (the path already carries the workspace); the document endpoint ignores a revision query. */
+export const checkpointFetcher: CheckpointFetcher = async (path, signal) => {
+  const response = await apiFetch(path, { signal, cache: "no-store" })
   return { status: response.status, body: response.status === 200 ? await response.json().catch(() => null) : null }
 }

@@ -34,7 +34,7 @@ function usePinnedRead(target: Extract<LinkedViewerTarget, { mode: "revision" }>
   const key = `${targetKey(target)}:${attempt}`
   useEffect(() => {
     const controller = new AbortController()
-    void readExactRevision(checkpointFetcher(target.workspaceId), target, controller.signal).then(read => { if (!controller.signal.aborted) setState({ key, read }) })
+    void readExactRevision(checkpointFetcher, target, controller.signal).then(read => { if (!controller.signal.aborted) setState({ key, read }) })
     return () => controller.abort()
   }, [key, target])
   // Mask during render: a different pin never shows the previous pin's content.
