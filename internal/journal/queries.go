@@ -234,9 +234,28 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 	from := "FROM journal_entries"
 	if match := fts5Query(q.FTSQuery); match != "" {
-		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
-		conds = append(conds, "journal_entries_fts MATCH ?", publicFolderSearchSQL)
-		args = append(args, match)
+		conds = append(conds, publicFolderSearchSQL)
+		// Protected authorization events contain canonical-only snapshots.
+		// Search their summary only, including historical public payload fields.
+		// Keep MATCH in separate SELECTs: FTS5 cannot safely plan it under OR.
+		workspace := ""
+		if q.WorkspaceID != "" {
+			workspace = "j.workspace_id=? AND "
+		}
+		const protected = "?,?,?,?,?"
+		conds = append(conds, `journal_entries.rowid IN (
+ SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
+ WHERE `+workspace+`j.entry_type IN (`+protected+`) AND journal_entries_fts.summary MATCH ?
+ UNION ALL
+ SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
+ WHERE `+workspace+`j.entry_type NOT IN (`+protected+`) AND journal_entries_fts MATCH ?)`)
+		for range 2 {
+			if q.WorkspaceID != "" {
+				args = append(args, q.WorkspaceID)
+			}
+			args = append(args, string(EntryMemberCapabilitiesChanged), string(EntryPageGrantAdded),
+				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded), match)
+		}
 	}
 	return conds, args, from
 }

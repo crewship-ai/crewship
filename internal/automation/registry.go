@@ -571,11 +571,13 @@ func (r *Registry) Observer(entries []journal.Entry) {
 
 	r.mu.Lock()
 	for i := range entries {
-		e := journal.PublicFolderMembership(entries[i])
+		e := entries[i]
 		rules := r.byEvent[eventKey{e.WorkspaceID, string(e.Type)}]
 		if len(rules) == 0 {
 			continue
 		}
+		e = journal.PublicFolderMembership(e)
+		e = journal.PublicAuthorizationAudit(e)
 		for _, rule := range rules {
 			if !rule.Matcher.Matches(e) {
 				continue

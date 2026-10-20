@@ -87,7 +87,7 @@ func TestPipelineWebhooks_Fire_RecordsReceiptWithoutPhantomWork(t *testing.T) {
 	if runID == "" || runID != got["run_id"] {
 		t.Fatalf("receipt points to %q, response %v", runID, got)
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if n := countWebhookRows(t, h.db, `SELECT COUNT(*) FROM work_items`); n != 0 {
 		t.Fatalf("%d phantom work items", n)
 	}
@@ -105,7 +105,7 @@ func TestPipelineWebhooks_Fire_DuplicateAnswersTheOriginalRun(t *testing.T) {
 	}
 	var first map[string]any
 	_ = json.Unmarshal(firstRR.Body.Bytes(), &first)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	secondRR := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-dup-1")
 	if secondRR.Code != 202 {
@@ -141,7 +141,7 @@ func TestPipelineWebhooks_Fire_SameKeyDifferentBodyIsConflict(t *testing.T) {
 	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"a"}`, "evt-conflict"); rr.Code != 202 {
 		t.Fatalf("first status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	rr := fireRoutineWebhook(t, h, token, secret, `{"event":"DIFFERENT"}`, "evt-conflict")
 	if rr.Code != 409 {
@@ -182,7 +182,7 @@ func TestPipelineWebhooks_Fire_ThrottledRedeliveryAnswersTheOriginalReceipt(t *t
 	}
 	var first map[string]any
 	_ = json.Unmarshal(firstRR.Body.Bytes(), &first)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	// The gate is closed for new work — and stays closed.
 	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"other"}`, "evt-new-under-throttle"); rr.Code != 429 {

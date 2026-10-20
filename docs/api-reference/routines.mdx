@@ -174,7 +174,12 @@ that does not belong to the run. A malformed cursor, a missing or unparseable
 
 The public dispatch token is the authentication mechanism. When a signing
 secret is configured, the request must also carry a valid HMAC signature.
-Dispatch is asynchronous and returns `202`; an inactive routine returns `409`.
+Dispatch is asynchronous and returns `202` only after the receipt and queued
+start are committed. The returned `run_id` is the planned durable identity, not
+confirmation that execution has started. A queued webhook start expires after
+24 hours if it cannot start; expiration remains visible in the pending-start
+record. Other capacity-queued sources retain their one-hour TTL. An inactive
+routine returns `409`.
 
 ### Editing a webhook in place (F21)
 

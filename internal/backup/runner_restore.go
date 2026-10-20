@@ -443,6 +443,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	if err := runAdmissionBundlePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions, opts.ResumeWorkspaceID); err != nil {
 		return nil, err
 	}
+	// Apply the same pure privacy preflight before dry-run success or any
+	// replacement service fence can mutate the current installation.
+	if !opts.FilesOnly {
+		if err := validatePrivateArtifactContextDump(extracted.DBDump, manifest.SchemaMigrationVersions); err != nil {
+			return nil, err
+		}
+		if err := validatePrivateArtifactContextTarget(ctx, db, extracted.DBDump); err != nil {
+			return nil, err
+		}
+	}
 	servicePlan, err := extracted.prepareServiceRestorePlan(ctx, manifest.Contents.ServiceSnapshots)
 	if err != nil {
 		return nil, err
@@ -465,6 +475,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	_, _ = io.Copy(io.Discard, hashed)
 	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
 		return nil, err
+	}
+
+	// Reject replacement before dry-run success or any service/file effects.
+	// ReplaceWorkspaceContents repeats this under its deleting transaction.
+	if opts.Replace && !opts.FilesOnly && extracted.DBDump != nil {
+		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump)); err != nil {
+			return nil, err
+		}
 	}
 
 	// #2009: snapshot the payload's row counts HERE, before anything below

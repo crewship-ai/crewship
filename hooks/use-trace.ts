@@ -28,6 +28,8 @@ import type { PipelineDSL } from "@/lib/trace/types"
 //   - 3s poll while run is in active states (running/queued/paused)
 
 interface RunDetailResponse extends PipelineRun {
+  pending_id?: string
+  reason_code?: string
   behavior?: import("@/lib/routine-behavior").RoutineBehavior
   // GET /pipeline-runs/{id} parses step_outputs_json server-side and
   // returns it as `step_outputs` (already in PipelineRun). The
@@ -90,7 +92,10 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       }
       const runData: RunDetailResponse = await runRes.json()
       if (ctrl.signal.aborted) return
-      setRun(runData)
+      // Accepted starts use uppercase QUEUED before a real run row exists.
+      // Normalize status for the existing trace consumers without inventing
+      // execution fields such as started_at or an archived definition.
+      setRun({ ...runData, status: runData.status.toLowerCase() })
 
       // The server resolves the immutable definition of THIS run. Never use HEAD
       // as a fallback: it would redraw historical work using a different recipe.

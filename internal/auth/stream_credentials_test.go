@@ -51,8 +51,11 @@ func TestStreamCredentialRevocationKinds(t *testing.T) {
 			other, oc := r.Track(t.Context(), r.Epoch(), "other", "s-other", "", time.Time{})
 			defer oc()
 			before := r.Epoch()
+			defer r.ReleaseEpoch(before)
 			tc.notify(&r)
-			if r.Epoch() <= before {
+			after := r.Epoch()
+			defer r.ReleaseEpoch(after)
+			if after <= before {
 				t.Fatal("notification did not advance epoch")
 			}
 			for _, item := range []struct {
@@ -73,7 +76,7 @@ func TestStreamCredentialRevocationKinds(t *testing.T) {
 func TestStreamCredentialStaleAdmissionAndInvalidIdentity(t *testing.T) {
 	var r StreamCredentials
 	epoch := r.Epoch()
-	r.NotifyTokenRevoked("unrelated")
+	r.NotifySessionRevoked("s")
 	ctx, cleanup := r.Track(t.Context(), epoch, "u", "s", "", time.Time{})
 	defer cleanup()
 	if StreamCredentialCurrent(ctx) || ctx.Err() == nil {

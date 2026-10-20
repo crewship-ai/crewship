@@ -19,6 +19,7 @@ package retention
 //   and it holds no open work. Open work, conservatively:
 //     - any delegation (assignments row) — the same rule that makes a manual
 //       chat delete answer 409, because a delegation is audit trail;
+//     - private artifact provenance needed to authorize retained copies;
 //     - an escalation raised in it that nobody resolved;
 //     - an unresolved "agent replied" inbox item for it;
 //     - a pending approval whose payload names it;
@@ -43,6 +44,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -67,6 +69,7 @@ const inboxEligible = `workspace_id = ?
 
 // chatEligible: args workspace_id, cutoff, cutoff.
 const chatEligible = `c.workspace_id = ?
+	AND (` + chataudience.NoPrivateArtifactContextSQL + `)
 	AND COALESCE(c.last_activity_at, c.updated_at, c.created_at) < ?
 	AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.chat_id = c.id)
 	AND NOT EXISTS (SELECT 1 FROM escalations e WHERE e.chat_id = c.id AND e.resolved_at IS NULL)

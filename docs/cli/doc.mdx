@@ -166,6 +166,17 @@ audience. Legacy public Page links cannot publish it. Storage limits continue
 to count the whole workspace. If its owner leaves, removal returns 409 until
 the workspace OWNER explicitly selects an active human successor.
 
+The source conversation keeps that private audience from the original creation
+consent, even if creation fails or the execution permission later expires.
+Its stored tool results and live messages cannot expose the output to an ADMIN;
+OWNER inspection is audited before delivery. Existing transcript-sharing links
+cannot publish this protected conversation. Create new private documents from
+your own private conversation; administrative chat access is not creation consent.
+Deleting a protected source conversation currently returns 409: retained log
+copies still depend on its privacy record. Ordinary chat deletion is unaffected.
+Configured chat retention also keeps protected source conversations and excludes
+them from its deletion preview while those copies depend on their privacy record.
+
 The run creates a populated document and returns its saved link. Reopening a
 result does not grant a later run permission to edit it. Repeating an uncertain
 operation must reuse the original request, rather than issuing a new chat task.
@@ -179,3 +190,9 @@ saved links and provenance, without document contents or transcript text.
 
 A completed or recovered run does not erase its saved result. The command
 rechecks your current access; the original run does not regain permission.
+
+Agent-wide logs and diagnostics can contain copies from several conversations.
+They are available only when the reader may inspect every protected conversation
+represented by that agent; a document author does not gain access to another
+author's private output. Foreign OWNER inspection is audited before copies are
+returned. Unavailable required auditing prevents disclosure.

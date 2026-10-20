@@ -54,6 +54,7 @@ func Preview(m Matcher, eventType string, entries []journal.Entry) PreviewResult
 		if eventType != "" && string(e.Type) != eventType {
 			continue
 		}
+		e = journal.PublicAuthorizationAudit(e)
 		out.Scanned++
 		r := m.Explain(e)
 		if r.Matched {
