@@ -100,3 +100,17 @@ Mutation tests cover concurrent revision checks, lease renewal and release,
 boot fencing, immutable transaction guards, exact retries and revoked authority.
 Checkpoint and restore tests also cover generation-bound retries, scoped reads,
 pinned history, and transaction rollback that preserves the original writer.
+
+Retained targeted run authority is an internal foundation. A trusted host can
+bind an already retained personal Document intent to the original human turn
+and live run. This slice exposes no chat send flow for creating that intent.
+It does not turn ordinary messages, Page context or creation provenance into
+permission to edit an existing Document. Shared targets require a proposal
+and remain unavailable through this direct path.
+
+The binding preserves the original Page ID, schema, generation, revision,
+human principal and expiry. Existing draft operations recheck current private
+Page ownership, membership, chat audience and policy. Their cursor advances
+inside the same writer transaction as a committed edit. Exact retries retain
+the original receipt; revoked retained intents cannot fall back to creation
+authority. Backup and instance recovery discard these runtime permissions.
