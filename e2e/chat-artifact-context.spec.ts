@@ -1,4 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { throwawayRefusal } from "./throwaway-guard"
 
 // Chat <-> artifacts context in a real browser, against a real backend for the
 // chat itself. The artifact endpoints are a PROPOSED contract that no backend
@@ -10,6 +13,12 @@ import { test, expect, type Page, type Route } from "@playwright/test"
 // NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT=true. That is a build-time value, so the
 // spec runs only when E2E_CHAT_ARTIFACT_CONTEXT=true says it was.
 test.skip(process.env.E2E_CHAT_ARTIFACT_CONTEXT !== "true", "needs a frontend built with NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT=true")
+
+// Sending starts a real run, so nothing happens until the target is a verified throwaway instance
+// (scripts/throwaway-server.sh manifest, port range, data dir, server and base URL all bound to it)
+// and the instance is provider-free. A flag or an environment variable alone is not proof.
+const refusal = throwawayRefusal(process.env, process.env.PLAYWRIGHT_BASE_URL ?? "", [process.env.CREWSHIP_DATA_DIR ?? "", join(homedir(), ".crewship")])
+test.skip(refusal !== "", refusal)
 
 const TIMEOUT = 20_000
 const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text }] }] })
@@ -74,6 +83,26 @@ async function mockContract(page: Page, options: Partial<Mock> = {}): Promise<Mo
   return mock
 }
 
+/**
+ * Provider-free proof, asked of the target itself before any chat is created or message sent: every
+ * workspace on this instance holds no credential at all (an offline seed creates none, and the
+ * throwaway server runs with a clean environment, so it has no provider key either). Anything
+ * unreadable counts as not proven.
+ */
+async function providerFreeRefusal(page: Page): Promise<string> {
+  const workspaces = await page.request.get("/api/v1/workspaces")
+  if (!workspaces.ok()) return `cannot list workspaces to prove the instance is provider-free (${workspaces.status()})`
+  const list = await workspaces.json()
+  if (!Array.isArray(list) || list.length === 0) return "no workspace on this instance; seed one with `crewship seed --offline-demo`"
+  for (const workspace of list) {
+    const credentials = await page.request.get(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspace.id)}`)
+    if (!credentials.ok()) return `cannot list credentials to prove the instance is provider-free (${credentials.status()})`
+    const items = await credentials.json()
+    if (!Array.isArray(items) || items.length > 0) return "the instance has provider credentials; run against `crewship seed --offline-demo` data, which has none"
+  }
+  return ""
+}
+
 /** A real chat row for the demo agent, so the panel verifies read scope as it does for any existing conversation. */
 async function openChat(page: Page) {
   await page.goto("/")
@@ -115,7 +144,11 @@ const composer = (page: Page) => page.getByRole("textbox").last()
 
 for (const width of [1280, 390]) {
   test.describe(`chat artifact context at ${width}px`, () => {
-    test.beforeEach(async ({ page }) => { await page.setViewportSize({ width, height: 900 }) })
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const notProviderFree = await providerFreeRefusal(page)
+      test.skip(notProviderFree !== "", notProviderFree)
+    })
 
     test("result card, exact revision, linked switch, composer target (update disabled), plain send and library", async ({ page }) => {
       const sent = captureSends(page)

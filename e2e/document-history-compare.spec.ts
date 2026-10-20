@@ -18,13 +18,40 @@ import { test, expect, type Browser, type BrowserContext, type Page, type Route 
 import { spawn, type ChildProcess } from "node:child_process"
 import { request as httpRequest } from "node:http"
 import { once } from "node:events"
-import { readFileSync, mkdtempSync, openSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { readFileSync, mkdtempSync, openSync, realpathSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
+import { dirname, join, resolve, sep } from "node:path"
+import { throwawayRefusal } from "./throwaway-guard"
 
 const manifestPath = process.env.CREWSHIP_THROWAWAY_MANIFEST
 const server = process.env.CREWSHIP_SERVER
-test.skip(!manifestPath || !server, "needs scripts/throwaway-server.sh run --documents (see playwright.documents.config.ts)")
+
+/**
+ * Why this run must not touch anything, or "". Checked before the engine starts or any request is made:
+ * the verified throwaway instance (running manifest, state root, data dir, port range, server), the
+ * frontend proxy bound to that same port (no fallback), and the Documents socket and token paths
+ * confined to that instance's own directory.
+ */
+function refusalFor(): string {
+  if (!manifestPath || !server) return "needs scripts/throwaway-server.sh run --documents (see playwright.documents.config.ts)"
+  const refused = throwawayRefusal(process.env, server, [process.env.CREWSHIP_DATA_DIR ?? "", join(homedir(), ".crewship")])
+  if (refused) return refused
+  let manifest: Record<string, string>
+  try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")) } catch { return "the throwaway manifest is unreadable" }
+  if (process.env.DOCUMENTS_E2E_PROXY_PORT !== manifest.port) return "the frontend proxy port is not the manifest's port (playwright.documents.config.ts derives it from CREWSHIP_SERVER)"
+  let owned: string
+  try { owned = realpathSync(dirname(manifestPath)) } catch { return "the instance directory cannot be resolved" }
+  for (const key of ["documents_authority_socket", "documents_service_socket", "documents_service_token_file"]) {
+    const value = manifest[key] ?? ""
+    if (!value) return `manifest has no ${key}; start the instance with --documents`
+    let parent: string
+    try { parent = realpathSync(dirname(value)) } catch { return `${key} directory does not exist` }
+    if (parent !== owned && !parent.startsWith(owned + sep)) return `${key} is outside the instance directory`
+  }
+  return ""
+}
+const refusal = refusalFor()
+test.skip(refusal !== "", refusal)
 test.describe.configure({ mode: "serial" })
 
 const FIRST = ["Alpha plan", "Beta plan", "Delta plan"]
@@ -67,7 +94,7 @@ const confirmed = async (page: Page) => (await (await page.request.get(`/api/v1/
 const headRev = async (page: Page) => (await confirmed(page)).rev
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
-  if (!manifestPath || !server) return
+  if (refusal || !manifestPath || !server) return
   test.setTimeout(240_000)
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
   const out = mkdtempSync(join(tmpdir(), "document-history-e2e-"))

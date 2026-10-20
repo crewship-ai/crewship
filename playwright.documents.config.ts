@@ -15,7 +15,10 @@ import { defineConfig, devices } from "@playwright/test"
  * (DOCUMENTS_E2E_REVIEW_FLAG=off|on; run the spec once for each).
  */
 const server = process.env.CREWSHIP_SERVER ?? ""
-const goPort = /:(\d{2,5})\/?$/.exec(server)?.[1] ?? "8080"
+// No fallback port: without the throwaway server's address there is no target, and the spec refuses.
+const goPort = /^http:\/\/127\.0\.0\.1:(\d{4,5})$/.exec(server)?.[1] ?? ""
+// The spec requires the frontend proxy to point at the manifest's own port: it compares this value with the manifest.
+process.env.DOCUMENTS_E2E_PROXY_PORT = goPort
 // One frontend per run: DOCUMENTS_E2E_REVIEW_FLAG=off (default) runs the compare
 // tests where the review flag is off; =on runs revert and proposals with it on.
 // Run the command twice, each against its own throwaway server.
@@ -32,13 +35,14 @@ export default defineConfig({
   timeout: 120_000,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: `http://localhost:${webPort}`,
+    baseURL: goPort ? `http://localhost:${webPort}` : undefined,
     storageState: { cookies: [], origins: [] },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
+  // Nothing is started without a target: a frontend proxying to a guessed port could reach someone else's server.
+  webServer: !goPort ? undefined : {
     command: `pnpm dev --port ${webPort}`,
     url: `http://localhost:${webPort}`,
     reuseExistingServer: false,
