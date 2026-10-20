@@ -33,7 +33,7 @@ it("waits for a message that renders later", async () => {
   const el = turn("m1")
   await act(async () => { await Promise.resolve() })
   expect(el.scrollIntoView).toHaveBeenCalled()
-  expect(toast).not.toHaveBeenCalled()
+  expect(toast).not.toHaveBeenCalledWith("Could not locate that message in this conversation view.")
 })
 
 it("says so when the message never appears", () => {
@@ -101,4 +101,45 @@ it("stops re-applying as soon as the reader scrolls or interacts", () => {
   const n = vi.mocked(el.scrollIntoView).mock.calls.length
   act(() => { vi.advanceTimersByTime(500) })
   expect(vi.mocked(el.scrollIntoView).mock.calls.length).toBe(n)
+})
+
+const INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"]
+
+it("unmounting mid-settle removes all four window listeners and stops re-applying", () => {
+  const el = turn("m1")
+  params.current = new URLSearchParams("message=m1")
+  const add = vi.spyOn(window, "addEventListener")
+  const remove = vi.spyOn(window, "removeEventListener")
+  const { unmount } = renderHook(() => useMessageAnchor("s1"))
+  const added = INPUTS.map((t) => add.mock.calls.filter((c) => c[0] === t).length)
+  expect(added).toEqual([1, 1, 1, 1])
+  act(() => { vi.advanceTimersByTime(100) })
+  unmount()
+  INPUTS.forEach((t) => expect(remove.mock.calls.filter((c) => c[0] === t).length).toBeGreaterThanOrEqual(1))
+  const n = vi.mocked(el.scrollIntoView).mock.calls.length
+  act(() => { vi.advanceTimersByTime(1500) })
+  expect(vi.mocked(el.scrollIntoView).mock.calls.length).toBe(n)
+  add.mockRestore(); remove.mockRestore()
+})
+
+it("a session switch mid-settle stops it and clears the marker", () => {
+  const el = turn("m1")
+  params.current = new URLSearchParams("message=m1")
+  const { rerender } = renderHook(({ id }) => useMessageAnchor(id), { initialProps: { id: "s1" } })
+  act(() => { vi.advanceTimersByTime(100) })
+  rerender({ id: "s2" })
+  const n = vi.mocked(el.scrollIntoView).mock.calls.length
+  act(() => { vi.advanceTimersByTime(1500) })
+  expect(vi.mocked(el.scrollIntoView).mock.calls.length).toBe(n)
+  expect(el.hasAttribute("data-search-target")).toBe(false)
+})
+
+it("moves focus to the hit without scrolling and announces the jump", () => {
+  const el = turn("m1")
+  el.focus = vi.fn()
+  params.current = new URLSearchParams("message=m1")
+  renderHook(() => useMessageAnchor("s1"))
+  expect(el.getAttribute("tabindex")).toBe("-1")
+  expect(el.focus).toHaveBeenCalledWith({ preventScroll: true })
+  expect(toast).toHaveBeenCalledWith("Jumped to message")
 })

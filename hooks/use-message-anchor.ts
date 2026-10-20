@@ -39,7 +39,12 @@ export function useMessageAnchor(sessionId: string | null) {
   }
   const handled = useRef<{ id: string } | null>(null)
   const settle = useRef<(() => void) | null>(null)
-  useEffect(() => () => settle.current?.(), [])
+  const mark = useRef<{ el: HTMLElement; timer: ReturnType<typeof setTimeout> } | null>(null)
+  // A session switch or unmount ends the settle loop and the marker of the previous session.
+  useEffect(() => () => {
+    settle.current?.()
+    if (mark.current) { clearTimeout(mark.current.timer); mark.current.el.removeAttribute("data-search-target"); mark.current = null }
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || !target || handled.current === target) return
@@ -67,7 +72,12 @@ export function useMessageAnchor(sessionId: string | null) {
       settle.current = stop
       frame = requestAnimationFrame(tick)
       el.setAttribute("data-search-target", "true")
-      setTimeout(() => el.removeAttribute("data-search-target"), MARK_MS)
+      if (mark.current) clearTimeout(mark.current.timer)
+      mark.current = { el, timer: setTimeout(() => { el.removeAttribute("data-search-target"); mark.current = null }, MARK_MS) }
+      // Keyboard and screen-reader users land on the hit: focus without scrolling, and say so.
+      if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1")
+      el.focus({ preventScroll: true })
+      toast.message("Jumped to message")
       setTarget(null)
     }
     const now = find()

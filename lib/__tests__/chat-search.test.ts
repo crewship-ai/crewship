@@ -83,6 +83,18 @@ describe("from: matches the message author, not the conversation", () => {
   })
 })
 
+describe("workspace agent cap", () => {
+  const big = (n: number): ChatSearchRoster => Array.from({ length: n }, (_, i) => ({ id: `a${i}`, slug: `agent-${i}`, name: `Agent ${i}` }))
+  it("a workspace at the server's 400-agent cap is never reported complete for All chats", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ hits: [hit()] })))
+    const capped = await runChatSearch({ raw: "deploy", scope: "all", workspaceId: "ws", roster: big(400) })
+    expect(capped.status).toBe("partial")
+    expect(capped.note).toMatch(/400 agents/)
+    expect((await runChatSearch({ raw: "deploy", scope: "all", workspaceId: "ws", roster: big(399) })).status).toBe("complete")
+    expect((await runChatSearch({ raw: "deploy in:agent-1", scope: "all", workspaceId: "ws", roster: big(400) })).status).toBe("complete")
+  })
+})
+
 describe("runChatSearch", () => {
   it("49 hits are complete, 50 are truncated (no pagination to prove more do not exist)", async () => {
     const page = (n: number) => Array.from({ length: n }, (_, i) => hit({ id: `m${i}` }))

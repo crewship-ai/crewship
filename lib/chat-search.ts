@@ -27,6 +27,8 @@ export interface ParsedChatSearch { text: string; filters: ChatSearchFilters; in
 export type ChatSearchRoster = { id: string; slug: string; name: string }[]
 
 export const CHAT_SEARCH_PAGE = 50
+/** The server searches at most this many agents per workspace-wide query (maxWorkspaceSearchAgents); it says nothing when the cap applied. */
+export const WORKSPACE_SEARCH_AGENT_CAP = 400
 const MAX_TEXT = 200
 const MAX_TOKENS = 64
 const MAX_HAS = 3
@@ -156,10 +158,14 @@ export async function runChatSearch(opts: {
     hits = applyClientFilters(hits, parsed.filters, opts.roster)
     const narrowedLocally = opts.scope === "this" || before !== hits.length || Object.keys(parsed.filters).some((k) => k !== "in")
     const fullPage = page.length >= CHAT_SEARCH_PAGE
+    const capNote = opts.scope === "all" && !agentId && opts.roster.length >= WORKSPACE_SEARCH_AGENT_CAP
+      ? ` Only the first ${WORKSPACE_SEARCH_AGENT_CAP} agents of a workspace are searched; chats of other agents may be missing.`
+      : ""
     if (fullPage && narrowedLocally) {
-      return { status: "partial", hits, note: `Filters were applied to the ${CHAT_SEARCH_PAGE} best matches only. More matches may exist.` }
+      return { status: "partial", hits, note: `Filters were applied to the ${CHAT_SEARCH_PAGE} best matches only. More matches may exist.${capNote}` }
     }
-    if (fullPage) return { status: "truncated", hits, note: `First ${CHAT_SEARCH_PAGE} results, more may exist.` }
+    if (fullPage) return { status: "truncated", hits, note: `First ${CHAT_SEARCH_PAGE} results, more may exist.${capNote}` }
+    if (capNote) return { status: "partial", hits, note: capNote.trim() }
     return { status: "complete", hits }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return { status: "idle", hits: [] }

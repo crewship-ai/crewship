@@ -260,6 +260,9 @@ test("Enter opens the exact message, scrolled into view", async ({ page }) => {
   // The transcript opened at the bottom and was scrolled away from it.
   expect(await inViewport(seed.longLastId)).toBe(false)
   await expect(target).toHaveAttribute("data-search-target", "true")
+  // Keyboard and screen-reader users land on the hit.
+  await expect(target).toBeFocused()
+  await expect(page.getByText("Jumped to message")).toBeVisible()
   // History and rows above keep settling after the jump; the hit must still be in view afterwards.
   await page.waitForTimeout(1500)
   expect(await inViewport(seed.longTargetId), "hit drifted out of view after the transcript settled").toBe(true)
