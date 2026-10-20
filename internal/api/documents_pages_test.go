@@ -316,3 +316,31 @@ func TestHumanDocumentMetadataEditPreservesContentType(t *testing.T) {
 		t.Fatalf("content changed: %q %v", snapshot, err)
 	}
 }
+
+func TestHumanDocumentRevisionSelectorNeverFallsForward(t *testing.T) {
+	for _, query := range []string{"?revision=1", "?revision=", "?revision=latest", "?revision=1&revision=2", ""} {
+		t.Run(query, func(t *testing.T) {
+			h, ws, user := humanDocumentTransportFixture(t)
+			calls := 0
+			h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+				calls++
+				return []byte(`{"rev":2,"schema":2,"content":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"CURRENT HEAD TWO"}]}]}}`), 200, nil
+			}
+			w := httptest.NewRecorder()
+			h.GetDocument(w, humanDocumentRequest(t, "GET", "/api/v1/pages/private-doc/document"+query, ws, user, ""))
+			if query == "" {
+				if w.Code != 200 || calls != 1 || !strings.Contains(w.Body.String(), "CURRENT HEAD TWO") {
+					t.Fatalf("ordinary latest read changed: status=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+				}
+				return
+			}
+			if w.Code != 400 || calls != 0 {
+				t.Fatalf("unsupported revision fell forward: status=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+			}
+			var body map[string]any
+			if json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 1 || body["error"] != "selected revision reads are not enabled" {
+				t.Fatalf("revision refusal must be a closed error: %s", w.Body.String())
+			}
+		})
+	}
+}
