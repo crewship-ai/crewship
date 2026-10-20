@@ -29,16 +29,17 @@ const runVerdictFlagKey = "run_verdict_summaries"
 // POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID                     string                    `json:"id"`
-		AgentID                string                    `json:"agent_id"`
-		ChatID                 string                    `json:"chat_id"`
-		WorkspaceID            string                    `json:"workspace_id"`
-		TriggerType            string                    `json:"trigger_type"`
-		Metadata               json.RawMessage           `json:"metadata"`
-		HumanAuthority         *chataudience.Receipt     `json:"human_authority"`
-		TriggerMessageID       string                    `json:"trigger_message_id"`
-		ChatOriginID           string                    `json:"chat_origin_id"`
-		DocumentCreationIntent *documents.CreationIntent `json:"document_creation_intent"`
+		ID                      string                     `json:"id"`
+		AgentID                 string                     `json:"agent_id"`
+		ChatID                  string                     `json:"chat_id"`
+		WorkspaceID             string                     `json:"workspace_id"`
+		TriggerType             string                     `json:"trigger_type"`
+		Metadata                json.RawMessage            `json:"metadata"`
+		HumanAuthority          *chataudience.Receipt      `json:"human_authority"`
+		TriggerMessageID        string                     `json:"trigger_message_id"`
+		ChatOriginID            string                     `json:"chat_origin_id"`
+		DocumentCreationIntent  *documents.CreationIntent  `json:"document_creation_intent"`
+		DocumentIterationIntent *documents.IterationIntent `json:"document_iteration_intent"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -52,7 +53,11 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		body.TriggerType = "USER"
 	}
 
-	if body.DocumentCreationIntent != nil {
+	if body.DocumentCreationIntent != nil && body.DocumentIterationIntent != nil {
+		replyError(w, http.StatusBadRequest, "one Document purpose required")
+		return
+	}
+	if body.DocumentCreationIntent != nil || body.DocumentIterationIntent != nil {
 		if !h.documentCreationEnabled {
 			replyError(w, http.StatusServiceUnavailable, "Document creation unavailable")
 			return
@@ -143,7 +148,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	// If the journal cannot commit, do not flip the agent to RUNNING.
 	{
 		synchronous, ok := h.journal.(journal.SyncEmitter)
-		if !ok && body.DocumentCreationIntent == nil {
+		if !ok && body.DocumentCreationIntent == nil && body.DocumentIterationIntent == nil {
 			replyError(w, http.StatusServiceUnavailable, "Durable run journal unavailable")
 			return
 		}
@@ -169,6 +174,9 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		if body.DocumentCreationIntent != nil {
 			payload["document_creation_intent"] = body.DocumentCreationIntent
 		}
+		if body.DocumentIterationIntent != nil {
+			payload["document_iteration_intent"] = body.DocumentIterationIntent
+		}
 		entry := journal.Entry{
 			ID:          "run-start:" + body.ID,
 			WorkspaceID: body.WorkspaceID,
@@ -189,6 +197,15 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 					replyInternalError(w, h.logger, "create document run admission", err)
 				} else {
 					replyError(w, status, err.Error())
+				}
+				return
+			}
+		} else if body.DocumentIterationIntent != nil {
+			if status, err := h.admitDocumentIterationStart(r, entry, body.HumanAuthority, body.TriggerMessageID, *body.DocumentIterationIntent); err != nil {
+				if status == http.StatusInternalServerError {
+					replyInternalError(w, h.logger, "admit targeted Document run", err)
+				} else {
+					replyError(w, status, "Document update admission refused")
 				}
 				return
 			}
