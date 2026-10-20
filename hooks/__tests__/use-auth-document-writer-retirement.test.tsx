@@ -11,6 +11,7 @@ type DocumentWriterFixture = {
   editor: ReturnType<typeof import("@/hooks/use-page-document").usePageDocument>
   pause: boolean
   putStarted: boolean
+  abortCount: number
   purgeStarted: boolean
   done: boolean
   transition: Promise<void>
@@ -34,7 +35,7 @@ const source=documentSchema.create({type:'doc',content:[{type:'paragraph',attrs:
 const state={page_id:'p',schema:3,rev:1,epoch:'epoch',generation:1,incarnation:'generation',snapshot:documentSchema.snapshot(source),snapshotRev:1,updates:[],blocks:[],content:{type:'doc'},outline:[],can_write:true,can_comment:false,can_resolve:false};
 // Keep this single-tab fixture mounted so its post-sign-out IDB rows can be observed.
 window.BroadcastChannel=undefined;
-const f=window.documentErasureFixture={human:'alice',auth:null,editor:null,pause:false,putStarted:false,purgeStarted:false,done:false,holdSession:false,sessionStarted:false};
+const f=window.documentErasureFixture={human:'alice',auth:null,editor:null,pause:false,putStarted:false,abortCount:0,purgeStarted:false,done:false,holdSession:false,sessionStarted:false};
 window.fetch=async url=>{
  const path=String(url);
  if(path.includes('/api/auth/session')){
@@ -46,6 +47,8 @@ window.fetch=async url=>{
  if(path.includes('/document?'))return Response.json(state);
  throw new Error('Unexpected fixture request');
 };
+const abort=IDBTransaction.prototype.abort;
+IDBTransaction.prototype.abort=function(){f.abortCount++;return abort.call(this);};
 const put=IDBObjectStore.prototype.put;
 IDBObjectStore.prototype.put=function(value,...args){
  const result=put.call(this,value,...args);
@@ -69,7 +72,7 @@ f.rows=()=>new Promise((resolve,reject)=>{
 });
 `
 
-it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "in-flight sign-out", "identity replacement", "stale session refresh"])(
+it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "in-flight sign-out", "identity replacement", "stale session refresh", "stuck sign-out"])(
   "retires the real document writer before erasure: %s", async scenario => {
     const { outputFiles } = buildSync({ stdin: { contents: fixture, loader: "tsx", resolveDir: process.cwd() }, bundle: true, write: false, platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"test"' } })
     const browser = await chromium.launch({ headless: true })
@@ -83,7 +86,7 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
         await page.evaluate(() => { const f = window.documentErasureFixture; f.holdSession = true; f.staleRefresh = f.auth.refresh() })
         await page.waitForFunction(() => window.documentErasureFixture.sessionStarted)
       }
-      const paused = scenario === "in-flight sign-out" || scenario === "identity replacement"
+      const paused = scenario === "in-flight sign-out" || scenario === "identity replacement" || scenario === "stuck sign-out"
       await page.evaluate(paused => { const f = window.documentErasureFixture; f.pause = paused; f.edit() }, paused)
       if (paused) await page.waitForFunction(() => window.documentErasureFixture.putStarted)
       await page.evaluate(replace => {
@@ -92,13 +95,18 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
         f.purgeStarted = false
         f.transition = (replace ? f.auth.refresh() : f.auth.signOut()).then(() => { f.done = true })
       }, scenario === "identity replacement")
-      if (paused) {
+      if (paused && scenario !== "stuck sign-out") {
         // Let the auth response settle while the first actual IDB transaction is
         // paused, then add another batch. It must never follow the final purge.
         await page.waitForTimeout(50)
         await page.evaluate(() => { const f = window.documentErasureFixture; f.edit(); f.pause = false })
       }
-      await page.waitForFunction(() => window.documentErasureFixture.done)
+      await page.waitForFunction(() => window.documentErasureFixture.done, undefined, { timeout: 6000 })
+      if (scenario === "stuck sign-out") {
+        expect(await page.evaluate(() => window.documentErasureFixture.abortCount)).toBeGreaterThan(0)
+        // Releasing the old fixture after auth settles must not revive its write.
+        await page.evaluate(() => { window.documentErasureFixture.pause = false })
+      }
       if (scenario === "identity replacement") {
         await page.waitForFunction(() => window.documentErasureFixture.auth.session?.user.id === "bob" && window.documentErasureFixture.editor?.state?.rev === 1)
         await page.evaluate(() => window.documentErasureFixture.edit())

@@ -25,6 +25,30 @@ export const STORAGE_OPEN_TIMEOUT_MS = 2000
 export const STORAGE_LOCK_WAIT_MS = 1000
 const message = "Private document storage is unavailable. Changes are unsaved; recover your draft."
 
+/** Reuse the browser-storage deadline for transactions as well as opening.
+ * Abort the actual transaction before releasing a privacy barrier: a rejected
+ * promise alone would still permit a late write after the final purge. */
+function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject: (cause: Error) => void): () => void {
+  let settled = false
+  const finish = (ok: boolean) => {
+    if (settled) return
+    settled = true; clearTimeout(timer)
+    if (ok) complete()
+    else reject(new DocumentStorageError(message))
+  }
+  const abort = () => {
+    if (settled) return
+    // InvalidStateError means the native transaction has already finished.
+    try { tx.abort() } catch { /* Already committed or aborted. */ }
+    finish(false)
+  }
+  const timer = setTimeout(abort, STORAGE_OPEN_TIMEOUT_MS)
+  tx.oncomplete = () => finish(true)
+  tx.onabort = () => finish(false)
+  tx.onerror = abort
+  return abort
+}
+
 export async function openDocumentDrafts(human: string, workspace: string, page: string): Promise<DocumentDraftStore> {
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
@@ -67,12 +91,13 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
   const keys = new Map<string, [string, string]>()
   function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => {
+      let abort = () => {}
       try {
         const tx = db.transaction("drafts", mode, { durability: "strict" })
-        const request = action(tx.objectStore("drafts"))
-        tx.oncomplete = () => resolve(request.result)
-        tx.onabort = tx.onerror = () => reject(new DocumentStorageError(message))
-      } catch { reject(new DocumentStorageError(message)) }
+        let request: IDBRequest<T>
+        abort = boundDraftTransaction(tx, () => resolve(request.result), reject)
+        request = action(tx.objectStore("drafts"))
+      } catch { abort(); reject(new DocumentStorageError(message)) }
     })
   }
   return {
@@ -147,16 +172,19 @@ async function purgeRows(range: () => IDBKeyRange | undefined, owns: (owner: str
     try {
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction("drafts", "readwrite")
-        tx.oncomplete = () => resolve()
-        tx.onabort = tx.onerror = () => reject(new Error("purge"))
-        const cursor = tx.objectStore("drafts").openCursor(range())
-        cursor.onsuccess = () => {
-          const row = cursor.result
-          if (!row) return
-          const key = row.key as [string, string]
-          if (owns(key[0])) row.delete()
-          row.continue()
-        }
+        const abort = boundDraftTransaction(tx, resolve, reject)
+        try {
+          const cursor = tx.objectStore("drafts").openCursor(range())
+          cursor.onsuccess = () => {
+            try {
+              const row = cursor.result
+              if (!row) return
+              const key = row.key as [string, string]
+              if (owns(key[0])) row.delete()
+              row.continue()
+            } catch { abort() }
+          }
+        } catch { abort() }
       })
     } finally { db.close() }
   } catch { /* Nothing more can be done for rows the browser will not let us delete. */ }
