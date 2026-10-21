@@ -155,6 +155,24 @@ nonempty panels, and does not change normal Page validation. Page creation
 retains its existing `workspace:admin` CLI scope. Then use
 [`crewship doc initialize`](./doc) to populate the document.
 
+Add `--private` together with `--allow-empty` to create an explicitly private
+empty Page, for example before `crewship slides initialize` on a server with
+Slides enabled. It posts only to `/api/v1/private-pages`, without automatic
+retry, preflight or fallback to ordinary creation. A server lacking this route
+refuses before creating anything, including after a server rollback.
+The audience is its author and audited workspace OWNERs;
+workspace ADMIN alone cannot read it. Creation checks the current human
+credential and authoring permission again after reading the input. Crew ownership,
+panels, folders, grants and public links are incompatible with this mode.
+Private Pages cannot use legacy App/project creation or publication. Omitting
+`--private` preserves the existing audience; `--allow-empty` alone does not
+establish privacy. Neither flag enables a content service.
+
+Authorized `page get` and `page list` JSON includes `private_audience`,
+`has_slides` and `slides_schema`. A Page without a saved deck has `false` and
+`0`; a saved deck reports its stored schema even when this client cannot edit
+that schema. These fields contain no deck content and grant no access.
+
 ```bash
 crewship page create --file fleet-201.page.yaml
 ```

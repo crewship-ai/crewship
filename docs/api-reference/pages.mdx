@@ -2478,6 +2478,32 @@ Page read and list responses include `has_document`, which identifies saved nati
 document content. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.
 
+For an explicitly private empty Page, send `allow_empty: true` and `panels: []`
+to `POST /api/v1/private-pages`. The route selects the private audience; a body
+flag cannot select it. This requires a
+current human credential, the existing Page creation permission and `pages:write`
+scope in addition to the route's existing CLI scope. Authority is rechecked in
+the creation transaction. The author is inferred from the credential; folders,
+crew ownership, sharing, public tokens and supplied author fields are rejected.
+This narrow mode accepts the flat Page fields only, without a `spec` envelope.
+Ordinary `POST /api/v1/pages` preserves its existing default audience and rejects
+the new `private` body field. CLI:
+`crewship page create --private --allow-empty --file <page.yaml>`.
+
+The CLI uses only the separate private route, without automatic retry or a
+fallback to ordinary creation. Older servers return 404 or 405 before creating
+anything; a preflight request is not used as a substitute for this boundary.
+
+Private Pages are visible to their author and audited workspace OWNERs, with no
+workspace ADMIN override. They cannot acquire panels, ordinary grants or legacy
+public links, and legacy App/project operations return 409 because that runtime
+does not support private content. Content service switches remain independent.
+Authorized Page detail and list responses include `private_audience`,
+`has_slides` and `slides_schema`. The latter fields reflect saved Slides identity
+and the stored schema (`false`/`0` when absent), without payload, hash or an
+assertion that the reader supports that schema. An unauthorized private Page
+remains absent from lists and returns 404 for detail.
+
 ## Saved documents from a chat
 
 `GET /api/v1/chats/{chatId}/document-results` returns a `results` array of up to

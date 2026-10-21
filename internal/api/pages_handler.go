@@ -252,7 +252,10 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	HasDocument bool `json:"has_document"`
+	PrivateAudience bool `json:"private_audience"`
+	HasSlides       bool `json:"has_slides"`
+	SlidesSchema    int  `json:"slides_schema"`
+	HasDocument     bool `json:"has_document"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -319,6 +322,8 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	HasSlides    bool `json:"has_slides"`
+	SlidesSchema int  `json:"slides_schema"`
 	// Explicit audience classification; unfiled human ownership is not privacy.
 	PrivateAudience bool `json:"private_audience"`
 	HasDocument     bool `json:"has_document"`
@@ -403,6 +408,8 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasSlides          bool
+	SlidesSchema       int
 	PrivateAudience    bool
 	HasDocument        bool
 	HasProject         bool
@@ -550,7 +557,9 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),
+ COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -565,7 +574,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasSlides, &p.SlidesSchema); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -667,6 +676,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
+		HasSlides: rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		PrivateAudience: rec.PrivateAudience,
 		HasDocument:     rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
@@ -807,6 +817,16 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 // an agent saving a page that names a routine which does not exist — the page
 // would render a grid of dead panels and nobody would know why.
 func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
+	h.createPage(w, r, false)
+}
+
+// The route owns this mode. A request body can never opt a legacy constructor
+// into private creation, so an older server fails before creating anything.
+func (h *PageHandler) CreatePrivate(w http.ResponseWriter, r *http.Request) {
+	h.createPage(w, r, true)
+}
+
+func (h *PageHandler) createPage(w http.ResponseWriter, r *http.Request, private bool) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -821,8 +841,12 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, ok := h.decodeWrite(w, r)
+	req, ok := h.decodeWrite(w, r, private)
 	if !ok {
+		return
+	}
+	if private && (!req.AllowEmpty || req.Spec != nil) {
+		replyError(w, 400, "private creation requires a flat empty human-owned page with allow_empty")
 		return
 	}
 	if req.AllowEmpty {
@@ -932,12 +956,25 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	if private {
+		ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+		current := r.WithContext(ctx)
+		agent, _ := pageGrantCallerIsAgent(current)
+		if agent || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil || validateContentHumanCredential(current, tx, "pages:write") != nil {
+			replyError(w, 403, "current human Page authoring authority required")
+			return
+		}
+		if _, err := h.liveContentHumanRole(ctx, wsID, user.ID); err != nil || !h.artifactPrincipalMayCreate(ctx, wsID, user.ID) {
+			replyError(w, 403, "current human Page authoring authority required")
+			return
+		}
+	}
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at, private_audience)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
 		pageID, wsID, doc.Metadata.Slug, doc.Metadata.Name, doc.Metadata.Description,
-		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now); err != nil {
+		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now, private); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf("a page with slug %q already exists in this workspace", doc.Metadata.Slug))
 			return
@@ -1027,7 +1064,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, ok := h.decodeWrite(w, r)
+	req, ok := h.decodeWrite(w, r, false)
 	if !ok {
 		return
 	}
@@ -1062,8 +1099,8 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if req.Panels != nil && rec.HasDocument {
-		replyError(w, 409, "document pages cannot contain panels")
+	if req.Panels != nil && (rec.HasDocument || rec.PrivateAudience) {
+		replyError(w, 409, "this Page type does not support panels")
 		return
 	}
 	if req.Panels != nil {
@@ -1390,11 +1427,13 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience
+ EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),
+ COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0)
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasSlides, &p.SlidesSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -1806,6 +1845,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
+		PrivateAudience: rec.PrivateAudience, HasSlides: rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
@@ -1897,7 +1937,7 @@ func (h *PageHandler) ownerRef(ctx context.Context, rec *pageRecord) string {
 // The cap is enforced HERE and never as a DB CHECK (§10): a CHECK cannot
 // produce the rejection envelope the API owes the caller, and cannot be raised
 // without a migration.
-func (h *PageHandler) decodeWrite(w http.ResponseWriter, r *http.Request) (*pageWriteRequest, bool) {
+func (h *PageHandler) decodeWrite(w http.ResponseWriter, r *http.Request, private bool) (*pageWriteRequest, bool) {
 	body, ok := readCapped(w, r, pages.MaxSpecBytes, "page spec")
 	if !ok {
 		return nil, false
@@ -1906,6 +1946,29 @@ func (h *PageHandler) decodeWrite(w http.ResponseWriter, r *http.Request) (*page
 	if err := json.Unmarshal(body, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(body, &fields)
+	for key := range fields {
+		if strings.EqualFold(key, "private") {
+			replyError(w, 400, "private creation requires POST /api/v1/private-pages")
+			return nil, false
+		}
+	}
+	if private {
+		var shape map[string]any
+		if pages.DecodeProjectJSON(body, &shape) != nil {
+			replyError(w, 400, "unambiguous private Page audience required")
+			return nil, false
+		}
+		for key := range fields {
+			switch key {
+			case "allow_empty", "slug", "name", "description", "panels", "owner", "icon", "color", "workspace_id":
+			default:
+				replyError(w, 400, "unsupported private Page creation field")
+				return nil, false
+			}
+		}
 	}
 	// `spec: {panels: [...]}` is accepted as well as a flat `panels`, because
 	// an agent that has a pages.Document in hand should not have to flatten it.

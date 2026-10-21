@@ -117242,6 +117242,11 @@
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
                           },
+                          "has_slides": {
+                            "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                            "readOnly": true,
+                            "type": "boolean"
+                          },
                           "icon": {
                             "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                             "type": "string"
@@ -117302,6 +117307,11 @@
                               "type": "string"
                             },
                             "type": "array"
+                          },
+                          "slides_schema": {
+                            "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                            "readOnly": true,
+                            "type": "integer"
                           },
                           "slug": {
                             "type": "string"
@@ -118552,6 +118562,11 @@
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
+                        "has_slides": {
+                          "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "icon": {
                           "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                           "type": "string"
@@ -118612,6 +118627,11 @@
                             "type": "string"
                           },
                           "type": "array"
+                        },
+                        "slides_schema": {
+                          "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                          "readOnly": true,
+                          "type": "integer"
                         },
                         "slug": {
                           "type": "string"
@@ -118890,6 +118910,11 @@
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
+                        "has_slides": {
+                          "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "icon": {
                           "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                           "type": "string"
@@ -118950,6 +118975,11 @@
                             "type": "string"
                           },
                           "type": "array"
+                        },
+                        "slides_schema": {
+                          "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                          "readOnly": true,
+                          "type": "integer"
                         },
                         "slug": {
                           "type": "string"
@@ -119240,6 +119270,11 @@
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
                           },
+                          "has_slides": {
+                            "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                            "readOnly": true,
+                            "type": "boolean"
+                          },
                           "icon": {
                             "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                             "type": "string"
@@ -119300,6 +119335,11 @@
                               "type": "string"
                             },
                             "type": "array"
+                          },
+                          "slides_schema": {
+                            "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                            "readOnly": true,
+                            "type": "integer"
                           },
                           "slug": {
                             "type": "string"
@@ -119674,6 +119714,11 @@
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
                       },
+                      "has_slides": {
+                        "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                        "readOnly": true,
+                        "type": "boolean"
+                      },
                       "icon": {
                         "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                         "type": "string"
@@ -119734,6 +119779,11 @@
                           "type": "string"
                         },
                         "type": "array"
+                      },
+                      "slides_schema": {
+                        "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                        "readOnly": true,
+                        "type": "integer"
                       },
                       "slug": {
                         "type": "string"
@@ -119878,7 +119928,7 @@
               "schema": {
                 "properties": {
                   "allow_empty": {
-                    "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode.",
+                    "description": "Explicitly stage an empty human-owned Page before native content initialization. Panels are refused; explicit privacy requires POST /api/v1/private-pages.",
                     "type": "boolean"
                   },
                   "color": {
@@ -120070,6 +120120,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -120219,7 +120274,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -120289,6 +120354,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -120438,7 +120508,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -121137,6 +121217,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -121286,7 +121371,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -121356,6 +121451,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -121505,7 +121605,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -122058,6 +122168,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -122207,7 +122322,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -122539,6 +122664,11 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -122688,7 +122818,17 @@
                       },
                       "type": "array"
                     },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
                     "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
                       "type": "integer"
                     },
                     "slug": {
@@ -133249,6 +133389,11 @@
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
+                        "has_slides": {
+                          "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "icon": {
                           "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                           "type": "string"
@@ -133398,7 +133543,17 @@
                           },
                           "type": "array"
                         },
+                        "private_audience": {
+                          "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                          "readOnly": true,
+                          "type": "boolean"
+                        },
                         "publication_version": {
+                          "type": "integer"
+                        },
+                        "slides_schema": {
+                          "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                          "readOnly": true,
                           "type": "integer"
                         },
                         "slug": {
@@ -136281,6 +136436,750 @@
           "presence"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/private-pages": {
+      "post": {
+        "description": "Create private pages (POST /api/v1/private-pages).",
+        "operationId": "post_api_v1_private-pages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "allow_empty": {
+                    "description": "Explicitly stage an empty human-owned Page before native content initialization. Panels are refused; explicit privacy requires POST /api/v1/private-pages.",
+                    "type": "boolean"
+                  },
+                  "color": {
+                    "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "icon": {
+                    "description": "The page's icon, a crew icon name. On PATCH an omitted field keeps the stored one and \"\" clears it; a name outside the crew icon registry is refused by name (400).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "panels": {
+                    "description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1).",
+                    "items": {
+                      "properties": {
+                        "icon": {
+                          "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                          "enum": [
+                            "memory",
+                            "cpu",
+                            "disk",
+                            "network",
+                            "container",
+                            "database",
+                            "queue",
+                            "clock",
+                            "calendar",
+                            "money",
+                            "people",
+                            "deploy",
+                            "alert"
+                          ],
+                          "type": "string"
+                        },
+                        "id": {
+                          "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                          "type": "string"
+                        },
+                        "on_failure": {
+                          "properties": {
+                            "issue": {
+                              "description": "`crew/\u003cslug\u003e` — the crew an SLA lapse or a producer failure opens an issue on, once per lapse (§4 rule 4).",
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "owner": {
+                          "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                          "type": "string"
+                        },
+                        "producer": {
+                          "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                          "type": "string"
+                        },
+                        "public": {
+                          "type": "boolean"
+                        },
+                        "refresh": {
+                          "description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. `on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. Refused at save time: a value outside the set; a producer that is not `routine/\u003cslug\u003e` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); `on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop.",
+                          "enum": [
+                            "on:wake",
+                            "on:panels-changed"
+                          ],
+                          "type": "string"
+                        },
+                        "schema": {
+                          "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
+                          "enum": [
+                            "metric.v1",
+                            "series.v1",
+                            "status.v1",
+                            "table.v1",
+                            "narrative.v1",
+                            "embed.v1"
+                          ],
+                          "type": "string"
+                        },
+                        "sla_seconds": {
+                          "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                          "type": "integer"
+                        },
+                        "span": {
+                          "description": "1–12 columns of the grid. Absent means 12.",
+                          "type": "integer"
+                        },
+                        "tab": {
+                          "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "wake": {
+                          "description": "Thresholds that turn this panel into a sensor (§5). Each compiles to an `automations` row owned by the page spec. Max 4 per panel.",
+                          "items": {
+                            "properties": {
+                              "agent": {
+                                "description": "`crew/\u003cslug\u003e` — the crew woken when the gate fires. A crew and never a single agent.",
+                                "type": "string"
+                              },
+                              "for": {
+                                "description": "Go duration. The condition must hold this long, continuously, before the gate fires, so one bad scrape wakes nobody. Max 24h.",
+                                "type": "string"
+                              },
+                              "when": {
+                                "description": "The threshold, in one of two forms: `any(state == \"critical\")` / `all(state == \"ok\")` over a status.v1 panel, or `value \u003e 90` over a metric.v1 panel. Not an expression language; a predicate the panel's schema cannot satisfy is refused at save time rather than never matching (§5).",
+                                "type": "string"
+                              },
+                              "writes": {
+                                "description": "The panel the woken agent is expected to write. Must exist on this page. A declaration, not a grant: the agent still needs produce authority on it.",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
+                    "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
+                      "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "private_audience": {
+                      "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience.",
+                      "readOnly": true,
+                      "type": "boolean"
+                    },
+                    "publication_version": {
+                      "type": "integer"
+                    },
+                    "slides_schema": {
+                      "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included.",
+                      "readOnly": true,
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create private pages",
+        "tags": [
+          "private-pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/projects": {

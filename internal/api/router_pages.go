@@ -113,7 +113,11 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// openapi: responses 200,201,400,401,403,409,500
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
+	// A separate path prevents older servers from silently ignoring privacy.
+	// openapi: responses 201,400,401,403,409,422,500
+	r.authedMut("POST", "/api/v1/private-pages", roleInline, p.CreatePrivate)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)

@@ -533,6 +533,10 @@ var pageCreateCmd = &cobra.Command{
 			return err
 		}
 		allowEmpty, _ := cmd.Flags().GetBool("allow-empty")
+		private, _ := cmd.Flags().GetBool("private")
+		if private && (!allowEmpty || owner != "") {
+			return cli.WithExitCode(errors.New("--private requires --allow-empty and the default human owner"), cli.ExitValidation)
+		}
 		if allowEmpty && (len(doc.Spec.Panels) != 0 || owner != "") {
 			return cli.WithExitCode(errors.New("--allow-empty requires no panels and the default human owner"), cli.ExitValidation)
 		}
@@ -544,7 +548,12 @@ var pageCreateCmd = &cobra.Command{
 		body.AllowEmpty = allowEmpty
 		body.Owner = owner
 		body.Icon, body.Color = pageAvatarFromFlags(cmd)
-		resp, err := client.Post("/api/v1/pages", body)
+		var resp *http.Response
+		if private {
+			resp, err = client.Post("/api/v1/private-pages", body)
+		} else {
+			resp, err = client.Post("/api/v1/pages", body)
+		}
 		if err != nil {
 			return err
 		}
@@ -965,6 +974,7 @@ func pageDash(s string) string {
 
 func init() {
 	pageCreateCmd.Flags().Bool("allow-empty", false, "Create an empty human-owned Page before document initialization; no panels or crew owner")
+	pageCreateCmd.Flags().Bool("private", false, "Create an explicitly private empty Page; requires --allow-empty and current human authority")
 	pageCreateCmd.Flags().String("file", "", "Page document to author from (YAML or JSON; - for stdin)")
 	// Create only. `update` re-applies a spec, and ownership is not part of the
 	// spec — see pageWriteJSON.Owner.

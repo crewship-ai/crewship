@@ -55,6 +55,10 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
 		return nil, false
 	}
+	if rec.PrivateAudience {
+		replyError(w, 409, "private content is unsupported by the legacy App runtime")
+		return nil, false
+	}
 	if h.projectStore == nil {
 		replyError(w, 503, "Page project storage is not configured")
 		return nil, false

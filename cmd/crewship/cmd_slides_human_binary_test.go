@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
@@ -26,7 +28,6 @@ func TestSlidesHumanBinary(t *testing.T) {
 		`INSERT INTO users(id,email) VALUES('slides-human','slides-human@example.invalid')`,
 		`INSERT INTO workspaces(id,name,slug) VALUES('chumanslidesworkspace00001','Slides','slides')`,
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('slides-member','chumanslidesworkspace00001','slides-human','OWNER')`,
-		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES('slides-binary-page','chumanslidesworkspace00001','binary-slides','Slides','slides-human',1,'{}')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -41,7 +42,8 @@ func TestSlidesHumanBinary(t *testing.T) {
 	}
 	t.Cleanup(router.Shutdown)
 	router.RegisterSlidesHuman(true)
-	server := httptest.NewServer(router)
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); router.ServeHTTP(w, r) }))
 	t.Cleanup(server.Close)
 	binary := buildCrewshipBinary(t)
 	cfg := filepath.Join(t.TempDir(), "cli.yaml")
@@ -67,6 +69,23 @@ func TestSlidesHumanBinary(t *testing.T) {
 		}
 		return out
 	}
+	for _, flags := range [][]string{{"--private"}, {"--private", "--allow-empty", "--owner", "crew/missing"}} {
+		before := requests.Load()
+		out, err := run(emptyDocPage, append([]string{"page", "create", "--file", "-"}, flags...)...)
+		if err == nil || requests.Load() != before {
+			t.Fatalf("invalid private flags reached HTTP: %v %s", err, out)
+		}
+	}
+	created := require(strings.ReplaceAll(emptyDocPage, "human-document", "binary-slides"), "page", "create", "--private", "--allow-empty", "--file", "-")
+	var page struct {
+		ID        string `json:"id"`
+		Private   bool   `json:"private_audience"`
+		HasSlides bool   `json:"has_slides"`
+		Schema    int    `json:"slides_schema"`
+	}
+	if json.Unmarshal(created, &page) != nil || page.ID == "" || !page.Private || page.HasSlides || page.Schema != 0 {
+		t.Fatalf("new private empty Page: %s", created)
+	}
 	raw, err := os.ReadFile("../../testdata/slides-schema-v1.json")
 	if err != nil {
 		t.Fatal(err)
@@ -77,18 +96,18 @@ func TestSlidesHumanBinary(t *testing.T) {
 	if err = json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	fixture.Deck.DeckID = "slides-binary-page"
+	fixture.Deck.DeckID = page.ID
 	body, err := json.Marshal(slides.InitializeRequest{PageID: fixture.Deck.DeckID, SchemaVersion: 1, MutationID: "binary-init", Deck: fixture.Deck})
 	if err != nil {
 		t.Fatal(err)
 	}
 	require(string(body), "slide", "initialize", "binary-slides", "--file", "-")
-	replay := require(string(body), "slide", "initialize", "@slides-binary-page", "--file", "-")
+	replay := require(string(body), "slide", "initialize", "@"+page.ID, "--file", "-")
 	var receipt slides.Receipt
 	if json.Unmarshal(replay, &receipt) != nil || receipt.Revision != 1 || !receipt.Duplicate {
 		t.Fatalf("receipt %s", replay)
 	}
-	saved := require("", "slide", "read", "@slides-binary-page")
+	saved := require("", "slide", "read", "@"+page.ID)
 	var state slides.State
 	if json.Unmarshal(saved, &state) != nil || state.Revision != 1 || state.Deck.DeckID != fixture.Deck.DeckID {
 		t.Fatalf("state %s", saved)
@@ -97,8 +116,17 @@ func TestSlidesHumanBinary(t *testing.T) {
 	if string(pinned) != string(saved) {
 		t.Fatalf("pinned differs %s", pinned)
 	}
-	if plural := require("", "slides", "read", "@slides-binary-page"); string(plural) != string(saved) {
+	if plural := require("", "slides", "read", "@"+page.ID); string(plural) != string(saved) {
 		t.Fatalf("canonical slides command differs from singular alias: %s", plural)
+	}
+	for _, args := range [][]string{{"page", "get", "@" + page.ID}, {"page", "list"}} {
+		metadata := require("", args...)
+		if !strings.Contains(string(metadata), `"has_slides": true`) || !strings.Contains(string(metadata), `"slides_schema": 1`) {
+			t.Fatalf("missing Slides metadata for %v: %s", args, metadata)
+		}
+		if strings.Contains(string(metadata), state.ContentHash) || strings.Contains(string(metadata), `"canonical_json"`) {
+			t.Fatalf("Page metadata carried Slides content: %s", metadata)
+		}
 	}
 	for _, op := range []string{"patch", "restore", "reorder", "history", "export"} {
 		if out, e := run("", "slide", op, "binary-slides"); e == nil {

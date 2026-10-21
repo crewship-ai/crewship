@@ -169,8 +169,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 
 	page := obj(map[string]any{
-		"has_document": boolean(),
-		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"private_audience": map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private audience: the author and audited workspace OWNERs. Read metadata does not grant access or change the audience."},
+		"has_slides":       map[string]any{"type": "boolean", "readOnly": true, "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported."},
+		"slides_schema":    map[string]any{"type": "integer", "readOnly": true, "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included."},
+		"has_document":     boolean(),
+		"has_project":      map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},
@@ -183,6 +186,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"has_slides":             map[string]any{"type": "boolean", "readOnly": true, "description": "A saved native Slides head exists on this authorized Page. Does not imply that its schema or runtime is supported."},
+		"slides_schema":          map[string]any{"type": "integer", "readOnly": true, "description": "Stored native Slides schema; zero when no deck exists. No payload or content hash is included."},
 		"private_audience":       map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
 		"has_document":           boolean(),
 		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
@@ -265,7 +270,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	createBody := obj(mergeProps(writeBody["properties"].(map[string]any), map[string]any{
-		"allow_empty": map[string]any{"type": "boolean", "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode."},
+		"allow_empty": map[string]any{"type": "boolean", "description": "Explicitly stage an empty human-owned Page before native content initialization. Panels are refused; explicit privacy requires POST /api/v1/private-pages."},
 	}))
 
 	// ── Grants (§7.1, §7.1b) ────────────────────────────────────────────────
@@ -652,6 +657,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: page,
 		},
 		"POST /api/v1/pages": {
+			Request: createBody, Response: page,
+		},
+		"POST /api/v1/private-pages": {
 			Request: createBody, Response: page,
 		},
 		"PATCH /api/v1/pages/{slug}": {
