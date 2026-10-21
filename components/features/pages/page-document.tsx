@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Extension } from "@tiptap/core"
-import { EditorContent, useEditor } from "@tiptap/react"
+import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Collaboration from "@tiptap/extension-collaboration"
 import { Table } from "@tiptap/extension-table"
@@ -11,6 +11,7 @@ import TableHeader from "@tiptap/extension-table-header"
 import TableCell from "@tiptap/extension-table-cell"
 import { Plugin } from "@tiptap/pm/state"
 import { Button } from "@/components/ui/button"
+import { isEmptyDocument } from "@/lib/documents/empty"
 import { Input } from "@/components/ui/input"
 import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
@@ -99,6 +100,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
     editorProps: { attributes: { class: "min-h-64 max-w-none p-6 outline-none [&_p]:my-3 [&_h1]:my-4 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:text-xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono", "aria-label": "Document editor" } },
   }, [sync.doc,sync.state?.schema])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
+  const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
@@ -144,6 +146,7 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
       {sync.state?.schema===3 && <><Button size="sm" variant="ghost" onClick={()=>editor.chain().focus().toggleMark("code").run()}>Inline code</Button><Button size="sm" variant="ghost" onClick={()=>editor.chain().focus().toggleNode("codeBlock","paragraph",{id:editor.state.selection.$from.parent.attrs.id}).run()}>Code block</Button><Input aria-label="Link address" className="w-64" value={linkAddress} onChange={event=>setLinkAddress(event.target.value)} placeholder="https://example.com" /><Button size="sm" variant="ghost" onClick={()=>{const href=normalizeDocumentLink(linkAddress);if(!href){setActionError("Enter an HTTP or HTTPS link without credentials.");return};editor.chain().focus().setMark("link",{href}).run();setActionError(undefined)}}>Apply link</Button><Button size="sm" variant="ghost" onClick={()=>editor.chain().focus().unsetMark("link").run()}>Remove link</Button></>}
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Table</Button>
     </div>}
+    {sync.state && empty && <p className="px-6 text-sm text-muted-foreground">{sync.editable && !restoring ? "This document is empty. Start writing below, or ask an agent in a chat to draft it." : "This document is empty."}</p>}
     {sync.state ? <EditorContent editor={editor} /> : <p className="p-6">{sync.status}</p>}
     </>}
   </section>

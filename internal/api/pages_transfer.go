@@ -158,7 +158,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
-	rec, err := h.loadPage(r.Context(), wsID, slug)
+	rec, err := h.loadPageForRead(r.Context(), wsID, slug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
@@ -167,7 +167,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for export", err)
 		return
 	}
-	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
+	if !rec.PrivateAudience && !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		h.refusePageAction(w, r, rec, "exporting a page requires page edit permission", "")
 		return
 	}

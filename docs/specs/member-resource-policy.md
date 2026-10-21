@@ -789,3 +789,17 @@ frames with 1×1, 16×8 and 64×16 concurrent clients and channels sharing a
 five-connection pool. It reports time per authorization, SQL statements per
 frame, and pool wait count and duration per frame. These are concurrent
 throughput measurements, not end-to-end socket latency or p99 claims.
+
+
+### Revocable backups and private Page custody
+
+Workspace and instance bundle downloads verify credential, suspension and current
+role before each chunk. Browser stream delivery additionally verifies its exact
+persisted session, so a separate local password recovery process can revoke an
+already open stream. Logout/revocation never waits for the whole file copy.
+
+Private Page versions, exports, document reads, project sources/history and chat
+context use the private custodian policy. An active custodian restricted in a
+different workspace retains custody; unrelated grants do not widen private
+audiences. Another current workspace OWNER must produce the existing audit
+before private output is released. Metadata snapshot fences remain in place.

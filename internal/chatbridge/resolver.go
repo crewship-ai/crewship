@@ -321,7 +321,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		cleanMetadata := make(map[string]interface{}, len(metadata))
 		for k, v := range metadata {
 			switch k {
-			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "human_authority", "trigger_message_id", "chat_origin_id":
+			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "document_iteration_intent", "human_authority", "trigger_message_id", "chat_origin_id":
 			default:
 				cleanMetadata[k] = v
 			}
@@ -331,6 +331,10 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		receipt := chataudience.ReceiptFromContext(ctx)
 		if ok && intent != nil && intent.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
 			payload["document_creation_intent"] = intent
+		}
+		iteration, ok := metadata["document_iteration_intent"].(*documents.IterationIntent)
+		if ok && iteration != nil && iteration.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload["document_iteration_intent"] = iteration
 		}
 	}
 	body, err := json.Marshal(payload)

@@ -86,6 +86,11 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.SetPathValue("page", parts[3])
 	r.SetPathValue("operation", parts[4])
+	if parts[4] == "state" || parts[4] == "checkpoints" || parts[4] == "checkpoint-read" {
+		// This marker cannot be supplied by a public client. Service-secret
+		// authentication and exact method/path parsing have already succeeded.
+		r = r.WithContext(context.WithValue(r.Context(), documentPrivateReadKey{}, documentPrivateReadAdmission{pageID: parts[3]}))
+	}
 	operation := http.HandlerFunc(h.operation)
 	if h.authenticateDocumentDraftAgent(w, r, operation) {
 		return
@@ -109,19 +114,37 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 		if user == nil {
 			return "", errDocumentAccess
 		}
-		role, e := h.pages.liveContentHumanRole(ctx, k.WorkspaceID, user.ID)
-		if e != nil {
-			return "", errDocumentAccess
-		}
-		ctx = context.WithValue(ctx, ctxRole, role)
 		var slug string
 		if tx.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&slug) != nil {
 			return "", errDocumentAccess
 		}
-		rec, e := h.pages.loadPage(ctx, k.WorkspaceID, slug)
+		// Custody only relaxes human reads of private output. Draft agents,
+		// ordinary Pages and every writer retain trusted workspace authority.
+		_, draftAgent := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
+		custodyRead := !write && !initialize && !draftAgent
+		load := h.pages.loadPage
+		if custodyRead {
+			load = h.pages.loadPageForRead
+		}
+		rec, e := load(ctx, k.WorkspaceID, slug)
 		if e != nil {
 			return "", errDocumentAccess
 		}
+		var role string
+		var privateReader *pageViewer
+		if custodyRead && rec.PrivateAudience {
+			privateReader, e = h.pages.livePrivatePageReader(ctx, k.WorkspaceID, user.ID)
+			if e != nil || !privatePageViewer(rec, privateReader) {
+				return "", errDocumentAccess
+			}
+			role = privateReader.Role
+		} else {
+			role, e = h.pages.liveContentHumanRole(ctx, k.WorkspaceID, user.ID)
+			if e != nil {
+				return "", errDocumentAccess
+			}
+		}
+		ctx = context.WithValue(ctx, ctxRole, role)
 		if rec.HasProject || rec.HasApplication {
 			return "", errDocumentAccess
 		}
@@ -173,9 +196,12 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 				return "", errDocumentAccess
 			}
 		} else {
-			viewer, e := h.pages.loadViewer(ctx, k.WorkspaceID, user.ID)
-			if e != nil {
-				return "", errDocumentAccess
+			viewer := privateReader
+			if viewer == nil {
+				viewer, e = h.pages.loadViewer(ctx, k.WorkspaceID, user.ID)
+				if e != nil {
+					return "", errDocumentAccess
+				}
 			}
 			ok, e := h.pages.canSeePage(ctx, k.WorkspaceID, rec, nil, viewer)
 			if e != nil || !ok {

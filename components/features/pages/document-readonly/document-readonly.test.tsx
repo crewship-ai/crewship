@@ -89,3 +89,17 @@ it("clears prior DOM if serialization of a new valid read unexpectedly fails", (
   expect(screen.queryByText("New private body")).toBeNull()
   expect(screen.getByRole("status")).toHaveTextContent("Document unavailable")
 })
+
+it.each([2, 3] as const)("says a schema %s document with only empty paragraphs is empty instead of drawing a blank box", schema => {
+  render(<DocumentReadonly schema={schema} accessibleLabel={label} emptyText="Nothing here yet." content={doc(
+    { type: "paragraph", attrs: { id: "p1" } }, { type: "paragraph", attrs: { id: "p2" } },
+  )} />)
+  expect(screen.getByRole("region", { name: label })).toHaveTextContent("Nothing here yet.")
+})
+
+it("does not call a document with any content empty", () => {
+  render(<DocumentReadonly schema={3} accessibleLabel={label} emptyText="Nothing here yet." content={doc(
+    { type: "paragraph", attrs: { id: "p1" } }, { type: "heading", attrs: { id: "h1", level: 1 } },
+  )} />)
+  expect(screen.queryByText("Nothing here yet.")).toBeNull()
+})

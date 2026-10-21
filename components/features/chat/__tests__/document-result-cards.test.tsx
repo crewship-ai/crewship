@@ -29,6 +29,8 @@ it("opens the durable native Document identity with truthful provenance and no w
   expect(link.getAttribute("href")).toBe("/pages?ref=saved-doc&workspace_id=ws+%2F%26")
   expect(screen.getByText("Document · Ada")).toBeTruthy()
   expect(screen.getByText("On behalf of you")).toBeTruthy()
+  // Chat-created Documents are private-audience Pages; nothing widens that audience later.
+  expect(screen.getByText("Private to its owner and workspace owners")).toBeTruthy()
   expect(screen.queryByText(/Revision 0|static artifact/i)).toBeNull()
   expect(vi.mocked(apiFetch).mock.calls.every(call => !call[1]?.method)).toBe(true)
 })

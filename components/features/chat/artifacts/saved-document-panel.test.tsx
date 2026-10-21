@@ -96,3 +96,10 @@ it("does not offer an editor link when the saved body is malformed", async () =>
   expect(screen.queryByRole("link", { name: "Open full editor" })).toBeNull()
   expect(screen.queryByText("Private saved title")).toBeNull()
 })
+it("tells the reader how to fill an empty saved document", async () => {
+  vi.mocked(apiFetch).mockImplementation(async url => response(String(url).includes("/document?")
+    ? { page_id: "page /&", schema: 3, rev: 1, content: { type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" } }] } }
+    : { id: "page /&", name: "Private saved title", has_document: true }))
+  render(<SavedDocumentPanel {...props()} />)
+  expect(await screen.findByText("This document is empty. Choose Edit here to start writing, or ask the agent in this chat to draft it.")).toBeInTheDocument()
+})
