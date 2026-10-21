@@ -645,6 +645,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		userMsgMetadata.(map[string]any)["document_iteration_intent"] = *documentIteration
 	}
+	// Reject a retained submission before container provisioning. A successful
+	// check grants nothing; the append rechecks live authority under its writer
+	// transaction, including races with another connection or revocation.
+	if documentCreation != nil {
+		candidate := conversation.Message{ID: triggerMessageID, AgentID: info.AgentID, Role: conversation.RoleUser, Content: content, Metadata: userMsgMetadata, AuthorUserID: userID}
+		if err := b.convStore.CheckDocumentCreationSubmission(ctx, chatID, candidate, *documentCreation, info.HumanAuthority); err != nil {
+			var accepted *conversation.DocumentCreationAlreadyAccepted
+			if errors.As(err, &accepted) || errors.Is(err, conversation.ErrDocumentCreationSubmissionConflict) {
+				return err
+			}
+			if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
+				streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
+			} else {
+				streamFn(ws.ChatEvent{Type: "error", Content: "document creation request unavailable"})
+			}
+			return err
+		}
+	}
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
@@ -940,6 +958,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
+		var accepted *conversation.DocumentCreationAlreadyAccepted
+		if errors.As(err, &accepted) || errors.Is(err, conversation.ErrDocumentCreationSubmissionConflict) {
+			return err
+		}
 		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
 			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
 			return err

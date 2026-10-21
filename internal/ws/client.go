@@ -616,8 +616,16 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// why the bridge suppresses the orchestrator-level recording for this
 		// path (AgentRunRequest.SuppressSessionStream) instead of the other way
 		// round.
-		run := c.hub.beginSessionRun(payload.ChatID, c)
-		defer run.End()
+		// A rejected replay must not reset the original replay buffer or
+		// announce a new run. Start recording only when the handler actually
+		// emits an event; every admitted event still follows run_begin.
+		var run SessionRun
+		var streamStart sync.Once
+		defer func() {
+			if run != nil {
+				run.End()
+			}
+		}()
 
 		// Track whether the handler already told the user what went wrong.
 		//
@@ -634,6 +642,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// fires only when nothing was said.
 		var streamedError bool
 		streamFn := func(ev ChatEvent) {
+			streamStart.Do(func() { run = c.hub.beginSessionRun(payload.ChatID, c) })
 			if ev.Type == "error" {
 				streamedError = true
 			}
@@ -708,6 +717,14 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				c.hub.logger.Info("message deferred: crew provisioning in progress",
 					"session_id", payload.ChatID, "user_id", c.userID)
 				streamFn(ChatEvent{Type: "done", Content: ""})
+				return
+			}
+			// A retained creation submission is a rejected new send, not a
+			// terminal event for the original model run. Reply only to this
+			// sender; do not broadcast a synthetic done or user turn.
+			var refused interface{ DocumentCreationSubmissionRefused() string }
+			if errors.As(err, &refused) {
+				c.sendError(channel, refused.DocumentCreationSubmissionRefused())
 				return
 			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
