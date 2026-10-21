@@ -6,7 +6,8 @@ snapshots and rewrite embedded Page identity without changing slide or element
 identities.
 
 The model recognizes schema 1 and explicit schema 2 image metadata. It does not
-provide image storage or transport, a write service, an editor, an API or a CLI.
+provide image storage or transport or an editor. The human API and CLI use
+the durable store described below.
 The shared fixture pins canonical schema 1 bytes and their hash. Unsupported
 versions, unknown fields and invalid structures fail validation.
 
@@ -24,14 +25,14 @@ request. It retains existing IDs, checks operation target hashes in sequence,
 and rejects an invalid batch without changing the input deck. It validates the
 complete resulting deck against the same canonical model and aggregate budgets
 used by backup restoration. `ObjectIDs` and `SlideHash` expose existing identity
-and hashing rules to a future persistence adapter.
+and hashing rules to the persistence adapter.
 
 These are pure content operations, not a write service. Callers must first use
 the strict decoder, then verify current transactional Go authorization, immutable
 Page identity, base revision and order version before committing. `ApplyPatch`
 does not enforce base revision or order-version CAS, receipt replay, historical
-ID tombstones, asset access/pins or retention. A future store must enforce those
-conditions and persist revision, receipt and identity changes atomically.
+ID tombstones, asset access/pins or retention. The Store enforces those
+conditions and persists revision, receipt and identity changes atomically.
 Reorder and restore decoders do not themselves reorder or restore stored data.
 
 This extraction adds no schema, migration, format selection, agent tool, API,
@@ -40,9 +41,9 @@ remain unchanged. Tests cover strict initialization, bounded targeted edits,
 atomic rejection, identity preservation and explicit image upgrade fencing;
 they do not constitute model/browser/Office or complete S0 acceptance.
 
-## Durable initialization and reads
+## Durable initialization, reads and targeted patches
 
-`Store.Initialize` and `Store.Read` use the shipped Slides tables. A fenced
+`Store.Initialize`, `Store.Read` and `Store.Patch` use the shipped Slides tables. A fenced
 transaction checks live Go authorization before receipt lookup and again before
 commit, requiring the same authorized actor both times. Initialization retains
 one immutable revision, its request-bound receipt and persistent slide/element
@@ -56,9 +57,9 @@ back heads, revisions, receipts and identity reservations together. Images
 require a real `OnRevision` hook that validates access and pins references in
 the same transaction; absence of the hook rejects image initialization.
 
-This cut supplies initialization/read persistence only. It does not connect a
-public handler, create a Page, infer authorization from crew membership, enable
-agent authoring, edit a saved deck, implement comments or select an S0 format.
+The schema-1 human adapter exposes initialization, reads and targeted patches
+behind the default-off Slides setting. It does not create a Page, infer authority
+from crew membership, enable agent authoring, implement comments or select an S0 format.
 The caller supplies the current Go authority and authorized asset-pin hook.
 
 `InitializeTx` permits atomic Page/deck creation in a caller-owned transaction.
@@ -76,3 +77,11 @@ checks. Caller-transaction tests create a real Page alongside the deck, verify
 rollback across all content/identity/receipt rows, and close/reopen the database
 to verify committed content and its original retry receipt. These checks do not
 implement or qualify the separate public creation-authority integration.
+
+`Patch` strictly decodes its typed request again, binds Page, schema, base revision
+and optional order version, applies the existing pure candidate builder, then
+uses the same atomic write/quota/revision guard. Exact actor/request-bound receipt
+lookup precedes head preconditions, preserving the original retry revision.
+Every introduced slide/element ID is reserved, including one removed later in
+the same batch; historical deleted IDs cannot be reused. No mutation is retried
+automatically or admitted by a static client-provided identity.

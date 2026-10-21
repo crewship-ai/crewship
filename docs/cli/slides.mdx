@@ -1,20 +1,20 @@
 ---
 title: "Slides Commands"
-description: "Initialize and read a saved native presentation with a human credential."
+description: "Initialize, read and patch a saved native presentation with a human credential."
 stability: experimental
 tag: Experimental
 ---
 
 # crewship slides
 
-Read or initialize a schema-1 presentation on an existing empty private Page.
+Read, initialize or patch a schema-1 presentation on a private Page.
 The server must enable `CREWSHIP_SLIDES_ENABLED`. The singular `slide` alias
 accepts the same commands. These human commands refuse agent credentials.
 
 ## `crewship slides read <page-slug|@ID>`
 
 Read the confirmed head using a current human credential with `pages:read`.
-The result contains `schema_version`, `revision`, `order_version`, `content_hash`
+The result contains `schema_version`, `revision` (also `rev`), `order_version`, `content_hash`
 and the complete native `deck`. Another workspace OWNER needs audited private
 access; ADMIN and other unrelated users receive 404.
 
@@ -36,5 +36,22 @@ the same current actor returns the original receipt, marked `duplicate: true`.
 Changed content under the same mutation ID conflicts. The receipt contains
 `mutation_id`, `revision`, `order_version`, `content_hash` and `duplicate`.
 
-Initialization creates no Page or sharing grant. Patch, reorder, restore,
+Initialization creates no Page or sharing grant. Reorder, restore,
 agent creation, presentation mode and export are separate capabilities.
+
+## `crewship slides patch <page-slug|@ID> --file <request.json>`
+
+Save a closed targeted patch as the current private Page custodian with
+`pages:write`. The required `--file` accepts a file or `-` for stdin. Supply
+`page_id`, `schema_version: 1`, the confirmed `base_rev`, a new stable
+`mutation_id`, and 1–100 typed `operations`. Use the immutable `@ID` selector.
+Structural slide insertion/deletion also requires `if_order_version`.
+Targeted edits require the current element or slide hash; see the
+[native Slides guide](/guides/slides-native#patch-the-saved-deck).
+
+Success prints `{deck, rev, order_version, mutation_id}`. Keep the exact request
+for uncertain outcomes: an authorized exact retry returns the original saved
+revision, even after subsequent edits. Changed payload or actor under that ID
+conflicts. A conflict prints the fresh authorized `{deck, rev, order_version}`
+and exits unsuccessfully; inspect it before constructing a new mutation. The
+CLI never refreshes preconditions or retries a write automatically.

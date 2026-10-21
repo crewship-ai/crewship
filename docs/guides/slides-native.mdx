@@ -1,20 +1,21 @@
 ---
-title: Native Slides initialization and reads
+title: Native Slides initialization, reads and patches
 description: "Save a native presentation and read its confirmed head or an exact revision."
 stability: experimental
 tag: Experimental
 ---
 
 The schema-1 native Slides adapter can initialize a populated presentation on an
-existing empty private Page and read its saved head or an exact revision.
+existing empty private Page and read its saved head or an exact revision, and save targeted edits.
 The routes are disabled by default. Enable `slides.enabled: true` in the server
 configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
 This switch does not require the separate Document engine and does not enable
-agent authoring or unsupported editing operations.
+agent authoring or unrelated editing operations.
 
 The human endpoints are `GET /api/v1/pages/{slug}/slides`,
 `GET /api/v1/pages/{slug}/slides/revisions/{revision}` and
-`POST /api/v1/pages/{slug}/slides/initialize`. A slug or the encoded `@PAGE_ID`
+`POST /api/v1/pages/{slug}/slides/initialize` and
+`PATCH /api/v1/pages/{slug}/slides`. A slug or the encoded `@PAGE_ID`
 form addresses the same immutable Page. Disabled routes return 404. An enabled
 route still requires a current human credential and workspace context.
 
@@ -54,7 +55,7 @@ path. It creates neither a Page nor a permission grant.
 
 Schema 2 and future schemas remain unavailable, including on reads: no partial
 text, image metadata or hashes are returned. Retained stored data is preserved.
-Patch, reorder, restore, history, image upload, agent creation, editor, Present
+Reorder, restore, history, image upload, agent creation, editor, Present
 and export are outside this adapter. This delivery makes no canonical-format or
 Office/headless export qualification claim.
 
@@ -65,7 +66,7 @@ Office/headless export qualification claim.
 Authentication: current human session or CLI token with `pages:read`, current
 membership and private access. Request: Page slug or immutable `@ID`, workspace
 context, no body. Response 200: `schema_version`, `revision`, `order_version`,
-`content_hash` and `deck`. Statuses: 200 state; 401 invalid credential;
+`content_hash`, the compatible `rev` alias and `deck`. Statuses: 200 state; 401 invalid credential;
 403 workspace or scope boundary; 404 disabled, missing or private Page;
 409 unsupported schema; 500 storage or audit failure. `Cache-Control: no-store`.
 
@@ -91,3 +92,40 @@ and `duplicate`. Statuses: 200 receipt; 400 invalid request; 401 invalid credent
 403 workspace or scope boundary; 404 disabled, missing or inaccessible Page;
 409 conflicting identity, mutation or schema; 429 retained capacity exhausted;
 500 storage failure. `Cache-Control: no-store`.
+
+## Patch the saved deck
+
+`PATCH /api/v1/pages/{slug}/slides`
+
+Authentication: current human custodian with `pages:write` and live membership,
+including on exact retries. The existing default-off Slides setting controls
+this route too. The request is the closed `slides.PatchRequest` schema, bounded
+to 2 MiB and 1–100 operations. This human adapter accepts schema 1 only; image
+schema upgrades are unavailable. Unknown, duplicate or null fields are rejected.
+
+```json
+{"page_id":"PAGE_ID","schema_version":1,"base_rev":1,"mutation_id":"save-notes-1","operations":[{"op":"set_notes","slide_id":"SLIDE_ID","if_hash":"CURRENT_SLIDE_SHA256","notes":"Updated speaker notes"}]}
+```
+
+Use `crewship slides patch @PAGE_ID --file patch.json`. Compute `if_hash` with
+`slides.SlideHash` for a targeted slide or `slides.ElementHash` for an element;
+these versioned domain hashes are not the complete deck's content hash. Valid
+operations are `set_notes`, `set_element`, `insert_element`, `delete_element`,
+`insert_slide` and `delete_slide`. Structural slide changes require the confirmed
+`if_order_version`. Replacement elements preserve their original identity.
+Historical slide/element IDs remain reserved after deletion.
+
+Response 200 is `{deck, rev, order_version, mutation_id}` for the committed
+immutable revision. Exact authorized retries retain that original response.
+A stale revision/order/hash, conflicting identity or reused mutation ID returns
+409 with the fresh currently authorized `{deck, rev, order_version}`. No current
+snapshot is disclosed after loss of custody, membership or credential access.
+Private and missing targets share the same JSON 404 response. Other statuses:
+400 malformed or invalid patch; 401 invalid credential; 403 workspace or scope
+boundary; 409 unsupported schema; 429 retained-history quota; 500 persistence
+failure. All responses use `Cache-Control: no-store`.
+
+Head, immutable revision, request/actor-bound receipt and identity reservations
+commit atomically under the existing writer fence. Failed authority, validation,
+quota or revision hooks roll back the entire patch. This route creates no Page,
+permission or agent capability. It provides no automatic conflict merge or retry.
