@@ -7,12 +7,11 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
 import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import {
   Popover,
   PopoverContent,
@@ -238,25 +237,35 @@ export function AccessEditor({
     }
   }
 
+  const saveDisabled = busy || loading || !!loadErr
+
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-h-[88dvh] max-w-lg overflow-y-auto rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-base">Edit access — {agentName}</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!saveDisabled) void save()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={Plug}
+        title={`Edit access — ${agentName}`}
+        description={
+          <>
             {agentCrew ? `${agentCrew} · ` : ""}Crewship provisions one scoped MCP server
             per grant — {agentName} sees only the apps and tools you allow here.
-          </DialogDescription>
-        </DialogHeader>
-
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody>
         {loading ? (
-          <div className="mt-4">
-            <TableSkeleton rows={4} />
-          </div>
+          <TableSkeleton rows={4} />
         ) : loadErr ? (
-          <div className="mt-4 text-xs text-destructive">{loadErr}</div>
+          <div className="text-xs text-destructive">{loadErr}</div>
         ) : (
-          <div className="mt-4 space-y-4">
+          <div className="space-y-4">
             {/* Acts-as user */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-muted-foreground">Acts as</span>
@@ -364,20 +373,16 @@ export function AccessEditor({
         )}
 
         {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex items-center gap-2">
-          <Button size="sm" onClick={save} disabled={busy || loading || !!loadErr}>
-            {busy ? "Saving…" : "Save access"}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <span className="ml-auto hidden text-[11px] text-muted-foreground sm:block">
-            Apps set to Off are removed on save.
-          </span>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        hint="Apps set to Off are removed on save."
+        onCancel={onClose}
+        primaryLabel={busy ? "Saving…" : "Save access"}
+        onPrimary={save}
+        primaryDisabled={loading || !!loadErr}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }
 

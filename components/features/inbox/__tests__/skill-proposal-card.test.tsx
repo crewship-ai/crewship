@@ -13,7 +13,7 @@ vi.mock("@/lib/api-fetch", async (importActual) => ({
 }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 
-import { KindActions } from "../inbox-list"
+import { KindActions } from "../kind-actions"
 
 // Minimal InboxItem for an agent-authored skill proposal (rides the escalation
 // kind, disambiguated by payload.kind, per the inbox card).

@@ -45,7 +45,7 @@ type Schedule struct {
 	// LastStatus is the outcome of the last main-routine fire:
 	//   COMPLETED — run finished successfully
 	//   FAILED    — run errored (a MANAGER inbox alert was raised)
-	//   SKIPPED   — target routine not active (proposed/disabled)
+	//   SKIPPED   — target inactive, or capacity full with an occurrence already waiting
 	//   WAITING   — run parked on a human approval gate (healthy,
 	//               non-terminal; resumes when the approval lands)
 	//   DEDUPED   — a re-fire of the same occurrence hit the idempotency
@@ -1154,7 +1154,10 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	case CatchupAll:
 		allDue := append([]time.Time{dueAt}, extra...)
 		for _, occ := range allDue {
-			s.fireSingleOccurrence(ctx, sched, occ, nextRun, 0)
+			cursor := cronSched.Next(occ.In(loc))
+			if !s.fireSingleOccurrence(ctx, sched, occ, cursor, 0) {
+				break
+			}
 		}
 	default: // CatchupOnce — unchanged pre-#1422 behaviour: fire exactly
 		// the original due occurrence; report the rest as missed.
@@ -1252,7 +1255,7 @@ func (s *PipelineScheduler) notifyMissedOccurrences(ctx context.Context, sched *
 // as telemetry via recordRun/recordCatchupSkip). Called once for the
 // common on-time case and the gated/once-policy backlog case, and once
 // per occurrence in a CatchupAll loop.
-func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Schedule, occurrence, nextRun time.Time, missedCount int) {
+func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Schedule, occurrence, nextRun time.Time, missedCount int) bool {
 	pipeline, err := s.pipelines.GetByID(ctx, sched.TargetPipelineID)
 	if err != nil {
 		s.logger.Error("pipeline scheduler: load pipeline", "error", err, "schedule", sched.ID)
@@ -1268,7 +1271,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		// The pipeline never loaded, so there's no slug to label it with;
 		// maybeTripCircuitBreaker falls back to "target routine".
 		s.maybeTripCircuitBreaker(ctx, sched, "")
-		return
+		return true
 	}
 	var inputs map[string]any
 	if sched.InputsJSON != "" {
@@ -1279,7 +1282,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 	// (duplicate tick / restart before next_run_at advanced, or a
 	// CatchupAll loop re-run after a crash) dedupes at the idempotency
 	// chokepoint, while each distinct occurrence in a backlog gets its own
-	// key and actually runs.
+	// key; capacity admission may skip newer occurrences behind a waiting one.
 	occBucket := occurrence.UTC().Format(time.RFC3339)
 	dueAt := occurrence.UTC()
 
@@ -1308,6 +1311,22 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		IdempotencyKey: ScheduledFireIdempotencyKey("sched", sched.ID, occBucket),
 	}
 
+	// A restart/repeated tick must resolve an already accepted occurrence
+	// before trying direct execution, even if capacity has since freed.
+	pendingID := "pnd_" + in.IdempotencyKey
+	accepted, pendingErr := NewPendingRunStore(s.store.db).Get(ctx, sched.WorkspaceID, pendingID)
+	if pendingErr != nil {
+		s.logger.Warn("pipeline scheduler: inspect accepted occurrence", "schedule", sched.ID, "error", pendingErr)
+		return false
+	}
+	if accepted != nil {
+		if err := s.queueScheduledOccurrence(ctx, sched, pipeline, in, nextRun, missedCount); err != nil {
+			s.logger.Warn("pipeline scheduler: record accepted occurrence", "schedule", sched.ID, "error", err)
+			return false
+		}
+		return true
+	}
+
 	// The run is running work, not a write the barrier can wait for. It is
 	// admitted while the fire's writer is still inside the gate — so it is
 	// counted as busy before the writer steps out, and a window that closes
@@ -1318,7 +1337,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		// A window closed before this fire entered (the fire's writer is
 		// not inside): leave the occurrence due for the first tick after
 		// release.
-		return
+		return false
 	}
 	var res *RunResult
 	var runErr error
@@ -1327,7 +1346,27 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		res, runErr = s.executor.Run(adm.Context(), in)
 	})
 	if err != nil {
-		return
+		return false
+	}
+
+	// concurrency_policy "skip" (ODCH-RT-25): the previous run still holds the
+	// slot, so this occurrence is dropped on purpose. SKIPPED, like a
+	// non-active routine: no failure, no alert, no circuit-breaker tick.
+	if SkipsStartWhenBusy(pipeline.DefinitionJSON, runErr) {
+		s.logger.Info("pipeline scheduler: skipping start, the previous run is still going",
+			"schedule", sched.ID, "pipeline", pipeline.Slug)
+		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
+			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
+		}
+		return true
+	}
+
+	if errors.Is(runErr, ErrConcurrencyLimitReached) && (res == nil || res.RunID == "") {
+		if err := s.queueScheduledOccurrence(ctx, sched, pipeline, in, nextRun, missedCount); err != nil {
+			s.logger.Warn("pipeline scheduler: queue capacity-blocked occurrence", "schedule", sched.ID, "error", err)
+			return false
+		}
+		return true
 	}
 
 	// Governance airbag: a routine that is 'proposed' (unapproved) or
@@ -1341,7 +1380,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
 			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
 		}
-		return
+		return true
 	}
 
 	status := "FAILED"
@@ -1374,7 +1413,9 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		s.logger.Warn("pipeline scheduler: run failed", "schedule", sched.ID, "pipeline", pipeline.Slug, "error", runErr)
 	}
 
+	recorded := true
 	if err := s.store.recordRun(ctx, sched.ID, runID, status, nextRun, missedCount); err != nil {
+		recorded = false
 		s.logger.Warn("pipeline scheduler: record run", "error", err)
 	}
 
@@ -1386,6 +1427,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		s.alertFailedScheduledRun(ctx, sched, pipeline.ID, pipeline.Slug, runID, errLine)
 		s.maybeTripCircuitBreaker(ctx, sched, pipeline.Slug)
 	}
+	return recorded
 }
 
 // maybeTripCircuitBreaker checks whether this FAILED fire pushed the
@@ -1739,4 +1781,77 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// queueScheduledOccurrence commits admission and the schedule cursor together.
+// QUEUED and SKIPPED are admission results, not execution failures or breaker events.
+// Keep the oldest accepted occurrence intact; never coalesce its inputs or identity.
+func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched *Schedule, target *Pipeline, in RunInput, nextRun time.Time, missedCount int) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	pending := NewPendingRunStoreTx(tx)
+	pendingID := "pnd_" + in.IdempotencyKey
+	existing, err := pending.Get(ctx, sched.WorkspaceID, pendingID)
+	if err != nil {
+		return err
+	}
+	confirmedRunID := ""
+	status := "QUEUED"
+	if existing == nil {
+		now := s.now().UTC()
+		// Include a claimed but not yet linked start, so dispatch cannot open a
+		// window for another waiting occurrence. Confirmed/expired/cancelled
+		// starts do not occupy the waiting slot. Keep unknown claims held.
+		var waiting bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS (
+SELECT 1 FROM pending_runs
+WHERE workspace_id=? AND triggered_via=? AND triggered_by_id=?
+  AND ((status='pending' AND (expires_at IS NULL OR expires_at>?))
+       OR (status='fired' AND COALESCE(fired_run_id,'')=''))
+)`, sched.WorkspaceID, TriggeredViaSchedule, sched.ID, formatRFC3339(now)).Scan(&waiting)
+		if err != nil {
+			return err
+		}
+		if waiting {
+			status = "SKIPPED"
+			missedCount++ // The current occurrence, in addition to catch-up misses.
+		} else {
+			expires := now.Add(time.Hour)
+			_, _, err = pending.Enqueue(ctx, PendingRun{
+				ID: pendingID, WorkspaceID: sched.WorkspaceID, PipelineID: target.ID, PipelineSlug: target.Slug,
+				RunID: NewRunID(), IdempotencyKey: in.IdempotencyKey, DueAt: in.DueAt, ReasonCode: "routine_capacity",
+				InputsJSON: sched.InputsJSON, FireAt: now, ExpiresAt: &expires,
+				PinnedVersion: sched.TargetPipelineVersion, ChatOriginID: sched.ChatOriginID,
+				TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID,
+			})
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		confirmedRunID = existing.FiredRunID
+	}
+	now := tsformat.Format(s.now())
+	cursor := tsformat.Format(nextRun)
+	result, err := tx.ExecContext(ctx, `UPDATE pipeline_schedules
+SET last_run_at=?,last_status=?,last_run_id=?,
+    next_run_at=CASE WHEN next_run_at IS NULL OR next_run_at < ? THEN ? ELSE next_run_at END,
+    last_missed_count=?,updated_at=?
+WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, now, status, nullStr(confirmedRunID), cursor, cursor, missedCount, now, sched.WorkspaceID, sched.ID)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count != 1 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	NotifyPendingRuns(s.store.db)
+	return nil
 }

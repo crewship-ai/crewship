@@ -91,6 +91,7 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
+	r.RegisterSlidesHuman(true)
 	validator, err := auth.NewJWTValidator(secret)
 	if err != nil {
 		t.Fatalf("NewJWTValidator: %v", err)

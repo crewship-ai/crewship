@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -70,6 +71,9 @@ var agentCreateCmd = &cobra.Command{
 			body["avatar_seed"] = v
 		}
 		if v, _ := flags.GetString("avatar-style"); v != "" {
+			if !avatarstyle.Valid(v) {
+				return fmt.Errorf("%s", avatarstyle.Problem(v))
+			}
 			body["avatar_style"] = v
 		}
 
@@ -233,6 +237,9 @@ var agentUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("avatar-style") {
 			v, _ := flags.GetString("avatar-style")
+			if !avatarstyle.Valid(v) {
+				return fmt.Errorf("%s", avatarstyle.Problem(v))
+			}
 			body["avatar_style"] = v
 		}
 

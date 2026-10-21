@@ -46,6 +46,7 @@ import { RoutineGlyph } from "./routine-glyph"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { cn } from "@/lib/utils"
 import { RoutineCalendarSchedule } from "./routine-calendar-schedule"
+import { calendarHrefFromRoutines } from "@/lib/calendar/model"
 
 // The calendar's density rules live in lib/routine-calendar-groups.ts and are
 // unit-tested there; this file only draws them (proposal §3, screen 1b): a
@@ -671,6 +672,11 @@ export function RoutineCalendar({
           />
         </label>
         <span className="text-xs text-muted-foreground">{routineTimeZone()}</span>
+        {/* The workspace Calendar shows these starts and runs next to the
+            rest of the workspace's dates, on the same day and view. */}
+        <Button asChild size="sm" variant="ghost">
+          <Link href={calendarHrefFromRoutines(viewParam, dateParam)}>Open in Calendar</Link>
+        </Button>
         <div className="flex-1" />
         <div
           role="group"

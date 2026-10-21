@@ -1,20 +1,42 @@
-import { beforeEach, afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 const mocks = vi.hoisted(() => ({
-  push: vi.fn(), replace: vi.fn(), work: vi.fn(), deliveries: vi.fn(), mobile: false, role: "OWNER",
+  push: vi.fn(), replace: vi.fn(), work: vi.fn(), deliveries: vi.fn(), mobile: false, role: "OWNER" as string | null, roleLoading: false,
 }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => window.location.pathname,
 }))
 vi.mock("../activity-stream-view", () => ({
-  ActivityStreamView: ({ onOpenSection }: { onOpenSection: (s: "work" | "deliveries") => void }) => (
-    <><p>Execution overview</p><button onClick={() => onOpenSection("work")}>Rail: Work queue</button></>
+  ActivityStreamView: ({ onOpenSection, journalLedgers, modeSegment }: { onOpenSection: (s: string) => void; journalLedgers?: boolean; modeSegment?: React.ReactNode }) => (
+    <>
+      <p>Execution overview</p>
+      <button onClick={() => onOpenSection("work")}>Rail: Work queue</button>
+      {journalLedgers && <button onClick={() => onOpenSection("log")}>Rail: Technical log</button>}
+      {modeSegment}
+    </>
+  ),
+}))
+vi.mock("@/components/features/journal/journal-ledger", () => ({
+  JournalLedger: ({ view, actions }: { view: string; actions?: React.ReactNode }) => <><p>Journal ledger {view}</p>{actions}</>,
+}))
+vi.mock("../activity-spend", () => ({
+  ActivitySpendView: () => (
+    <>
+      <h1>Spend</h1>
+      <p>Spend ledger</p>
+    </>
   ),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role }) }))
+// The panel reads its remembered collapse from the user's preferences.
+vi.mock("@/lib/api-fetch", async (original) => ({
+  ...await original<typeof import("@/lib/api-fetch")>(),
+  apiFetch: vi.fn(async () => new Response("{}")),
+}))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role, loading: mocks.roleLoading }) }))
 vi.mock("@/hooks/use-work-items", async (original) => ({
   ...await original<typeof import("@/hooks/use-work-items")>(),
   useLedgerWork: mocks.work,
@@ -31,6 +53,7 @@ vi.mock("@/components/features/work/work-item-detail", () => ({
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span data-testid="avatar" /> }))
 import { ActivityWorkspace } from "../activity-workspace"
 import WorkPage from "@/app/(dashboard)/work/page"
+import { useAppStore } from "@/lib/store"
 
 const casey = { id: "a-casey", name: "Casey", slug: "casey", avatar_seed: "c", avatar_style: "" }
 const robot = { id: "a-robot", name: "Lab Robot 2", slug: "lab-robot-2", avatar_seed: "r", avatar_style: "" }
@@ -44,6 +67,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.mobile = false
   mocks.role = "OWNER"
+  mocks.roleLoading = false
+  try { window.localStorage.removeItem("crewship.pref.panel.activity.collapsed") } catch { /* no storage */ }
+  useAppStore.getState().setSecondaryPanelOpen(false)
   window.history.replaceState(null, "", "/activity")
   mocks.push.mockImplementation((url: string) => window.history.pushState(null, "", url))
   mocks.work.mockReturnValue({ items: [], capped: false, loading: false, error: null, refetch: vi.fn() })
@@ -145,7 +171,7 @@ it("keeps an agent picked on the Work queue removable on Deliveries, where it ha
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: /Webhook deliveries · Casey/ })).toBeInTheDocument()
   expect(screen.getByLabelText(/^Casey, none here/)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Remove filter/ }))
   expect(screen.getByRole("heading", { name: "Webhook deliveries" })).toBeInTheDocument()
 })
 
@@ -159,13 +185,38 @@ it("says the ledger did not load, and loads it again on request", () => {
   expect(refetch).toHaveBeenCalled()
 })
 
-it("opens on a phone with the rail closed over the page", () => {
+it("opens on a phone with the rail in the closed panel sheet, which a pick closes again", () => {
   mocks.mobile = true
   window.history.replaceState(null, "", "/activity?section=work")
+  mocks.work.mockReturnValue({
+    items: [work("w1", "succeeded", casey, "invoice.disputed", 2)],
+    capped: false, loading: false, error: null, refetch: vi.fn(),
+  })
   render(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: "Work queue" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "All activity" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Close filters" })).toBeNull()
+  expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+  act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+  const sheet = screen.getByRole("dialog", { name: "Activity views" })
+  expect(within(sheet).getByRole("button", { name: "All activity" })).toBeInTheDocument()
+  fireEvent.click(within(sheet).getByLabelText(/^Casey,/))
+  expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+})
+
+// Harbor 2 M3 (#3350): the ledger rail is Activity's SecondaryPanel.
+it("puts the ledger rail in the activity SecondaryPanel with Back in its toolbar and one collapse", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  const panel = document.querySelector("[data-slot=secondary-panel]") as HTMLElement
+  expect(panel).toHaveAttribute("data-panel-id", "activity")
+  const toolbar = panel.querySelector(".secondary-panel-toolbar") as HTMLElement
+  expect(within(toolbar).getByRole("button", { name: "All activity" })).toBeInTheDocument()
+  expect(screen.getAllByRole("button", { name: "Hide Activity views" })).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "Hide Activity views" }))
+  expect(panel).toHaveAttribute("data-collapsed", "true")
+  expect(screen.queryByRole("navigation", { name: "Ledger" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Show Activity views" }))
+  expect(screen.getByRole("navigation", { name: "Ledger" })).toBeInTheDocument()
 })
 
 it("keeps work stuck for longer than the window in Needs you (#3017)", () => {
@@ -210,4 +261,84 @@ it("uses a replacement redirect for old Work bookmarks", () => {
   window.history.replaceState(null, "", "/work?section=deliveries")
   render(<WorkPage />)
   expect(mocks.replace).toHaveBeenCalledWith("/activity?section=deliveries", { scroll: false })
+})
+
+// F-02: the Journal's views live in Activity, gated exactly as before.
+describe("the Journal inside Activity (F-02)", () => {
+  it.each([
+    ["section=log", "Journal ledger log"],
+    ["section=runs", "Journal ledger runs"],
+    ["mode=spend", "Spend ledger"],
+  ])("shows ?%s to OWNER and ADMIN", (query, text) => {
+    for (const role of ["OWNER", "ADMIN"]) {
+      mocks.role = role
+      window.history.replaceState(null, "", `/activity?${query}`)
+      const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+      expect(screen.getByText(text)).toBeInTheDocument()
+      expect(mocks.replace).not.toHaveBeenCalled()
+      view.unmount()
+    }
+  })
+
+  it.each([
+    ["MANAGER", "section=log&trace_id=run-1&severity=error", "/activity?run=run-1"],
+    ["MEMBER", "section=log&crew_id=c1&time=30d", "/activity?range=30d&crew=c1"],
+    ["MEMBER", "section=runs&run_status=FAILED", "/activity?what=work&range=24h&view=failed"],
+    ["VIEWER", "section=runs", "/activity?what=work&range=24h"],
+    ["MEMBER", "mode=spend", "/activity"],
+    ["MANAGER", "mode=spend", "/activity"],
+  ])("sends a %s on ?%s to the list (%s), never drawing the admin view", (role, query, target) => {
+    mocks.role = role
+    window.history.replaceState(null, "", `/activity?${query}`)
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(mocks.replace).toHaveBeenCalledWith(target, { scroll: false })
+    expect(view.container.textContent).toBe("")
+  })
+
+  it("draws nothing for an admin-only view while the role is loading, and does not redirect", () => {
+    mocks.role = null
+    mocks.roleLoading = true
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(view.container.textContent).toBe("")
+    expect(mocks.replace).not.toHaveBeenCalled()
+  })
+
+  it("offers the Activity / Spend segment and the Journal ledgers only to OWNER / ADMIN", () => {
+    const view = render(<ActivityWorkspace workspaceId="ws-a" />)
+    const seg = screen.getByRole("navigation", { name: "Activity or spend" })
+    expect(within(seg).getByRole("link", { name: "Activity" })).toHaveAttribute("aria-current", "page")
+    expect(within(seg).getByRole("link", { name: "Spend" })).toHaveAttribute("href", "/activity?mode=spend")
+    expect(screen.getByRole("button", { name: "Rail: Technical log" })).toBeInTheDocument()
+    view.unmount()
+    for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
+      mocks.role = role
+      const v = render(<ActivityWorkspace workspaceId="ws-a" />)
+      expect(screen.queryByRole("navigation", { name: "Activity or spend" })).toBeNull()
+      expect(screen.queryByRole("link", { name: "Spend" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Rail: Technical log" })).toBeNull()
+      v.unmount()
+    }
+  })
+
+  it("the Spend view keeps one h1: its own page title", () => {
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^Spend$/)
+  })
+
+  it("marks Spend as the current side on the Spend view", () => {
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    expect(screen.getByRole("link", { name: "Spend" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("opens the technical log clean, without the list's filters", () => {
+    window.history.replaceState(null, "", "/activity?view=failed&q=boom")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Rail: Technical log" }))
+    expect(mocks.push).toHaveBeenLastCalledWith("/activity?section=log", { scroll: false })
+  })
 })

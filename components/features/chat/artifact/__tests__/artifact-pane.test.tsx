@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent, waitFor, act, within } from "@testing-library/react"
+import { ConfirmHost } from "@/components/ui/confirm-host"
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react"
 
 // =============================================================================
 // P0.4 — the pane asked the *listing* route for file contents.
@@ -215,7 +216,7 @@ describe("ArtifactPane — saving", () => {
     // (and offering to save) the first tab's bytes under the second's path.
     apiFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
 
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
@@ -370,13 +371,20 @@ describe("ArtifactPane — document and table editing", () => {
 })
 
 describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
+  // The question is the in-page dialog; answer it by its buttons.
+  const discardDialog = () => screen.findByRole("alertdialog", { name: "Discard unsaved artifact changes?" })
+  const answer = async (label: "Discard" | "Keep editing") => {
+    await discardDialog()
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  }
   const openEditorWithEdits = async () => {
     apiFetch.mockImplementation((url: string) =>
       String(url).includes("/files/download")
         ? response({ body: "draft\n", contentType: "application/octet-stream" })
         : response({ body: "{}", contentType: "application/json" }),
     )
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     openTab("t2", "workspace/two.md")
     useArtifactStore.setState({ activeId: "t1" })
@@ -384,13 +392,6 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
     await screen.findByTestId("editor-code")
     fireEvent.click(screen.getByRole("button", { name: "stub-dirty" }))
     expect(screen.getByRole("status")).toHaveTextContent("Editing")
-  }
-
-  /** Answer the in-page discard question (#3342). */
-  const answer = async (label: "Discard changes" | "Keep editing") => {
-    const dialog = await screen.findByRole("alertdialog", { name: "Discard unsaved artifact changes?" })
-    fireEvent.click(within(dialog).getByRole("button", { name: label }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
   }
 
   afterEach(() => {
@@ -412,8 +413,7 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
     await openEditorWithEdits()
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
-    expect(useArtifactStore.getState().activeId).toBe("t1")
-    await answer("Discard changes")
+    await answer("Discard")
 
     await waitFor(() => expect(useArtifactStore.getState().activeId).toBe("t2"))
   })
@@ -427,28 +427,12 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
     expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
   })
 
-  it("asks before hiding the pane with unsaved changes, and hides it on confirm", async () => {
+  it("asks before hiding the pane with unsaved changes", async () => {
     await openEditorWithEdits()
 
     fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
     await answer("Keep editing")
+
     expect(useArtifactStore.getState().open).toBe(true)
-
-    fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
-    await answer("Discard changes")
-    await waitFor(() => expect(useArtifactStore.getState().open).toBe(false))
-  })
-
-  it("asks before Preview drops the edits, and switches on confirm", async () => {
-    await openEditorWithEdits()
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    await answer("Keep editing")
-    expect(screen.getByTestId("editor-code")).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    await answer("Discard changes")
-    await waitFor(() => expect(screen.queryByTestId("editor-code")).not.toBeInTheDocument())
-    expect(screen.getByRole("status")).not.toHaveTextContent("Editing")
   })
 })

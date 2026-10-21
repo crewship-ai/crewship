@@ -133,7 +133,7 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
                 </td>
                 <td className={cn(td, "whitespace-nowrap text-muted-foreground")}>{ago(p.last_active_at)}</td>
                 <td className={td}><StatusChip person={p} /></td>
-                <td className={cn(td, "text-right font-mono tabular-nums")}>{p.active_sessions ?? 0}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{p.active_sessions ?? 0}</td>
               </tr>
             ))}
             {people.length === 0 && <tr><td colSpan={canTick ? 6 : 5} className="px-3 py-6 text-center text-muted-foreground">No one matches.</td></tr>}
@@ -184,9 +184,9 @@ export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, 
                     onChange={(e) => onSelect([w.id], e.target.checked)} className="size-3.5 accent-[var(--primary)] disabled:opacity-30" />
                 </td>
                 <td className={td}>{owner ? <PersonLabel person={owner} sub={w.name} /> : <span>{w.name}</span>}</td>
-                <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_crews}</td>
-                <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_agents}</td>
-                <td className={cn(td, "text-right font-mono tabular-nums")}>{w.runs_7d ?? 0}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{w._count_crews}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{w._count_agents}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{w.runs_7d ?? 0}</td>
                 <td className={td}>
                   <span className="flex flex-wrap gap-1">
                     {elsewhere.length === 0 ? <span className="text-muted-foreground">Nowhere else</span>
@@ -223,9 +223,9 @@ export function WorkspacesTable({ workspaces, people, onOpen }: { workspaces: Wo
                     </span>
                   </td>
                   <td className={td}>{owner ? <PersonLabel person={owner} /> : <StatusPill tone="warn" label="No owner" />}</td>
-                  <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_members}</td>
-                  <td className={cn(td, "text-right font-mono tabular-nums")}>{w._count_crews}</td>
-                  <td className={td}><span className="inline-flex items-center gap-2"><WeekLine values={w.runs_by_day?.length ? w.runs_by_day : [0]} muted={!w.runs_7d} /><span className="font-mono text-micro text-muted-foreground">{w.runs_7d ?? 0}</span></span></td>
+                  <td className={cn(td, "text-right tabular-nums")}>{w._count_members}</td>
+                  <td className={cn(td, "text-right tabular-nums")}>{w._count_crews}</td>
+                  <td className={td}><span className="inline-flex items-center gap-2"><WeekLine values={w.runs_by_day?.length ? w.runs_by_day : [0]} muted={!w.runs_7d} /><span className="text-micro tabular-nums text-muted-foreground">{w.runs_7d ?? 0}</span></span></td>
                   <td className={cn(td, "whitespace-nowrap text-muted-foreground")}>{ago(w.last_activity_at)}</td>
                 </tr>
               )

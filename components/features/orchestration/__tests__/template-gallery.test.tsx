@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { TemplateGallery } from "../template-gallery"
+import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 import type { WorkflowTemplate } from "@/lib/types/template"
 
 const state = vi.hoisted(() => ({ api: vi.fn(), success: vi.fn(), error: vi.fn() }))
@@ -11,14 +12,8 @@ function template(id: string, overrides: Partial<WorkflowTemplate> = {}): Workfl
 }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
-beforeEach(() => { state.api.mockReset(); state.success.mockReset(); state.error.mockReset() })
+beforeEach(() => { state.api.mockReset(); state.success.mockReset(); state.error.mockReset(); mountConfirmHost() })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-/** Answer the delete confirmation with `label`. */
-async function answer(label: "Delete template" | "Cancel") {
-  const dialog = await screen.findByRole("alertdialog", { name: /^Delete template / })
-  fireEvent.click(within(dialog).getByRole("button", { name: label }))
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
-}
 async function openEditor() {
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "New Template" }))
@@ -66,10 +61,10 @@ it("validates required names and titles before sending a creation request", asyn
   state.api.mockResolvedValue(json([]))
   await openEditor()
   fireEvent.click(screen.getByRole("button", { name: "Create Template" }))
-  expect(state.error).toHaveBeenCalledWith("Template name is required")
+  expect(state.error).toHaveBeenCalledWith("Template name is required", { duration: Infinity })
   fireEvent.change(screen.getByPlaceholderText("e.g. Code Review Pipeline"), { target: { value: "Review" } })
   fireEvent.click(screen.getByRole("button", { name: "Create Template" }))
-  expect(state.error).toHaveBeenCalledWith("All steps need a title")
+  expect(state.error).toHaveBeenCalledWith("All steps need a title", { duration: Infinity })
   expect(state.api).toHaveBeenCalledTimes(1)
 })
 
@@ -112,7 +107,7 @@ it.each([true, false])("reports a refused create response (readable reason: %s) 
   await openEditor()
   fill()
   fireEvent.click(screen.getByRole("button", { name: "Create Template" }))
-  await waitFor(() => expect(state.error).toHaveBeenCalledWith(readable ? "Template quota reached" : "Failed to create template"))
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith(readable ? "Template quota reached" : "Failed to create template", { duration: Infinity }))
   expect(screen.getByDisplayValue("Review changes")).toBeVisible()
   expect(screen.getByRole("button", { name: "Create Template" })).toBeEnabled()
 })
@@ -158,16 +153,15 @@ it("requires confirmation before deletion and reports refusal before a successfu
   })
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template custom" }))
-  expect(await screen.findByRole("alertdialog", { name: "Delete template Template custom?" })).toBeInTheDocument()
-  await answer("Cancel")
+  expect(await screen.findByRole("alertdialog", { name: 'Delete template "Template custom"?' })).toBeVisible()
+  await answerConfirm("Cancel")
   expect(state.api).toHaveBeenCalledTimes(1)
-  expect(screen.getByText("Template custom")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "Delete template Template custom" }))
-  await answer("Delete template")
-  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template"))
+  await answerConfirm("Delete")
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template", { duration: Infinity }))
   refuse = false
   fireEvent.click(screen.getByRole("button", { name: "Delete template Template custom" }))
-  await answer("Delete template")
+  await answerConfirm("Delete")
   await screen.findByText("No templates yet")
   expect(state.success).toHaveBeenCalledWith("Template deleted")
 })
@@ -177,7 +171,7 @@ it("reports a network failure during creation and keeps the draft retryable", as
   await openEditor()
   fill()
   fireEvent.click(screen.getByRole("button", { name: "Create Template" }))
-  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to create template"))
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to create template", { duration: Infinity }))
   expect(screen.getByDisplayValue("Review changes")).toBeVisible()
   expect(screen.getByRole("button", { name: "Create Template" })).toBeEnabled()
 })
@@ -199,8 +193,8 @@ it("reports a network failure during deletion without losing the template", asyn
   state.api.mockImplementation((_url: string, init?: RequestInit) => init?.method === "DELETE" ? Promise.reject(new Error("offline")) : Promise.resolve(json([template("custom")])))
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template custom" }))
-  await answer("Delete template")
-  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template"))
+  await answerConfirm("Delete")
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template", { duration: Infinity }))
   expect(screen.getByText("Template custom")).toBeVisible()
 })
 
@@ -209,7 +203,7 @@ it("does not refresh a former workspace when its deletion finishes", async () =>
   state.api.mockImplementation((url: string, init?: RequestInit) => init?.method === "DELETE" ? deleted.promise : Promise.resolve(json([template(url.endsWith("=a") ? "old" : "current")])))
   const view = render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template old" }))
-  await answer("Delete template")
+  await answerConfirm("Delete")
   view.rerender(<TemplateGallery workspaceId="b" />)
   await screen.findByText("Template current")
   await act(async () => deleted.resolve(json({})))

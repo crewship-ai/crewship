@@ -205,12 +205,11 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 				})
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
-			if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
-				// Nonterminal (#2626): the run stays at `running`, and
-				// RunAgent already attempted to stop the wedged exec inside
-				// its own ownership boundary — before the run semaphore this
-				// goroutine's cleanup releases could be re-acquired.
-				s.logger.Warn("agent run's exec detached after RunAgent's stop attempt", "agent_id", agentID, "error", err)
+			if errors.Is(err, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(err, orchestrator.ErrDetachedStillRunning) {
+				// RunAgent retains execution occupancy until its reconciliation
+				// owner confirms the outcome. Ending this observer grants neither
+				// terminal status nor permission to run the agent again.
+				s.logger.Warn("agent observer ended without a confirmed execution outcome", "agent_id", agentID, "error", err)
 			} else {
 				s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
 			}

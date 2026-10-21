@@ -235,8 +235,9 @@ queue tests its candidate against the current base. Use
 `--match-head-commit <SHA>` when submitting a reviewed head to prevent a concurrent push from
 changing the candidate.
 
-The queue policy uses one PR per merge group and becomes usable only after
-actual PR and merge-group canaries prove that every required context is emitted.
+The queue tests groups of up to ten pull requests together against the current
+base and merges the whole group when every entry is green. Branches do not need
+to be up to date with main before they enter the queue.
 `CI Result`, `Security Result`, `CodeQL Result` and `CI Inventory Guard` (once
 required) must execute on `merge_group`; a planned skip must still match the
 change plan. Main pushes retain the full exact-SHA verification required by
@@ -255,6 +256,34 @@ Measure changes with [the read-only PR throughput collector](scripts/ci/pr-throu
 Compare complete PR open-to-merge time, evidenced final substantive push-to-merge
 time, workflow queue/execution, failure rate and reruns. A new run after a push
 or automatic branch update is not a rerun attempt.
+
+## Review scaled by risk
+
+Many agent sessions open pull requests in parallel. Required checks run on
+every change; human attention is spent where the cost of a mistake is high.
+The content of the change sets the tier, not its author:
+
+| Tier | Typical changes | Before merge |
+|---|---|---|
+| Low | Docs, tests, copy, additive code behind a default-off flag | Required checks and an automated review by a session other than the author |
+| Ordinary | Product behavior visible to users | The above, and the person directing the work is accountable for the result |
+| High | Authorization, privacy, data deletion, migrations, CI workflows, branch rules, release and infrastructure | The above, and a deep independent review of the exact head SHA by a separate session focused on security and data loss, recorded in the pull request, plus a regression test at the affected boundary |
+
+- A new head SHA needs a fresh high-tier review. High-tier merges are listed
+  in the daily summary to the maintainer.
+- Only irreversible actions wait for the maintainer: production, destructive
+  data operations, secrets, history rewrites and removing required checks.
+- **Review rounds are capped at three.** After the third round of findings and
+  fixes, stop fixing and decide: merge with the remaining findings recorded as
+  known debt in the pull request, or close it. Later rounds review only the new
+  diff, flag the whole class of a defect once and never repeat a finding.
+  Findings in code the pull request did not change go to a separate issue.
+- Ship new behavior behind a flag that is off by default, so it can reach main
+  before its backend or rollout is ready and be switched off without a deploy.
+- A red main is fixed by reverting the offending commit first, then by a
+  forward fix in a new pull request.
+- Every pull request description states how the change was tested and how to
+  undo it.
 
 ## Issues
 

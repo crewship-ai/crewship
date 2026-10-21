@@ -11,6 +11,12 @@ export interface FilteredIssuesArgs {
   filterAgentId: string | null
   filterStatuses: MissionStatus[]
   filterPriority: IssuePriority | null
+  /** The accountable person (owner.id). */
+  filterOwnerId?: string | null
+  /** Who holds the work right now: an agent or a person. */
+  filterHolder?: "agent" | "person" | null
+  /** A label (by name, as `?label=` and the API spell it) the issue must carry. */
+  filterLabel?: string | null
 }
 
 export interface FilteredIssues {
@@ -38,6 +44,9 @@ export function useFilteredIssues({
   filterAgentId,
   filterStatuses,
   filterPriority,
+  filterOwnerId = null,
+  filterHolder = null,
+  filterLabel = null,
 }: FilteredIssuesArgs): FilteredIssues {
   return useMemo(() => {
     let filtered = issues
@@ -54,6 +63,19 @@ export function useFilteredIssues({
     }
     if (filterPriority) {
       filtered = filtered.filter((i) => (i.priority || "none") === filterPriority)
+    }
+    if (filterOwnerId) {
+      filtered = filtered.filter((i) => i.owner?.id === filterOwnerId)
+    }
+    if (filterHolder) {
+      filtered = filtered.filter((i) => {
+        const w = getIssueWorker(i)
+        if (!w.id) return false
+        return filterHolder === "person" ? w.isHuman : !w.isHuman
+      })
+    }
+    if (filterLabel) {
+      filtered = filtered.filter((i) => (i.labels ?? []).some((l) => l.name === filterLabel))
     }
     if (search) {
       const q = search.toLowerCase()
@@ -73,5 +95,5 @@ export function useFilteredIssues({
         ? filtered.filter((i) => filterStatuses.includes(i.status))
         : filtered
     return { visible, statusFacet }
-  }, [issues, search, selectedProjectId, filterProjectId, filterCrewId, filterAgentId, filterStatuses, filterPriority])
+  }, [issues, search, selectedProjectId, filterProjectId, filterCrewId, filterAgentId, filterStatuses, filterPriority, filterOwnerId, filterHolder, filterLabel])
 }

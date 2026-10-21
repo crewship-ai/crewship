@@ -1,6 +1,6 @@
 ---
 title: "The issue detail"
-description: "One issue, one screen — the card surface behind /issues/<identifier> and the /issues centre pane, and the URL that now carries your selection."
+description: "One issue, one screen — the page behind /issues/<identifier>, the peek on /issues, and the URL that carries your selection and filters."
 icon: "circle-dot"
 stability: experimental
 tag: Experimental
@@ -23,11 +23,11 @@ you arrived.
 
 | URL | What it is |
 | --- | --- |
-| `/issues/<identifier>` | The canonical deep link. Back goes wherever `?from=` says, or to `/issues`. |
-| `/issues?issue=<identifier>` | The same detail in the centre pane, beside the explorer, the board and the bottom dock. |
+| `/issues/<identifier>` | The issue's page, where it is edited. Back goes wherever `?from=` says, or to `/issues`. |
+| `/issues?issue=<identifier>` | A 480 px **peek** over the list: status, who holds the work, owner and delegate, project, labels, due date and the brief. **J** / **K** step through the list, **Enter** or the title opens the issue's page, **Esc** closes. On a phone a row opens the page directly. |
 
-Both render `components/features/issues/issue-detail-surface.tsx`. The route
-only decides what sits above it.
+The page renders `components/features/issues/issue-detail-surface.tsx`; the
+peek reads the same issue and changes nothing.
 
 ## The selection is in the URL
 
@@ -68,16 +68,17 @@ could.
 | **Title** | Click the pencil. Enter saves, Escape abandons. |
 | **Description** | A WYSIWYG editor (Tiptap). Saves on blur, and only when the markdown actually changed. |
 | **Status, Priority** | Pickers in the Properties card. |
-| **Owner, Delegate** | Two separate chips on the identity card and two rows in Properties: the **owner** is the accountable person, the **delegate** is the agent doing the work. They are independent — delegating never clears the owner, and an owner is not enough to Start; that needs a delegate. `crewship issue update <id> --assignee <email> --assignee-type user` sets the owner, `--assignee <agent>` the delegate. |
-| **Current work** | Who holds the issue right now (a person or an agent), the latest execution's stage and workers, the acceptance policy, and the buttons that move work between people and agents. See [Work, hand-offs and Lead review](#work-hand-offs-and-lead-review). |
+| **Session** | The block under the title says who is working on the issue and offers only the verbs that fit: *Nobody is working on this* (Take it myself · Delegate…), *delegated, not started* (Start work), *Working* (Take over · Stop), *Awaiting input* (Open request in Inbox), *Ready for review* (Request changes · Approve, or a note that the Lead closes it when no client acceptance is required), *Needs a person* (Reopen to Todo · Take over · Retry with a note…), *Accepted* (Reopen) and *a person holds it* (Hand off… · Submit result). Stop asks whether to stop **after this step** (cooperative) or **now** (`stop?hard=true`, `crewship issue stop --hard`). |
+| **Owner, Delegate** | Two separate rows in Properties: the **owner** is the accountable person, the **delegate** is the agent doing the work. They are independent — delegating never clears the owner, and an owner is not enough to Start; that needs a delegate. `crewship issue update <id> --assignee <email> --assignee-type user` sets the owner, `--assignee <agent>` the delegate. |
+| **Work & control** | First in the side column: who holds the issue right now (a person or an agent) and the work revision, the buttons that move work between people and agents, the Lead review rule, the **client acceptance** switch (locked, with the reason, outside Todo and Backlog or while a run is active) and the bound routine. See [Work, hand-offs and Lead review](#work-hand-offs-and-lead-review). |
 | **Due date, Estimate, Milestone** | Same card. Milestone existed only on the inline panel; the shipped page never had it. |
 | **Project** | Picker in the Project card, with a link through to the project board. |
 | **Labels** | Add, remove, or **create** one that does not exist yet, from the Labels card. |
 | **Routine** | Bind, unbind, and **Run now** when one is bound. Below it, **Recent runs started by** — how the bound routine's runs actually began, grouped by source, so "starting this issue runs that routine" is not the only half of the story you get. |
 | **Automations** | The [rules](/guides/automations) an event from this issue could set off, with the event each one watches. Absent when none are in scope. |
-| **Links** | Add a relation by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. Sub-issues are listed alongside. |
-| **Comments** | With `@` mentions — see [Issue mentions](/guides/issue-mentions). |
-| **Workflow** | Start work · Stop · Approve · Request changes (with a reason) · Reopen, top-right of the identity card, gated on status the way the server gates them. |
+| **Sub-issues, Relations** | Two cards: the sub-issues with how many are done (a parent cannot move to Done or In review while one is open), and the relations — add one by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. |
+| **Timeline** | Comments and activity in one stream, newest first, with All / Comments / Activity. Comments take `@` mentions — see [Issue mentions](/guides/issue-mentions). |
+| **Technical details** | Collapsed at the end of the side column: the routine's run sources, the automations in scope, the figures band and the metadata. |
 | **Run activity** | The live agent-work timeline while the issue is running. See [Activity](/guides/activity). |
 
 Two of these did not work before this landed, and now do:
@@ -109,7 +110,7 @@ them together would report that a schedule did something a
 
 ## Work, hand-offs and Lead review
 
-The **Current work** card is the issue's work contract (#2448): at any
+The **Work & control** card is the issue's work contract (#2448): at any
 moment the issue is either *with an agent* (`work_mode: agent` — Start may
 open runs) or *with a person* (`work_mode: human` — automatic work is
 paused). Every change to that state is a compare-and-set on
@@ -122,6 +123,14 @@ assignments and open plan tasks are cancelled, pending `@mention`
 deliveries are superseded, and the issue goes back to `TODO` held by you.
 While the runs are still winding down the card reads *Taking over ·
 stopping agent runs* (`work_stopping: true`) and hand-back/submit wait.
+
+**Hand off…**, **Delegate…**, **Submit result** and **Request changes** open
+dialogs. Each transfer carries the revision you saw and an operation id that
+stays the same if you retry the same request, so a double submit is one
+transfer; a `409` refreshes the page and keeps what you typed. The dialog's
+footer shows the revision. **Delegate…** is a handoff to an agent with
+**Start work now** on by default; Request changes says which of the Lead's two
+correction rounds it is.
 
 **Hand off** names the next worker and carries a note. To a person, the
 issue stays paused and they get a targeted Inbox message. To an agent, that
@@ -220,6 +229,33 @@ purpose, since a failure is not the same thing as the work being finished.
 
 ## The layout
 
+`/issues/<id>` has the Issues panel on its left, as `/issues` does. On this
+page the panel takes you somewhere: a view, a project, a facet or a search
+opens `/issues` with it. The top bar has **Back** (to wherever you came from),
+**Previous issue / Next issue** (through the list you came from, in your
+grouping and order; the origin is kept), **Copy link**, a **⋯** menu and
+**Back to list**. The menu has Copy link, **Move to project…**, **Cancel
+issue…** (asks first) and **Delete issue…** (red confirmation; only Backlog and
+Cancelled issues can be deleted, as the server allows). On a phone the bar is
+Back, the ID and ⋯.
+
+The page is two columns from `xl` up: the main column (ID, status, project,
+title, session, brief, sub-issues, relations, pull requests, timeline) and a
+320 px side column (Work & control, properties, files, related links,
+technical details). Below `xl` the side column follows the main one.
+
+The **Timeline** is one card with a segment: **All** (comments, activity and
+runs, newest first; a run is one line), **Comments**, **Activity** and
+**Runs** (every run with its result, a link to the run and the journal).
+**Relations › Add** and **Pull requests › Attach PR URL** open popovers at
+their field: Add relation has the four kinds (Blocks, Blocked by, Related,
+Duplicate of) and an Issue field that searches the workspace; Attach a pull
+request takes the URL and reads its state with your stored GitHub or GitLab
+credential. **Owner** (the accountable person) is a people picker next to
+Delegate; the change waits for Save like the other properties. There is no
+"nobody" owner: the API clears owner and delegate together when it is asked to
+unassign.
+
 Everything on the surface is a card, including **Run activity** — it used to
 render bare, a heading and a list of steps sitting on the page background in
 the middle of a stack of cards. It is now a card like the rest, with the step
@@ -234,37 +270,51 @@ scrolls internally if it is taller, so a long rail on a short window is still
 reachable. Below `xl` the columns stack and the rail scrolls with the page,
 exactly as before.
 
-## Finding issues: one filter, two places
+## Finding issues: the panel
 
-`/issues` filters by **crew, agent, priority and status**, and the four
-**combine** — "Engineering crew, high priority, still in Backlog" is one
-selection, not three attempts. Each pick used to clear the others, so the
-dropdown behaved like a set of switches; picking a crew left the priority
-alone, picking an agent did not, and no combination survived.
+The left panel of `/issues` holds **Views** (My work, All issues), **Projects**
+and **Saved views**, and a **Filter** button that opens the facets inside the
+panel, under its toolbar: Status, Priority, Delegate, Owner, Who holds the
+work, Labels and Crew. Each facet folds and names its current choice; it lists
+at most six values and the rest under **All N…**. The facets **combine** —
+"Engineering crew, high priority, still in Backlog" is one selection — and each
+pick changes only its own facet.
 
 | Where | What it is |
 | --- | --- |
-| **Filter** button in the explorer (left panel) | All four facets. The badge counts every active one. Stays open while you pick, so a second facet is one click away. |
-| **Status chips** over the board | The same status selection, with live counts per status, one click each. |
+| **Filter** in the panel's toolbar | Opens the facets in the panel, with counts from the loaded issues. The badge counts the active ones. |
+| **Chips** under the toolbar | One per active facet; its × removes just that one. |
+| **Status chips** over the list | All, In progress, In review, Todo, Backlog — the same status selection, one click each. |
 
-The two are one piece of state, not two filters: picking **Backlog** in the
-dropdown lights the Backlog chip, and clearing the chip clears it in the
-dropdown. The chips are the quick, count-carrying affordance and disappear
-when an issue detail takes the centre pane; the dropdown is always reachable,
-which is why status belongs in it too.
-
-Clearing:
+Filters live in the URL (`?status=REVIEW,TODO&priority=high&crew_id=…&assignee_id=…&owner=…&holder=agent&label=docs`),
+so a filtered list can be shared and a link from another page lands filtered.
+Changing a filter replaces the URL rather than adding a history entry.
 
 - Click an active value again to drop **that** facet.
-- **All crews / All agents / Any priority / Any status** resets one facet and
-  leaves the others.
-- **Clear all** in the dropdown header drops everything, as does `Esc` on the
-  board.
+- A facet's **×** resets that facet and leaves the others.
+- **Clear all** drops every facet, as does `Esc` outside a text field.
+- **Saved views ›  +** keeps the current filters and layout under a name, optionally shared with the workspace.
+- Keys **1–9** select Views, then saved views, then projects; **C** opens New issue, **/** focuses search, **⇧V** opens Display options.
 
-The explorer's own issue list runs the same filter as the board
-(`hooks/use-filtered-issues.ts`). It used to apply only crew and agent, so a
-priority picked in the dropdown narrowed the board while the list beside it
-went on showing the rows the filter had excluded.
+**My work** is the open issues you own or hold. Needs my reply, Agents working,
+Waiting for my review and Blocked are not offered yet: the list endpoint does
+not report session state or relations, and a filter over the loaded page would
+leave issues out.
+
+## The list and the board
+
+A list row is one 38 px line: priority, ID, status, title, sub-issues, labels,
+due date, when it last changed, and the owner and delegate. **Display options**
+(⇧V) choose the grouping (status, project, delegate, priority or none), the
+order (manual, priority, updated, due date, created) and which of those fields
+a row shows; they are personal. Ticking rows opens a bar at the bottom for
+Status, Priority and Project; it asks before changing anything and says when the
+server changed only some of the selection.
+
+The board has Backlog, Todo, In progress, In review, Done and Failed columns;
+cancelled and duplicate issues stay in the list. Dragging a card to another
+column changes its status — moves to Done or In review ask first, and a move
+the workflow refuses leaves the card where it was with the reason.
 
 ## Read-only
 
@@ -276,8 +326,22 @@ minus the editing, which is the defect this replaced.
 
 ## The project detail
 
-`/issues?project=<id>` renders the matching project card:
-identity → figures → the project's issues → breakdown → health → properties.
+`/issues?project=<id>` opens the project page: a hero (icon, dates, name,
+description, status, health, lead, crews) and the tabs **Overview** (done of
+total, issues by status, milestones, team), **Tree** (milestone → issue →
+sub-issue), **Issues** (the project's rows; a row opens the peek), **Files**
+(project files with their revision and a download; **Upload file** adds a
+file, or the next revision of a file with the same name, up to 1 MB; a row's
+⋯ › **Retire file…** removes it for new runs, and runs that already started
+keep the revision they read; a change that raced another is refused with a
+reason rather than overwriting) and **Settings**
+(properties, Access with Share, and — for admins and owners — Delete, behind a
+red confirmation; the issues stay, without a project). The tab is in the URL
+as `?tab=`, so a link can open Settings and a refresh keeps Files. A
+`?project=` that names no project shows *This project doesn't exist* with Back
+to issues, rather than quietly opening the list. Updates, budget and archive
+are not shown: the backend has none of them yet.
+
 Name, icon, colour, status, priority, health, lead and **dates** are all
 editable. Dates are new: the old rail drew a row reading "Set dates" that had
 nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
@@ -313,7 +377,10 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 | The project equivalents | `components/features/issues/project-detail-surface.tsx`, `project-card-detail.tsx`, `project-card-editors.tsx` |
 | The URL-backed selection | `hooks/use-issue-detail.ts`, `hooks/use-project-detail.ts` |
 | Shared card primitives | `components/ui/detail` |
-| The filter dropdown + explorer list | `components/features/orchestration/unified-explorer.tsx` |
-| The status chips | `components/features/issues/issues-status-chips.tsx` |
-| The one filter both run | `hooks/use-filtered-issues.ts` |
+| The panel: views, projects, saved views, Filter | `components/features/orchestration/issues-panel.tsx` |
+| The status chips over the list | `components/features/orchestration/issues-toolbar-strip.tsx` |
+| Filters ⇄ URL, saved-view payload | `hooks/use-issue-filters.ts` |
+| The one filter everything runs | `hooks/use-filtered-issues.ts` |
+| Rows, grouping, order, quick views | `components/features/issues/issue-row.tsx`, `issues-view-model.ts` |
+| The peek | `components/features/issues/issue-peek.tsx` |
 | The run activity timeline | `components/features/activity/run-activity-timeline.tsx` |

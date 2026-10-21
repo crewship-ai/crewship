@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { LayoutGrid, RotateCw } from "lucide-react"
 import { AccessNotice, type AccessContext } from "@/components/features/restricted/access-notice"
 import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -25,7 +25,6 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
   const [error, setError] = useState("")
   const [catalogState, setCatalogState] = useState<RestrictedCatalogState>("loading")
   const [submitting, setSubmitting] = useState(false)
-  const { ask, dialog } = useConfirm()
   // Bumped by "Check again" / "Try again" to re-read the catalog.
   const [reload, setReload] = useState(0)
   const request = useRef<{ key: string; body: string; url: string } | null>(null)
@@ -71,15 +70,10 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
   const submit = async () => {
     if (!action || submitting) return
     const workspace = workspaceId
-    // The Page declares its own question; a retry resends the admission
-    // already confirmed, so only a first submit asks.
-    if (!request.current && action.confirm) {
-      const ok = await ask({ title: action.confirm.title, description: action.confirm.body, confirmLabel: "Run action" })
-      if (!ok || owner.current !== workspace) return
-    }
     setSubmitting(true); setError(""); setRun(null)
     try {
       if (!request.current) {
+        if (action.confirm && !await askConfirm({ title: action.confirm.title, description: action.confirm.body, confirmLabel: "Run action", cancelLabel: "Cancel" })) return
         const inputs: Record<string, string | number | boolean> = {}
         for (const field of action.inputs) {
           const value = values[field.name] ?? ""
@@ -113,15 +107,14 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
     {!notice && <p className="text-sm text-muted-foreground">Run a declared action. Its results are visible to you.</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {catalogState === "loading" ? <p>Loading Page actions…</p> : catalogState === "runtime_missing" ? <AccessNotice kind="not-installed" title="Private Page actions aren't set up here" description={RESTRICTED_RUNTIME_MISSING_MESSAGE} context={access} current="pages" /> : catalogState === "unavailable" ? <AccessNotice kind="unavailable" title="Page actions unavailable." description="The list of what you can run could not be loaded." context={access} current="pages" onRetry={() => setReload(n => n + 1)} /> : catalog.length === 0 ? <AccessNotice kind="no-access" title="No Page actions shared with you yet" description="No Page actions are available with your current access." context={access} current="pages" /> : <>
-      <label className="block space-y-2"><span>Action</span><select aria-label="Action" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose an action</option>{catalog.map(item => <option key={item.key} value={item.key}>{item.page.name} — {item.label}</option>)}</select></label>
+      <label className="block space-y-2"><span>Action</span><select aria-label="Action" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-[44px]" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose an action</option>{catalog.map(item => <option key={item.key} value={item.key}>{item.page.name} — {item.label}</option>)}</select></label>
       {action && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
-        {action.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.label ?? field.name}{field.required ? " (required)" : ""}</span>{field.type === "select" ? <select aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))}><option value="">Choose a value</option>{field.options?.map(value => <option key={value} value={value}>{value}</option>)}</select> : field.type === "textarea" ? <textarea aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-24 w-full rounded-md border bg-background p-2" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /> : <Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} />}</label>)}
+        {action.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.label ?? field.name}{field.required ? " (required)" : ""}</span>{field.type === "select" ? <select aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-[44px]" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))}><option value="">Choose a value</option>{field.options?.map(value => <option key={value} value={value}>{value}</option>)}</select> : field.type === "textarea" ? <textarea aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} className="min-h-24 w-full rounded-md border bg-background p-2" onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /> : <Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} />}</label>)}
         <Button type="submit" disabled={active}>{submitting ? "Submitting…" : request.current ? "Retry request" : "Run action"}</Button>
       </form>}
     </>}
     {run && <section className="space-y-3" aria-live="polite"><p>Status: {run.status === "needs_reconciliation" ? "Needs review" : run.status}</p>{run.status === "needs_reconciliation" && <p className="text-sm text-muted-foreground">An administrator must review this run’s outcome. It will not run again automatically.</p>}{Object.entries(run.step_outputs).map(([step, output]) => <div key={step}><h2 className="text-sm font-medium">{step}</h2><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-sm">{output}</pre></div>)}</section>}
     </div>
     </div>
-    {dialog}
   </div>
 }

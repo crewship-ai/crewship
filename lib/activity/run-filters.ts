@@ -11,6 +11,7 @@
 // flood the rail with 234 rows.
 
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import { isCostShown } from "@/lib/cost-visibility"
 
 // ── Filter ──────────────────────────────────────────────────────────
 
@@ -86,8 +87,10 @@ export function applyFilters(
       if (ts === null || ts < cutoffMs) return false
     }
 
-    if (f.costMin !== undefined && r.cost_usd < f.costMin) return false
-    if (f.costMax !== undefined && r.cost_usd > f.costMax) return false
+    // A withheld cost (#3590) cannot satisfy a cost bound.
+    if ((f.costMin !== undefined || f.costMax !== undefined) && !isCostShown(r.cost_usd)) return false
+    if (f.costMin !== undefined && isCostShown(r.cost_usd) && r.cost_usd < f.costMin) return false
+    if (f.costMax !== undefined && isCostShown(r.cost_usd) && r.cost_usd > f.costMax) return false
     if (f.durationMinMs !== undefined && r.duration_ms < f.durationMinMs) return false
     if (f.durationMaxMs !== undefined && r.duration_ms > f.durationMaxMs) return false
 

@@ -60,6 +60,6 @@ describe("RunEvidencePanel", () => {
     const { toast } = await import("sonner")
     render(<RunEvidencePanel workspaceId="ws" run={run} />)
     fireEvent.click(screen.getByRole("button", { name: /copy evidence/i }))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not copy evidence"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not copy evidence", { duration: Infinity }))
   })
 })

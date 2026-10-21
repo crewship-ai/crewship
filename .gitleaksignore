@@ -93,3 +93,7 @@ f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/orchestrator/exec_sidecar_toke
 # are encoded exactly as age encodes them. Public, protects nothing.
 # Fingerprint of the squash commit that brought it to main (#3056).
 a41d725e0d02a7a806308f7fdb01af116b99d509:components/features/admin/backups/__tests__/age-key.test.ts:age-secret-key:9
+
+# Synthetic error-redaction fixture; invalid run-token format, mock transport only.
+# Pin this exception to the original historical commit, rule, path and line.
+ad01771335611d1de65a80085ee4228959998486:cmd/crewship/cmd_doc_create_test.go:generic-api-key:83

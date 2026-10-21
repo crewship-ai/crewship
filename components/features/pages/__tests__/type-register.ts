@@ -75,6 +75,10 @@ export function typoValue(token: string): string {
 }
 
 export function remToPx(value: string): number {
+  // A floor written as max(11px, 0.6875rem) (Harbor 2 keeps 11 px at the
+  // Small text size) resolves at the 16 px root to its larger term.
+  const mx = value.match(/^max\(\s*([\d.]+)px\s*,\s*([\d.]+)rem\s*\)$/)
+  if (mx) return Math.max(Number(mx[1]), Number(mx[2]) * 16)
   const m = value.match(/^([\d.]+)rem$/)
   if (!m) throw new Error(`not a rem length: ${value}`)
   return Number(m[1]) * 16

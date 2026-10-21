@@ -107,7 +107,7 @@ describe("Crew policy and ephemeral quota controls", () => {
   it.each(["message", "empty", "invalid"])("aborts both saves when policy is refused with %s body", async body => {
     render(<CrewPolicyControls {...props} />); await screen.findByTestId("autonomy-guided"); setPolicy(); setQuota("20")
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(body === "message" ? JSON.stringify({ error: "Denied" }) : body === "empty" ? "{}" : "{", { status: 403 }))
-    save(); await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(`Failed to update policy: ${body === "message" ? "Denied" : "HTTP 403"}`))
+    save(); await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(`Failed to update policy: ${body === "message" ? "Denied" : "HTTP 403"}`, { duration: Infinity }))
     expect(writes()).toHaveLength(1); expect(quota()).toHaveValue(20)
     expect(screen.getByRole("textbox", { name: /Reason/ })).toHaveValue("  Approved change  ")
   })
@@ -115,7 +115,7 @@ describe("Crew policy and ephemeral quota controls", () => {
     render(<CrewPolicyControls {...props} />); await screen.findByTestId("autonomy-guided"); if (both) setPolicy(); setQuota("20")
     if (both) vi.mocked(apiFetch).mockResolvedValueOnce(ok({ ...policy, autonomy_level: "trusted" }))
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: "Limit refused" }), { status: 409 }))
-    save(); await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining(both ? "Policy saved, but quota update failed: Limit refused" : "Failed to update quota: Limit refused")))
+    save(); await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining(both ? "Policy saved, but quota update failed: Limit refused" : "Failed to update quota: Limit refused"), { duration: Infinity }))
     const count = writes().length; vi.mocked(apiFetch).mockResolvedValueOnce(ok({ max_ephemeral_agents: 20 })); save()
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("Quota updated")); expect(writes().slice(count).map(([, init]) => init?.method)).toEqual(["PATCH"])
   })
@@ -146,13 +146,13 @@ describe("Crew policy and ephemeral quota controls", () => {
   it.each([new Error("offline"), "disconnected"])("reports mutation transport failure %s and preserves the draft", async failure => {
     render(<CrewPolicyControls {...props} />); await screen.findByTestId("autonomy-guided"); setPolicy()
     vi.mocked(apiFetch).mockRejectedValueOnce(failure); save()
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(failure instanceof Error ? "offline" : "Failed to update policy"))
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(failure instanceof Error ? "offline" : "Failed to update policy", { duration: Infinity }))
     expect(screen.getByRole("button", { name: "Save policy" })).toBeEnabled()
   })
   it.each(["{}", "{"])("reports status-only quota refusals for body %s", async body => {
     render(<CrewPolicyControls {...props} />); await screen.findByTestId("autonomy-guided"); setQuota("20")
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(body, { status: 409 })); save()
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("Failed to update quota: HTTP 409"))
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("Failed to update quota: HTTP 409", { duration: Infinity }))
     expect(quota()).toHaveValue(20)
   })
   it.each(["load policy", "load quota", "save policy", "save quota", "policy refusal", "quota refusal", "transport"])("ignores late %s bodies or errors after unmount", async stage => {

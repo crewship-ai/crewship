@@ -33,6 +33,7 @@ default selections are preserved.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--offline-demo` | `false` | Create a control-plane fixture without model credentials or execution. Incompatible with execution smoke tests, backup self-tests and Codex login. Supports `--with-memory` through the server API. |
+| `--ui-tour` | `false` | Add the [UI tour](#ui-tour-for-visual-acceptance) on top of an already seeded demo workspace. Additive and idempotent; needs no provider credentials. Refused together with `--nuke` and the other phase flags. |
 | `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
 | `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
@@ -201,6 +202,50 @@ crewship seed --test-backup
 ```
 
 Implies `--wait-provision`. Picks the first crew that successfully started provisioning, runs a backup/restore round-trip via the admin self-test endpoint, and fails the command if the canary doesn't verify. Use as a CI guard for the backup pipeline.
+
+### UI tour for visual acceptance
+
+The default demo deliberately creates no scheduled routines, so Calendar starts
+empty and the other screens show only a few rows. `--ui-tour` adds a lived-in
+week to an **already seeded** workspace, in the same fictional company
+(Harbor Goods, run by the Sales & Shipping, Finance & Marketing and Operations
+crews). On a dev slot the intended flow is:
+
+```bash
+crew reset --yes                                   # default demo data, your slot only
+crewship whoami                                    # note Server and the workspace slug
+crewship seed --server http://127.0.0.1:8081 --workspace demo-xxxx --ui-tour
+```
+
+Pass `--server` exactly as `crewship whoami` prints it: the CLI keeps its sign-in
+per server URL, and `localhost` and `127.0.0.1` are different keys, so the other
+spelling fails with `session_invalid`. `--workspace` is required because seed never
+picks a workspace from the active profile.
+
+It only adds, and every write goes through the HTTP API:
+
+| Screen | What the tour adds |
+| --- | --- |
+| Routines | 10 agentless routines in four folders (Daily operations, Customer care, Finance, Reports), with run history: completed runs, a decided approval, two runs **waiting for a person**, and one **failed** run with its error. |
+| Calendar | 9 schedules with upcoming fires (several times a day, weekly, monthly), Europe/Prague time. |
+| Inbox | The approvals the waiting runs raised (one marked irreversible) and the notifications the completed runs posted. |
+| Issues | 22 issues across Sales, Shipping, Finance, Marketing and a new Warehouse move project, in every board state, with labels, assignees and a few comments. |
+| Activity, Dashboard | The journal entries and counts the writes above produce. |
+
+Running it again adds nothing: routines are matched by slug, folders by name,
+schedules by routine and name, issues by title in their crew, projects and labels by name,
+and a routine that already has runs keeps its history. The routines use only
+transform, code (`expr`/`cel`), query, wait and notify steps, so the tour
+needs no provider credentials (`--offline-demo` workspaces work too) and its
+schedules never spend tokens when they fire.
+
+The four folders are real routine folders (`crewship routine folders`); each
+routine also carries the folder as a tag. A routine that is already in a
+folder — for example one a person moved after the first run — is not moved
+back.
+
+Limit: run timestamps are the time of seeding — the API cannot backdate a
+run, so history across past days accrues as the schedules fire.
 
 ## crewship seed verify
 

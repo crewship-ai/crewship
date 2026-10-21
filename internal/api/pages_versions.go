@@ -92,6 +92,12 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
@@ -110,7 +116,7 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
+	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `
 		SELECT v.seq, v.spec_json, v.created_at,
 		       COALESCE(v.author_user_id, ''), COALESCE(u.email, ''),
 		       COALESCE(v.author_agent_id, ''), COALESCE(a.slug, '')
@@ -158,6 +164,19 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(out) > 0 {
 		out[0].Current = true
+	}
+
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
+		return
+	}
+
+	if err := rows.Close(); err != nil {
+		replyInternalError(w, h.logger, "close Page versions", err)
+		return
+	}
+
+	if !h.finishMetadataRead(w, r, read) {
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

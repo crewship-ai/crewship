@@ -16,6 +16,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Clock is the service's notion of now. Tests pass a fake.
@@ -415,17 +416,22 @@ func (s *Service) dispatch(ctx context.Context) {
 	}
 	now := s.now()
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+runColumns+` FROM backup_runs
-		WHERE status = 'running' AND phase IN ('queued','busy_wait') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-		ORDER BY started_at, id`, ts(now))
+		WHERE status = 'running' AND phase IN ('queued','busy_wait') AND (next_attempt_at IS NULL OR next_attempt_at < ?)
+		ORDER BY started_at, id`, tsformat.Format(now.Truncate(time.Second).Add(time.Second)))
 	if err != nil {
 		s.Logger.Warn("backup scheduler: list queued runs", "error", err)
 		return
 	}
+	// Stored UTC timestamps may have variable fractional precision. Select
+	// through this second, then compare parsed instants before any side effect.
 	var queued []*Run
 	for rows.Next() {
 		r, err := scanRun(rows)
 		if err != nil {
 			s.Logger.Warn("backup scheduler: read queued run", "error", err)
+			continue
+		}
+		if r.NextAttemptAt != nil && r.NextAttemptAt.After(now) {
 			continue
 		}
 		queued = append(queued, r)

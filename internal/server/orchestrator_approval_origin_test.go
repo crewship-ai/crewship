@@ -140,8 +140,11 @@ func TestWholeRunApprovalOriginActualOrchestratorAdapter(t *testing.T) {
 				}
 			}}
 			adapter := newApprovalGateAdapter(db, emitter)
-			// Test-only explicit rule. Production defaults remain unchanged.
-			adapter.evaluator = harbormaster.NewEvaluator(harbormaster.RuleMatcher{RequireWhen: func(tool string, _ map[string]any) bool { return tool == "agent_run" }, MapsToKind: harbormaster.KindToolCall})
+			// Exercise the same explicit crew opt-in as a live operator, rather
+			// than replacing the production evaluator with a test-only rule.
+			if _, err := db.Exec(`UPDATE crews SET whole_run_approval=1 WHERE id='approval-crew'`); err != nil {
+				t.Fatal(err)
+			}
 			container := &approvalOriginContainer{}
 			hooks := &approvalOriginHooks{}
 			orch := orchestrator.New(container, newMockState(), logging.New("error", "json", nil))

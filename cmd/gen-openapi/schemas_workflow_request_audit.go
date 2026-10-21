@@ -31,6 +31,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"id": str(), "workspace_id": str(), "slug": str(), "revision": integer(),
 		"base_pipeline_id": str(), "base_revision": integer(), "document": anyObject(),
 		"updated_by": str(), "created_at": str(), "updated_at": str(),
+		"test_result": ref("RoutineTestResult"),
 	})
 	draft["required"] = []string{"id", "workspace_id", "slug", "revision", "base_pipeline_id", "base_revision", "document", "updated_by", "created_at", "updated_at"}
 	draftSave := obj(map[string]any{
@@ -78,7 +79,11 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"wake_pipeline_slug": nullable(str()), "wake_pipeline_id": nullable(str()), "wake_inputs": anyObject(),
 		"wake_fail_closed": boolean(), "catchup_policy": str(), "max_consecutive_failures": integer(),
 	})
-	replay := obj(map[string]any{"pinned_version": integer()})
+	replay := obj(map[string]any{
+		"pinned_version": map[string]any{"type": "integer", "minimum": 1},
+		"inputs":         anyObject(), "metadata": anyObject(),
+		"tags": map[string]any{"type": "array", "items": str(), "maxItems": 10},
+	})
 	metadata := obj(map[string]any{"set": anyObject(), "increment": anyObject(), "append": anyObject()})
 	signal := obj(map[string]any{"event_type": str(), "payload": str()})
 	checkpoint := obj(map[string]any{"label": str()})
@@ -158,9 +163,14 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	fixtureResult := obj(map[string]any{"execution_mode": str(), "step_id": str(), "step_type": str(), "definition_hash": str(), "fixture_hash": str(), "output_source": str(), "output": str(), "valid": boolean(), "validation_declared": boolean(), "validation_reason": str(), "limitations": arr(str())})
 	fixtureResult["required"] = []string{"execution_mode", "step_id", "step_type", "definition_hash", "fixture_hash", "output_source", "output", "valid", "validation_declared", "limitations"}
 	components := map[string]any{
-		"WorkflowFixtureTestRequest":  fixtureTest,
-		"RoutineFixtureResult":        fixtureResult,
-		"RoutineDraft":                draft,
+		"WorkflowFixtureTestRequest": fixtureTest,
+		"RoutineFixtureResult":       fixtureResult,
+		"RoutineDraft":               draft,
+		"RoutineTestResult": func() map[string]any {
+			t := obj(map[string]any{"passed": boolean(), "status": str(), "tested_at": str(), "tested_by": str()})
+			t["required"] = []string{"passed", "status", "tested_at"}
+			return t
+		}(),
 		"RoutineDraftSaveRequest":     draftSave,
 		"RoutineDraftRevisionRequest": draftRevision,
 		"RoutineDraftList":            arr(draftListEntry),

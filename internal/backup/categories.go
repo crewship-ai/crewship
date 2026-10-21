@@ -183,6 +183,14 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"workspace_artifact_creation_policy": CategoryAgents,
+	"workspace_artifact_creation_crews":  CategoryAgents,
+
+	"slides_heads": CategoryPages, "slides_revisions": CategoryPages,
+	"slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
+	"document_creations": CategoryPages, "documents": CategoryPages, "document_updates": CategoryPages,
+	"document_receipts": CategoryPages, "document_checkpoints": CategoryPages,
+
 	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
 	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
 
@@ -191,7 +199,8 @@ var TableCategory = map[string]string{
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
 	"crew_templates": CategoryAgents, "workspace_members": CategoryAgents, "access_grants": CategoryAgents,
-	"workspace_invitations": CategoryAgents, "workspace_mcp_servers": CategoryAgents,
+	"access_preset_selections": CategoryAgents,
+	"workspace_invitations":    CategoryAgents, "workspace_mcp_servers": CategoryAgents,
 	"feature_flag_overrides": CategoryAgents, "budget_limits": CategoryAgents, "hooks_config": CategoryAgents,
 	"automations": CategoryAgents, "keeper_governance_settings": CategoryAgents, "retention_settings": CategoryAgents,
 	"notification_channels": CategoryAgents, "user_notification_prefs": CategoryAgents,
@@ -219,7 +228,7 @@ var TableCategory = map[string]string{
 
 	// Routines, schedules and run history.
 	"execution_origins": categoryAnchor, // required admission fences; never omit a referenced origin or imply autonomous work
-	"pipelines":         CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
+	"pipelines":         CategoryRoutines, "routine_folders": CategoryRoutines, "routine_folder_members": CategoryRoutines, "routine_templates": CategoryRoutines, "routine_test_results": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
 	"pipeline_schedules": CategoryRoutines, "pipeline_webhooks": CategoryRoutines, "pipeline_runs": CategoryRoutines,
 	"pipeline_step_executions": CategoryRoutines, "pipeline_run_artifacts": CategoryRoutines,
 	"pipeline_run_step_outputs": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,
@@ -235,7 +244,7 @@ var TableCategory = map[string]string{
 	"cost_ledger": CategoryJournal, "gdpr_actions": CategoryJournal,
 
 	// Credentials and integrations.
-	"credentials": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
+	"credentials": CategoryCreds, "credential_folders": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
 	"credential_fields": CategoryCreds, "provider_login_pools": CategoryCreds,
 	"provider_login_pool_members": CategoryCreds, "agent_credentials": CategoryCreds,
 	"credential_audit": CategoryCreds, "credential_rotations": CategoryCreds, "composio_settings": CategoryCreds,
@@ -341,6 +350,7 @@ func (f categoryFilter) filterDump(d *DBDump) []string {
 			dropped = append(dropped, name)
 		}
 	}
+	dropDanglingPresetSelections(d)
 	sort.Strings(dropped)
 	return dropped
 }

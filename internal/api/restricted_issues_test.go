@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
 )
@@ -47,6 +48,10 @@ func TestGuestProjectIssuesAndResponseBodyLeakWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
+	// This inventory walk checks response isolation; admit each search after refill.
+	// Exhaustion and credential rotation are covered by the limiter tests.
+	searchClock := time.Now()
+	router.sharedSearch.now = func() time.Time { searchClock = searchClock.Add(time.Minute); return searchClock }
 	tokens := map[string]string{"project-guest": mintTokenFor(t, db, "project-guest", "project-guest-"+strings.Repeat("0", 40)), "second-guest": mintTokenFor(t, db, "second-guest", "second-guest-"+strings.Repeat("0", 40))}
 	request := func(user, path string, want int) *httptest.ResponseRecorder {
 		t.Helper()

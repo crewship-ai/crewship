@@ -100,7 +100,10 @@ var pathWorkspaceAllowlist = map[string]string{
 	// path can only deny a mismatch, never choose or widen the tenant. Covered
 	// for both methods by TestMemberAccessPolicyAuthenticatedRoutes.
 	"workspaces_member_access.go": "rejects path/context disagreement; only validated context scopes queries",
-	"chat_entity_refs.go":         "revision alias only rejects path/context disagreement; every query uses validated context",
+	// Artifact policy also rejects disagreement only. Policy queries always
+	// use the validated context; authenticated path-shadow coverage follows.
+	"pages_artifact_policy.go": "rejects path/context disagreement; every policy query uses the validated context",
+	"chat_entity_refs.go":      "revision alias only rejects path/context disagreement; every query uses validated context",
 	// Instance administration: these routes register through authedInstance,
 	// with no RequireWorkspace and no ?workspace_id= to prefer. The workspace
 	// in the path IS the target, chosen by an instance admin who may act on

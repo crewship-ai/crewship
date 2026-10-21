@@ -35,7 +35,7 @@ func TestRemainingAdminSystemCatalogWiredIntoRouteCatalog(t *testing.T) {
 		"GET /api/v1/admin/health":      {"uptime_seconds", "disk"},
 		"GET /api/v1/system/version":    {"current", "schema_version"},
 		"GET /api/v1/system/license":    {"edition", "features"},
-		"GET /api/v1/policies":          {"crew_id", "autonomy_level", "behavior_mode"},
+		"GET /api/v1/policies":          {"crew_id", "autonomy_level", "behavior_mode", "whole_run_approval"},
 		"GET /api/v1/system/aux-status": {"subsystems"},
 	}
 	for route, fields := range checks {

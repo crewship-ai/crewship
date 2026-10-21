@@ -92,7 +92,7 @@ func TestWriteFrameHonoursPastDeadline(t *testing.T) {
 	// 1ns deadline is already in the past by the time the write syscall
 	// runs, so the socket write must time out. On the pre-fix code path
 	// (no SetWriteDeadline) the write would proceed and this fails.
-	c := &Client{conn: conn, writeWait: time.Nanosecond}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: time.Nanosecond}
 
 	if c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame returned true with an expired write deadline; expected timeout/false")
@@ -104,7 +104,7 @@ func TestWriteFrameHonoursPastDeadline(t *testing.T) {
 func TestWriteFrameDeliversWithinDeadline(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, writeWait: 5 * time.Second}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: 5 * time.Second}
 
 	if !c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame returned false for a healthy write within the deadline")
@@ -117,7 +117,7 @@ func TestWriteFrameDeliversWithinDeadline(t *testing.T) {
 func TestWriteFrameZeroUsesDefault(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, writeWait: 0}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: 0}
 
 	if !c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame with zero writeWait should use defaultWriteWait and succeed")

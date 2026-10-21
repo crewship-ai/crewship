@@ -34,6 +34,25 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
 
+Artifact-era chat bundles must retain their source conversation classification.
+If an older bundle lacks it, restore refuses the ambiguous chats before changing
+data or fencing existing services; upgrade the source and create a fresh bundle.
+This also applies to dry-run validation. Instance recovery must complete the
+privacy backfill with the original vault key before discarding runtime consents.
+Retaining this classification never restores permission to execute a run.
+Workspace backup operations retain their OWNER requirement while classified
+private conversations remain, even after creation fails or a Document is deleted.
+Crew bundles without the classification also require source migration evidence
+that they predate Document creation; missing evidence is refused, not inferred
+from omitted tables. Protected bundles require a migrated target schema.
+
+A valid older bundle cannot remove newer private conversation classification
+from its target. Workspace `--replace` refuses a target with retained private
+artifact conversations. Offline `recover --force` checks the existing database
+before replacing it and refuses such a target too; recover into an empty data
+directory instead. These operations do not replace per-agent diagnostic logs,
+so the retained audience proof must remain available.
+
 ## Key concepts
 
 | Term | What it means here |
@@ -91,6 +110,16 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 - **Encryption:** AGE passphrase (default) or AGE X25519 recipient — every new bundle is encrypted, because agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins).
 - **Default location:** `$CREWSHIP_DATA_DIR/backups/` on the server (mode `0700`), or `~/.crewship/backups/` when `CREWSHIP_DATA_DIR` is unset — the same root every other piece of per-instance state resolves against, so isolated instances on one host never share a bundle directory. `--output`/`output_dir` overrides it explicitly.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
+
+Explicit resource-preset choice provenance is included as informational metadata
+alongside canonical resource grants. Workspace backups carry only the historical
+selecting users actually referenced by that workspace, including selectors no
+longer in its roster. Fork restores remap typed membership/resource IDs while
+preserving the immutable definition hash. Older bundles have no saved choices;
+restore does not infer one from matching grants. Custom category subsets omit
+choice labels whose resource or membership is not carried, leaving canonical
+grants unchanged. This foundation does not enable preset application or revive
+in-flight execution authority.
 
 Inside `payload.age`, bundles carry three distinct notions of "memory" — don't confuse them:
 
@@ -1063,6 +1092,11 @@ its categories, and a restore with `--replace` from a custom bundle is
 refused, because replacing would delete everything the bundle does not hold.
 
 ### When plans run
+
+Queued manual runs and busy retries become eligible at their exact stored UTC
+deadline, including equality. Dispatch compares parsed instants after selecting
+candidates, so older variable-precision timestamps neither delay due work nor
+start a future retry early. Stored timestamp formats remain unchanged.
 
 - **Timezone.** `time_of_day` is a wall-clock time in the plan's IANA
   `timezone`, so 03:00 stays 03:00 across daylight-saving changes. Cadence is

@@ -120,6 +120,8 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "skill.unassigned",
     "skill.imported",
     "skill.deleted",
+    "skill.archived",
+    "skill.restored",
     "skill.invoked",
   ],
   memory: [
@@ -168,6 +170,12 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "invitation.revoked",
     "invitation.accepted",
     "member.access_changed",
+    "member.owner_created",
+    "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
+    "member.removed",
   ],
   provisioning: [
     "provisioning.queued",

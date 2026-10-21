@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/costvis"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -35,7 +38,9 @@ type Client struct {
 	send             chan []byte
 	ctx              context.Context
 	cancel           context.CancelFunc
-	mu               sync.Mutex // protects channels map
+	mu               sync.Mutex   // protects channels map
+	sendMu           sync.RWMutex // serializes senders with queue closure
+	sendClosed       bool
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
 	// writeWait overrides defaultWriteWait per connection; zero means use
@@ -54,6 +59,10 @@ func (c *Client) readPump() {
 		var raw []byte
 		if err := websocket.Message.Receive(c.conn, &raw); err != nil {
 			break
+		}
+
+		if !auth.StreamCredentialCurrent(c.ctx) {
+			return
 		}
 
 		var msg ClientMessage
@@ -80,7 +89,7 @@ func (c *Client) readPump() {
 		case "unsubscribe":
 			c.unsubscribe(msg.Channel)
 		case "ping":
-			c.send <- pongMessageBytes
+			c.safeSend(pongMessageBytes)
 		case "send_message":
 			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
 			c.handleSendMessage(msg)
@@ -137,6 +146,8 @@ func (c *Client) writePump() {
 
 	for {
 		select {
+		case <-c.ctx.Done():
+			return
 		case msg, ok := <-c.send:
 			if !ok {
 				return
@@ -176,6 +187,10 @@ func (c *Client) writeFrame(msg []byte) bool {
 			return false
 		}
 	}
+	msg, ok := c.costVisibleFrame(authorizer, msg)
+	if !ok {
+		return true // frame dropped, connection kept
+	}
 	wait := c.writeWait
 	if wait <= 0 {
 		wait = defaultWriteWait
@@ -183,10 +198,47 @@ func (c *Client) writeFrame(msg []byte) bool {
 	if err := c.conn.SetWriteDeadline(time.Now().Add(wait)); err != nil {
 		return false
 	}
+	if !auth.StreamCredentialCurrent(c.ctx) {
+		return false
+	}
 	if _, err := c.conn.Write(msg); err != nil {
 		return false
 	}
 	return true
+}
+
+// costReader is the optional authorizer half of the #3590 money rule.
+type costReader interface {
+	CanReadCosts(ctx context.Context, userID, channel string) (bool, error)
+}
+
+// costVisibleFrame removes money amounts (internal/costvis) from a frame bound
+// for a user who is not OWNER/ADMIN of the channel's workspace. Journal
+// entries, routine step/run events and chat run metadata all carry them.
+// It reports false when the frame could not be redacted; the caller drops it
+// rather than send amounts. Without any authorizer (unit-test hubs) frames
+// pass unchanged, matching CanDeliver above.
+func (c *Client) costVisibleFrame(authorizer ChannelAuthorizer, msg []byte) ([]byte, bool) {
+	if authorizer == nil || !costvis.MayCarry(msg) {
+		return msg, true
+	}
+	if cr, ok := authorizer.(costReader); ok {
+		var envelope struct {
+			Channel string `json:"channel"`
+		}
+		_ = json.Unmarshal(msg, &envelope)
+		ctx, cancel := context.WithTimeout(c.ctx, 2*time.Second)
+		allowed, err := cr.CanReadCosts(ctx, c.userID, envelope.Channel)
+		cancel()
+		if err == nil && allowed {
+			return msg, true
+		}
+	}
+	out, err := costvis.RedactJSON(msg)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // Session revocation is enforced by the hub's shared sweep
@@ -287,11 +339,11 @@ func (c *Client) unsubscribe(channel string) {
 }
 
 func (c *Client) safeSend(data []byte) (sent bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			sent = false
-		}
-	}()
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
 	select {
 	case c.send <- data:
 		return true
@@ -303,20 +355,33 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 // trySend is the non-blocking variant of safeSend: enqueue if the buffer
 // has room, otherwise drop the frame immediately. Used by hub-side
 // goroutines (connection sweep, revocation notify) that must never park
-// behind one client's saturated buffer. Same panic guard — the hub
-// closes c.send on unregister, and these callers race with that by
-// design.
+// behind one client's saturated buffer. The shared lock synchronizes enqueue
+// with unregister; recovering a send-on-closed panic would still be a race.
 func (c *Client) trySend(data []byte) (sent bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			sent = false
-		}
-	}()
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
 	select {
 	case c.send <- data:
 		return true
 	default:
 		return false
+	}
+}
+
+// closeSend wakes any blocked safeSend before waiting for its read lock.
+// The hub calls this after removing the client from its subscription maps.
+func (c *Client) closeSend() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if !c.sendClosed {
+		c.sendClosed = true
+		close(c.send)
 	}
 }
 

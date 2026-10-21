@@ -35,7 +35,7 @@ func TestGuestContributionSchemasExcludeAuthoritySelectors(t *testing.T) {
 }
 
 func TestGuestContributeIsDocumentedInMemberPolicySchema(t *testing.T) {
-	rights := memberAccessPolicySchema()["properties"].(map[string]any)["rights"].(map[string]any)["items"].(map[string]any)["oneOf"].([]any)
+	rights := memberAccessTestRightVariants()
 	for _, variant := range rights {
 		properties := variant.(map[string]any)["properties"].(map[string]any)
 		kind := properties["kind"].(map[string]any)["enum"].([]string)
@@ -54,7 +54,7 @@ func TestGuestContributeIsDocumentedInMemberPolicySchema(t *testing.T) {
 }
 
 func TestGuestManageIsDocumentedInMemberPolicySchema(t *testing.T) {
-	rights := memberAccessPolicySchema()["properties"].(map[string]any)["rights"].(map[string]any)["items"].(map[string]any)["oneOf"].([]any)
+	rights := memberAccessTestRightVariants()
 	for _, variant := range rights {
 		properties := variant.(map[string]any)["properties"].(map[string]any)
 		kind := properties["kind"].(map[string]any)["enum"].([]string)

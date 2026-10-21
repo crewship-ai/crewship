@@ -7,7 +7,7 @@ import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-di
 // "Inherit" is not a style, and the picker has to stop pretending it is.
 //
 // It sat in the style grid as a twelfth tile, and its preview renders
-// crewStyle ?? DEFAULT_AVATAR_STYLE. The default is bottts-neutral, whose
+// crewStyle ?? DEFAULT_AVATAR_STYLE. The default was bottts-neutral, whose
 // label in the grid is "Robots" — so for any agent whose crew has no style
 // set, two adjacent tiles showed the identical face with different words under
 // them, and nothing on screen explained why. It reads as a duplicate.
@@ -39,7 +39,8 @@ describe("avatar style — inherit", () => {
     // resolves to the same face the default tile shows one row down.
     render(<AvatarPickerDialog {...base} style={null} crewStyle={null} />)
     const tile = screen.getByRole("button", { name: /Follow the crew/i })
-    expect(tile).toHaveTextContent(/Bottts Neutral/i)
+    // Voxel Bot since #3789.
+    expect(tile).toHaveTextContent(/Voxel Bot/i)
     expect(tile).toHaveTextContent(/default/i)
   })
 

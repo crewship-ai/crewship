@@ -7,6 +7,18 @@ function part(p: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart {
 }
 
 describe("groupTurnParts", () => {
+  it("correlates interleaved A/B calls with B/A results by identity", () => {
+    const nodes = groupTurnParts([
+      part({ id: "a", type: "tool_call", metadata: { tool_id: "a", tool_name: "Read" } }),
+      part({ id: "b", type: "tool_call", metadata: { tool_id: "b", tool_name: "Read" } }),
+      part({ id: "br", type: "tool_result", content: "B", metadata: { tool_id: "b" } }),
+      part({ id: "ar", type: "tool_result", content: "A", metadata: { tool_id: "a" } }),
+    ])
+    expect(nodes).toHaveLength(1)
+    if (nodes[0].kind !== "activity") throw new Error("expected activity")
+    expect(nodes[0].tools.map(tool => [tool.call.id, tool.result?.content])).toEqual([["a", "A"], ["b", "B"]])
+  })
+
   it("pairs a tool_call with its following tool_result into one tool node", () => {
     const nodes = groupTurnParts([
       part({ type: "tool_call", content: "Bash", metadata: { tool_id: "t1", tool_name: "Bash" } }),
@@ -140,5 +152,24 @@ describe("groupTurnParts thinking merge", () => {
     ])
     const thinking = nodes.find((n) => n.kind === "part" && n.part.type === "thinking")
     expect(thinking && thinking.kind === "part" ? thinking.part.content : "").toBe("solo")
+  })
+})
+
+describe("canonical activity ancestry", () => {
+  it("nests a correlated child without duplicating it as a root", () => {
+    const nodes = groupTurnParts([
+      part({ id: "parent", type: "activity", tool_call_id: "p", activity: { kind: "task", state: "running" } }),
+      part({ id: "child", type: "activity", tool_call_id: "c", parent_tool_call_id: "p", activity: { kind: "read", state: "succeeded" } }),
+    ])
+    if (nodes[0].kind !== "activity") throw new Error("expected activity")
+    expect(nodes[0].tools).toHaveLength(1)
+    expect(nodes[0].tools[0].children?.map(child => child.call.id)).toEqual(["child"])
+  })
+  it("leaves an awaiting approval outside a collapsed parent", () => {
+    const nodes = groupTurnParts([
+      part({ id: "parent", type: "activity", tool_call_id: "p", activity: { kind: "task", state: "running" } }),
+      part({ id: "approval", type: "activity", tool_call_id: "c", parent_tool_call_id: "p", activity: { kind: "shell", state: "awaiting_approval" } }),
+    ])
+    expect(nodes.map(node => node.kind)).toEqual(["activity", "part"])
   })
 })

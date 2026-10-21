@@ -54,7 +54,7 @@ import type { AssigneeOption } from "@/components/features/issues/assignee-picke
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
@@ -63,7 +63,7 @@ const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
 /** The two date fields. `h-12` on a phone because `--spacing` is 0.23rem, so
  *  the usual h-11 lands at 40.5px — under the 44px floor. */
 const DATE_INPUT_CLASS =
-  "h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-12 coarse:text-sm"
+  "h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-[44px] coarse:text-sm"
 
 const PROJECT_STATUSES: { value: ProjectStatus; label: string; color: string }[] = [
   { value: "backlog", label: "Backlog", color: ISSUE_ICON_COLORS.BACKLOG },

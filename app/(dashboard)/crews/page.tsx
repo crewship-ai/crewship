@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Skeleton } from "@/components/ui/skeleton"
+import { PageLoading } from "@/components/layout/page-state"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { usePagedList } from "@/hooks/use-paged-list"
@@ -63,16 +63,14 @@ export default function CrewsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   if (wsLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
-      </div>
+      <PageLoading variant="cards" />
     )
   }
   if (!workspaceId) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
         <p className="text-sm font-medium text-foreground/80">No workspace selected</p>
-        <p className="text-[12px] text-muted-foreground max-w-sm">
+        <p className="text-label text-muted-foreground max-w-sm">
           Pick a workspace from the toolbar to see its crews, agents and missions.
         </p>
       </div>
@@ -160,9 +158,7 @@ function CrewsPageBody({ workspaceId }: { workspaceId: string }) {
   const firstLoad = beforeFirstResponse || (crewsList.loading && crewsList.total === null) || (agentsList.loading && agentsList.total === null)
   if (firstLoad && crews.length === 0 && agents.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
-      </div>
+      <PageLoading variant="cards" />
     )
   }
 

@@ -278,3 +278,70 @@ func TestWebhookDeliveryGet_ForeignWorkspaceIs404(t *testing.T) {
 		}
 	}
 }
+
+// ODCH-INT-06: the Triggers table counts calls for every kind of trigger, not
+// only routine webhooks, from the ledger every kind writes to.
+func TestWebhookDeliveriesSummary_CountsPerEndpointInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	if _, err := db.Exec(`INSERT INTO workspaces (id,name,slug) VALUES ('sum-foreign','F','sum-foreign')`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewWebhookDeliveriesHandler(db, quietLogger())
+	n := 0
+	add := func(workspace, endpoint, kind, decision string) {
+		n++
+		seedDelivery(t, db, seededDelivery{ID: fmt.Sprintf("sum-%d", n), WorkspaceID: workspace, EndpointID: endpoint,
+			EndpointKind: kind, SourceDeliveryID: fmt.Sprintf("src-%d", n), ContentKey: fmt.Sprintf("ck-%d", n), FilterDecision: decision})
+	}
+	add(ws, "ep-agent", "agent", "accepted")
+	add(ws, "ep-agent", "agent", "accepted")
+	add(ws, "ep-agent", "agent", "ignored")
+	add(ws, "ep-page", "page", "accepted")
+	add("sum-foreign", "ep-agent", "agent", "accepted") // another tenant, same endpoint id
+
+	tests := []struct {
+		name  string
+		query string
+		want  map[string][3]int // endpoint -> calls, accepted, ignored
+		code  int
+	}{
+		{"every endpoint, this workspace only", "", map[string][3]int{"ep-agent": {3, 2, 1}, "ep-page": {1, 1, 0}}, 200},
+		{"a window in the future counts nothing", "?since=2999-01-01T00:00:00Z", map[string][3]int{}, 200},
+		{"a bad window is refused", "?since=yesterday", nil, 400},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := workReq(t, "GET", "/webhook-deliveries/summary"+tc.query, "", user, ws, "VIEWER")
+			rr := httptest.NewRecorder()
+			h.Summary(rr, req)
+			if rr.Code != tc.code {
+				t.Fatalf("status %d, want %d: %s", rr.Code, tc.code, rr.Body.String())
+			}
+			if tc.code != 200 {
+				return
+			}
+			var body struct {
+				Items []webhookDeliverySummary `json:"items"`
+			}
+			decodeJSON(t, rr, &body)
+			got := map[string][3]int{}
+			for _, it := range body.Items {
+				got[it.EndpointID] = [3]int{it.Calls, it.Accepted, it.Ignored}
+				if it.LastReceivedAt == "" {
+					t.Errorf("%s has no last_received_at", it.EndpointID)
+				}
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("%s = %v, want %v", k, got[k], v)
+				}
+			}
+		})
+	}
+}

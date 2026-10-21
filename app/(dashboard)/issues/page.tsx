@@ -14,5 +14,5 @@ export default function IssuesPage() {
   const mode = useAccessMode()
   if (mode === "loading") return null
   if (mode === "restricted") return <RestrictedIssues />
-  return <Suspense><OrchestrationPageShell mode="issues" /></Suspense>
+  return <Suspense><OrchestrationPageShell /></Suspense>
 }

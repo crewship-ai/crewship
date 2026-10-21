@@ -38,7 +38,7 @@ export function XlsxPreview({ bytes, path, onAskSelection }: { bytes: Uint8Array
   const sheet = current.workbook.sheets[index]
   return <section aria-label="Workbook preview" className="flex h-full min-h-0 flex-col">
     <div className="flex flex-wrap items-center gap-2 border-b p-2 text-xs">
-      <label>Worksheet <select aria-label="Worksheet" className="rounded border bg-background p-2 coarse:min-h-12" value={index} onChange={event => setSelectedSheet({ source: bytes, path, index: Number(event.target.value) })}>{current.workbook.sheets.map((item, number) => <option key={item.name} value={number}>{item.name}</option>)}</select></label>
+      <label>Worksheet <select aria-label="Worksheet" className="rounded border bg-background p-2 coarse:min-h-[44px]" value={index} onChange={event => setSelectedSheet({ source: bytes, path, index: Number(event.target.value) })}>{current.workbook.sheets.map((item, number) => <option key={item.name} value={number}>{item.name}</option>)}</select></label>
       <span>Saved values only; formulas are never calculated. {current.workbook.missingFormulaResults > 0 && `${current.workbook.missingFormulaResults} formula results were not saved.`}</span>
     </div>
     <TableGrid key={sheet.name} bytes={bytes} path={path} table={sheet.table} version={current.version} sheet={sheet.name} onAskSelection={onAskSelection} />

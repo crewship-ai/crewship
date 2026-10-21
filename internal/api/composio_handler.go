@@ -976,6 +976,10 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 
 	// (1) Credential — upsert on UNIQUE(workspace_id, name); capture the id of
 	// whichever row now holds the key (existing or freshly inserted).
+	if err := releaseCredentialNameIn(ctx, tx, wsID, composioManagedKeyName); err != nil {
+		internalError(w, r, h.logger, "composio: release retired credential name", err)
+		return
+	}
 	credID := generateCUID()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
@@ -1636,6 +1640,10 @@ func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, req
 	}
 	defer tx.Rollback()
 
+	if err := releaseCredentialNameIn(ctx, tx, wsID, composioManagedKeyName); err != nil {
+		h.logger.Error("composio: release retired credential name", "error", err)
+		return "", "", &composioDefaultError{status: http.StatusInternalServerError, msg: "Internal server error"}
+	}
 	credID := generateCUID()
 	if _, exErr := tx.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
+  DEFAULT_AVATAR_STYLE,
   getAgentAvatarUrl,
   seedColor,
   _resetAvatarCacheForTest,
@@ -82,7 +83,7 @@ describe("getAgentAvatarUrl LRU cache", () => {
 
   it("handles null styleName by using the default", () => {
     const a = getAgentAvatarUrl("agent-y", null)
-    const b = getAgentAvatarUrl("agent-y", "bottts-neutral")
+    const b = getAgentAvatarUrl("agent-y", DEFAULT_AVATAR_STYLE)
     expect(a).toBe(b)
   })
 
@@ -96,7 +97,7 @@ describe("getAgentAvatarUrl LRU cache", () => {
     getAgentAvatarUrl("agent-z", "Robot")
     getAgentAvatarUrl("agent-z", null)
     getAgentAvatarUrl("agent-z", undefined)
-    getAgentAvatarUrl("agent-z", "bottts-neutral")
+    getAgentAvatarUrl("agent-z", DEFAULT_AVATAR_STYLE)
     expect(_avatarCacheSizeForTest()).toBe(1)
   })
 })

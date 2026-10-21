@@ -8,6 +8,10 @@ tag: Experimental
 
 A "run" is one execution — either an ad-hoc agent/chat run (orchestrator picks up an assignment, exec's the CLI) or a routine/pipeline run — and ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal). The two engines key their journal entries differently, and `GET /api/v1/runs` and `GET /api/v1/runs/{id}` read both (#2284):
 
+<Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
 - An **ad-hoc** run's entries (`run.started` + one terminal `run.{completed|failed|cancelled|timeout}`) are grouped on `trace_id`, which equals the run id.
 - A **routine/pipeline** run's entries (`pipeline.run.started` + one terminal `pipeline.run.{completed|failed}`) never set `trace_id`; they're grouped on `actor_id` instead, which the pipeline engine stamps to the run's own id. There is no dedicated `pipeline.run.cancelled` — a run cancelled mid-flight is still `pipeline.run.failed`, with the real outcome on `payload.status`.
 

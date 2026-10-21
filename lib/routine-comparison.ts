@@ -18,7 +18,8 @@ export interface ComparisonResult {
   run_id: string
   status: string
   output: string
-  cost_usd: number
+  /** null when the server withheld it (#3590: cost is OWNER/ADMIN only). */
+  cost_usd: number | null
   duration_ms: number
   pipeline_version: number
   definition_hash: string
@@ -83,10 +84,8 @@ export function readComparisonResult(
   if (
     typeof raw.status !== "string" ||
     typeof raw.output !== "string" ||
-    typeof raw.cost_usd !== "number" ||
+    (raw.cost_usd !== undefined && (typeof raw.cost_usd !== "number" || !Number.isFinite(raw.cost_usd) || raw.cost_usd < 0)) ||
     typeof raw.duration_ms !== "number" ||
-    !Number.isFinite(raw.cost_usd) ||
-    raw.cost_usd < 0 ||
     !Number.isFinite(raw.duration_ms) ||
     raw.duration_ms < 0
   )
@@ -95,7 +94,7 @@ export function readComparisonResult(
     run_id: raw.id as string,
     status: raw.status,
     output: raw.output,
-    cost_usd: raw.cost_usd,
+    cost_usd: typeof raw.cost_usd === "number" ? raw.cost_usd : null,
     duration_ms: raw.duration_ms,
     pipeline_version: raw.pipeline_version as number,
     definition_hash: raw.definition_hash as string,

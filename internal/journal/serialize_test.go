@@ -7,6 +7,23 @@ import (
 	"time"
 )
 
+func TestSerializeEntryKeepsCapabilityAuditSetsPrivate(t *testing.T) {
+	payload := map[string]any{
+		"subject_user_id": "member", "action": "capabilities_changed",
+		"previous_capabilities": []string{"chat"},
+		"capabilities":          []string{"chat", "credentials:reveal"},
+	}
+	want := map[string]any{"subject_user_id": "member", "action": "capabilities_changed"}
+	for _, entry := range SerializeEntries([]Entry{{Type: EntryMemberCapabilitiesChanged, Payload: payload}}) {
+		if !reflect.DeepEqual(entry["payload"], want) {
+			t.Fatalf("capability audit exposed through shared feed: %v", entry)
+		}
+	}
+	if len(payload) != 4 || !reflect.DeepEqual(payload["capabilities"], []string{"chat", "credentials:reveal"}) || !reflect.DeepEqual(payload["previous_capabilities"], []string{"chat"}) {
+		t.Fatal("serialization changed retained audit state")
+	}
+}
+
 func TestSerializeEntriesWireContract(t *testing.T) {
 	stamp := time.Date(2026, 10, 2, 9, 30, 0, 123456789, time.FixedZone("offset", 2*60*60))
 	minimal := Entry{ID: "first", WorkspaceID: "ws", TS: stamp, Type: EntryRunStarted, Severity: SeverityInfo, Priority: PriorityNormal, ActorType: ActorAgent, Summary: "started"}
@@ -94,5 +111,55 @@ func TestSerializeEntryKeepsDelegatedOriginPrivate(t *testing.T) {
 	}
 	if len(payload) != 4 || payload["chat_origin_id"] != "private-origin" {
 		t.Fatal("serialization altered durable delegated authority")
+	}
+}
+
+func TestSerializeMemberAddedKeepsInitialAuthorityPrivate(t *testing.T) {
+	payload := map[string]any{"member_id": "member", "subject_user_id": "subject", "action": "added", "role": "VIEWER", "access_mode": "restricted", "rights": []any{map[string]any{"id": "private-resource"}}, "email": "private@example.test", "setup_url": "private-setup"}
+	original, _ := json.Marshal(payload)
+	wire := SerializeEntry(Entry{Type: EntryMemberAdded, ActorType: ActorUser, ActorID: "actor", Payload: payload})
+	expected := map[string]any{"member_id": "member", "subject_user_id": "subject", "action": "added"}
+	if !reflect.DeepEqual(wire["payload"], expected) || wire["actor_id"] != "actor" {
+		t.Fatalf("public membership projection expanded: %#v", wire)
+	}
+	after, _ := json.Marshal(payload)
+	if string(original) != string(after) {
+		t.Fatal("public projection changed canonical chain payload")
+	}
+}
+
+func TestSerializePageGrantSnapshotsStayCanonical(t *testing.T) {
+	for _, kind := range []EntryType{EntryPageGrantAdded, EntryPageGrantRemoved, EntryPageSpecChanged} {
+		t.Run(string(kind), func(t *testing.T) {
+			payload := map[string]any{
+				"page": "fleet", "page_id": "page", "actor_user_id": "actor",
+				"subject_type": "crew", "subject_id": "crew", "subject": "engine",
+				"level": "produce", "panels": []string{"visible-panel"},
+				"previous_grant": map[string]any{"granted_by_user_id": "original-issuer", "panel_ids": `["stored-private-scope"]`},
+				"grant":          nil,
+			}
+			before, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			public := SerializeEntry(Entry{Type: kind, Payload: payload})["payload"].(map[string]any)
+			expected := map[string]any{}
+			for key, value := range payload {
+				if kind != EntryPageSpecChanged && (key == "previous_grant" || key == "grant") {
+					if _, exists := public[key]; exists {
+						t.Errorf("canonical %s leaked to the public feed", key)
+					}
+					continue
+				}
+				expected[key] = value
+			}
+			if !reflect.DeepEqual(public, expected) {
+				t.Error("existing public fields or unrelated event changed")
+			}
+			after, err := json.Marshal(payload)
+			if err != nil || string(after) != string(before) {
+				t.Fatal("serialization changed canonical payload")
+			}
+		})
 	}
 }

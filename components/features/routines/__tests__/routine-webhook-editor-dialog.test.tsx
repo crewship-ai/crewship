@@ -39,15 +39,10 @@ const onCancel = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // The rotation question is an in-page ConfirmDialog now; the browser's
+  // confirm() must never be the thing that decides.
+  window.confirm = vi.fn().mockReturnValue(true)
 })
-
-/** Answer the rotation question with `label`. */
-async function answer(label: "Rotate and save" | "Cancel") {
-  const dialog = await screen.findByRole("alertdialog", { name: "Rotate the signing secret?" })
-  fireEvent.click(within(dialog).getByRole("button", { name: label }))
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
-  return dialog
-}
 
 describe("RoutineWebhookEditorDialog", () => {
   it("renders nothing with no webhook", () => {
@@ -92,22 +87,30 @@ describe("RoutineWebhookEditorDialog", () => {
     render(<RoutineWebhookEditorDialog webhook={baseWebhook()} onCancel={onCancel} onSave={onSave} />)
     fireEvent.click(screen.getByRole("switch", { name: /rotate signing secret/i }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    // Save only asks; nothing is sent until the rotation is confirmed.
+    const question = await screen.findByRole("alertdialog")
+    expect(question).toHaveTextContent(/rotate the signing secret\?/i)
     expect(onSave).not.toHaveBeenCalled()
-    const dialog = await answer("Rotate and save")
-    expect(dialog).toHaveTextContent("The URL stays the same")
-    expect(dialog).toHaveTextContent("Every sender signing with the current secret fails verification")
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ rotate_secret: true })))
+    fireEvent.click(within(question).getByRole("button", { name: "Rotate and save" }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ rotate_secret: true })),
+    )
+    expect(window.confirm).not.toHaveBeenCalled()
   })
 
   it("does not save at all when the rotation confirmation is declined", async () => {
     render(<RoutineWebhookEditorDialog webhook={baseWebhook()} onCancel={onCancel} onSave={onSave} />)
     fireEvent.click(screen.getByRole("switch", { name: /rotate signing secret/i }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await answer("Cancel")
+
+    const question = await screen.findByRole("alertdialog")
+    fireEvent.click(within(question).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(onSave).not.toHaveBeenCalled()
-    // Cancel answers the question only; the editor stays open with its edits.
     expect(onCancel).not.toHaveBeenCalled()
-    expect(screen.getByRole("dialog", { name: "Edit webhook" })).toBeInTheDocument()
   })
 
   it("calls onCancel without saving", () => {

@@ -1,12 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   LayoutTemplate,
   ArrowRight,
@@ -20,6 +19,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { WorkflowTemplate, TemplateDefinition } from "@/lib/types/template"
 
@@ -170,7 +170,6 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
   const [loading, setLoading] = useState(true)
   const [editorOpen, setEditorOpen] = useState(false)
   const [error, setError] = useState(false)
-  const { ask, dialog } = useConfirm()
   const scope = useRef<{ workspaceId: string; controller: AbortController } | null>(null)
   const listing = useRef<AbortController | null>(null)
 
@@ -282,14 +281,7 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                     aria-label={`Delete template ${tmpl.name}`}
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
-                      const ok = await ask({
-                        title: `Delete template ${tmpl.name}?`,
-                        description: "It is removed from this workspace's gallery.",
-                        consequences: [{ tone: "kept", text: "Pipelines already created from it stay as they are" }],
-                        confirmLabel: "Delete template",
-                        destructive: true,
-                      })
-                      if (!ok) return
+                      if (!await askConfirm({ title: `Delete template "${tmpl.name}"?`, confirmLabel: "Delete", cancelLabel: "Cancel", destructive: true })) return
                       const current = scope.current
                       if (!current || current.workspaceId !== workspaceId) return
                       try {
@@ -358,7 +350,6 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
           })}
         </div>
       )}
-      {dialog}
     </div>
   )
 }

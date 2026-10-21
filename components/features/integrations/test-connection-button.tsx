@@ -5,7 +5,7 @@ import { AlertTriangle, Check, Info, XCircle, Zap } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { apiFetch } from "@/lib/api-fetch"
 import type { TestResult } from "./types"
 
@@ -93,13 +93,13 @@ export function TestConnectionButton({
           aria-atomic="true"
         >
           {result.status === "ok" && (
-            <StatusBadge status="COMPLETED" label={<span className="inline-flex items-center gap-1"><Check className="h-3 w-3" />Connected</span>} />
+            <StatusPill status="COMPLETED" icon={<Check className="h-3 w-3" />} label="Connected" />
           )}
           {result.status === "auth_required" && (
-            <StatusBadge status="BLOCKED" label={<span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Authentication required</span>} />
+            <StatusPill status="BLOCKED" icon={<AlertTriangle className="h-3 w-3" />} label="Authentication required" />
           )}
           {result.status === "error" && (
-            <StatusBadge status="FAILED" label={<span className="inline-flex items-center gap-1"><XCircle className="h-3 w-3" />{result.message || "Connection failed"}</span>} />
+            <StatusPill status="FAILED" icon={<XCircle className="h-3 w-3" />} label={result.message || "Connection failed"} />
           )}
           {result.status === "skipped" && (
             <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">

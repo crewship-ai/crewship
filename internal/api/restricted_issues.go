@@ -90,6 +90,13 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	}
 	total := 0
 	if id == "" {
+		if allowed, wait := r.sharedSearch.take(req.Context(), user.ID, workspace, project); !allowed {
+			if req.Context().Err() != nil {
+				return
+			}
+			replyRateLimited(w, "Shared issue searches are temporarily limited.", wait)
+			return
+		}
 		err = r.db.QueryRowContext(req.Context(), restrictedIssueAudienceSQL+`SELECT COUNT(*)`+restrictedIssueFromSQL+restrictedIssueSearchSQL,
 			member.ID, "list", workspace, project, project, search, search, search).Scan(&total)
 		if err != nil {

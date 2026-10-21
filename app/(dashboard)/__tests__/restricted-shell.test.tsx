@@ -144,10 +144,10 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     fireEvent.change(input,{target:{value:"preserved draft"}})
     workspacesPayload=[]
     await act(async()=>{await refreshWorkspaceSettings()})
-    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    expect(screen.getByRole("dialog",{name:"Alpha is unavailable"})).toBeInTheDocument()
     workspacesStatus=500
     await act(async()=>{await refreshWorkspaceSettings()})
-    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    expect(screen.getByRole("dialog",{name:"Alpha is unavailable"})).toBeInTheDocument()
     expect(screen.getByTestId("local-draft")).toBe(input)
     workspacesStatus=200
     workspacesPayload=[RESTRICTED_A]
@@ -163,7 +163,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(requests).toEqual(["GET /api/v1/workspaces"])
     expect(sockets).toEqual([])
     expect(screen.queryByTestId("page")).toBeNull()
-    expect(screen.queryByText("Not available with your access")).toBeNull()
+    expect(screen.queryByText("Chat isn’t part of your access")).toBeNull()
   })
 
   it("stays restricted in a workspace where the membership is trusted (mixed membership)", async () => {
@@ -197,27 +197,67 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("offers only the server's surfaces in the sidebar and phone sheet", async () => {
     mount()
     expect(await screen.findByTestId("page")).toBeInTheDocument()
-    for (const name of ["Chat", "Routines", "Pages", "Settings"]) {
+    for (const name of ["Chat", "Routines", "Artifacts", "Settings"]) {
       expect(screen.getAllByRole("link", { name }).length).toBeGreaterThan(0)
+    }
+    for (const link of screen.getAllByRole("link", { name: "Artifacts" })) {
+      expect(link).toHaveAttribute("href", "/pages")
     }
     for (const name of ["Dashboard", "Inbox", "Issues", "Activity", "Crews", "Skills", "Credentials", "Integrations"]) {
       expect(screen.queryByRole("link", { name })).toBeNull()
     }
   })
 
+  it("requires the server's pages permission for the Artifacts surface", async () => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: SURFACES.filter(surface => surface !== "pages") }]
+    nav.pathname = "/pages"
+    mount()
+    expect(await screen.findByText(/isn’t part of your access$/)).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Artifacts" })).toBeNull()
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(forbidden()).toEqual([])
+  })
+
   it("keeps only allowed tabs in the phone tab bar", async () => {
     mobile = true
     mount()
     const bar = await screen.findByRole("navigation", { name: "Primary" })
-    expect(within(bar).getByRole("link", { name: "Chat" })).toBeInTheDocument()
+    // Home leads to the session's own home, Chat (SHL-07 / DSH-02), and Chat
+    // is not offered a second time.
+    expect(within(bar).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/chat")
+    expect(within(bar).queryByRole("link", { name: "Chat" })).toBeNull()
     expect(within(bar).queryByRole("link", { name: "Dashboard" })).toBeNull()
     expect(within(bar).queryByRole("link", { name: "Inbox" })).toBeNull()
+  })
+
+  it("mounts only the exact known-project management boundary without Issues discovery", async () => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: ["account_security"] }]
+    nav.pathname = "/issues/manage"
+    mount(<div data-testid="known-project-boundary">Known project access check</div>)
+    expect(await screen.findByTestId("known-project-boundary")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Issues" })).toBeNull()
+    expect(forbidden()).toEqual([])
+  })
+
+  // Harbor 2: a known path outside the access says so (G03); a path the app
+  // has no page for is the not-found state. Neither mounts the screen.
+  it.each([
+    ["/issues", /isn’t part of your access$/],
+    ["/issues/manage/other", "Not found"],
+    ["/issues/manage-all", /isn’t part of your access$/],
+  ] as const)("does not widen adjacent management path %s", async (pathname, copy) => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: ["account_security"] }]
+    nav.pathname = pathname
+    mount()
+    expect((await screen.findAllByText(copy)).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(forbidden()).toEqual([])
   })
 
   it("shows the unavailable page for a forbidden URL and never mounts the screen", async () => {
     nav.pathname = "/issues"
     mount()
-    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(await screen.findByText("Issues isn’t part of your access")).toBeInTheDocument()
     expect(screen.queryByTestId("page")).toBeNull()
     expect(screen.getByRole("link", { name: "Go to Chat" })).toHaveAttribute("href", "/chat")
     await settle(300)
@@ -235,7 +275,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("fails closed when a restricted row carries no surfaces", async () => {
     workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: undefined }]
     mount()
-    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(await screen.findByText("Chat isn’t part of your access")).toBeInTheDocument()
     expect(screen.queryByTestId("page")).toBeNull()
   })
 
@@ -246,7 +286,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mount(<SettingsLayout />)
     await settle(300)
     expect(screen.queryByRole("textbox", {name: "Full name"})).toBeNull()
-    expect(screen.queryByText("Failed to load settings")).toBeNull()
+    expect(screen.queryByText("Couldn’t load settings")).toBeNull()
     expect(requests.filter(path => /workspaces\/[^?]+/.test(path))).toEqual([])
     workspacesStatus = 200
     workspacesPayload = [RESTRICTED_A]
@@ -260,6 +300,9 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mount(<SettingsLayout />)
     expect(await screen.findByText("Account security")).toBeInTheDocument()
     await settle(500)
+    // The same 820 px column every Settings section has (v67 `.settings`).
+    const col = document.querySelector("[data-slot=settings-page-head]")!.closest("div.mx-auto")!
+    expect(col.className.split(" ")).toContain("max-w-[820px]")
     expect(screen.getByRole("button", { name: /New token/ })).toBeEnabled()
     // Profile picture and name are not editable; the password is.
     expect(screen.queryByRole("button", { name: "Upload" })).toBeNull()
@@ -267,7 +310,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(screen.getAllByRole("button", { name: "Change" })).toHaveLength(1)
     // Sessions and token revoke live in their own section now; the
     // restricted page still shows them under the password.
-    expect(screen.getByRole("region", { name: /Sessions & access/ })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: /CLI tokens/ })).toBeInTheDocument()
     expect(forbidden()).toEqual([])
   })
 })

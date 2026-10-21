@@ -146,6 +146,8 @@ export const JOURNAL_ENTRY_TYPES = [
   // Skills
   "skill.imported",
   "skill.deleted",
+  "skill.archived",
+  "skill.restored",
   "skill.assigned",
   "skill.unassigned",
   "skill.invoked",
@@ -159,6 +161,12 @@ export const JOURNAL_ENTRY_TYPES = [
   "invitation.revoked",
   "invitation.accepted",
     "member.access_changed",
+    "member.owner_created",
+    "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
+    "member.removed",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",

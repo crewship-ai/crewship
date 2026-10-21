@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { presetSelectionSchema } from "./resource-preset-selection"
 
 export const resourceRightSchema = z.object({
   kind: z.enum(["agent", "project", "routine"]), id: z.string().min(1), operation: z.string(),
@@ -6,6 +7,7 @@ export const resourceRightSchema = z.object({
 export const resourcePolicySchema = z.object({
   membership_id: z.string().min(1), revision: z.number().int().positive(),
   mode: z.enum(["trusted", "restricted"]), rights: z.array(resourceRightSchema),
+  preset_selections: z.array(presetSelectionSchema).optional(),
   grant_details: z.array(resourceRightSchema.extend({
     issuer_id: z.string(), issuer_name: z.string().optional(), created_at: z.string(), live: z.boolean(),
   })).optional(),

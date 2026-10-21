@@ -7,10 +7,10 @@ import { ArrowLeft, Bell, BellOff, MessageSquare, Plus, Send, Settings2, UserMin
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
+import { askConfirm } from "@/components/ui/confirm-host"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { MentionAutocomplete, type CrewMember } from "@/components/features/chat/composer/mention-autocomplete"
 import { ConversationIdentity, ConversationIcon, conversationTitle } from "./conversation-identity"
@@ -74,7 +74,7 @@ function ConversationWorkspace({ workspaceId, userId }: { workspaceId: string; u
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {list.isPending && <p className="p-3 text-sm">Loading conversations…</p>}
         {list.error && <ErrorNotice error={list.error} retry={() => { void list.refetch() }} />}
-        {conversations?.filter((c) => c.title.toLowerCase().includes(search.toLowerCase())).map((c) => <button key={c.id} onClick={() => select(c.id)} aria-current={selectedId === c.id ? "page" : undefined} className={cn("mb-1 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-accent", selectedId === c.id && "bg-accent")}>
+        {conversations?.filter((c) => c.title.toLowerCase().includes(search.toLowerCase())).map((c) => <button key={c.id} onClick={() => select(c.id)} aria-current={selectedId === c.id ? "page" : undefined} className={cn("mb-1 flex min-h-12 coarse:min-h-[44px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-accent", selectedId === c.id && "bg-accent")}>
           <ConversationIcon conversation={c} /><span className="min-w-0 flex-1"><span className="block truncate">{conversationTitle(c)}</span><span className="block text-xs text-muted-foreground">{conversationLabel(c)}</span></span>{c.unread_count > 0 && <span aria-label={`${c.unread_count} unread`} className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">{c.unread_count}</span>}
         </button>)}
         {list.hasNextPage && <Button type="button" variant="ghost" disabled={list.isFetchingNextPage} onClick={() => { void list.fetchNextPage() }}>Load more conversations</Button>}
@@ -119,7 +119,7 @@ export function CreateConversation({ workspaceId, userId, onCreated, initialKind
   return <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void create() }}>
     <label className="block space-y-1 text-sm"><span>Name</span><Input autoFocus maxLength={120} required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Design team" /></label>
     <label className="block space-y-1 text-sm"><span>Who can access this conversation?</span><select className="w-full rounded-md border bg-background p-2" value={kind} onChange={(e) => setKind(e.target.value as "group" | "channel")}><option value="group">Selected people</option><option value="channel">Everyone in the workspace</option></select></label>
-    {kind === "group" && <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">Add people · you are included</legend>{people.isPending && <p className="text-sm">Loading people…</p>}{people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}<div className="max-h-52 overflow-y-auto">{people.data?.filter((p) => p.user.id !== userId).map(({ user }) => <label key={user.id} className="flex min-h-10 items-center gap-3 text-sm"><input type="checkbox" checked={members.includes(user.id)} onChange={(e) => setMembers((old) => e.target.checked ? [...old, user.id] : old.filter((id) => id !== user.id))} /><ConversationIdentity id={user.id} name={user.full_name || user.email} avatarUrl={user.avatar_url} className="size-7" /><span>{user.full_name || user.email}</span></label>)}</div></fieldset>}
+    {kind === "group" && <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">Add people · you are included</legend>{people.isPending && <p className="text-sm">Loading people…</p>}{people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}<div className="max-h-52 overflow-y-auto">{people.data?.filter((p) => p.user.id !== userId).map(({ user }) => <label key={user.id} className="flex min-h-10 coarse:min-h-[44px] items-center gap-3 text-sm"><input type="checkbox" checked={members.includes(user.id)} onChange={(e) => setMembers((old) => e.target.checked ? [...old, user.id] : old.filter((id) => id !== user.id))} /><ConversationIdentity id={user.id} name={user.full_name || user.email} avatarUrl={user.avatar_url} className="size-7" /><span>{user.full_name || user.email}</span></label>)}</div></fieldset>}
     {error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}<Button type="submit" disabled={busy || !title.trim() || (kind === "group" && (people.isPending || !!people.error))}>{busy ? "Creating…" : "Create conversation"}</Button>
   </form>
 }
@@ -260,7 +260,6 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
 export function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
   const canManage = !conversation.is_direct && conversation.created_by === userId
   const [adding, setAdding] = useState("")
-  const { ask, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const people = useQuery({ queryKey: ["workspace-conversation-people", workspaceId, userId], enabled: canManage, queryFn: ({ signal }) => conversationRequest<{ user: ConversationPerson }[]>(workspaceId, `workspaces/${encodeURIComponent(workspaceId)}/members`, undefined, signal) })
@@ -282,13 +281,13 @@ export function ConversationMembers({ workspaceId, userId, conversation, partici
         <ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-7 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{person.name || "Workspace member"}</span>
         <span className="text-[10px] text-muted-foreground">{person.role}</span>
-        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-12 text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={async () => { if (await ask({ title: `Remove ${person.name || "this member"} from this conversation?`, description: conversation.kind === "channel" ? "Membership does not restrict access: everyone in the workspace can still read and write here." : "They lose access to this group and its history. You can add them again later.", confirmLabel: "Remove member", destructive: true })) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
+        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-[44px] text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { void askConfirm({ title: `Remove ${person.name} from this conversation?`, confirmLabel: "Remove", cancelLabel: "Cancel", destructive: true }).then((ok) => { if (ok) void change(person.user_id) }) }}><UserMinus className="size-3.5" /></Button>}
       </li>)}
     </ul>
     {canManage && <>
       <div className="flex items-center gap-2">
         <Select value={adding} onValueChange={setAdding} disabled={busy || people.isPending}>
-          <SelectTrigger aria-label="Person to add" size="sm" className="min-w-0 flex-1 text-xs coarse:min-h-12"><SelectValue placeholder="Add a member…" /></SelectTrigger>
+          <SelectTrigger aria-label="Person to add" size="sm" className="min-w-0 flex-1 text-xs coarse:min-h-[44px]"><SelectValue placeholder="Add a member…" /></SelectTrigger>
           <SelectContent>{people.data?.filter(({ user }) => !participants.some((person) => person.user_id === user.id)).map(({ user }) => <SelectItem key={user.id} value={user.id} className="text-xs"><span className="flex items-center gap-2"><ConversationIdentity id={user.id} name={user.full_name || user.email} avatarUrl={user.avatar_url} className="size-6 shrink-0" /><span className="truncate">{user.full_name || user.email}</span></span></SelectItem>)}</SelectContent>
         </Select>
         <Button type="button" size="sm" variant="outline" disabled={!adding || busy} onClick={() => { void change() }}><UserPlus className="size-3.5" />Add</Button>
@@ -297,7 +296,6 @@ export function ConversationMembers({ workspaceId, userId, conversation, partici
       {people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}
     </>}
     {error && <p role="alert" className="text-xs text-destructive">{error.message}</p>}
-    {dialog}
   </div>
 }
 

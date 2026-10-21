@@ -11,6 +11,37 @@ import (
 	"github.com/crewship-ai/crewship/internal/paymaster"
 )
 
+func TestChatRunPreflightWholeRunOptInMatchesRuntimeRules(t *testing.T) {
+	db, user, ws, crew, agent := acrSeed(t, "CLAUDE_CODE", "ANTHROPIC", "claude-sonnet-4-6")
+	execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('optin-chat',?,?,?,'private')`, ws, agent, user)
+	r := &Router{db: db, logger: newTestLogger()}
+	for _, tc := range []struct {
+		enabled           bool
+		level             string
+		matches, blocking bool
+	}{
+		{false, "guided", false, false}, {true, "guided", true, true}, {true, "trusted", true, false}, {true, "full", true, false}, {false, "guided", false, false},
+	} {
+		execOrFatal(t, db, `UPDATE crews SET whole_run_approval=?,autonomy_level=? WHERE id=?`, tc.enabled, tc.level, crew)
+		r.PolicyResolver().Invalidate(crew)
+		req := withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, ws, "OWNER")
+		req.SetPathValue("chatId", "optin-chat")
+		rr := httptest.NewRecorder()
+		r.chatRunPreflight(rr, req)
+		var got chatRunPreflightResponse
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &got) != nil {
+			t.Fatalf("preflight %d %s", rr.Code, rr.Body.String())
+		}
+		if got.Gate.RuleMatches != tc.matches || got.Gate.Blocking != tc.blocking {
+			t.Fatalf("enabled=%v level=%s gate=%+v", tc.enabled, tc.level, got.Gate)
+		}
+	}
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM approvals_queue`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("preflight wrote approval: %d %v", rows, err)
+	}
+}
+
 func TestChatRunPreflightReadsPayerBudgetWithoutEffectsAndRevokes(t *testing.T) {
 	db, user, ws, crew, agent := acrSeed(t, "CLAUDE_CODE", "ANTHROPIC", "claude-sonnet-4-6")
 	acrCredential(t, db, ws, user, "preflight-key", "ANTHROPIC_API_KEY", "API_KEY", "ANTHROPIC")

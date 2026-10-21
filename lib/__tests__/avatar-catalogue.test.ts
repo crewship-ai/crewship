@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, loadableStyleSlugs } from "@/lib/agent-avatar"
+import { AVATAR_STYLES, LEGACY_DEFAULT_AVATAR_STYLE, loadableStyleSlugs } from "@/lib/agent-avatar"
 
 // =============================================================================
 // A style in the catalogue with no way to load it is a silent lie.
@@ -19,7 +19,9 @@ import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, loadableStyleSlugs } from "@/lib/a
 
 describe("avatar catalogue", () => {
   it("can load every style it offers", () => {
-    const loadable = new Set([...loadableStyleSlugs(), DEFAULT_AVATAR_STYLE])
+    // bottts-neutral is resident (most existing agents are pinned to it,
+    // #3789), so it is the one style without a lazy loader.
+    const loadable = new Set([...loadableStyleSlugs(), LEGACY_DEFAULT_AVATAR_STYLE])
     for (const slug of Object.keys(AVATAR_STYLES)) {
       expect(loadable.has(slug), `"${slug}" is offered but has no loader`).toBe(true)
     }
@@ -46,7 +48,7 @@ describe("avatar catalogue", () => {
       "croodles", "croodles-neutral", "dylan", "fun-emoji", "lorelei",
       "lorelei-neutral", "micah", "miniavs", "notionists", "notionists-neutral",
       "open-peeps", "personas", "pixel-art", "pixel-art-neutral", "thumbs",
-      "toon-head",
+      "toon-head", "voxel-bot", "voxel-art",
     ]) {
       expect(AVATAR_STYLES[slug], `missing "${slug}"`).toBeDefined()
     }

@@ -19,6 +19,9 @@ vi.mock("@/hooks/use-agent-reach", () => ({
 vi.mock("@/components/features/crews/agent-canvas-managers", () => ({
   SkillsManager: () => <div data-testid="skills-manager" />,
 }))
+vi.mock("@/components/features/crews/agent-skills-picker", () => ({
+  AgentSkillsPicker: ({ open, agentName }: { open: boolean; agentName: string }) => (open ? <div role="dialog" aria-label={`Give skills to ${agentName}`} data-testid="skills-picker" /> : null),
+}))
 vi.mock("@/components/features/integrations/composio/access-editor", () => ({
   AgentConnectorsCard: () => <div data-testid="connectors-manager" />,
 }))
@@ -66,6 +69,13 @@ function renderTab() {
 }
 
 describe("agent overview structure", () => {
+  // /issues filters by ?assignee_id=<agent id>; ?assignee=<slug> was read by
+  // nothing, so "Open filtered" showed every issue in the workspace.
+  it("opens Issues filtered to this agent with the key the page reads", () => {
+    renderTab()
+    expect(screen.getByRole("link", { name: /Open filtered by casey/ })).toHaveAttribute("href", "/issues?assignee_id=a1")
+  })
+
   it("groups the cards under the question each answers", () => {
     renderTab()
     for (const band of ["What it holds", "Capabilities", "What it has been up to"]) {
@@ -105,6 +115,14 @@ describe("agent overview structure", () => {
     // Only its own manager — this replaced a drawer that showed all four.
     expect(screen.queryByTestId("connectors-manager")).not.toBeInTheDocument()
     expect(screen.queryByTestId("channels-manager")).not.toBeInTheDocument()
+  })
+
+  // K09: Add skill is on the Skills card, not behind Manage skills > dialog > Add skill.
+  it("Add skill on the Skills card opens the picker directly, without the manager dialog", async () => {
+    renderTab()
+    fireEvent.click(screen.getByRole("button", { name: "Add skill" }))
+    expect(await screen.findByTestId("skills-picker")).toBeInTheDocument()
+    expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
   })
 
   it("counts enabled skills against the total in the card header", async () => {

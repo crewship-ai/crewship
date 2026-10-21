@@ -123,6 +123,40 @@ admission. Changes in an unrelated workspace do not revoke valid local shares.
 The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
+### Ordered resource presets
+
+The immutable v1 catalog defines routine View (`view,results`), Run
+(`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
+View (`list,read`), Contribute (`list,read,contribute`) and Manage
+(`list,read,contribute,manage`). Publication and `delete_issues` remain separate.
+These bundles are available through administrative preview and confirmed apply
+API/CLI operations and the Settings selector. Application is always explicit;
+the catalog does not change existing grants or access mode.
+
+An empty-on-upgrade `access_preset_selections` table preserves deliberately saved
+choice provenance separately from canonical `access_grants`. Matching independent
+grants remain Custom. Managed grant edits invalidate a saved label; orthogonal
+rights, unrelated revisions and issuer liveness changes preserve saved intent.
+Inactive grants stay inactive. Versioned definitions are immutable, with no
+backfill or automatic reissue. Preview describes regular-results disclosure and
+retained destructive consequences before confirmed application; the API/CLI
+and Settings contracts are specified below.
+
+An internal transaction-scoped planner now computes explicit before/after
+operations, retained issuer/timestamp provenance, deliberate reissue intent and
+independent Results, execution, destructive and file-role consequences. Its
+confirmation digest binds the current member incarnation/revision, caller and
+issuer authority, resource state and immutable definition in one snapshot.
+The selected resource is validated live; FK-valid historical grants for unrelated
+unavailable resources remain in the canonical before/after plan without regaining
+resource authority. The planner performs no writes and the digest supplies no
+authority. Administrative preview API/CLI and the confirmed apply API expose
+these contracts; application recomputes the same snapshot inside its writer
+transaction. The administrative apply CLI and Settings selector submit the same
+reviewed, confirmed selection without silently refreshing or retrying a write.
+An empty starting grant collection serializes as `before: []`, including in the
+canonical confirmation fingerprint; preview collections remain JSON arrays.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -158,6 +192,14 @@ CLI: `crewship issue shared --project PROJECT_ID` lists a shared project;
 `--offset` page the catalog without using shared workspace issue endpoints.
 `--search TEXT` filters shared issue titles and identifiers, without searching
 private descriptions or comments. It is only valid for the collection command.
+On a temporary 429 the browser preserves the current result view and search
+draft, pauses collection polling and disables search/refresh/pagination until
+the bounded Retry-After interval ends, then checks again. User/workspace
+changes clear that state. Definitive 401/403/404 responses discard the result
+projection; a subsequent 429 or failed query cannot restore its cached titles.
+Only a fresh successful response restores results. Project metadata and
+contribution forms retain their separate requests. CLI prints the server retry guidance, exits 6 and does not
+retry automatically.
 
 The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
 Unicode characters, trimmed). Search is a literal substring of title or identifier,
@@ -174,6 +216,40 @@ issue board, global search and statistics routes remain closed to Guests;
 searching this dedicated Guest projection does not open them. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header
 supports pagination.
+
+Shared issue collection requests (including empty search and pagination) have a
+per-process authenticated budget shared by browser sessions and CLI tokens of the
+same user/workspace: default 20/minute, burst 15, plus 20/minute, burst 5 for
+each explicitly authorized project or the all-project selection. Both budgets
+are charged together only when admitted. Query text, offset and IP do not create
+new budgets. Detail, comments and project metadata are outside this policy.
+Invalid inputs and forbidden explicit projects retain their existing errors.
+A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
+`Retry-After` seconds; it discloses no audience or workspace counts.
+
+The lazy limiter retains at most 4096 user/workspace entries and 32768 audience
+buckets globally. Each workspace may retain at most 256 entries and 2048 audience
+buckets; each entry still supports 257 audiences (256 valid List projects plus
+all-projects). These are process memory quotas, not product tiers or tenant
+capacity guarantees. One workspace cannot consume the entire global allowance,
+but multiple workspaces can fill it: a new entry or audience is then refused
+with the same transient 429. Existing audiences remain usable subject to their
+unchanged rate budgets. Capacity refusal allocates no empty account and spends
+neither budget; active entries are never evicted or reset to grant a fresh burst.
+The account rate budget is checked before a new audience is retained. Account,
+workspace and audience entries are committed to the limiter only after both
+rate budgets admit the request. Rejected requests neither allocate audience
+capacity nor refresh idle timestamps; each user/workspace retains its existing
+257-audience quota within the workspace quota.
+
+Idle entries expire after at least five minutes and the configured full-refill
+interval. Ordered idle lists retain exactly one node per entry and audience;
+cleanup visits only the expired prefix, not all active maps on every full
+request. Audience maps shrink after expiry halves their high-water mark, bounding
+retained backing storage without copying a full active map on capacity denial.
+Rate settings are exposed in Rate Limiters; process restart resets these
+in-memory budgets and replicas enforce their own budgets. Rate limiting does not
+truncate counts or bound the cost of one large authorized search.
 
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
@@ -199,12 +275,14 @@ navigation. Account security remains available without resource grants. A truste
 account's rows carry neither field.
 
 The web app shows only those screens in the sidebar, the phone menu and the phone
-tab bar. Any other URL shows "Not available with your access" without mounting
-the screen, so none of its requests are sent. `/` goes to the first available
+tab bar. Any other URL shows "<Screen> isn’t part of your access" (the screen
+named by its navigation label) with one way on to the first available surface,
+without mounting the screen, so none of its requests are sent. `/` goes to the first available
 surface (Chat when authorized). Selection uses the current workspace row, never
 another membership's projection. Settings shows
-only account security: password, browser sessions and revoking CLI tokens.
-Profile edits and issuing new tokens are not on the allowlist. A restricted row
+only account security: password, browser sessions, revoking CLI tokens and
+own CLI bootstrap from a verified browser session. Profile edits and minting
+successor credentials from a CLI bearer are not on the allowlist. A restricted row
 without `restricted_surfaces` allows nothing (fail closed).
 
 Navigation is an existence projection: it stops after the first authorized
@@ -266,7 +344,10 @@ the self-scoped token endpoint. The middleware supplies verified identity and
 authentication kind to the restricted classifier before evaluating this rule.
 CLI bearer credentials cannot use this new Guest minting entrypoint, preserving
 their scope ceiling. Minted tokens retain account restriction, object grants,
-existing tier/scope checks and ordinary self-revocation behavior.
+existing tier/scope checks and ordinary self-revocation behavior. Browser device
+pairing start/poll uses the same verified-session boundary. The account menu
+offers Connect CLI to trusted and Guest accounts once access mode is resolved;
+it does not expose trusted-only profile, notification or system-version reads.
 
 
 Pages’ existing grant resolver now also requires an active trusted issuer account, including no Guest restriction elsewhere. This applies to workspace administrators, user owners and owning crew members. Stored Page grants remain available to administrators with an account-status reason when inactive. The two Pages ACL models have not yet been migrated to access_grants.
@@ -335,6 +416,20 @@ The UI preserves failed drafts and requires explicit reload after a changed
 snapshot; CLI requires the reviewed version and never automatically retries it.
 Live account, local membership, Read/Manage issuers, update and journal entry
 share one transaction. Other client projects and private metadata remain hidden.
+
+Known-project metadata and milestones also open at
+`/issues/manage?project=<known-project-id>` with Read+Manage and no List share.
+The exact route checks only that resource through the dedicated API before
+showing protected fields; it adds no Issues navigation, selector, issue list,
+search or count. Query data never grants access or selects another workspace.
+User/workspace/project changes require fresh verification and reset protected
+drafts; current credential hints still control mutation affordances. Temporary
+workspace-directory loss preserves the existing draft behind the availability
+boundary; it cannot admit another resource. Actual resource access loss clears
+protected fields. An optional explicit `issue_id` opens only that issue's fresh
+deletion preview after project verification, with matching project and current
+Read+Manage+`delete_issues`. Successful confirmed deletion stays on this route
+and preserves the project draft; it never opens an issue collection.
 
 Milestones and explicit issue deletion use dedicated scoped routes. Remaining
 project settings require further scoped enforcement. The original
@@ -449,3 +544,248 @@ Selected output content is capped at 256 KiB before loading; the encoded
 response is capped at 1 MiB. Oversized details return 413 while list metadata
 remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
+
+Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.
+
+### Administrative preset catalog
+
+The read-only `/workspaces/{workspaceId}/access/presets` catalog and `workspace member access presets` CLI expose immutable definitions and hashes. Both retain the existing administrative member-policy credential and live authority checks; listing writes no grants, selection metadata, audit entries or membership revisions. Applying a selection is a separate explicit operation described under Explicit preset application.
+
+The OpenAPI `MemberAccessAgentRight` component names the existing agent-right variant for reuse in administrative policies. It preserves exact operation choices, required IDs and rejection of undeclared fields, without changing grants or runtime authority.
+
+OpenAPI also names `MemberAccessProjectRight`, `MemberAccessRoutineRight` and their complete `MemberAccessRight` union. The schemas preserve existing primitive operation choices, IDs and closed objects exactly; naming them does not add inheritance or alter grant authority.
+
+### Saved selection in administrative policies
+
+Administrative member-policy GET/PUT responses include `preset_selections`, a complete array of informational saved intent. An empty array means no saved preset choice; matching permission bits alone never fabricate a choice. Every item carries the immutable definition reference, saved level/hash/time and optional historical selecting actor. `selected` describes supported saved intent, while `custom` marks unsupported definitions or inconsistent managed bits; neither state grants effective authority. The grant issuer and original creation time remain canonical in `grant_details`.
+
+Only a current trusted workspace administrator can read these choices. Personal `OwnPolicy` responses omit the field. The manual policy PUT accepts the read-only field when round-tripping a GET but ignores its contents: it changes only the explicitly supplied canonical rights, and returns freshly computed selection metadata. Managed-grant changes invalidate the saved choice; unrelated rights and issuer liveness do not rewrite intent. Reading metadata performs no application or automatic backfill; application uses the separate confirmed endpoint.
+
+OpenAPI names the unchanged `MemberAccessGrant` provenance shape for reuse. This retains every original issuer, timestamp and liveness field and changes no policy inputs or effective authority.
+
+### Transactional selection recorder
+
+The internal recorder accepts only a caller-owned transaction, a live trusted administrator, an existing restricted membership with the expected post-replacement incarnation/revision, a supported immutable definition and exact matching canonical managed operations. It records the authenticated selecting actor and server time without changing canonical grant rows, issuers, timestamps or membership revisions. The caller must first perform fresh preview/digest checks, canonical replacement and transactional audit, then record selection last and commit once. Any failure must roll back the whole transaction. The helper alone exposes no apply endpoint and performs no backfill.
+
+### Read-only preset preview transport
+
+The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only; no apply endpoint is enabled by this slice.
+
+The reusable OpenAPI `MemberAccessPolicy` names the same complete administrative policy envelope used by existing GET and PUT. This documentation refactor preserves closed fields, required incarnation/revision/mode/rights and all grant/provenance constraints; it introduces no endpoint or permission change.
+
+The preset CLI uses one shared bounded decoder for explicit JSON documents. File/stdin handling, unknown/trailing-field rejection, exact integer revisions and the absence of automatic consent repair remain unchanged.
+
+Preset application uses a transaction-scoped managed-subset writer. It validates the selected resource and fresh operator/member authority, changes only the immutable definition’s managed operations, and leaves orthogonal grant IDs, issuers and creation timestamps untouched even for FK-valid inactive historical resources. It neither revives unavailable resources nor changes ordinary complete-document PUT validation. Failed audit or selection writes roll back managed changes and revision together.
+
+The managed-subset writer is used by the confirmed apply API; the existing complete-document policy API is unchanged. Transactional journal acknowledgement requires one inserted row before any post-commit notification is available.
+
+### Explicit preset application
+
+The administrative apply endpoint takes only the preview’s exact normalized selection and digest. Current operator authority, membership incarnation/revision, immutable definition, resource/issuer state and consequences are recomputed in one writer transaction. The digest is confirmation data, never authorization. Managed replacement preserves unrelated rights and unchanged rows, including historical unavailable resources; deliberate retained managed reissue uses the authenticated actor. Audit records exact before/after provenance, preset ID/version/level/hash and reissue intent. Selection metadata is written last; all writes roll back together. Conflicts require a new reviewed preview, with no silent retries or account conversion. The administrative `workspace member access preset apply MEMBER --file confirmed.json` command submits this consent once and does not refresh or retry it. The Settings selector exposes the same reviewed selection explicitly.
+
+### Settings preset selection
+
+For an existing restricted member, Settings resource access offers an explicit ordered preset after choosing a project or routine. The server catalog supplies exact immutable versioned operations; matching manual bits remain Custom without a saved choice. Save/discard manual drafts first. Preview lists managed changes, retained original/inactive issuers, unrelated rights, Results history and conditional destructive eligibility. Optional reissue explicitly names only retained managed rights. A separate confirmation submits the same normalized selection and digest, never inferred authority. Selection changes clear consent. Conflicts and uncertain apply outcomes require reloading saved policy before a new preview; explicit reload discards editor drafts and stale consent even if the membership revision is unchanged, because resource/authority state can invalidate a digest independently; the UI never refreshes or retries writes automatically and never converts trusted accounts.
+
+Known policy-read 401/403/404 responses remove the member editor and its reviewed preset consent. A later transient read failure cannot restore that consent; a fresh successful read starts a new editor. A mutation response from an older verified read cannot overwrite a newer policy read or revive controls after access loss. Transient failures without an earlier access denial retain an existing manual draft.
+
+Switching the member or resource scope invalidates both pending reads and mutation confirmations immediately. Returning to a previously cached scope requires a fresh successful read before an old response can affect visible controls or saved-policy state.
+
+### Client stream credential lifetime
+
+Browser and CLI WebSockets, journal SSE and run NDJSON retain the authenticated
+session or CLI-token row ID and its original expiry. Successful API revocation
+invalidates matching in-memory stream leases after commit and wakes idle streams;
+every frame is fenced again at delivery, including replay and control frames.
+An admission snapshot captured before database authentication compares only
+the selected session/token and the applicable user revocation epochs. Revoking
+another identity cannot reject a valid concurrent request. Snapshot cleanup also
+covers failed/canceled authentication; counters disappear when no earlier
+admission can need them. This prevents late registration with a pre-revocation
+validation result. No TTL or batch skips
+extend access. The registry retains active requests/connections and pending authentications only.
+Repeated signout still updates the stored revocation reason/timestamp, but only
+a committed active-to-revoked session transition sends a notification. An empty
+bulk session revocation does not advance a user epoch. Custom session stores
+without atomic transition reporting retain their existing notification contract.
+
+Container terminals share that same source-credential authenticator and registry.
+They fence PTY output, terminal input, resize and ping replies; credential loss
+also wakes idle connections and closes the PTY. Restricted chat/run text streams,
+including native project-file requests, check the credential before each text or
+done frame and emit no error body after credential loss. This does not permit
+restricted accounts to open terminals or widen their workspace access.
+
+Terminals additionally recheck the active account, live crew and workspace,
+trusted membership with MEMBER-or-higher role, and global restricted-profile
+ceiling in one fresh SQL snapshot before each PTY input/output data frame,
+resize or pong, and resource-bound info/error response. Container preparation
+is followed by another check before starting the PTY. Database errors refuse
+use and close the connection; they do not revoke the source credential.
+The same watcher checks idle CLI and browser shells on a 30-second cadence.
+Resource queries configure a five-second context deadline, but native SQLite
+busy handling can outlast cancellation; this is not a hard maximum closure
+bound. A failed check releases no frame. These checks also observe database
+mutations made outside HTTP, without relying on a post-commit notification in
+this process.
+Already authorized or in-flight operations cannot be recalled. This is a
+security fallback costing one resource query per data/control frame, not the
+H1 zero-SQL authority design; that performance goal remains open. Other users'
+credentials and streams are not revoked by another user's membership change.
+
+
+Revocation stops admission of the next frame; already authorized or in-flight
+bytes cannot be recalled. Ordinary logout does not cancel an already started
+routine: its account and grant authority is a separate execution contract.
+CLI-token revocation now also closes an existing CLI WebSocket. Older CLI tickets
+without a source token ID must be replaced through the normal ticket endpoint.
+A short WS ticket lifetime limits admission; it never extends the source expiry.
+Already-issued browser tickets with a session ID use the live persisted session's
+expiry. New browser tickets additionally retain the access JWT's expiry and its
+existing five-second validation grace. Legacy CLI tickets without a source token
+ID cannot establish a connection. This does not change routine run authority.
+Access-token authentication keeps its existing five-second validation grace.
+A non-null malformed CLI-token expiry is invalid and cannot open a stream.
+Offline administrative writes require the exclusive-writer path; this registry
+is an in-process API invalidation mechanism, not cross-process messaging.
+
+A storage failure or conservative stream-admission race rejects the upgrade with
+a generic error; it does not claim the session was revoked. Operational errors
+retain their class for server-side handling and logging.
+
+## Capability and membership audit
+
+Adding an existing account to a workspace or provisioning a new or existing account
+commits the membership and `member.added` chained audit together. Both provisioning
+commit paths recheck the live trusted administrator and OWNER-only ADMIN grant
+boundary inside their writer transaction. The internal event records the stored,
+normalized initial rights after Guest policy replacement; public GET/SSE/WS
+serialization exposes only opaque member/subject IDs and the action, never role,
+rights, email or setup material. Audit or commit failure rolls back the membership,
+new account and setup-token writes; notification occurs only after commit.
+The same public whitelist is applied before automation preview samples, matcher
+explanations and observer matching/template rendering. Canonical rights remain
+unchanged. This does not cover onboarding creation.
+
+A workspace role update appends `member.role_changed`, a changed capability
+set appends `member.capabilities_changed`, and a removed workspace membership
+appends `member.removed`, in the same transaction as the mutation. Role and
+capability changes revalidate the caller's live account, workspace membership
+and account-wide trusted ceiling inside the writer after reading the request
+body. Existing role ladders, the last-OWNER guard and immutable OWNER capability
+rules still apply. The role event identifies the membership and subject user
+and records the previous and resulting role.
+
+The existing `member.role_change` / `WorkspaceMember` record in `audit_logs`
+is retained in the same transaction for Settings Audit category filters, CSV
+and IP/UA presentation. Its actor, subject and from/to metadata keep their
+existing shape. Both audit records and the role must survive final readback;
+an ignored or altered audit write rolls back the entire change.
+
+Capability events retain sorted `previous_capabilities` and `capabilities`
+sets in their durable, keyed journal payload. These are the effective sets
+used by the mutation, including the existing role-default interpretation of
+NULL or empty storage. The shared GET, SSE and WebSocket journal serializer
+omits both sets without altering the retained event or its chain. Automation
+preview samples, matcher diagnostics and observer matching/template inputs use
+the same public projection before evaluating an event. Page grant snapshots
+(`previous_grant`, `grant`) and folder ACL snapshots (`previous_acl`, `acl`,
+`previous_acl_version`) are also canonical-only; existing public event fields
+remain available. The feed
+continues to expose only the subject and action for capability changes.
+Current values remain available through the existing ADMIN-only capability
+endpoint; this change adds no administrative historical-values API.
+
+Search compatibility limit: journal `q` searches only the summary for
+`member.added`, `member.owner_created`, `member.access_changed`, `member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
+`page.folder_acl_changed`, including historical rows. Previously public payload
+IDs, actions and ACL versions therefore no longer match free-text search for
+these types. Explicit filters and non-search reads remain available; other event
+types retain summary-and-payload search. List and Count use the same boundary,
+without rewriting canonical payloads, FTS indexes or keyed audit history.
+Transactional journal appends acknowledge the exact surviving native INSERT
+tuple, including its configured-key hash, before the business transaction can
+commit; post-insert removal or alteration aborts the mutation and notification.
+Background batching retains its existing query path.
+
+
+Role and capability writes acknowledge their final stored state after the
+audit append. An append or commit failure rolls back the mutation; observers
+are notified only after commit. Member removal requires exactly one deleted
+membership row and rolls back page transfers and crew cleanup with its event.
+An unchanged capability set or already absent membership does not append a
+duplicate event. This scoped contract does not establish complete audit
+coverage for crew memberships, owner transfers or Page grants
+and folder ACL mutations; those remain separate authorization paths. The crew audit below covers the three explicit membership handlers only; onboarding insertion and crew-deletion cascades remain outside this cut.
+
+### Crew membership mutation audit
+
+The crew member add, remove and role-update HTTP handlers append a keyed
+`crew.member_changed` event in the same transaction as the membership write.
+They recheck the live caller, workspace and crew on that writer, retaining the
+existing role floors and grant ceilings. The event identifies the actor, crew,
+membership and subject user, with `previous_membership` and `membership` role
+snapshots. A missing membership is NULL; a present membership with a NULL role
+inherits the workspace role. Those states are distinct. No credential or user
+profile data is included.
+
+The final membership must survive audit append and readback before commit.
+Audit insert/commit failures, ignored writes or audit-trigger state changes
+roll back the entire mutation. Observers are notified only after commit; an
+unchanged role override emits no change event. Existing response shapes and
+duplicate/not-found behavior remain. These events use the general journal;
+this change adds no dedicated Settings Audit projection or history endpoint.
+The separate onboarding initial-membership writer and other F1 mutation paths
+remain outside this scoped contract.
+
+### Initial workspace ownership audit
+
+Workspace creation, signup without a redeemed invitation, and initial bootstrap
+append the dedicated `member.owner_created` event with `action=owner_created` in the same transaction
+as the first OWNER membership. The actor and subject are the actual inserted
+owner. The stored event has `old_membership=null`, the exact new membership
+(including native timestamp defaults and nullable capabilities), its sorted
+effective capabilities, and `creation_path` identifying the three entry points.
+Guest `POST /api/v1/workspaces` returns 403 without creating a workspace.
+Workspace creation rechecks the current account and global trusted ceiling in
+that transaction; the new OWNER row is not evidence of a prior grant.
+
+Audit failure, ignored writes, altered final membership or commit failure roll
+back creation. Notifications run only after commit, including bootstrap's
+committed `session_pending` response. Bootstrap retains its instance CLI-token
+audit and final token acknowledgement; invitation signup still joins the invited
+workspace without a personal-owner event. Generic signup responses retain their
+existing anti-enumeration behavior.
+
+General journal GET/SSE/WebSocket serialization, automation preview samples,
+predicates and template inputs expose only `member_id`, `subject_user_id`,
+`action` and `creation_path` for this event. The public projection leaves the
+canonical payload unchanged and provides no new administrative snapshot reader.
+
+Journal text search uses only the summary for `member.owner_created` and the entire
+`member.access_changed` family, including historical owner events and other actions. Previously searchable public
+payload fields in this family no longer match journal List or Count queries;
+unfiltered reads and canonical payloads are unchanged.
+The creation helper acknowledges the decoded audit snapshot semantically, rather
+than requiring JSON object byte order; the writer retains its signed native INSERT check.
+No email, password, token or invitation proof enters the owner audit. This does
+not add audit coverage to onboarding crew creation or Page/folder ACL writers.
+
+### Per-frame realtime authorization cost
+
+Workspace, keeper, journal, crew, files, agent, mission and page channels resolve
+live account eligibility, the global restricted-profile ceiling and the selected
+resource's workspace membership in one SQL snapshot for every frame. Private
+page channels additionally require the current page owner or live workspace
+OWNER in that snapshot; ownership bypasses neither membership nor account
+eligibility. Shared page channels retain their membership audience. Session and
+chat-hints channels retain their existing single audience snapshot. Definitive
+denials remain distinct from storage or cancellation errors; both refuse delivery.
+There is no TTL cache or skipped batch check. Stream credential revocation and
+expiry retain their separate per-frame fence described above.
+
+`BenchmarkChatDeliveryAuthorization` measures workspace, agent and private-chat
+frames with 1×1, 16×8 and 64×16 concurrent clients and channels sharing a
+five-connection pool. It reports time per authorization, SQL statements per
+frame, and pool wait count and duration per frame. These are concurrent
+throughput measurements, not end-to-end socket latency or p99 claims.

@@ -112,3 +112,8 @@ export function runDisabledReason(status: string | null | undefined): string | n
       return null
   }
 }
+
+/** Turning a schedule back on after the circuit breaker zeroes its failure
+ * count at once (pipeline.updateSchedule), not after the next run. */
+export const BREAKER_ON_AGAIN = "The failure count is back to zero."
+export const BREAKER_OFF_HINT = "Turn it back on once the cause is fixed; the failure count is back to zero as soon as you do."

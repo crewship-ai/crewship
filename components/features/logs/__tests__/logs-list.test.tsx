@@ -77,6 +77,7 @@ function lookupWith(agents: AgentLookup[] = [], crews: CrewLookup[] = []): Journ
     agents: new Map(agents.map((a) => [a.id, a])),
     crews: new Map(crews.map((c) => [c.id, c])),
     missions: new Map(),
+    people: new Map(),
     loading: false,
     refresh: () => {},
   }

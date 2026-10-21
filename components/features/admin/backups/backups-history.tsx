@@ -3,11 +3,11 @@
 import * as React from "react"
 import { Download, History, Pin, PinOff, X } from "lucide-react"
 
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, selectionBar, selectionBarAction, selectionBarButton,
@@ -17,7 +17,7 @@ import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
-import type { RunFilter, RunQuery, SectionCtx } from "./backups-console"
+import type { RunFilter, RunQuery, SectionCtx } from "./backups-scope"
 
 const FILTERS: { value: RunFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -203,7 +203,7 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
         <div role="toolbar" aria-label="Change the selected runs" data-slot="runs-bulk"
           className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
             "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
-          <span className="px-1"><span className="font-mono font-semibold tabular-nums">{pickedRuns.length}</span><span className="max-sm:hidden"> selected</span></span>
+          <span className="px-1"><span className="font-semibold tabular-nums">{pickedRuns.length}</span><span className="max-sm:hidden"> selected</span></span>
           <Button type="button" size="sm" className={cn(selectionBarAction, "max-sm:px-2")} onClick={() => void pinAll(true)}><Pin />Pin</Button>
           <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={() => void pinAll(false)}><PinOff />Unpin</Button>
           <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={downloadAll}><Download />Download</Button>
@@ -249,7 +249,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
-      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro text-muted-foreground">{n}</span>
+      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-micro tabular-nums text-muted-foreground">{n}</span>
       <div className="min-w-0 flex-1">
         <div>{label}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>
@@ -326,16 +326,24 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
   const [passphrase, setPassphrase] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   React.useEffect(() => { if (!run) { setIdentity(""); setPassphrase(""); setBusy(false) } }, [run])
+  const close = () => { if (!busy) onClose() }
+  const canCheck = !busy && (legacy || !!identity.trim() || !!passphrase)
+  const check = async () => {
+    if (!canCheck) return
+    setBusy(true)
+    await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined })
+  }
   return (
-    <Dialog open={!!run} onOpenChange={(o) => { if (!o && !busy) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Check contents</DialogTitle>
-          <DialogDescription>
+    <CreateSurface open={!!run} onOpenChange={(o) => { if (!o) close() }} size="sm" onSubmit={() => void check()}>
+        <CreateSurfaceHeader
+          title="Check contents"
+          description={<>
             Decrypts the backup and reads every section, comparing row counts and hashes with what it recorded. Nothing is restored.
             The key is used for this check only and never stored.
-          </DialogDescription>
-        </DialogHeader>
+          </>}
+          onClose={close}
+        />
+        <CreateSurfaceBody>
         {legacy ? (
           <p className="text-xs text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
         ) : (
@@ -348,18 +356,18 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">or passphrase (older bundles)</span>
               <input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} autoComplete="off"
-                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[2.75rem]" />
+                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[44px]" />
             </label>
           </div>
         )}
-        <DialogFooter>
-          <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy || (!legacy && !identity.trim() && !passphrase)}
-            onClick={async () => { setBusy(true); await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined }) }}>
-            {busy ? "Checking…" : "Check"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={close}
+          primaryLabel={busy ? "Checking…" : "Check"}
+          onPrimary={() => void check()}
+          primaryDisabled={!canCheck}
+          busy={busy}
+        />
+    </CreateSurface>
   )
 }

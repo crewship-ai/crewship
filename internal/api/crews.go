@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -98,12 +99,13 @@ type crewActivityNoter interface {
 type CrewHandler struct {
 	containerCleanup *resourcelifecycle.Controller
 
-	db          *sql.DB
-	hub         *ws.Hub
-	logger      *slog.Logger
-	license     *license.License
-	socketPath  string
-	provisioner crewProvisionEnqueuer
+	db            *sql.DB
+	hub           *ws.Hub
+	logger        *slog.Logger
+	license       *license.License
+	socketPath    string
+	provisioner   crewProvisionEnqueuer
+	policyJournal journal.Emitter
 	// container reaches the live container runtime for the /services live
 	// inventory endpoint (#services). nil when Docker isn't wired (tests,
 	// --no-docker) — Services then answers an empty list rather than

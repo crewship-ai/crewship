@@ -300,15 +300,6 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		h.logger.Warn("pending credential: retire stranded proposal", "name", p.Name, "error", err)
 	}
 
-	// Clear any soft-deleted same-name row so the INSERT can't trip the
-	// UNIQUE(workspace_id, name) constraint (mirrors credentials_mutate.go).
-	// Runs after the retirement above so rows it just soft-deleted are cleared
-	// in the same pass.
-	if _, err := h.db.ExecContext(ctx,
-		"DELETE FROM credentials WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL",
-		wsID, p.Name); err != nil {
-		h.logger.Warn("pending credential: cleanup soft-deleted", "name", p.Name, "error", err)
-	}
 	// A live credential with this name already exists → do not auto-rename.
 	var existing int
 	if err := h.db.QueryRowContext(ctx,
@@ -344,7 +335,16 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 
 	credID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(ctx, `
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", pendingCredVaultError
+	}
+	defer tx.Rollback()
+	if err := releaseCredentialNameIn(ctx, tx, wsID, p.Name); err != nil {
+		h.logger.Error("pending credential: release retired name", "error", err)
+		return "", pendingCredVaultError
+	}
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, security_level, status, created_by, created_at, updated_at,
 			created_by_actor_type, created_by_actor_id, handle_only)
@@ -352,6 +352,11 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		credID, wsID, p.Name, p.Purpose, enc, p.Type, p.Provider, level, status, ownerID, now, now,
 		fromAgentID, handleOnly); err != nil {
 		h.logger.Error("pending credential: insert", "error", err, "name", p.Name)
+		return "", pendingCredVaultError
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("pending credential: commit", "error", err)
 		return "", pendingCredVaultError
 	}
 

@@ -1,0 +1,107 @@
+{
+  "pageId": "slidesprobe1",
+  "read": {
+    "schema_version": 1,
+    "revision": 1,
+    "order_version": 1,
+    "content_hash": "3105384aa82af8bdd4a726d24fdf0bc29b468fdf10ca359a981d5b82d7804257",
+    "deck": {
+      "schema_version": 1,
+      "deck_id": "slidesprobe1",
+      "width": 960,
+      "height": 540,
+      "theme": {
+        "background": "#FFFFFF",
+        "color": "#112233",
+        "font_family": "DejaVu Sans",
+        "font_size": 24
+      },
+      "slide_order": [
+        "slide_b",
+        "slide_a"
+      ],
+      "slides": [
+        {
+          "id": "slide_a",
+          "notes": "",
+          "elements": [
+            {
+              "id": "table_a",
+              "type": "table",
+              "x": 0,
+              "y": 0,
+              "width": 900,
+              "height": 300,
+              "table": {
+                "cells": [
+                  [
+                    "Položka",
+                    "Kč"
+                  ],
+                  [
+                    "Výzkum",
+                    "12345"
+                  ]
+                ],
+                "font_family": "Arial",
+                "font_size": 18,
+                "color": "#112233",
+                "fill": "#FFFFFF",
+                "border": "#445566"
+              }
+            }
+          ]
+        },
+        {
+          "id": "slide_b",
+          "notes": "Poznámka česky\nDruhý řádek",
+          "elements": [
+            {
+              "id": "title_b",
+              "type": "text",
+              "x": 24,
+              "y": 24,
+              "width": 880,
+              "height": 80,
+              "text": {
+                "value": "Příliš žluťoučký kůň 🐎\nLiteral \\u2028 a oddělovač  / ",
+                "font_family": "DejaVu Sans",
+                "font_size": 28,
+                "color": "#112233",
+                "align": "left"
+              }
+            },
+            {
+              "id": "shape_b",
+              "type": "shape",
+              "x": 24,
+              "y": 140,
+              "width": 100,
+              "height": 100,
+              "shape": {
+                "kind": "rectangle",
+                "fill": "#112233",
+                "stroke": "#445566",
+                "stroke_width": 2
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "receipt": {
+    "mutation_id": "m_probe_1",
+    "revision": 1,
+    "order_version": 1,
+    "content_hash": "3105384aa82af8bdd4a726d24fdf0bc29b468fdf10ca359a981d5b82d7804257",
+    "duplicate": false
+  },
+  "duplicate": {
+    "mutation_id": "m_probe_1",
+    "revision": 1,
+    "order_version": 1,
+    "content_hash": "3105384aa82af8bdd4a726d24fdf0bc29b468fdf10ca359a981d5b82d7804257",
+    "duplicate": true
+  }
+}

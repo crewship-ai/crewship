@@ -318,7 +318,7 @@ func (a pageDefinitionAuthorizer) visible(ownerRef string) bool {
 // author may have written into application code.
 func (h *PageHandler) reviewDefinitionAuthorizer(ctx context.Context, ws string) (pageDefinitionAuthorizer, error) {
 	auth := pageDefinitionAuthorizer{h: h, viewer: h.reviewViewer(ctx, ws), crews: map[string]string{}}
-	rows, err := h.db.QueryContext(ctx, `SELECT slug,id FROM crews WHERE workspace_id=? AND deleted_at IS NULL`, ws)
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `SELECT slug,id FROM crews WHERE workspace_id=? AND deleted_at IS NULL`, ws)
 	if err != nil {
 		return auth, err
 	}

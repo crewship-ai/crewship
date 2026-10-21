@@ -207,6 +207,42 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []chatResponse{}
 	}
+	// Recheck all returned rows after enrichment: an ordinary conversation
+	// may have become protected during this read. The batch keeps ordinary
+	// catalogs out of a per-row authorization query loop.
+	ids := make([]string, len(result))
+	for i := range result {
+		ids[i] = result[i].ID
+	}
+	allowed, err := chataudience.FilterReadableArtifactConversations(r.Context(), h.db, workspaceID, userID, ids)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit private conversation listing", err)
+		return
+	}
+	filtered := result[:0]
+	for _, chat := range result {
+		if allowed[chat.ID] {
+			filtered = append(filtered, chat)
+		}
+	}
+	if len(filtered) != len(result) {
+		if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM chats c WHERE c.agent_id=? AND c.workspace_id=?`+audienceWhere+kindWhere, args...).Scan(&total); err != nil {
+			replyInternalError(w, h.logger, "refresh private conversation count", err)
+			return
+		}
+		writeListMeta(w, total, limit, offset)
+		// The original decorative counts predate the observed audience change.
+		w.Header().Del(ChatKindCountsHeader)
+		if r.URL.Query().Get("counts") == "1" {
+			counts, err := h.chatKindCounts(r.Context(), agentID, workspaceID, userID)
+			if err != nil {
+				h.logger.Warn("refresh private chat kind counts", "error", err)
+			} else {
+				w.Header().Set(ChatKindCountsHeader, formatChatKindCounts(counts))
+			}
+		}
+	}
+	result = filtered
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -536,6 +572,23 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Copies in agent diagnostics outlive this row. Until deletion can retain
+	// their audience independently, keep private-artifact provenance intact.
+	// Classify inside the deleting transaction so new consent cannot be
+	// admitted between this check and removal of the source chat.
+	privateContext, err := chataudience.ResolvePrivateArtifactContext(r.Context(), tx, workspaceID, chatID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	if errors.Is(err, chataudience.ErrPrivateArtifactContext) || (err == nil && privateContext.Sealed) {
+		replyError(w, http.StatusConflict, "Chat contains private artifact provenance and cannot be deleted while retained copies depend on it")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "delete chat: private artifact provenance", err)
+		return
+	}
 	for _, stmt := range []struct {
 		q    string
 		args []any
@@ -669,5 +722,5 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, resp)
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeCostAwareJSON(w, r, http.StatusOK, result)
 }

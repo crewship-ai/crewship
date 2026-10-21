@@ -86,6 +86,7 @@ func (r *Router) registerAdminRoutes() {
 	// instance admins. authedInstance: an instance admin, and no workspace in
 	// the request — they need not belong to what they manage.
 	inst := NewInstanceAdminHandler(r.db, r.logger, r.sessionsStore, r.Journal(), r.hub)
+	inst.streams = r.authMw.streams
 	// openapi: responses 201,400,401,403,404,409,500,503
 	r.authedInstance("POST", "/api/v1/admin/instance/people", inst.CreatePerson)
 	// openapi: responses 200,400,401,403,404,409,500
@@ -205,7 +206,7 @@ func (r *Router) registerAdminRoutes() {
 	// Master-key re-encryption (E1). Instance-wide walk of every stored
 	// AES-256-GCM envelope, re-encrypted to the current key version — the
 	// missing half of ENCRYPTION_KEY rotation (decrypt-old always worked;
-	// this moves rows forward so the old key can be retired). Mutation →
+	// this moves envelopes forward; audit root retention is separate). Mutation →
 	// roleManage, same gate as the other instance-scoped admin operations
 	// (backups, prune-legacy-resources).
 	reencryptH := NewReencryptHandler(r.db, r.logger)

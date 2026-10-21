@@ -101,6 +101,23 @@ export type SubscriptionUsageResponse = z.infer<
   typeof subscriptionUsageResponseSchema
 >
 
+/** GET /paymaster/credential-spend — metered $ per API key (OWNER/ADMIN). */
+export const credentialSpendRowSchema = z.object({
+  credential_id: z.string(),
+  cost_usd: z.number(),
+  call_count: z.number(),
+  input_tokens: z.number().optional(),
+  output_tokens: z.number().optional(),
+  last_ts: z.string().optional(),
+})
+export type CredentialSpendRow = z.infer<typeof credentialSpendRowSchema>
+export const credentialSpendResponseSchema = z.object({
+  rows: z.array(credentialSpendRowSchema),
+  since: z.string().optional(),
+  until: z.string().optional(),
+})
+export type CredentialSpendResponse = z.infer<typeof credentialSpendResponseSchema>
+
 /** Cost-confidence labels mirror the Helicone "precise / estimate / unknown"
  *  pattern. Adopted in migration v60 so every $ figure surfaced in the UI
  *  carries provenance — never just a number, always a number + a badge. */

@@ -7,7 +7,7 @@ import { formatRoutineTime } from "@/lib/routine-time"
 
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { Plus, Trash2, Pencil } from "lucide-react"
 import {
   usePipelineSchedules,
@@ -16,26 +16,28 @@ import {
 } from "@/hooks/use-pipeline-schedules"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useConfirm } from "@/components/ui/use-confirm"
 import { Switch } from "@/components/ui/switch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, Pill, FieldLabel } from "./_shared"
+import { Card, FieldLabel } from "./_shared"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
 import { RoutineOnceSchedule } from "./routine-once-schedule"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import { inputsSubmitContent, submitInputsForm } from "./routine-run-inputs-dialog"
 import { RoutinePresetForm } from "./routine-preset-form"
 import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // RoutineSchedulesTab — the Plan: a Repeating card and a One-time starts card
 // (operator console proposal, screen 2 · Plan). Each row says in one line
@@ -64,6 +66,8 @@ interface Props {
   /** Webhooks and automations, rendered by the detail page, fold under the
    * "Other ways this routine starts" disclosure at the bottom. */
   otherWays?: ReactNode
+  /** Add opens the page's Add trigger dialog instead of the inline form. */
+  onAdd?: () => void
 }
 
 /** "Weekdays at 08:00" — the words a person would use, so a new schedule is
@@ -94,6 +98,7 @@ export function RoutineSchedulesTab({
   concurrencyKey,
   maxConcurrent,
   otherWays,
+  onAdd,
 }: Props) {
   const { role, capabilities } = useAbilities()
   const permissions = routinePermissions(role, capabilities)
@@ -130,7 +135,6 @@ export function RoutineSchedulesTab({
   // Reliability editor (B9, #2362) — every §13.2 row, opened per schedule.
   const [editing, setEditing] = useState<PipelineSchedule | null>(null)
   const [editSaving, setEditSaving] = useState(false)
-  const { ask, dialog } = useConfirm()
   const saveEdit = async (body: SchedulePatchBody) => {
     if (!editing) return
     setEditSaving(true)
@@ -152,6 +156,8 @@ export function RoutineSchedulesTab({
     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   )
   const [editingInputs, setEditingInputs] = useState<PipelineSchedule | null>(null)
+  const answersFormId = useId()
+  const [answersReady, setAnswersReady] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const submit = async (inputs: Record<string, unknown>) => {
@@ -189,20 +195,14 @@ export function RoutineSchedulesTab({
     }
   }
 
+  const [deleting, setDeleting] = useState<PipelineSchedule | null>(null)
   const del = async (s: PipelineSchedule) => {
-    const ok = await ask({
-      title: `Delete schedule ${s.name}?`,
-      description: "The routine stops starting on this schedule.",
-      consequences: [{ tone: "kept", text: "Runs it already started stay in the history" }],
-      confirmLabel: "Delete schedule",
-      destructive: true,
-    })
-    if (!ok) return
     try {
       await remove(s.id)
       toast.success("Schedule deleted")
     } catch (e) {
       toast.error("Delete failed", { description: e instanceof Error ? e.message : String(e) })
+      throw e
     }
   }
 
@@ -222,7 +222,7 @@ export function RoutineSchedulesTab({
       variant="outline"
       disabled={!permissions.createSchedule}
       title={!permissions.createSchedule ? "Creating a repeating plan requires permission to create routines" : undefined}
-      onClick={() => setFormOpen(true)}
+      onClick={() => (onAdd ? onAdd() : setFormOpen(true))}
       className="h-8 gap-1.5 text-xs"
     >
       <Plus className="h-3 w-3" />
@@ -282,14 +282,17 @@ export function RoutineSchedulesTab({
                         {s.name && s.name !== describeCron(s.cron_expr) && (
                           <span className="truncate text-xs text-muted-foreground">· {s.name}</span>
                         )}
-                        {isDraft && <Pill tone="purple">awaiting activation</Pill>}
+                        {isDraft && <StatusPill size="md" tone="purple" label="awaiting activation" />}
                         {/* Health — read-only. F18/A6: this is the only place a
                         circuit-breaker-disabled schedule's reason is shown;
                         the editor to change breaker settings is Track B. */}
                         {(health.tone === "destructive" || health.tone === "warn") && (
-                          <Pill tone={health.tone} data-testid={`schedule-health-${s.id}`}>
-                            {health.label}
-                          </Pill>
+                          <StatusPill
+                            size="md"
+                            tone={toStatusTone(health.tone)}
+                            label={health.label}
+                            data-testid={`schedule-health-${s.id}`}
+                          />
                         )}
                         <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                       </div>
@@ -408,7 +411,7 @@ export function RoutineSchedulesTab({
                         variant="ghost"
                         disabled={!permissions.manage}
                         title={!permissions.manage ? "Managing existing plans requires an admin role" : undefined}
-                        onClick={() => del(s)}
+                        onClick={() => setDeleting(s)}
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                         aria-label={`Delete schedule ${s.name}`}
                       >
@@ -459,21 +462,27 @@ export function RoutineSchedulesTab({
         )}
 
         {editingInputs && (
-          <Dialog
+          <CreateSurface
             open
             onOpenChange={(open) => {
               if (!open && !busy) setEditingInputs(null)
             }}
+            size="sm"
+            onSubmit={() => answersReady && submitInputsForm(answersFormId)}
           >
-            <DialogContent className="max-h-[90dvh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Answers for {editingInputs.name}</DialogTitle>
-                <DialogDescription>
-                  These values are supplied to every start of this schedule.
-                </DialogDescription>
-              </DialogHeader>
+            <CreateSurfaceHeader
+              concept="routines"
+              title={`Answers for ${editingInputs.name}`}
+              description="These values are supplied to every start of this schedule."
+              onClose={() => {
+                if (!busy) setEditingInputs(null)
+              }}
+            />
+            <CreateSurfaceBody>
               <RoutinePresetForm
                 key={editingInputs.id}
+                formId={answersFormId}
+                onReadyChange={setAnswersReady}
                 workspaceId={workspaceId}
                 slug={slug}
                 version={editingInputs.target_pipeline_version}
@@ -496,10 +505,19 @@ export function RoutineSchedulesTab({
                   }
                 }}
               />
-            </DialogContent>
-          </Dialog>
+            </CreateSurfaceBody>
+            <CreateSurfaceFooter
+              hint={null}
+              onCancel={() => setEditingInputs(null)}
+              guardCancel={false}
+              primaryLabel={answersReady ? inputsSubmitContent("Save inputs", busy) : undefined}
+              onPrimary={answersReady ? () => submitInputsForm(answersFormId) : undefined}
+              busy={busy}
+            />
+          </CreateSurface>
         )}
 
+        <div id="routine-once-starts" tabIndex={-1} className="scroll-mt-4 outline-none">
         <RoutineOnceSchedule
           key={slug}
           workspaceId={workspaceId}
@@ -507,7 +525,9 @@ export function RoutineSchedulesTab({
           headVersion={headVersion}
           draft={draft}
         />
+        </div>
       </section>
+      {otherWays !== undefined && (
       <details className="rounded-xl border border-dashed border-border/60 bg-card px-4 py-2">
         <summary className="cursor-pointer py-1 text-xs font-medium text-muted-foreground">
           Other ways this routine starts · webhooks, automations, overlap rules
@@ -545,6 +565,23 @@ export function RoutineSchedulesTab({
           </Card>
         </div>
       </details>
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete schedule “${deleting?.name ?? ""}”?`}
+        description="It stops starting this routine."
+        consequences={[
+          { tone: "lost", text: "Future starts of this schedule and its saved answers." },
+          { tone: "kept", text: "Runs it already started stay in the history." },
+        ]}
+        confirmLabel="Delete schedule"
+        destructive
+        onConfirm={async () => {
+          if (deleting) await del(deleting)
+        }}
+      />
 
       <RoutineScheduleEditorDialog
         schedule={editing}
@@ -554,7 +591,6 @@ export function RoutineSchedulesTab({
         onSave={saveEdit}
         onPreview={preview}
       />
-      {dialog}
     </div>
   )
 }

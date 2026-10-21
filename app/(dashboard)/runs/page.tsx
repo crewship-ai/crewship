@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation"
 
-// Phase F of unified-journal: /runs has been folded into /journal as a
-// preset tab. Old bookmarks land here and are bounced over so links
-// posted on Slack / docs / dashboards don't 404.
+// /runs was folded into the Journal's Runs tab, and the Journal into Activity
+// (F-02). Old bookmarks land on the fleet runs ledger; Activity sends anyone
+// below ADMIN on to its own list of runs (`?what=work`), as the Journal gate
+// did before — see lib/journal-redirect.
 //
 // The redirect is server-side (App Router redirect()) so it happens
 // before any client JS hydrates, avoiding a flash of empty layout.
 export default function RunsRedirect(): never {
-  redirect("/journal?tab=runs")
+  redirect("/activity?section=runs")
 }

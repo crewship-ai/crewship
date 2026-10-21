@@ -21,8 +21,8 @@ type EnvelopeColumn struct {
 	// FailOpen marks a column that is encrypted at rest only when a key is
 	// configured (webhook secrets, #1072). A bare (non-enveloped) value there
 	// is EXPECTED legacy/key-less state, not a rotation failure — so it counts
-	// as Skipped rather than Failed, keeping the "failed=0 ⇒ retire old key"
-	// signal honest.
+	// as Skipped rather than Failed, keeping envelope-conversion counts honest.
+	// Journal/audit root retention is separate from envelope conversion.
 	FailOpen bool
 }
 
@@ -54,7 +54,7 @@ type EnvelopeColumn struct {
 // NULL) and its migration rewrote every historical row to the plaintext
 // marker "[credential submitted]". Expiry, cancel and auto-resolve write
 // plaintext prose there too. A target on that column can only ever count
-// Failed, which poisons the "failed=0 ⇒ retire old key" gate for good.
+// Failed, which incorrectly reports a failed envelope conversion.
 //
 // Non-SQLite envelope storage (~/.crewship/backup-keyring.enc) is handled
 // separately; see the runbook in docs/guides/credentials.mdx.

@@ -6,7 +6,8 @@ import { ArrowUpRight, ChevronDown, ChevronRight, FolderCode, Maximize2, Minimiz
 import { EditorState } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
 
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
@@ -166,10 +167,10 @@ function FileRow({
         )}
         {getChatFileIcon(node.name, node.is_dir, isOpen)}
         <span className="truncate font-mono text-foreground/85">{node.name}</span>
-        {file && routineFileStatus(file) === "missing" && <Pill tone="destructive">Missing on the share</Pill>}
+        {file && routineFileStatus(file) === "missing" && <StatusPill size="md" tone="danger" label="Missing on the share" />}
         {file && routineFileStatus(file) === "unverified" && (
           <span title="The crew share could not be checked right now — the file may well be there.">
-            <Pill tone="default">Not verified</Pill>
+            <StatusPill size="md" tone="muted" label="Not verified" />
           </span>
         )}
         {node.is_dir ? (

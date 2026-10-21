@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/license"
 )
 
@@ -213,6 +214,10 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validToolProfiles[req.ToolProfile] {
 		replyError(w, http.StatusBadRequest, "tool_profile must be MINIMAL, CODING, or FULL")
+		return
+	}
+	if req.AvatarStyle != nil && !avatarstyle.Valid(*req.AvatarStyle) {
+		replyError(w, http.StatusBadRequest, avatarstyle.Problem(*req.AvatarStyle))
 		return
 	}
 	if req.TimeoutSeconds == 0 {

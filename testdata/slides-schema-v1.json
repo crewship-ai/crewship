@@ -1,0 +1,88 @@
+{
+  "deck": {
+    "schema_version": 1,
+    "deck_id": "fixture_page",
+    "width": 960,
+    "height": 540,
+    "slide_order": [
+      "slide_b",
+      "slide_a"
+    ],
+    "slides": [
+      {
+        "id": "slide_b",
+        "notes": "Poznámka česky\nDruhý řádek",
+        "elements": [
+          {
+            "id": "title_b",
+            "type": "text",
+            "x": 24,
+            "y": 24,
+            "width": 880,
+            "height": 80,
+            "text": {
+              "value": "Příliš žluťoučký kůň 🐎\nLiteral \\u2028 a oddělovač  / ",
+              "font_family": "DejaVu Sans",
+              "font_size": 28,
+              "color": "#112233",
+              "align": "left"
+            }
+          },
+          {
+            "id": "shape_b",
+            "type": "shape",
+            "x": 24,
+            "y": 140,
+            "width": 100,
+            "height": 100,
+            "shape": {
+              "kind": "rectangle",
+              "fill": "#112233",
+              "stroke": "#445566",
+              "stroke_width": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "slide_a",
+        "notes": "",
+        "elements": [
+          {
+            "id": "table_a",
+            "type": "table",
+            "x": 0,
+            "y": 0,
+            "width": 900,
+            "height": 300,
+            "table": {
+              "cells": [
+                [
+                  "Položka",
+                  "Kč"
+                ],
+                [
+                  "Výzkum",
+                  "12345"
+                ]
+              ],
+              "font_family": "Arial",
+              "font_size": 18,
+              "color": "#112233",
+              "fill": "#FFFFFF",
+              "border": "#445566"
+            }
+          }
+        ]
+      }
+    ],
+    "theme": {
+      "background": "#FFFFFF",
+      "color": "#112233",
+      "font_family": "DejaVu Sans",
+      "font_size": 24
+    }
+  },
+  "canonical_json": "{\"deck_id\":\"fixture_page\",\"height\":540,\"schema_version\":1,\"slide_order\":[\"slide_b\",\"slide_a\"],\"slides\":[{\"elements\":[{\"height\":300,\"id\":\"table_a\",\"table\":{\"border\":\"#445566\",\"cells\":[[\"Položka\",\"Kč\"],[\"Výzkum\",\"12345\"]],\"color\":\"#112233\",\"fill\":\"#FFFFFF\",\"font_family\":\"Arial\",\"font_size\":18},\"type\":\"table\",\"width\":900,\"x\":0,\"y\":0}],\"id\":\"slide_a\",\"notes\":\"\"},{\"elements\":[{\"height\":80,\"id\":\"title_b\",\"text\":{\"align\":\"left\",\"color\":\"#112233\",\"font_family\":\"DejaVu Sans\",\"font_size\":28,\"value\":\"Příliš žluťoučký kůň 🐎\\nLiteral \\\\u2028 a oddělovač \\u2028/\\u2029\"},\"type\":\"text\",\"width\":880,\"x\":24,\"y\":24},{\"height\":100,\"id\":\"shape_b\",\"shape\":{\"fill\":\"#112233\",\"kind\":\"rectangle\",\"stroke\":\"#445566\",\"stroke_width\":2},\"type\":\"shape\",\"width\":100,\"x\":24,\"y\":140}],\"id\":\"slide_b\",\"notes\":\"Poznámka česky\\nDruhý řádek\"}],\"theme\":{\"background\":\"#FFFFFF\",\"color\":\"#112233\",\"font_family\":\"DejaVu Sans\",\"font_size\":24},\"width\":960}",
+  "hash": "de71e0909d1bba5b7a26bc5aad1aeb3ff46d4838fa64e764cb8b8aa4f32e74a9"
+}

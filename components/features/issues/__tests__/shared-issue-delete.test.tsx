@@ -54,4 +54,22 @@ describe("explicit issue deletion",()=>{
   await screen.findByText(/issue project changed/)
   expect(screen.queryByRole("button",{name:"Delete issue"})).toBeNull()
  })
+  it.each([401,403,404].flatMap(status=>[429,500].map(transient=>({status,transient}))))("does not resurrect deletion data after $status then $transient",async({status,transient})=>{
+    fetchMock.mockResolvedValue(response(item))
+    const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})
+    const tree=<QueryClientProvider client={client}><SharedIssueDelete path="/api/v1/workspaces/w1/restricted-issues/i1" issueId="i1" projectId="p1" userId="guest-a" disabled={false} /></QueryClientProvider>
+    const view=render(tree)
+    fireEvent.click(await screen.findByRole("button",{name:"Delete issue"}));await screen.findByRole("alertdialog")
+    for(const code of [status,transient]){
+      fetchMock.mockResolvedValue(response({},code))
+      await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issue-deletion"]})})
+      view.rerender(<QueryClientProvider client={client}><SharedIssueDelete path="/api/v1/workspaces/w1/restricted-issues/i1" issueId="i1" projectId="p1" userId="guest-a" disabled={false} /></QueryClientProvider>)
+      await waitFor(()=>expect(screen.queryByRole("alertdialog")).toBeNull())
+      expect(screen.queryByRole("button",{name:"Delete issue"})).toBeNull()
+      expect(screen.queryByText(item.title)).toBeNull()
+    }
+    fetchMock.mockResolvedValue(response(item))
+    await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issue-deletion"]})})
+    await screen.findByRole("button",{name:"Delete issue"});expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
 })

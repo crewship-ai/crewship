@@ -1,0 +1,159 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { render, screen, cleanup, fireEvent, act, within, waitFor } from "@testing-library/react"
+
+// Harbor 2 M3 (#3350): the Settings sections live in the one SecondaryPanel —
+// a column with a remembered collapse on a desktop, the top bar's bottom
+// sheet on a phone (it used to be a hand-made 280 px aside and a left Sheet
+// behind a hamburger on the sub-bar).
+
+const h = vi.hoisted(() => ({ mobile: false, push: vi.fn(), replace: vi.fn() }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: h.replace, push: h.push, prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => "/settings",
+}))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "w1", role: "OWNER", loading: false }),
+}))
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({
+    session: { user: { id: "u1", name: "Ada", email: "ada@example.com" } },
+    signOut: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn(),
+  }),
+}))
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ abilities: { can: () => false }, hasCapability: () => false }),
+}))
+vi.mock("@/lib/api-fetch", () => ({
+  apiFetch: vi.fn(async (url: string) => ({
+    ok: true,
+    status: 200,
+    json: async () =>
+      url.includes("/members")
+        ? []
+        : url.includes("/preferences")
+          ? {}
+          : { id: "w1", name: "Acme", slug: "acme", preferred_language: null, _count: { crews: 1, agents: 2, members: 3 } },
+  })),
+}))
+vi.mock("../sections/profile-section", () => ({ ProfileSection: () => <div data-testid="profile-section" /> }))
+vi.mock("../sections/general-section", () => ({ GeneralSection: () => <div data-testid="general-section" /> }))
+
+import { useAppStore } from "@/lib/store"
+import { SettingsNav } from "../settings-nav"
+import { SettingsLayout } from "../settings-layout"
+
+let store: Map<string, string>
+beforeEach(() => {
+  cleanup()
+  h.mobile = false
+  h.push.mockReset()
+  h.replace.mockReset()
+  sessionStorage.clear()
+  store = new Map()
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  })
+  window.history.replaceState(null, "", "/settings")
+  act(() => {
+    useAppStore.getState().setSecondaryPanel(null)
+    useAppStore.getState().setSecondaryPanelOpen(false)
+  })
+})
+afterEach(() => vi.unstubAllGlobals())
+
+const panel = () => document.querySelector<HTMLElement>("[data-slot=secondary-panel]")
+
+describe("Settings navigation panel", () => {
+  it("renders inside the SecondaryPanel with the id settings", () => {
+    render(<SettingsNav activeTab="profile" onTabChange={vi.fn()} role="OWNER" />)
+    const aside = panel()!
+    expect(aside).toHaveAttribute("data-panel-id", "settings")
+    expect(within(aside).getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument()
+    // The search is the panel toolbar, with the panel's one collapse button.
+    const search = within(aside).getByPlaceholderText("Search settings…")
+    expect(search.closest(".secondary-panel-toolbar")).toContainElement(
+      within(aside).getByRole("button", { name: "Hide Settings navigation" }),
+    )
+  })
+
+  it("collapses to a rail and remembers it", () => {
+    render(<SettingsNav activeTab="profile" onTabChange={vi.fn()} role="OWNER" />)
+    fireEvent.click(screen.getByRole("button", { name: "Hide Settings navigation" }))
+    expect(panel()).toHaveAttribute("data-collapsed", "true")
+    expect(screen.queryByRole("navigation", { name: "Settings sections" })).toBeNull()
+    expect(store.get("crewship.pref.panel.settings.collapsed")).toBe("true")
+  })
+
+  it("on a phone is the top bar's sheet, with no hamburger on the sub-bar, and a pick closes it", async () => {
+    h.mobile = true
+    // A link that names a section opens it; the list is behind the sheet.
+    window.history.replaceState(null, "", "/settings?tab=profile")
+    render(<SettingsLayout />)
+    await screen.findByTestId("profile-section")
+    expect(panel()).toBeNull()
+    expect(screen.queryByRole("button", { name: "Open settings navigation" })).toBeNull()
+    expect(useAppStore.getState().secondaryPanel).toMatchObject({ id: "settings", label: "Settings navigation" })
+
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    const sheet = screen.getByRole("dialog", { name: "Settings navigation" })
+    fireEvent.click(within(sheet).getByRole("button", { name: "General" }))
+    await waitFor(() => expect(useAppStore.getState().secondaryPanelOpen).toBe(false))
+    // Phone pilot: a section is a history entry of its own (the browser's Back returns).
+    expect(h.push).toHaveBeenCalledWith("/settings?tab=general")
+  })
+})
+
+describe("Settings on a phone: list → section → back (PNL-05)", () => {
+  it("/settings is the list of sections, with no section open", async () => {
+    h.mobile = true
+    render(<SettingsLayout />)
+    const list = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-slot=secondary-panel][data-phone=inline]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(within(list).getByRole("button", { name: "Profile" })).toBeInTheDocument()
+    expect(screen.queryByTestId("profile-section")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Back to Settings" })).toBeNull()
+  })
+
+  it("a pick opens the section with a Back that returns to the list", async () => {
+    h.mobile = true
+    render(<SettingsLayout />)
+    fireEvent.click(await screen.findByRole("button", { name: "General" }))
+    expect(await screen.findByTestId("general-section")).toBeInTheDocument()
+    // Phone pilot: a section is a history entry of its own (the browser's Back returns).
+    expect(h.push).toHaveBeenCalledWith("/settings?tab=general")
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }))
+    await waitFor(() => expect(screen.queryByTestId("general-section")).toBeNull())
+    expect(screen.getByRole("button", { name: "Profile" })).toBeInTheDocument()
+    // The (mocked) router never moved to the section, so Back lands on the list address.
+    expect(h.replace).toHaveBeenCalledWith("/settings")
+  })
+})
+
+describe("Settings section head", () => {
+  it("names the section with its icon tile and one sentence", async () => {
+    window.history.replaceState(null, "", "/settings?tab=general")
+    render(<SettingsLayout />)
+    await screen.findByTestId("general-section")
+    const head = document.querySelector<HTMLElement>("[data-slot=settings-page-head]")!
+    expect(within(head).getByRole("heading", { level: 2, name: "General" })).toBeInTheDocument()
+    expect(within(head).getByText(/Workspace identity and defaults/)).toBeInTheDocument()
+  })
+
+  it("names the workspace group after the workspace", async () => {
+    render(<SettingsLayout />)
+    await screen.findByTestId("profile-section")
+    const nav = screen.getByRole("navigation", { name: "Settings sections" })
+    expect(within(nav).getByText("Acme")).toBeInTheDocument()
+    expect(within(nav).queryByText("Workspace")).toBeNull()
+  })
+})

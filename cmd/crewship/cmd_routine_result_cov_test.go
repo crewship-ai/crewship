@@ -37,7 +37,7 @@ func TestRoutineResultRunE_PrintsDeliverable(t *testing.T) {
 	defer s.Close()
 	s.OnGet(covResultPath, clitest.JSONResponse(200, cli.PipelineRunDetail{
 		ID: "run_x", Status: "completed", Output: "The quarterly report is ready.",
-		DurationMs: 1200, CostUSD: 0.0042,
+		DurationMs: 1200, CostUSD: usdPtr(0.0042),
 	}))
 	covSetupCli10(t, s.URL())
 
