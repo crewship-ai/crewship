@@ -102,6 +102,8 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
+  // Collaboration's Yjs undo tracks only this editor's own transactions, so it never takes back confirmed work from others.
+  const history = useEditorState({ editor, selector: ({ editor }) => ({ undo: editor?.can().undo() ?? false, redo: editor?.can().redo() ?? false }) })
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
@@ -138,6 +140,8 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
     {reviewEnabled && sync.state && !sync.denied && <div className="px-3"><DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} /></div>}
     {!sync.denied && <>
     {sync.editable && !restoring && editor && <div aria-label="Document formatting" className="flex flex-wrap gap-1 px-6">
+      <Button size="sm" variant="ghost" disabled={!history?.undo} onClick={() => editor.chain().focus().undo().run()}>Undo</Button>
+      <Button size="sm" variant="ghost" disabled={!history?.redo} onClick={() => editor.chain().focus().redo().run()}>Redo</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().setParagraph().run()}>Paragraph</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>Heading 1</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>Heading 2</Button>
