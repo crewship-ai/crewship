@@ -404,6 +404,40 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     expect(said).not.toMatch(/message/i)
   })
 
+  // S1.4: a session ID that belongs to someone else. Its history answers 404,
+  // like any draft, so arriving shows nothing; the create is where the server
+  // says no, and from then on the panel says so in place, not only in a toast.
+  it.each([404, 403])("says the conversation is unavailable, and keeps saying it, when the create is refused with %i", async status => {
+    createStatus = status
+    missingHistoryStatus = 404
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+    expect(screen.queryByText(/isn't available to you/)).toBeNull()
+
+    fireEvent.click(await firstChip())
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    expect(toastError.mock.calls[0][0]).toMatch(/isn't available to you/)
+    expect(toastError.mock.calls[0][0]).not.toMatch(/connection/i)
+    const notice = await screen.findByRole("alert")
+    expect(notice.textContent).toMatch(/This conversation isn't available to you/)
+    expect(screen.getByRole("link", { name: "Start a new chat" })).toHaveAttribute("href", "/chat/riley?new=1")
+    expect(screen.queryByRole("button", { name: /Prepare project inputs/ })).toBeNull()
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("keeps the connection wording and shows no unavailable notice when the create fails for another reason", async () => {
+    createStatus = 500
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+
+    fireEvent.click(await firstChip())
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    expect(toastError.mock.calls[0][0]).toMatch(/connection/i)
+    expect(screen.queryByText(/isn't available to you/)).toBeNull()
+  })
+
   it("retries the create on the next send after a failure", async () => {
     createStatus = 500
     render(<ChatPanel {...panelProps} />)
