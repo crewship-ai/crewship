@@ -73,6 +73,8 @@ var responseShapeContracts = []struct {
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
 	{name: "NativeSlidesState", pointer: "/components/schemas/NativeSlidesState", value: slides.State{}},
 	{name: "NativeSlidesReceipt", pointer: "/components/schemas/NativeSlidesReceipt", value: slides.Receipt{}},
+	{name: "NativeSlidesPatchResult", pointer: "/components/schemas/NativeSlidesPatchResult", value: slidesPatchResult{}},
+	{name: "NativeSlidesConflict", pointer: "/components/schemas/NativeSlidesConflict", value: slidesPatchResponse{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
 	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},

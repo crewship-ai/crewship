@@ -219,13 +219,17 @@ func (h *slidesHumanHTTP) initialize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, result)
 }
 
-// slidesPatchResponse keeps the editor's revision name stable independently of
-// the retained-history State representation. Conflict snapshots omit mutation ID.
+// slidesPatchResponse is the current authorized conflict snapshot.
 type slidesPatchResponse struct {
 	Deck         slides.Deck `json:"deck"`
 	Rev          int64       `json:"rev"`
 	OrderVersion int64       `json:"order_version"`
-	MutationID   string      `json:"mutation_id,omitempty"`
+}
+
+// The success receipt always names its mutation; a conflict has no receipt.
+type slidesPatchResult struct {
+	slidesPatchResponse
+	MutationID string `json:"mutation_id"`
 }
 
 func (h *slidesHumanHTTP) patch(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +280,5 @@ func (h *slidesHumanHTTP) patch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 409, response)
 		return
 	}
-	response.MutationID = receipt.MutationID
-	writeJSON(w, 200, response)
+	writeJSON(w, 200, slidesPatchResult{response, receipt.MutationID})
 }
