@@ -85,6 +85,7 @@ class WorkflowContracts(unittest.TestCase):
         types = self.job(ci, 'frontend-test-types')
         self.assertIn('pnpm test:types', types)
         self.assertIn('private-artifacts.test.mjs', types)
+        self.assertIn('node --test e2e/static-app-engines.test.mjs', types)
         shard_config = (ROOT / 'vitest.ci-shard.config.ts').read_text()
         self.assertIn("import base from './vitest.config'", shard_config)
         self.assertIn('...base.test?.coverage', shard_config)
