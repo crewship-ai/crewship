@@ -110,7 +110,9 @@ export function EditableUserMessage({
       <div className="whitespace-pre-wrap rounded-2xl rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 text-sm">
         {text}
       </div>
-      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Hover reveals it with a mouse; a keyboard (focus-within) and a touch
+          screen, which has no hover, need it without one. */}
+      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
         <span className="font-mono text-[10px] text-muted-foreground">
           {timestamp.toLocaleTimeString("en-GB", {
             hour: "2-digit",

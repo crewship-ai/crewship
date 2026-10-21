@@ -844,8 +844,9 @@ function TurnFeedbackActions({
       //
       // `focus-within` is not optional here — these are the only way to
       // register feedback, and hover-only would put them out of reach of a
-      // keyboard entirely.
-      className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100", submitted.helpful || submitted.not_helpful || copy !== "idle" ? "opacity-100" : "opacity-0")}
+      // keyboard entirely. A touch screen has no hover either, so there they
+      // always show (`pointer-coarse`).
+      className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100", submitted.helpful || submitted.not_helpful || copy !== "idle" ? "opacity-100" : "opacity-0")}
     >
       <MessageAction tooltip={copy === "copied" ? "Copied" : "Copy"} label="Copy" onClick={() => void copyReply()}>
         {copy === "copied" ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
