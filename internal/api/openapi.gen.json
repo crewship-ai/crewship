@@ -135563,6 +135563,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -136473,6 +136482,15 @@
             "in": "path",
             "name": "slug",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
             "schema": {
               "type": "string"
             }
