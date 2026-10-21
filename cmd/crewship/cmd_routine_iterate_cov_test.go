@@ -73,6 +73,7 @@ func TestRoutineIterateRunE_RequiresAuthorCrew(t *testing.T) {
 }
 
 func TestRoutineIterateRunE_RoundsOutOfRange(t *testing.T) {
+	guardCLIState(t)
 	for _, rounds := range []string{"0", "11"} {
 		t.Run(rounds, func(t *testing.T) {
 			covSetupCli5(t)
@@ -88,6 +89,7 @@ func TestRoutineIterateRunE_RoundsOutOfRange(t *testing.T) {
 }
 
 func TestRoutineIterateRunE_TargetOutOfRange(t *testing.T) {
+	guardCLIState(t)
 	for _, target := range []string{"0", "101"} {
 		t.Run(target, func(t *testing.T) {
 			covSetupCli5(t)
