@@ -42,7 +42,7 @@ const authority = http.createServer(async (req, res) => {
       default: throw new Error(`unexpected authority operation ${op}`);
     }
     res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(result));
-  } catch (error) { res.writeHead(500); res.end(JSON.stringify({ error: error.message })); }
+  } catch (error) { res.setHeader('Content-Type', 'application/json'); res.writeHead(500); res.end(JSON.stringify({ error: error.message })); }
 });
 let service;
 async function call(operation, body) {
