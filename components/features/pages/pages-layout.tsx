@@ -9,6 +9,7 @@ import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
 import { PersonalDocumentSpace } from "./personal-document-space"
 import { NewDocumentDialog } from "./new-document-dialog"
+import { UnsentEditsLeaveDialog } from "./unsent-edits-leave-dialog"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 
 /**
@@ -518,10 +519,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">{detail.accessDenied ? "Document access is unavailable." : "The original Page identity is unavailable."}</p> : <>
                   {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
                   <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
+                  <UnsentEditsLeaveDialog pending={nav.pending} />
                   </>
                 ) : nativeSlides ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
-                    : <PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
+                    : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} /></>
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}
