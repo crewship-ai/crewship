@@ -194,6 +194,7 @@ func TestPrivateEmptyPageCreationRequiresExplicitWriteScope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newInstanceFixture(t)
 			seedInstanceUser(t, f.db, "private-member", "private-member@example.test", "ws-old", "MEMBER")
+			mustExec(t, f.db, `UPDATE workspace_members SET capabilities='["page.create"]' WHERE workspace_id='ws-old' AND user_id='private-member'`)
 			token := mintTokenFor(t, f.db, "private-member", "privatepagesmembertoken00001")
 			mustExec(t, f.db, `UPDATE cli_tokens SET scopes=? WHERE token_hash=?`, tc.scopes, sha256Hex(token))
 			rr := f.do(token, "POST", "/api/v1/private-pages?workspace_id=ws-old", `{"slug":"scoped-private","name":"Private scope sentinel","panels":[],"allow_empty":true}`)
