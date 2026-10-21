@@ -238,6 +238,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/credential-readiness", authed(wsCtx(http.HandlerFunc(crews.CredentialReadiness))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
+	// Crew existence is checked inside the transactional mutation helper.
+	// openapi: responses 404
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
 
 	// Per-crew autonomy policy (PR-B F2). Workspace-scoped list +
