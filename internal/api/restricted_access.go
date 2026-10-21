@@ -57,6 +57,18 @@ var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, sto
 // with an acceptance test, and update restrictedAllowedPatterns in
 // restricted_route_table_test.go in the same change.
 var restrictedRoutes = map[string]restrictedRule{
+	// Exact live private custody only; ordinary Page authority is not widened.
+	"GET /api/v1/pages/{slug}/versions":                          restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/export":                            restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document":                          restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document/checkpoints":              restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}": restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project":                           restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/source":                    restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history":                   restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history/{revision}":        restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history/{revision}/source": restrictedPrivateCustody,
+
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects":                                   restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}":                             restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones":                  restrictedPass,
@@ -161,6 +173,11 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	rule, ok := restrictedRoutes[r.Pattern]
+	if _, privateRead := r.Context().Value(documentPrivateReadKey{}).(documentPrivateReadAdmission); privateRead {
+		// Only the service-secret authenticated Docs boundary creates this
+		// marker, for its three exact read operations; never infer from Pattern.
+		rule, ok = restrictedPrivateCustody, true
+	}
 	switch {
 	case !ok:
 		err = access.ErrDenied
