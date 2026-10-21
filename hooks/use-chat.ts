@@ -1728,22 +1728,36 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
-    setTurns((prev) =>
-      prev.map((t) =>
-        t.role === "assistant" && t.isStreaming
-          ? {
-              ...t,
-              isStreaming: false,
-              // Drop transient status rows (mirrors handleDoneEvent) — a
-              // stopped turn must not keep a stale animated progress line.
-              parts: stripStatusParts(t.parts),
-            }
-          : t,
-      )
-      // A turn that held only status parts is now empty — drop it entirely
-      // (same as handleDoneEvent's orphaned status-only turn cleanup).
-      .filter((t) => !(t.role === "assistant" && t.parts.length === 0)),
-    )
+    // Captured before the updater, which React may invoke more than once.
+    const localRunPending = isStreamingRef.current
+    setTurns((prev) => {
+      // The stopped turn is marked cancelled so its end note says the reply
+      // was stopped ("Stopped before any reply." when it held only status
+      // rows). It is kept even when empty: the late done/cancel ack is
+      // dropped by cancelledRef, and Regenerate slices it away. A history
+      // refetch replaces it with what the server persisted — legacy turns
+      // carry no run id to keep an unpersisted one safely as #3872 does.
+      let stopped = false
+      const next = prev.map((t) => {
+        if (t.role !== "assistant" || !t.isStreaming) return t
+        stopped = true
+        // Drop transient status rows (mirrors handleDoneEvent) — a stopped
+        // turn must not keep a stale animated progress line.
+        return { ...t, isStreaming: false, turnState: "cancelled" as const, parts: stripStatusParts(t.parts) }
+      })
+      if (stopped || !localRunPending) return next
+      // Stop before any event opened a turn: say so under our own message
+      // (past teammates' broadcasts, like handleDoneEvent's zero-output check).
+      let ownTurnPending = false
+      for (let i = next.length - 1; i >= 0; i--) {
+        const t = next[i]
+        if (t.role === "user" && t.authorUserId) continue
+        ownTurnPending = t.role === "user"
+        break
+      }
+      if (!ownTurnPending) return next
+      return [...next, { id: uuid(), role: "assistant", parts: [], isStreaming: false, turnState: "cancelled", timestamp: new Date() }]
+    })
   }, [send, sessionId, isCurrentAuthority])
 
   // Regenerate the last assistant response by re-sending the last user message.

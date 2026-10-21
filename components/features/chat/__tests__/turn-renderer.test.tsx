@@ -282,6 +282,16 @@ describe("TurnRenderer", () => {
       expect(container.textContent).toBe("")
       expect(screen.queryByTestId("assistant-turn-mock")).toBeNull()
     })
+    it("renders an empty stopped turn so its end note can show", () => {
+      const turn: ChatTurn = { ...assistantTurn("a-stop"), parts: [], turnState: "cancelled" }
+      render(<TurnRenderer turn={turn} onCopy={async () => true} onFileClick={noop} />)
+      expect(screen.getByTestId("assistant-turn-mock").getAttribute("data-turn-id")).toBe("a-stop")
+    })
+    it("still hides an empty turn that did not end early", () => {
+      const turn: ChatTurn = { ...assistantTurn(), parts: [] }
+      const { container } = render(<TurnRenderer turn={turn} onCopy={async () => true} onFileClick={noop} />)
+      expect(container.textContent).toBe("")
+    })
     it("delegates rendering to AssistantTurn", () => {
       render(
         <TurnRenderer turn={assistantTurn("a-42")} onCopy={async () => true} onFileClick={noop} />,
