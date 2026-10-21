@@ -60,19 +60,22 @@ class WorkflowContracts(unittest.TestCase):
         }
         self.assertTrue(shipped - {'pnpm-lock.yaml'})
         self.assertLessEqual(shipped | {'go.mod'}, scanned)
+        router = self.job(security, 'changes')
+        for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
+            self.assertIn("'" + pattern + "'", router)
 
     def test_osv_leaves_go_reachability_to_govulncheck(self):
         # osv-scanner's Go call analysis vendors an x/tools that panics on
         # newer Go syntax whenever the database names a candidate package, so
         # a scan dies with exit 2 depending on the day (#3877). This job is the
         # reachability-blind dependency check; govulncheck owns reachability.
+        # Only the command counts: comments may mention the flag too.
         security = self.text('security.yml')
         osv = self.job(security, 'osv-scan')
-        self.assertIn('--no-call-analysis=go', osv)
+        code = '\n'.join(line.split('#', 1)[0] for line in osv.splitlines())
+        command = code[code.index('osv-scanner \\'):code.index('> /tmp/osv.log')]
+        self.assertIn('--no-call-analysis=go', command)
         self.assertIn('govulncheck ./...', self.job(security, 'govulncheck'))
-        router = self.job(security, 'changes')
-        for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
-            self.assertIn("'" + pattern + "'", router)
 
     def test_frontend_partitions_preserve_the_merged_gate(self):
         ci = self.text('ci.yml')
