@@ -100,10 +100,10 @@ describe("pacing", () => {
   async function failOnce(queue: ReturnType<typeof setup>["queue"]) { await queue.deliver(async () => { throw new Error("no") }).catch(() => {}) }
 
   it.each([
-    ["first failure, full jitter top", 1, () => 1, 1000],
-    ["first failure, jitter floor", 1, () => 0, 500],
-    ["third failure", 3, () => 1, 4000],
-    ["capped", 6, () => 1, 8000],
+    ["first failure, full jitter top", 1, (): number => 1, 1000],
+    ["first failure, jitter floor", 1, (): number => 0, 500],
+    ["third failure", 3, (): number => 1, 4000],
+    ["capped", 6, (): number => 1, 8000],
   ] as const)("%s", async (_name, failures, random, expected) => {
     const { queue } = setup({ pacing: { ...pacing, retryBudgetMs: Infinity }, random })
     queue.enqueue(row("a"))
