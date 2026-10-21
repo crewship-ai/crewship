@@ -29,6 +29,8 @@ import {
   Search,
   SkipForward,
   Trash2,
+  Archive,
+  ArchiveRestore,
   UserMinus,
   ClipboardCheck,
   ClipboardList,
@@ -250,6 +252,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // ── Skills ────────────────────────────────────────────────────────
   "skill.imported": PackageOpen,
   "skill.deleted": Trash2,
+  "skill.archived": Archive,
+  "skill.restored": ArchiveRestore,
   "skill.assigned": UserPlus,
   "skill.unassigned": UserMinus,
   "skill.invoked": Sparkles,
@@ -267,7 +271,11 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "invitation.revoked": UserMinus,
   "invitation.accepted": UserCheck,
   "member.access_changed": ShieldCheck,
+  "member.owner_created": ShieldCheck,
   "member.capabilities_changed": ShieldCheck,
+  "member.added": ShieldCheck,
+  "crew.member_changed": ShieldCheck,
+  "member.role_changed": ShieldCheck,
   "member.removed": UserMinus,
 
   // ── Memory ────────────────────────────────────────────────────────

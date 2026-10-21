@@ -1120,6 +1120,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			transferHostHold(result.ExecID)
 			return fmt.Errorf("%w: protected CLI terminal semantics require reconciliation", ErrHostCaptureUnconfirmed)
 		}
+		if req.CapturedExit != nil && snapshot.Result.CompletedAt != "" {
+			req.CapturedExit(snapshot.Result.CompletedAt)
+		}
 		exitCode = snapshot.Result.ExitCode
 	} else {
 		running, exitCode, inspErr = o.awaitExecTerminal(ctx, result.ExecID)

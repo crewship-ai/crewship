@@ -63,6 +63,15 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 	memoryEntry := anyObject()
 
 	return map[string]DomainSchema{
+		"GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics": {Response: str(), ResponseMedia: []string{"text/calendar"}, SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{
+			"Content-Disposition": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{`attachment; filename="crewship-calendar.ics"`}}},
+			"Cache-Control":       map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"private, no-store"}}},
+		}},
+		// Release and skill lifecycle actions read only authenticated/path context.
+		"POST /api/v1/agents/{agentId}/release":                          {NoRequest: true},
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": {NoRequest: true},
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": {NoRequest: true},
+
 		"GET /api/v1/recipes":                                              {Response: arr(recipe)},
 		"GET /api/v1/recipes/{slug}":                                       {Response: recipe},
 		"GET /api/v1/recipes/{slug}/preview":                               {Response: obj(map[string]any{"recipe": recipe, "needed_credentials": arr(str()), "existing_credentials": anyObject(), "crew_slug_available": boolean(), "resolved_crew_slug": str()})},

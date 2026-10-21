@@ -36,6 +36,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
+	crews.policyJournal = r.journal
 	crewSocket := r.socketPath
 	if crewSocket == "" {
 		crewSocket = config.DefaultSocketPath()
@@ -247,6 +248,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	policies := NewCrewPolicyHandler(r.db, r.PolicyResolver(), r.logger)
 	policies.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/policies", authed(wsCtx(http.HandlerFunc(policies.List))))
+	// Monthly budget of the crew (Crew settings > Budget). ADMIN and above for
+	// reads too: the handler checks the role.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/budget", authed(wsCtx(http.HandlerFunc(crews.BudgetGet))))
+	r.authedMut("PUT", "/api/v1/crews/{crewId}/budget", roleManage, crews.BudgetPut)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/budget", roleManage, crews.BudgetDelete)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/policy", authed(wsCtx(http.HandlerFunc(policies.Get))))
 	r.authedMut("PUT", "/api/v1/crews/{crewId}/policy", roleCreate, policies.Put)
 
@@ -416,6 +422,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// PENDING_REVIEW to IDLE, releasing the chatbridge guard so the
 	// agent can serve messages. Paired with the blocking inbox
 	// waitpoint written by Hire when policy returns InboxApprove.
+	// Release now: ends a temporary hire before its expiry (becomes an expired
+	// hire, Rehire brings it back).
+	r.authedMut("POST", "/api/v1/agents/{agentId}/release", roleCreate, agents.Release)
 	r.authedMut("POST", "/api/v1/agents/{agentId}/approve-hire", roleCreate, agents.ApproveHire)
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.authedMut("PATCH", "/api/v1/agents/{agentId}", roleInline, agents.Update)
@@ -604,6 +613,16 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-bindings",
 		authed(wsCtx(http.HandlerFunc(bindings.ResolveForAgent))))
 
+	// Vault folders (#3479). Registered before the /{credentialId} wildcard
+	// routes' neighbours; the path is its own prefix so there is no clash.
+	// Read is open to every workspace member (names are not secret, counts
+	// follow credential visibility); the handlers repeat the role gates.
+	credFolders := NewCredentialFolderHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credential-folders", authed(wsCtx(http.HandlerFunc(credFolders.List))))
+	r.authedMut("POST", "/api/v1/credential-folders", roleInline, credFolders.Create)
+	r.authedMut("PATCH", "/api/v1/credential-folders/{folderId}", roleInline, credFolders.Update)
+	r.authedMut("DELETE", "/api/v1/credential-folders/{folderId}", roleManage, credFolders.Delete)
+
 	// Credential custom fields (PRD-CREDENTIALS-V2-2026 §2.2). The multi-part
 	// half of a credential: AWS wants access key id + secret + region, a
 	// service account wants a blob + a filename, and one `encrypted_value`
@@ -638,6 +657,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/import", roleInline, skills.Import)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive", roleManage, skills.Archive)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore", roleManage, skills.Restore)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
 	// /api/v1/internal/skills/generate adapter shares the instance
@@ -684,6 +705,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 
 	// Crew provisioning (require workspace context)
+	r.mux.Handle("GET /api/v1/crews/provisioning-summary", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionSummary))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)

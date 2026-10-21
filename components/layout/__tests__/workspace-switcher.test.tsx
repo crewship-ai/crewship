@@ -65,6 +65,46 @@ describe("CreateWorkspaceDialog", () => {
   })
 })
 
+// CHR-01 / G13 (#3482): Create workspace is a small CreateSurface (v67
+// `newws`, "Dialog S; chyby u pole"): its refusals belong to the field, not
+// to a toast.
+const fetchMock = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => fetchMock(...a) }))
+
+describe("CreateWorkspaceDialog on the kit surface", () => {
+  beforeEach(() => {
+    cleanup()
+    fetchMock.mockReset()
+  })
+
+  it("is a small surface named Create workspace, with Cancel and Create workspace", () => {
+    render(<CreateWorkspaceDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />)
+    const dialog = screen.getByRole("dialog", { name: "Create workspace" })
+    expect(dialog.className).toMatch(/sm:max-w-\[480px\]/)
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create workspace" })).toBeDisabled()
+  })
+
+  it("shows a slug the server refuses under the Slug field", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 409, text: async () => JSON.stringify({ error: "Slug already taken", field: "slug" }) })
+    render(<CreateWorkspaceDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Acme" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
+    const error = await screen.findByText("Slug already taken")
+    expect(error).toHaveAttribute("id", "ws-slug-error")
+    expect(screen.getByLabelText(/^slug$/i)).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByLabelText(/^slug$/i)).toHaveAttribute("aria-describedby", "ws-slug-error")
+  })
+
+  it("shows any other refusal under the Name field", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 400, text: async () => JSON.stringify({ error: "Name is reserved" }) })
+    render(<CreateWorkspaceDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Admin" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
+    expect(await screen.findByText("Name is reserved")).toHaveAttribute("id", "ws-name-error")
+  })
+})
+
 // #3005: a workspace with a logo is drawn with it — in the rail tile and in
 // the switcher's list — and with its initial otherwise.
 import { WorkspaceMark } from "../workspace-switcher"

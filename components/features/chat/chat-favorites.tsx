@@ -25,5 +25,5 @@ export function useChatFavorites(scope: string) {
 }
 
 export function FavoriteButton({ name, active, onClick }: { name: string; active: boolean; onClick: () => void }) {
-  return <button type="button" aria-label={`${active ? "Unpin" : "Pin"} ${name}`} aria-pressed={active} title={`${active ? "Remove from" : "Add to"} Favorites`} onClick={onClick} className={cn("kit-tap flex size-7 coarse:size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent", active && "text-gold")}><Star aria-hidden className={cn("size-3", active && "fill-current")} /></button>
+  return <button type="button" aria-label={`${active ? "Unpin" : "Pin"} ${name}`} aria-pressed={active} title={`${active ? "Remove from" : "Add to"} Favorites`} onClick={onClick} className={cn("kit-tap flex size-7 coarse:size-[44px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent", active && "text-gold")}><Star aria-hidden className={cn("size-3", active && "fill-current")} /></button>
 }

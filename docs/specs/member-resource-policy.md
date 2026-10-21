@@ -236,6 +236,11 @@ but multiple workspaces can fill it: a new entry or audience is then refused
 with the same transient 429. Existing audiences remain usable subject to their
 unchanged rate budgets. Capacity refusal allocates no empty account and spends
 neither budget; active entries are never evicted or reset to grant a fresh burst.
+The account rate budget is checked before a new audience is retained. Account,
+workspace and audience entries are committed to the limiter only after both
+rate budgets admit the request. Rejected requests neither allocate audience
+capacity nor refresh idle timestamps; each user/workspace retains its existing
+257-audience quota within the workspace quota.
 
 Idle entries expire after at least five minutes and the configured full-refill
 interval. Ordered idle lists retain exactly one node per entry and audience;
@@ -270,8 +275,9 @@ navigation. Account security remains available without resource grants. A truste
 account's rows carry neither field.
 
 The web app shows only those screens in the sidebar, the phone menu and the phone
-tab bar. Any other URL shows "Not available with your access" without mounting
-the screen, so none of its requests are sent. `/` goes to the first available
+tab bar. Any other URL shows "<Screen> isn’t part of your access" (the screen
+named by its navigation label) with one way on to the first available surface,
+without mounting the screen, so none of its requests are sent. `/` goes to the first available
 surface (Chat when authorized). Selection uses the current workspace row, never
 another membership's projection. Settings shows
 only account security: password, browser sessions, revoking CLI tokens and
@@ -649,22 +655,121 @@ retain their class for server-side handling and logging.
 
 ## Capability and membership audit
 
-A changed capability set appends `member.capabilities_changed`, and a removed
-workspace membership appends `member.removed`, in the same transaction as the
-mutation. Capability changes revalidate the caller’s active, trusted OWNER/ADMIN
-authority inside the write transaction, after reading the request body. Member
-removal requires exactly one deleted membership row. An audit append or commit failure rolls back the mutation, including
-page transfers and crew membership cleanup during departure. Notifications are
-published only after commit. An unchanged capability set or already absent
-membership does not append a duplicate change event.
+Adding an existing account to a workspace or provisioning a new or existing account
+commits the membership and `member.added` chained audit together. Both provisioning
+commit paths recheck the live trusted administrator and OWNER-only ADMIN grant
+boundary inside their writer transaction. The internal event records the stored,
+normalized initial rights after Guest policy replacement; public GET/SSE/WS
+serialization exposes only opaque member/subject IDs and the action, never role,
+rights, email or setup material. Audit or commit failure rolls back the membership,
+new account and setup-token writes; notification occurs only after commit.
+The same public whitelist is applied before automation preview samples, matcher
+explanations and observer matching/template rendering. Canonical rights remain
+unchanged. This does not cover onboarding creation.
 
-Both events identify the actor through the standard journal actor fields and
-contain only `subject_user_id` and `action` in their payload. Capability values,
-names of changed capabilities and hashes of those values are excluded: values
-remain available through the existing ADMIN-only capability endpoint. The
-journal records who changed whose access and when; it cannot reconstruct old
-capability sets. This contract does not add chained auditing for instance-level
-CLI token creation or revocation.
+A workspace role update appends `member.role_changed`, a changed capability
+set appends `member.capabilities_changed`, and a removed workspace membership
+appends `member.removed`, in the same transaction as the mutation. Role and
+capability changes revalidate the caller's live account, workspace membership
+and account-wide trusted ceiling inside the writer after reading the request
+body. Existing role ladders, the last-OWNER guard and immutable OWNER capability
+rules still apply. The role event identifies the membership and subject user
+and records the previous and resulting role.
+
+The existing `member.role_change` / `WorkspaceMember` record in `audit_logs`
+is retained in the same transaction for Settings Audit category filters, CSV
+and IP/UA presentation. Its actor, subject and from/to metadata keep their
+existing shape. Both audit records and the role must survive final readback;
+an ignored or altered audit write rolls back the entire change.
+
+Capability events retain sorted `previous_capabilities` and `capabilities`
+sets in their durable, keyed journal payload. These are the effective sets
+used by the mutation, including the existing role-default interpretation of
+NULL or empty storage. The shared GET, SSE and WebSocket journal serializer
+omits both sets without altering the retained event or its chain. Automation
+preview samples, matcher diagnostics and observer matching/template inputs use
+the same public projection before evaluating an event. Page grant snapshots
+(`previous_grant`, `grant`) and folder ACL snapshots (`previous_acl`, `acl`,
+`previous_acl_version`) are also canonical-only; existing public event fields
+remain available. The feed
+continues to expose only the subject and action for capability changes.
+Current values remain available through the existing ADMIN-only capability
+endpoint; this change adds no administrative historical-values API.
+
+Search compatibility limit: journal `q` searches only the summary for
+`member.added`, `member.owner_created`, `member.access_changed`, `member.capabilities_changed`, `page.grant_added`, `page.grant_removed` and
+`page.folder_acl_changed`, including historical rows. Previously public payload
+IDs, actions and ACL versions therefore no longer match free-text search for
+these types. Explicit filters and non-search reads remain available; other event
+types retain summary-and-payload search. List and Count use the same boundary,
+without rewriting canonical payloads, FTS indexes or keyed audit history.
+Transactional journal appends acknowledge the exact surviving native INSERT
+tuple, including its configured-key hash, before the business transaction can
+commit; post-insert removal or alteration aborts the mutation and notification.
+Background batching retains its existing query path.
+
+
+Role and capability writes acknowledge their final stored state after the
+audit append. An append or commit failure rolls back the mutation; observers
+are notified only after commit. Member removal requires exactly one deleted
+membership row and rolls back page transfers and crew cleanup with its event.
+An unchanged capability set or already absent membership does not append a
+duplicate event. This scoped contract does not establish complete audit
+coverage for crew memberships, owner transfers or Page grants
+and folder ACL mutations; those remain separate authorization paths. The crew audit below covers the three explicit membership handlers only; onboarding insertion and crew-deletion cascades remain outside this cut.
+
+### Crew membership mutation audit
+
+The crew member add, remove and role-update HTTP handlers append a keyed
+`crew.member_changed` event in the same transaction as the membership write.
+They recheck the live caller, workspace and crew on that writer, retaining the
+existing role floors and grant ceilings. The event identifies the actor, crew,
+membership and subject user, with `previous_membership` and `membership` role
+snapshots. A missing membership is NULL; a present membership with a NULL role
+inherits the workspace role. Those states are distinct. No credential or user
+profile data is included.
+
+The final membership must survive audit append and readback before commit.
+Audit insert/commit failures, ignored writes or audit-trigger state changes
+roll back the entire mutation. Observers are notified only after commit; an
+unchanged role override emits no change event. Existing response shapes and
+duplicate/not-found behavior remain. These events use the general journal;
+this change adds no dedicated Settings Audit projection or history endpoint.
+The separate onboarding initial-membership writer and other F1 mutation paths
+remain outside this scoped contract.
+
+### Initial workspace ownership audit
+
+Workspace creation, signup without a redeemed invitation, and initial bootstrap
+append the dedicated `member.owner_created` event with `action=owner_created` in the same transaction
+as the first OWNER membership. The actor and subject are the actual inserted
+owner. The stored event has `old_membership=null`, the exact new membership
+(including native timestamp defaults and nullable capabilities), its sorted
+effective capabilities, and `creation_path` identifying the three entry points.
+Guest `POST /api/v1/workspaces` returns 403 without creating a workspace.
+Workspace creation rechecks the current account and global trusted ceiling in
+that transaction; the new OWNER row is not evidence of a prior grant.
+
+Audit failure, ignored writes, altered final membership or commit failure roll
+back creation. Notifications run only after commit, including bootstrap's
+committed `session_pending` response. Bootstrap retains its instance CLI-token
+audit and final token acknowledgement; invitation signup still joins the invited
+workspace without a personal-owner event. Generic signup responses retain their
+existing anti-enumeration behavior.
+
+General journal GET/SSE/WebSocket serialization, automation preview samples,
+predicates and template inputs expose only `member_id`, `subject_user_id`,
+`action` and `creation_path` for this event. The public projection leaves the
+canonical payload unchanged and provides no new administrative snapshot reader.
+
+Journal text search uses only the summary for `member.owner_created` and the entire
+`member.access_changed` family, including historical owner events and other actions. Previously searchable public
+payload fields in this family no longer match journal List or Count queries;
+unfiltered reads and canonical payloads are unchanged.
+The creation helper acknowledges the decoded audit snapshot semantically, rather
+than requiring JSON object byte order; the writer retains its signed native INSERT check.
+No email, password, token or invitation proof enters the owner audit. This does
+not add audit coverage to onboarding crew creation or Page/folder ACL writers.
 
 ### Per-frame realtime authorization cost
 

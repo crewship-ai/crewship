@@ -35,6 +35,8 @@ export interface Pipeline {
   // OWNER/ADMIN). Absent on older payloads → treated as "active".
   status?: "active" | "proposed" | "disabled"
   author_crew_id?: string
+  // Routine folder it is filed in (ODCH-RT-01); absent when unfiled.
+  folder_id?: string
   author_agent_id?: string
   // author_agent_name is denormalized server-side from the agents
   // table so the routines list can render a human label without a
@@ -64,6 +66,16 @@ export interface PipelineDraftSummary {
   revision: number
   updated_at: string
   updated_by?: string
+  /** The latest Test run of exactly this draft's content; absent when untested (ODCH-RT-13). */
+  test_result?: RoutineTestResult
+}
+
+/** Outcome of a Test run, kept per definition (GET draft, versions). */
+export interface RoutineTestResult {
+  passed: boolean
+  status: string
+  tested_at: string
+  tested_by?: string
 }
 
 // PipelineRunSummary is the shape ListRuns returns — a journal entry

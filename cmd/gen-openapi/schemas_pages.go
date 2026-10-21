@@ -183,6 +183,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"private_audience":       map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
 		"has_document":           boolean(),
 		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
 		"can_remove_from_folder": map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},

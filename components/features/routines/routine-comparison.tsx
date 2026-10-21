@@ -389,7 +389,7 @@ export function RoutineComparison({
                     </td>
                     <td className="p-2">{comparisonVerdict(job)}</td>
                     <td className="p-2">
-                      {job.result ? `$${job.result.cost_usd.toFixed(4)}` : "—"}
+                      {job.result && job.result.cost_usd != null ? `$${job.result.cost_usd.toFixed(4)}` : "—"}
                     </td>
                     <td className="p-2">{job.result ? `${job.result.duration_ms} ms` : "—"}</td>
                     <td className="p-2">

@@ -9,8 +9,8 @@ package api
 // forward — rotating the master key meant carrying the old key env var
 // forever. This handler walks every inventoried envelope column, decrypts
 // with whatever key version the envelope names, re-encrypts with the current
-// version, and reports counts. After a run that reports failed=0 the old
-// key can be retired.
+// version, and reports counts. Successful envelope conversion does not
+// retire ENCRYPTION_KEY: journal and instance-audit MACs retain that v1 root.
 //
 // The column inventory below is the single source of truth for "where do
 // envelopes live". If you add a new encryption.Encrypt call site that
@@ -189,7 +189,7 @@ func (h *ReencryptHandler) reencryptColumn(ctx context.Context, tgt reencryptTar
 		}
 		// Fail-open columns (webhook secrets): a bare, non-enveloped value is
 		// the EXPECTED key-less/legacy state, not a rotation failure — count it
-		// as Skipped so it doesn't poison the "failed=0 ⇒ retire old key" gate.
+		// as Skipped so it does not count as a failed envelope conversion.
 		if tgt.FailOpen && !encryption.IsEncrypted(value) {
 			res.Skipped++
 			continue

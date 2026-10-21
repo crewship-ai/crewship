@@ -163,7 +163,7 @@ export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
       </div>
 
       <div className="flex items-center gap-2 pt-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
+        <span className="text-label font-medium text-muted-foreground-soft">
           Or start from a template
         </span>
         <span className="h-px flex-1 bg-hairline" aria-hidden="true" />
@@ -180,7 +180,7 @@ export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='Search templates… (e.g. "saas", "research")'
-          className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-12 coarse:text-sm"
+          className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-[44px] coarse:text-sm"
         />
       </div>
 

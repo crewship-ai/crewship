@@ -95,3 +95,12 @@ Host power loss, Docker daemon loss and Docker Desktop support require their own
 acceptance evidence. The tagged `TestTmuxRunContinuesAfterOutputReaderLoss`
 reproducer preserves the original FIFO/SIGPIPE failure for unsupported legacy
 transport; it is not a durable-path acceptance test.
+
+New terminal records retain `completed_at` from the protected writer's terminal
+observation. Inspect, line decoding and retained replay preserve that exact
+value; replay never reads a new clock to reconstruct completion. Host-produced
+completion carried in a separate typed field can therefore timestamp a terminal journal event separately
+from admission. Historical records omit the field: their finish time remains
+unknown, their bytes and prefix fingerprints remain unchanged, and callers use
+the previous deterministic timestamp only as a legacy fallback, not finish-time
+proof. This does not retroactively repair historical timelines.

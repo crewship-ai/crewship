@@ -10,6 +10,7 @@ import { useChat, type ChatMessage, type ChatTurn, type HistoryPart } from "@/ho
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
+import { copyToClipboard } from "@/lib/clipboard"
 import { TurnRenderer } from "@/components/features/chat/turn-renderer"
 import { ChatComposer } from "@/components/features/chat/composer/chat-composer"
 import { FollowUps } from "@/components/features/chat/suggestions/follow-ups"
@@ -170,6 +171,15 @@ interface OnboardingSetupChatProps {
    *  language. The agent's own replies are handled separately, by the
    *  LANGUAGE block the server injects into its system prompt. */
   language?: string
+  /** Inside the setup card's body: no card chrome of its own, fill the column. */
+  embedded?: boolean
+}
+
+/** The chat's own card, or — embedded in the setup card — a column that fills its parent. */
+function chatShellClass(embedded = false): string {
+  return embedded
+    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-card"
+    : "flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
 }
 
 /**
@@ -195,6 +205,7 @@ export function OnboardingSetupChat({
   onProposalApplied,
   onProposalPrepared,
   language,
+  embedded = false,
 }: OnboardingSetupChatProps) {
   const [session, setSession] = useState<SetupAgentSession | null>(null)
   const [starting, setStarting] = useState(true)
@@ -232,7 +243,7 @@ export function OnboardingSetupChat({
     // from a dashed placeholder to a full-height card when the Guide answers.
     return (
       <div
-        className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
+        className={chatShellClass(embedded)}
         role="status"
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -273,6 +284,7 @@ export function OnboardingSetupChat({
         onProposalApplied={onProposalApplied}
         onProposalPrepared={onProposalPrepared}
         language={language}
+        embedded={embedded}
       />
     </RealtimeProvider>
   )
@@ -322,6 +334,7 @@ function ConnectedSetupChat({
   onProposalApplied,
   onProposalPrepared,
   language,
+  embedded = false,
 }: {
   agentId: string
   sessionId: string
@@ -329,6 +342,7 @@ function ConnectedSetupChat({
   onProposalApplied: (result: ApplyProposalResult, proposal: OnboardingProposal) => void
   onProposalPrepared?: (proposal: OnboardingProposal | null) => void
   language?: string
+  embedded?: boolean
 }) {
   const session = useSession()
   const currentUserId = session.data?.user?.id
@@ -638,9 +652,7 @@ function ConnectedSetupChat({
     return true
   }, [])
   const starters = starterPrompts(language)
-  const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content).catch(() => {})
-  }, [])
+  const handleCopy = copyToClipboard
   const noopFileClick = useCallback(() => {}, [])
 
   // The ONLY call site of applyOnboardingProposal in this component, and it
@@ -665,7 +677,7 @@ function ConnectedSetupChat({
   }, [proposal, workspaceId, onProposalApplied])
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
+    <div className={chatShellClass(embedded)}>
       <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-primary/30 bg-primary/15">
           <AgentAvatar
@@ -684,14 +696,14 @@ function ConnectedSetupChat({
               }`}
             />
           </div>
-          <div className="text-[11px] text-muted-foreground truncate">
+          <div className="text-micro text-muted-foreground truncate">
             {connectionStatus === "connected"
               ? "Tell it what you need — it'll propose a crew"
               : "Reconnecting to the Guide…"}
           </div>
         </div>
         {connectionStatus !== "connected" && (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0" data-testid="onboarding-chat-connection">
+          <span className="flex items-center gap-1 text-micro text-muted-foreground shrink-0" data-testid="onboarding-chat-connection">
             <WifiOff className="h-3 w-3" />
             {connectionStatus}
           </span>
@@ -737,12 +749,12 @@ function ConnectedSetupChat({
                   <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                   <span className="min-w-0">
                     <span className="block text-xs font-medium tracking-tight">{p.title}</span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{p.prompt}</span>
+                    <span className="mt-0.5 block text-micro leading-relaxed text-muted-foreground">{p.prompt}</span>
                   </span>
                 </motion.button>
               ))}
             </div>
-            <p className="mt-3 text-center text-[11px] text-muted-foreground">{starters.footer}</p>
+            <p className="mt-3 text-center text-micro text-muted-foreground">{starters.footer}</p>
           </div>
         )}
         {historyWarning && (

@@ -57,7 +57,7 @@ function IntakeEditor({ path, data, disabled, onBusy, workspaceId, projectId }: 
     finally { setSaving(false); onBusy(false) }
   }
   return <div className="space-y-2"><label htmlFor={id} className="text-sm">Issue intake crew</label>
-    <select id={id} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-12" value={crewId} disabled={disabled || saving || conflict} onChange={event => setCrewId(event.target.value)}><option value="">Choose a crew</option>{data.crews.map(crew => <option key={crew.id} value={crew.id}>{crew.name}</option>)}</select>
+    <select id={id} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-[44px]" value={crewId} disabled={disabled || saving || conflict} onChange={event => setCrewId(event.target.value)}><option value="">Choose a crew</option>{data.crews.map(crew => <option key={crew.id} value={crew.id}>{crew.name}</option>)}</select>
     <Button size="sm" variant="outline" disabled={disabled || saving || conflict || !crewId || crewId === data.intake.crew_id} onClick={() => void save()}>{saving ? "Saving…" : "Save intake crew"}</Button>
     {error && <p role="alert" className="text-sm">{error}</p>}
   </div>

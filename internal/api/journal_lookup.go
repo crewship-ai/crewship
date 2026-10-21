@@ -60,17 +60,26 @@ type lookupMissionEntry struct {
 	Identifier string `json:"identifier,omitempty"`
 }
 
+// lookupPersonEntry names a workspace member for "who did this" on a
+// journal row (#3636). Display name only: never the email, which the
+// member list shows only to those allowed to see it.
+type lookupPersonEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type journalLookupResponse struct {
 	Crews    []lookupCrewEntry    `json:"crews"`
 	Agents   []lookupAgentEntry   `json:"agents"`
 	Missions []lookupMissionEntry `json:"missions"`
+	People   []lookupPersonEntry  `json:"people"`
 }
 
 // Get serves GET /api/v1/journal/lookup. Returns a workspace-scoped
 // snapshot of reference rows the frontend needs to render journal
 // entries with human-readable names + lucide icons + palette colors.
 //
-// All three lists are guaranteed non-nil even when empty, so the
+// All four lists are guaranteed non-nil even when empty, so the
 // frontend can safely access `.crews.find(...)` etc. without nil
 // guards.
 func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +93,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Crews:    []lookupCrewEntry{},
 		Agents:   []lookupAgentEntry{},
 		Missions: []lookupMissionEntry{},
+		People:   []lookupPersonEntry{},
 	}
 
 	// Crews — icon (lucide name) and color (palette ID) per CLAUDE.md.
@@ -202,6 +212,36 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = missionRows.Close()
+
+	// People — members of this workspace only, by display name.
+	personRows, err := h.db.QueryContext(r.Context(), `
+		SELECT u.id, COALESCE(u.full_name, '')
+		FROM workspace_members wm JOIN users u ON u.id = wm.user_id
+		WHERE wm.workspace_id = ?
+		ORDER BY u.full_name
+		LIMIT ?`, workspaceID, lookupCap)
+	if err != nil {
+		h.logger.Error("journal lookup: people", "err", err)
+		replyError(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+	for personRows.Next() {
+		var p lookupPersonEntry
+		if err := personRows.Scan(&p.ID, &p.Name); err != nil {
+			_ = personRows.Close()
+			h.logger.Error("journal lookup: scan person", "err", err)
+			replyError(w, http.StatusInternalServerError, "lookup failed")
+			return
+		}
+		resp.People = append(resp.People, p)
+	}
+	if err := personRows.Err(); err != nil {
+		_ = personRows.Close()
+		h.logger.Error("journal lookup: person rows", "err", err)
+		replyError(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+	_ = personRows.Close()
 
 	writeJSON(w, http.StatusOK, resp)
 }

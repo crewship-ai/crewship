@@ -129,6 +129,28 @@ const GOLDEN_AVATAR_HASHES: Record<string, string> = {
   "toon-head__alice": "b3c64fbada3d8559",
   "toon-head__bob-the-builder": "b647f9d3d3d26635",
   "toon-head__42": "f2c4084f47cc7cf1",
+
+  // ── #3789: DiceBear 10's voxel styles ───────────────────────────────────
+  // ADDED, from @dicebear/core-v10 + @dicebear/styles-v10 (exact pins), while
+  // every style above stays on 9.4 and keeps its hash. Voxel agents never
+  // store a render (lib/agent-avatar-persist.ts), so these hashes are the
+  // ONLY thing that keeps their faces across a dependency bump.
+  "voxel-bot__alice": "2419dfa7ab5a073c",
+  "voxel-bot__bob-the-builder": "e358ec7fd9417170",
+  "voxel-bot__42": "4ad22aa2b8b70a21",
+  "voxel-art__alice": "78f1f2d192a1ffaa",
+  "voxel-art__bob-the-builder": "a5cd96c6f1e0bf9c",
+  "voxel-art__42": "f60c4f13a978bbab",
+}
+
+// The moving renders of the same faces (animationVariant "slow").
+const GOLDEN_ANIMATED_HASHES: Record<string, string> = {
+  "voxel-bot__alice": "c9686fba48a9ba02",
+  "voxel-bot__bob-the-builder": "9044c7c8b27985aa",
+  "voxel-bot__42": "c94ca7b7f7169eb8",
+  "voxel-art__alice": "c8d68c56ed1947f0",
+  "voxel-art__bob-the-builder": "9e95468203b822d7",
+  "voxel-art__42": "50c08561b5eab997",
 }
 
 const SEEDS = ["alice", "bob-the-builder", "42"]
@@ -166,6 +188,15 @@ describe("avatar rendering stability", () => {
       )
       expect(hashOf(uri), `avatar rendering changed for ${key} — see this file's header`).toBe(
         GOLDEN_AVATAR_HASHES[key],
+      )
+    }
+  })
+
+  it.each(["voxel-bot", "voxel-art"])("animates %s identically to the pinned output", (style) => {
+    for (const seed of SEEDS) {
+      const key = `${style}__${seed}`
+      expect(hashOf(getAgentAvatarUrl(seed, style, { animated: true })), `animated rendering changed for ${key}`).toBe(
+        GOLDEN_ANIMATED_HASHES[key],
       )
     }
   })

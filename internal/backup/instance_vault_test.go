@@ -76,6 +76,53 @@ func TestRecoveryKitMissingKeyIsRecorded(t *testing.T) {
 	}
 }
 
+func TestRecoveryKitAuditRootRetention(t *testing.T) {
+	upper := strings.ToUpper(strings.Repeat("ab", 32))
+	for _, tc := range []struct {
+		name, root string
+		wantError  bool
+	}{
+		{"upper_case_root_without_v1_envelopes", upper, false},
+		{"absent_root_is_not_invented", "", false},
+		{"malformed_provided_root_refuses_capture", strings.Repeat("z", 64), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(encryption.KeyVersionEnvVar, "v2")
+			t.Setenv(encryption.KeyEnvVar("v1"), tc.root)
+			t.Setenv(encryption.KeyEnvVar("v2"), strings.Repeat("cd", 32))
+			kit, missing, err := backup.BuildRecoveryKit(backup.VaultScan{Versions: map[string]int{"v2": 2}}, time.Now())
+			if tc.wantError {
+				if err == nil || kit != nil {
+					t.Fatal("malformed configured audit root was silently dropped")
+				}
+				return
+			}
+			if err != nil || len(missing) != 0 || kit.CurrentVersion != "v2" {
+				t.Fatalf("valid configured kit failed: err=%v missing=%d", err, len(missing))
+			}
+			if kit.ChainSeed() != tc.root {
+				t.Fatal("audit root was normalized, lost, or invented")
+			}
+			lines, err := kit.EnvLines()
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, line := range lines {
+				if value, ok := strings.CutPrefix(line, "ENCRYPTION_KEY="); ok {
+					found = true
+					if value != tc.root {
+						t.Fatal("recovered root environment changed its exact string")
+					}
+				}
+			}
+			if found != (tc.root != "") {
+				t.Fatal("recovered root presence does not match explicit configuration")
+			}
+		})
+	}
+}
+
 func TestParseRecoveryKitRejectsTampering(t *testing.T) {
 	cases := []struct{ name, body string }{
 		{"not json", `nope`},

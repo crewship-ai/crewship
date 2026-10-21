@@ -151,7 +151,7 @@ describe("<EgressAllowlistAction>", () => {
     render(<EgressAllowlistAction entry={deniedEntry()} />)
     fireEvent.click(screen.getByRole("button", { name: /add raw\.githubusercontent\.com/i }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Forbidden"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Forbidden", { duration: Infinity }))
     expect(screen.getByRole("button", { name: /add raw\.githubusercontent\.com/i })).toBeEnabled()
   })
 

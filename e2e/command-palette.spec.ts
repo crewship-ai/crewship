@@ -86,7 +86,10 @@ async function firstRow(page: Page, hrefPattern: RegExp) {
     for (const row of await page.locator("[cmdk-item][data-href]").all()) {
       const href = await row.getAttribute("data-href")
       if (href && hrefPattern.test(href)) {
-        return { row, href, text: (await row.innerText()).trim() }
+        // The row's own name (the `type-row` label), without the crew,
+        // role or provider the row carries on its right.
+        const name = (await row.locator(".type-row").first().innerText()).trim()
+        return { row, href, text: (await row.innerText()).trim(), name }
       }
     }
     await page.waitForTimeout(250)
@@ -105,10 +108,17 @@ test.describe("⌘K — every row opens the thing it names", () => {
     await expect(page).toHaveURL(/\/crews\?agent=/, { timeout: TIMEOUT })
     // The canvas, not an empty shell: /crews/agents/<id> answered 200 and
     // rendered only the sidebar, so "the URL changed" proves nothing. The
-    // agent has to be ON it.
-    await expect(page.locator("main")).toContainText(slug, { timeout: TIMEOUT })
-    await expect(page.getByText("Current work", { exact: true })).toBeVisible({ timeout: TIMEOUT })
-    await expect(page.getByText("Recent outcomes", { exact: true })).toBeVisible({ timeout: TIMEOUT })
+    // agent has to be ON it. The Harbor 2 agent header (crews K08) names the
+    // agent and no longer prints the slug, so the slug is proven through the
+    // header's own Chat action, which links to that agent's chat.
+    const header = page.getByTestId("agent-header")
+    await expect(header.getByRole("heading", { level: 1 })).toContainText(hit!.name, { timeout: TIMEOUT })
+    await expect(page.getByRole("link", { name: `Chat with ${hit!.name}`, exact: true }))
+      .toHaveAttribute("href", `/chat/${encodeURIComponent(slug)}`, { timeout: TIMEOUT })
+    // v67 agent overview (crews, 111a036f2): Now / Holds / Talks with / Last
+    // 30 days replace Current work and Recent outcomes.
+    await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByRole("heading", { level: 2, name: "Last 30 days", exact: true })).toBeVisible({ timeout: TIMEOUT })
   })
 
   test("a crew selects that crew, rather than a route that does not exist", async ({ page }) => {
@@ -117,10 +127,13 @@ test.describe("⌘K — every row opens the thing it names", () => {
     expect(hit, "seeded palette is missing crews").not.toBeNull()
     await hit!.row.click()
 
-    await expect(page).toHaveURL(/\/crews\?crew=/, { timeout: TIMEOUT })
+    const slug = decodeURIComponent(/crew=([^&]+)/.exec(hit!.href)![1])
+    await expect(page).toHaveURL(new RegExp(`/crews\\?crew=${slug}(?:&|$)`), { timeout: TIMEOUT })
     // /crews/<id> answered 200 and rendered nothing but the sidebar. A crew
-    // that is really selected names itself in the sub-bar.
-    await expect(page.getByText(/Crews & Agents/)).toBeVisible({ timeout: TIMEOUT })
+    // that is really selected names itself: in Harbor 2 that is the crew
+    // page's own header (crews K03), not the old "Crews & Agents" sub-bar.
+    await expect(page.getByTestId("crew-header").getByRole("heading", { level: 1 }))
+      .toHaveText(hit!.name, { timeout: TIMEOUT })
   })
 
   test("a routine opens that routine", async ({ page }) => {
@@ -130,8 +143,16 @@ test.describe("⌘K — every row opens the thing it names", () => {
     const slug = decodeURIComponent(/slug=([^&]+)/.exec(hit!.href)![1])
     await hit!.row.click()
 
-    await expect(page).toHaveURL(/\/routines\?slug=/, { timeout: TIMEOUT })
-    await expect(page.locator("main")).toContainText(slug, { timeout: TIMEOUT })
+    await expect(page).toHaveURL(new RegExp(`/routines\\?slug=${slug}(?:&|$)`), { timeout: TIMEOUT })
+    // The routine page, not an empty shell: its header names the routine the
+    // row named. Harbor 2 (routines R05) prints the slug only in Full detail,
+    // so the slug is proven there.
+    const header = page.getByTestId("routine-page-header")
+    await expect(header.getByRole("heading")).toHaveText(hit!.name, { timeout: TIMEOUT })
+    await page.getByRole("radio", { name: "Full detail", exact: true }).click()
+    await expect(header.getByTestId("routine-meta-line")).toContainText(slug, { timeout: TIMEOUT })
+    // The depth is remembered per person; leave it as the other specs expect.
+    await page.getByRole("radio", { name: "Simple", exact: true }).click()
   })
 
   test("a project filters the board to that project", async ({ page }) => {
@@ -250,8 +271,14 @@ test.describe("⌘K — every row opens the thing it names", () => {
     // during a client-side transition), and the roster then gave no sign of
     // which person had been picked. Members is its own page now; the link
     // must still land on it with that person open.
-    await expect(page).toHaveURL(/\/settings\/members\?member=/, { timeout: TIMEOUT })
-    await expect(page.getByRole("region", { name: /^Member details:/ })).toBeVisible({ timeout: TIMEOUT })
+    //
+    // The page reads ?member= once and drops it (settings T12, kept since
+    // #3056): the Peek keeps its own history entry, and leaving the param in
+    // the URL made Back reopen the person. So the URL proves the page, and
+    // the open Peek proves the person — the one the row named.
+    await expect(page).toHaveURL(/\/settings\/members(?:\?|$)/, { timeout: TIMEOUT })
+    await expect(page.getByRole("region", { name: `Member details: ${hit!.name}`, exact: true }))
+      .toBeVisible({ timeout: TIMEOUT })
   })
 
   test("a credential opens that credential, not the vault", async ({ page }) => {
@@ -261,7 +288,11 @@ test.describe("⌘K — every row opens the thing it names", () => {
     await hit!.row.click()
 
     await expect(page).toHaveURL(/\/credentials\?id=/, { timeout: TIMEOUT })
-    await expect(page.getByRole("button", { name: /Back to credentials/i })).toBeVisible({ timeout: TIMEOUT })
+    // The secret's own page (vault Q03), not the list: its name is the page
+    // heading and its sections are open. The Harbor 2 back control is
+    // "‹ <space>" (Secrets / AI providers), not "Back to credentials".
+    await expect(page.getByRole("heading", { level: 1, name: hit!.name, exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByRole("tablist", { name: "Secret sections" })).toBeVisible({ timeout: TIMEOUT })
   })
 })
 
@@ -300,28 +331,29 @@ test.describe("⌘K — the panel itself", () => {
   })
 })
 
-test.describe("top bar — one status pill, two bells", () => {
-  test("states the connection, and the fleet only when it matters", async ({ page }) => {
+test.describe("top bar — two bells; the status lives in the Activity panel", () => {
+  // PAR-001 (v67): the bar ends with the two bells. The connection and fleet
+  // pill moved into the Activity bell's panel as its "Now" summary line.
+  test("states the connection, and the fleet only when it is live", async ({ page }) => {
     await page.goto("/")
-    const pill = page.getByTestId("system-status-pill")
-    await expect(pill).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByTestId("activity-trigger")).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByTestId("system-status-pill")).toHaveCount(0)
+    await page.getByTestId("activity-trigger").click()
+    const line = page.getByTestId("activity-status-summary")
+    await expect(line).toBeVisible({ timeout: TIMEOUT })
 
     // NOT specifically "Online": that depends on the websocket connecting on
-    // the runner, and this PR deliberately hides the fleet half when it has
-    // not — so pinning the connected state would fail for the very behaviour
-    // it is meant to check. Assert the pill states A known one.
-    await expect(pill).toContainText(/Online|Connecting|Reconnecting|Offline/)
+    // the runner. Assert the line states A known one.
+    await expect(line).toContainText(/Online|Connecting|Reconnecting|Offline/)
 
-    const text = (await pill.innerText()).replace(/\s+/g, " ")
+    const text = (await line.innerText()).replace(/\s+/g, " ")
     if (!/Online/.test(text)) {
-      // Not connected: the counts are last-known, so the pill must not recite
-      // them. That is the whole reason the two pills became one.
-      expect(text).not.toMatch(/agents?|errors?|queued/)
+      // Not connected: the counts are last-known, so the line must not
+      // recite them.
+      expect(text).not.toMatch(/agents?|running|idle|errors?|queued/)
     } else {
-      // Connected and healthy, the pill says nothing beyond "Online" — it
-      // speaks for errors, a queue, or an empty workspace, and otherwise
-      // stays quiet. So a plain census is the thing that must never appear.
-      expect(text).not.toMatch(/\d+ agents?\b/)
+      // Connected: v67's summary is the census, "N agents · N running · N idle".
+      await expect(line).toHaveText(/^Online · \d+ agents · \d+ running · \d+ idle$/, { timeout: TIMEOUT })
     }
   })
 

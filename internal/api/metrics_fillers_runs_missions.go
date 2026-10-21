@@ -2,8 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"math"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 func (h *MetricsHandler) fillRunsCount(r *http.Request, p timeseriesParams, idxByKey map[string]int, resp *metricsResponse) error {
@@ -196,3 +199,61 @@ func (h *MetricsHandler) fillActiveMissions(r *http.Request, p timeseriesParams,
 
 // parseDBTime parses a timestamp string as written by SQLite defaults or the
 // RFC3339 format used by the Go side. Returns an error if neither works.
+
+// fillRunOutcomes fills success_rate (percent of finished runs that
+// succeeded, cancelled and still-running runs excluded, as the insights tiles
+// do) or p95_duration_ms (nearest-rank p95 over every finished run) per
+// bucket, by the bucket the run started in. Buckets with nothing to report are
+// left without a value.
+func (h *MetricsHandler) fillRunOutcomes(r *http.Request, p timeseriesParams, idxByKey map[string]int, resp *metricsResponse) error {
+	since, err := time.Parse(time.RFC3339, windowStartCutoff(p))
+	if err != nil {
+		return err
+	}
+	runs, _, err := journal.RunOutcomes(r.Context(), h.db, p.WorkspaceID, since)
+	if err != nil {
+		return err
+	}
+	type tally struct {
+		succeeded, failed int
+		durations         []int64
+	}
+	byBucket := map[string]*tally{}
+	for _, run := range runs {
+		key := bucketKey(truncateToBucket(run.StartedAt, p.BucketDur))
+		if _, in := idxByKey[key]; !in {
+			continue
+		}
+		t := byBucket[key]
+		if t == nil {
+			t = &tally{}
+			byBucket[key] = t
+		}
+		switch run.Status {
+		case journal.RunStatusCompleted:
+			t.succeeded++
+		case journal.RunStatusFailed, journal.RunStatusTimeout:
+			t.failed++
+		}
+		if !run.FinishedAt.IsZero() {
+			if ms := run.FinishedAt.Sub(run.StartedAt).Milliseconds(); ms >= 0 {
+				t.durations = append(t.durations, ms)
+			}
+		}
+	}
+	resp.SeriesLabels["total"] = "Total"
+	for key, t := range byBucket {
+		i := idxByKey[key]
+		switch p.Metric {
+		case "success_rate":
+			if n := t.succeeded + t.failed; n > 0 {
+				resp.Buckets[i].Series["total"] = math.Round(float64(t.succeeded)/float64(n)*10000) / 100
+			}
+		case "p95_duration_ms":
+			if len(t.durations) > 0 {
+				resp.Buckets[i].Series["total"] = float64(journal.Percentile95(t.durations))
+			}
+		}
+	}
+	return nil
+}

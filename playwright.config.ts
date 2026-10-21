@@ -13,11 +13,9 @@ export default defineConfig({
   testIgnore: [
     "**/smoke.spec.ts",
     "**/manual-crews-walkthrough.spec.ts",
-    "**/crews-unification.spec.ts",
     "**/full-integration.spec.ts",
     "**/edge-cases.spec.ts",
     "**/visual.spec.ts",
-    "**/mobile-crews.spec.ts",
     // onboarding-wizard.spec.ts needs a fresh, NEVER-bootstrapped DB
     // and explicitly bypasses globalSetup's demo-user login. Running
     // it under the main config would either skip silently (already

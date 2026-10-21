@@ -1,6 +1,30 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { RotationDialog } from "../rotation-dialog"
+import { SecretValueHistory } from "../secret-value-history"
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
+
+it("End grace early calls DELETE /credential-rotations/{id}", async () => {
+  const rows = [
+    { id: "rot/1", grace_seconds: 86400, rotated_at: "2026-10-16T07:55:00Z", expires_at: "2099-10-17T07:55:00Z", rotated_by: "u1", status: "ACTIVE" },
+    { id: "rot0", grace_seconds: 0, rotated_at: "2026-07-20T10:12:00Z", expires_at: "2026-07-20T10:12:00Z", rotated_by: "u1", status: "EXPIRED" },
+  ]
+  api.mockImplementation(async (_url: string, init?: RequestInit) => (init?.method === "DELETE" ? { ok: true, json: async () => ({}) } : { ok: true, json: async () => rows }))
+  render(<SecretValueHistory workspaceId="ws/1" credentialId="cred_1" canRotate onReplace={() => {}} />)
+  expect(await screen.findByText("Replaced · grace 1 d")).toBeInTheDocument()
+  expect(screen.getByText("Replaced · no grace")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "End grace early" }))
+  const dialog = await screen.findByRole("alertdialog")
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "End grace early" })))
+  await waitFor(() => expect(api).toHaveBeenCalledWith("/api/v1/credential-rotations/rot%2F1?workspace_id=ws%2F1", { method: "DELETE" }))
+})
+
+it("does not ask for the rotation history without the rotate permission", () => {
+  render(<SecretValueHistory workspaceId="ws1" credentialId="cred_1" canRotate={false} onReplace={() => {}} />)
+  expect(api).not.toHaveBeenCalled()
+  expect(screen.queryByRole("button", { name: /replace value/i })).not.toBeInTheDocument()
+})
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
@@ -15,7 +39,7 @@ function deferred<T>() {
 function props() { return { workspaceId: "workspace-a", credentialId: "credential-a", credentialName: "Fixture", open: true, onOpenChange: vi.fn(), onRotated: vi.fn() } }
 function submit() {
   fireEvent.change(screen.getByLabelText("New value"), { target: { value: "replacement fixture" } })
-  fireEvent.click(screen.getByRole("button", { name: "Replace value" }))
+  fireEvent.click(screen.getByRole("button", { name: "Replace" }))
 }
 
 it("clears the secret draft and visibility when the workspace changes", () => {
@@ -65,7 +89,7 @@ it.each(["server", "malformed", "null", "network"])("shows a recoverable %s fail
   expect(alert).toHaveTextContent(failure === "server" ? "Permission denied" : failure === "network" ? "Network error" : "Could not replace the value")
   expect(screen.getByLabelText("New value")).toHaveValue("replacement fixture")
   api.mockResolvedValueOnce({ ok: true })
-  fireEvent.click(screen.getByRole("button", { name: "Replace value" }))
+  fireEvent.click(screen.getByRole("button", { name: "Replace" }))
   await waitFor(() => expect(p.onRotated).toHaveBeenCalledOnce())
   expect(p.onOpenChange).toHaveBeenCalledWith(false)
 })
@@ -76,9 +100,9 @@ it("encodes the target and refuses blank or repeated submissions while pending",
   const p = { ...props(), workspaceId: "workspace/a&b", credentialId: "credential/a?b" }
   render(<RotationDialog {...p} />)
   fireEvent.change(screen.getByLabelText("New value"), { target: { value: "   " } })
-  expect(screen.getByRole("button", { name: "Replace value" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Replace" })).toBeDisabled()
   submit()
-  fireEvent.click(screen.getByRole("button", { name: /Replace value|Saving|Replacing/ }))
+  fireEvent.click(screen.getByRole("button", { name: /^Replace$|Saving|Replacing/ }))
   expect(api).toHaveBeenCalledTimes(1)
   expect(api).toHaveBeenCalledWith("/api/v1/credentials/credential%2Fa%3Fb/rotate?workspace_id=workspace%2Fa%26b", expect.objectContaining({ method: "POST" }))
   await act(async () => pending.resolve({ ok: true }))

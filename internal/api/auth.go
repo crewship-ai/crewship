@@ -444,6 +444,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := ""
+	var notifyOwner func()
 	if joined == 0 {
 		slug = slugBase + "-" + workspaceID[:8]
 		// kind = personal: this one person's own space, kept apart from the
@@ -464,11 +465,16 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "retention defaults", err)
 			return
 		}
-		_, err = tx.ExecContext(r.Context(),
+		memberResult, err := tx.ExecContext(r.Context(),
 			"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 			memberID, workspaceID, userID, "OWNER", now)
 		if err != nil {
 			replyInternalError(w, h.logger, "insert membership", err)
+			return
+		}
+		notifyOwner, err = appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "signup_personal")
+		if err != nil {
+			replyInternalError(w, h.logger, "audit initial workspace owner", err)
 			return
 		}
 	}
@@ -479,6 +485,9 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	publishAudit()
+	if notifyOwner != nil {
+		notifyOwner()
+	}
 	h.logger.Info("signup: account created", "user_id", userID, "workspace", slug, "invitations_redeemed", joined)
 	writeSignupResponse(w)
 }
@@ -854,7 +863,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
+	memberResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
@@ -897,6 +906,11 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "bootstrap: token audit", err)
 		return
 	}
+	notifyOwner, err := appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "bootstrap")
+	if err != nil {
+		replyInternalError(w, h.logger, "bootstrap: audit initial workspace owner", err)
+		return
+	}
 	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
 		replyInternalError(w, h.logger, "bootstrap: acknowledge token", err)
 		return
@@ -905,6 +919,10 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "bootstrap: commit", err)
 		return
+	}
+
+	if notifyOwner != nil {
+		notifyOwner()
 	}
 
 	// One-shot: close the deploy-race window so a second POST gets 410

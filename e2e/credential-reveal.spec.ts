@@ -47,22 +47,22 @@ for (const scenario of [
     })
     await page.goto("/credentials")
     await pinSidebar(page)
-    await page.getByText("Demo file", { exact: true }).first().click()
-    await expect(page.getByText("Back to credentials", { exact: true })).toBeVisible()
-    const reveal = page.getByRole("button", { name: "Reveal the existing value…", exact: true })
+    await page.getByRole("table", { name: "Secrets" }).getByText("Demo file", { exact: true }).click()
+    await expect(page.locator("[data-slot=secret-page]").getByRole("button", { name: "Secrets", exact: true })).toBeVisible()
+    const reveal = page.getByRole("button", { name: "Reveal…", exact: true })
     if (!allowed) {
       await expect(reveal).toHaveCount(0)
       expect(reveals).toBe(0)
       return
     }
     await reveal.click()
-    await page.getByLabel("Reason", { exact: true }).fill("Inspecting the inert demo credential for acceptance")
-    await page.getByRole("button", { name: "Reveal the existing value", exact: true }).click()
+    await page.getByLabel(/^Reason \(required/).fill("Inspecting the inert demo credential for acceptance")
+    await page.getByRole("button", { name: "Reveal for 30 s", exact: true }).click()
     await expect(page.getByTestId("revealed-value")).toHaveText("dummy-not-a-real-secret-browser")
     await page.screenshot({ path: "/tmp/credential-reveal-desktop.png" })
     await page.clock.fastForward(30001)
     await expect(page.getByTestId("revealed-value")).toHaveCount(0)
-    await expect(page.getByLabel("Reason", { exact: true })).toHaveValue("")
+    await expect(page.getByLabel(/^Reason \(required/)).toHaveValue("")
     expect(reveals).toBe(1)
   })
 }

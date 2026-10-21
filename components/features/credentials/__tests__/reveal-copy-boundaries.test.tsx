@@ -19,8 +19,8 @@ function show() {
   return { ...render(<RevealDialog {...p} />), p }
 }
 async function reveal() {
-  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: reason } })
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reveal the existing value" })))
+  fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: reason } })
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reveal for 30 s" })))
 }
 
 it("reports copied only after the browser confirms the clipboard write", async () => {
@@ -97,7 +97,7 @@ it("refuses a response that arrives while the tab is hidden and clears the reaso
   await act(async () => pending.resolve({ ok: true, json: async () => ({ value: privateValue }) }))
   expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
   expect(screen.getByRole("alert")).toHaveTextContent("tab was hidden")
-  expect(screen.getByLabelText("Reason")).toHaveValue("")
+  expect(screen.getByLabelText(/^Reason/)).toHaveValue("")
 })
 
 it("aborts a request on close and ignores its later network error", async () => {
@@ -112,7 +112,7 @@ it("aborts a request on close and ignores its later network error", async () => 
   await act(async () => pending.reject(new Error("offline")))
   rerender(<RevealDialog {...p} />)
   expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-  expect(screen.getByLabelText("Reason")).toHaveValue("")
+  expect(screen.getByLabelText(/^Reason/)).toHaveValue("")
 })
 
 it("treats an unreadable success body as no value and permits cancelling", async () => {

@@ -16,6 +16,11 @@ export interface CalendarEntry {
   status?: string
   outcome?: string
   pinned_version?: number | null
+  /** Planned starts only: the schedule they come from and its time zone. */
+  schedule_id?: string
+  timezone?: string
+  /** The agents of the routine's agent_run steps (absent when it has none). */
+  agents?: { id: string; slug: string; name: string }[]
 }
 
 export type CalendarOutcome = "planned" | "completed" | "failed" | "waiting" | "running" | "stopped"

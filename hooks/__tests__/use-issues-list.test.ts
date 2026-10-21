@@ -43,6 +43,24 @@ describe("useIssuesList", () => {
     vi.mocked(apiFetch).mockReset()
   })
 
+  it("asks the server for the quick view, on every page", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(jsonResponse(200, [issue("i1")], { "X-Total-Count": "2" }))
+    const { result } = renderHook(() => useIssuesList("ws-1", { quick: "reply" }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.loadMore() })
+    for (const [url] of vi.mocked(apiFetch).mock.calls) {
+      expect(new URL(String(url), "http://localhost").searchParams.get("needs")).toBe("reply")
+    }
+  })
+
+  it("sends no view parameter for All issues", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(jsonResponse(200, [], { "X-Total-Count": "0" }))
+    const { result } = renderHook(() => useIssuesList("ws-1", { quick: "all" }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const params = new URL(String(vi.mocked(apiFetch).mock.calls[0][0]), "http://localhost").searchParams
+    for (const k of ["mine", "needs", "working", "blocked"]) expect(params.has(k)).toBe(false)
+  })
+
   it("preserves the crew, assignee and mission scope across paging", async () => {
     vi.mocked(apiFetch).mockResolvedValue(jsonResponse(200, [issue("i1")], { "X-Total-Count": "2", "X-Has-More": "true" }))
     const { result } = renderHook(() => useIssuesList("ws-1", { crewId: "crew-2", assigneeId: "agent-2", missionType: "mission" }))

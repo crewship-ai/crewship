@@ -71,7 +71,7 @@ export function ProposalCard({
   return (
     <div
       data-testid="onboarding-proposal-card"
-      className="overflow-hidden rounded-2xl border border-primary/30 bg-gradient-to-b from-primary/10 to-card shadow-lg"
+      className="overflow-hidden rounded-card border border-primary/30 bg-gradient-to-b from-primary/10 to-card shadow-lg"
     >
       {/* Header: the crew's real look (the Guide picks icon + colour, the
           server validates them), its name and size. */}
@@ -84,7 +84,7 @@ export function ProposalCard({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">Proposal</div>
+          <div className="text-micro font-medium uppercase tracking-[0.16em] text-muted-foreground">Proposal</div>
           <div className="truncate text-base font-semibold tracking-tight">{proposal.crewName}</div>
           {/* No agent count here: the rows below ARE the roster, and a count
               is exactly the summary the card must never substitute for them
@@ -119,7 +119,7 @@ export function ProposalCard({
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="text-sm font-medium tracking-tight">{agent.name}</span>
-                  <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
                     {getModelLabel(agent.model)}
                   </span>
                 </span>
@@ -150,7 +150,7 @@ export function ProposalCard({
                   <span
                     key={tool}
                     data-testid="onboarding-proposal-tool"
-                    className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px]"
+                    className="rounded-full bg-muted px-2 py-0.5 font-mono text-micro"
                   >
                     {tool}
                   </span>
@@ -173,7 +173,7 @@ export function ProposalCard({
                     <span
                       key={domain}
                       data-testid="onboarding-proposal-domain"
-                      className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px]"
+                      className="rounded-full bg-muted px-2 py-0.5 font-mono text-micro"
                     >
                       {domain}
                     </span>
@@ -203,7 +203,7 @@ export function ProposalCard({
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/80 px-4 py-3">
-          <span className="text-[11px] text-muted-foreground">Nothing is created until you click Create.</span>
+          <span className="text-micro text-muted-foreground">Nothing is created until you click Create.</span>
           <Button
             type="button"
             size="sm"

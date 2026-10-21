@@ -11,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -45,13 +47,32 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
+	{name: "RoutineFolder", pointer: "/components/schemas/RoutineFolder", value: routineFolderResponse{}},
+	{name: "RoutineFolderMoveResult", pointer: "/components/schemas/RoutineFolderMoveResult", value: routineFolderMoveResult{}},
+	{name: "RoutineTemplate", pointer: "/components/schemas/RoutineTemplate", value: routineTemplateResponse{}},
+	{name: "RoutineHealth", pointer: "/components/schemas/RoutineHealth", value: routineHealthResponse{}},
+	{name: "RoutineHealthRow", pointer: "/components/schemas/RoutineHealthRow", value: routineHealthRow{}},
+	{name: "RoutineCheckup", pointer: "/components/schemas/RoutineCheckup", value: checkupResponse{}},
+	{name: "RoutineCheckupCheck", pointer: "/components/schemas/RoutineCheckupCheck", value: checkupCheck{}},
+	{name: "RoutineTestResult", pointer: "/components/schemas/RoutineTestResult", value: pipeline.TestResult{}},
 	{name: "WorkspaceArtifactCreationPolicyError", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyError", value: WorkspaceArtifactCreationPolicyError{}},
+	{name: "CrewProvisioningSummaryV1", pointer: "/components/schemas/CrewProvisioningSummaryV1", value: provisionSummaryResponse{}},
+	{name: "CrewProvisioningSummaryCrew", pointer: "/components/schemas/CrewProvisioningSummaryV1/properties/failed/items", value: provisionSummaryCrew{}},
+	{name: "CrewBudgetV1", pointer: "/components/schemas/CrewBudgetV1", value: crewBudgetResponse{}},
+	{name: "AgentReleasedV1", pointer: "/components/schemas/AgentReleasedV1", value: agentReleasedResponse{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "DocumentCheckpointList", pointer: "/components/schemas/DocumentCheckpointList", value: documentCheckpointListResponse{}},
+	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
+	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
+	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
+	{name: "NativeSlidesState", pointer: "/components/schemas/NativeSlidesState", value: slides.State{}},
+	{name: "NativeSlidesReceipt", pointer: "/components/schemas/NativeSlidesReceipt", value: slides.Receipt{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentAttributes", pointer: "/components/schemas/DocumentNode/properties/attrs", value: DocumentAttributes{}},
 	{name: "DocumentOutlineBlock", pointer: "/components/schemas/DocumentState/properties/outline/items", value: DocumentOutlineBlock{}},
@@ -397,6 +418,12 @@ func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {
 
 			var missing, spurious []string
 			for _, f := range always {
+				// A cost field is emitted for OWNER/ADMIN only: writeCostAwareJSON
+				// removes every costvis key for other roles whatever the tag says
+				// (#3590), so it must not be required.
+				if _, money := costvis.Keys[f]; money {
+					continue
+				}
 				// Only grade fields the schema actually describes; a schema may
 				// legitimately document a subset while it is being tightened.
 				if declared[f] && !required[f] {

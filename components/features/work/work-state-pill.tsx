@@ -18,7 +18,8 @@ import {
   AlertTriangle, Ban, CheckCircle2, Clock, Hourglass, Loader2, TimerReset, XCircle,
 } from "lucide-react"
 
-import { Pill, type DetailTone } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/status-tone"
 import { cn } from "@/lib/utils"
 import {
   WORK_STATE_LABEL,
@@ -30,12 +31,12 @@ import {
 
 /** The tone per OUTCOME, not per state — so the six things a reader needs to
  *  tell apart are six, and adding a state cannot quietly invent a seventh. */
-const OUTCOME_TONE: Record<WorkOutcome, DetailTone> = {
-  waiting: "default",
+const OUTCOME_TONE: Record<WorkOutcome, StatusTone> = {
+  waiting: "muted",
   live: "blue",
   succeeded: "success",
-  failed: "destructive",
-  cancelled: "default",
+  failed: "danger",
+  cancelled: "muted",
   // Not destructive: an unresolved item has not failed. Warn is the product's
   // "somebody has to look at this" colour, and it is the only outcome here
   // that is asking for a person.
@@ -76,10 +77,13 @@ export function WorkStatePill({ state, className, "data-testid": testId }: WorkS
       title={WORK_STATE_MEANING[state]}
       className="inline-flex"
     >
-      <Pill tone={OUTCOME_TONE[outcome]} className={cn("gap-1.5", className)}>
-        <Icon className={cn("h-3 w-3", spins && "animate-spin")} />
-        {WORK_STATE_LABEL[state]}
-      </Pill>
+      <StatusPill
+        size="md"
+        tone={OUTCOME_TONE[outcome]}
+        icon={<Icon className={cn("h-3 w-3", spins && "animate-spin motion-reduce:animate-none")} />}
+        label={WORK_STATE_LABEL[state]}
+        className={className}
+      />
     </span>
   )
 }

@@ -17,8 +17,8 @@ export type Invitation = z.infer<typeof invitationSchema>
 
 /**
  * Pending invitations (GET /workspaces/{id}/invitations: not accepted yet,
- * expired ones included). The server has no resend or revoke, so the page
- * only shows them and when each runs out.
+ * expired ones included). Each can be reissued (a new link, valid 7 days)
+ * or revoked — see reissueInvitation / revokeInvitation below.
  */
 export function useInvitations(workspaceId: string | null, enabled: boolean) {
   return useQuery({
@@ -34,6 +34,38 @@ export function useInvitations(workspaceId: string | null, enabled: boolean) {
       return parsed.success ? parsed.data : []
     },
   })
+}
+
+/** The link a person joins with (the same shape the invite dialog hands out). */
+export function invitationLink(token: string): string {
+  return `${window.location.origin}/join#invitation_token=${encodeURIComponent(token)}`
+}
+
+async function refusal(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null) as { error?: unknown; detail?: unknown } | null
+  const msg = body?.detail ?? body?.error
+  return new Error(typeof msg === "string" ? msg : `${fallback} (${res.status})`)
+}
+
+/**
+ * A new link for a pending invitation (POST …/reissue). The old link stops
+ * working; the new one runs 7 days and is shown once — the server keeps only
+ * its hash. An ADMIN invitation is the owner's to manage (403 otherwise).
+ */
+export async function reissueInvitation(workspaceId: string, invitationId: string): Promise<{ link: string; expiresAt: string }> {
+  const ws = encodeURIComponent(workspaceId)
+  const res = await apiFetch(`/api/v1/workspaces/${ws}/invitations/${encodeURIComponent(invitationId)}/reissue?workspace_id=${ws}`, { method: "POST" })
+  if (!res.ok) throw await refusal(res, "Couldn’t reissue the invitation")
+  const body = await res.json() as { token?: unknown; expires_at?: unknown }
+  if (typeof body?.token !== "string") throw new Error("The server returned no link")
+  return { link: invitationLink(body.token), expiresAt: typeof body.expires_at === "string" ? body.expires_at : "" }
+}
+
+/** Withdraw a pending invitation (DELETE): its link stops working at once. */
+export async function revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
+  const ws = encodeURIComponent(workspaceId)
+  const res = await apiFetch(`/api/v1/workspaces/${ws}/invitations/${encodeURIComponent(invitationId)}?workspace_id=${ws}`, { method: "DELETE" })
+  if (!res.ok) throw await refusal(res, "Couldn’t revoke the invitation")
 }
 
 /** Whole days until `iso`, negative once past. */

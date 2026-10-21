@@ -19,7 +19,8 @@ import { test, expect } from "./fixtures/auth"
 // NOTE: agent creation is no longer a routed page — the old
 // /crews/agents/new tree was deleted with the selection-driven canvas
 // redesign and now 404s. The surface lives in CreateAgentDialog on
-// /crews; the dedicated test below opens it via [data-crews-add-agent].
+// /crews; the dedicated test below opens it the way a person does, through
+// the page's one create action (Harbor 2 New ▾ › New agent, crews K01).
 const PAGES = [
   { name: "Dashboard", path: "/" },
   { name: "Crews", path: "/crews" },
@@ -30,6 +31,17 @@ const PAGES = [
 ]
 
 async function scan(page: Page, testInfo: import("@playwright/test").TestInfo) {
+  // Contrast is a property of the settled page. Rows and panels fade in, and
+  // a scan mid-fade measures the text at partial opacity (nightly 39195624399
+  // read #4B5363 at ~78% as #727884). Looping pulses never settle; skip them.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  )
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa"])
     .analyze()
@@ -82,12 +94,14 @@ test("New Agent dialog has no critical a11y violations", async ({ page }, testIn
   await page.goto("/crews")
   await page.waitForLoadState("networkidle")
 
-  // Subbar CTA opens CreateAgentDialog (works even with zero crews —
-  // the crew picker just starts empty).
-  const addAgent = page.locator("[data-crews-add-agent]")
-  await expect(addAgent).toBeVisible({ timeout: 15_000 })
-  await addAgent.click()
-  await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10_000 })
+  // Harbor 2 replaced the sub-bar "+ Agent" CTA with New ▾ (crews K01): on a
+  // desktop /crews opens the last crew, and New agent opens CreateAgentDialog
+  // for it. The scan must run against that dialog, not just any overlay.
+  const newMenu = page.getByRole("button", { name: "New", exact: true })
+  await expect(newMenu).toBeVisible({ timeout: 15_000 })
+  await newMenu.click()
+  await page.getByRole("menuitem", { name: /^New agent/ }).click()
+  await expect(page.getByRole("dialog", { name: /New agent in / })).toBeVisible({ timeout: 10_000 })
 
   const critical = await scan(page, testInfo)
   expect(critical).toHaveLength(0)

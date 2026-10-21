@@ -722,5 +722,5 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, resp)
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeCostAwareJSON(w, r, http.StatusOK, result)
 }

@@ -7,10 +7,43 @@ import { broadcastSessionExpired } from "@/lib/api-fetch"
 
 /** WebSocket connection lifecycle status.
  *
+ * `"connecting"` covers the first connect AND the fast backoff after a drop:
+ * a retry is already scheduled, so a restart reads as "reconnecting", not as a
+ * failure. `reason` (below) tells the two apart.
+ *
+ * `"offline"` is the not-yet-connected state past the fast backoff budget, or
+ * while the browser says it has no network. It is not terminal: the hook keeps
+ * retrying every 30 s and at once on `online`, a visible tab, window focus or
+ * `retry()`.
+ *
+ * `"error"` is terminal and means the session is dead (null ticket, close code
+ * 4401); the app redirects to /login. A transport failure never ends here.
+ *
+ * `"disconnected"` is a socket nobody asked for: before the first connect, or
+ * after the consumer disabled it.
+ *
  * `"unavailable"` is terminal and is not an outage: realtime does not exist for
  * this session (a restricted account, whose allowlist refuses `/ws-token` with
  * 404). Nothing retries and no "reconnecting" banner is shown for it. */
-export type WSStatus = "connecting" | "connected" | "disconnected" | "error" | "unavailable"
+export type WSStatus = "connecting" | "connected" | "disconnected" | "offline" | "error" | "unavailable"
+
+/** Why a socket that was wanted is not up, or null when nothing is wrong
+ *  (connected, first connect, disabled, or terminated).
+ *
+ *   retrying         a drop or a failed attempt; fast backoff ("connecting")
+ *   restart          the server closed with 1012 (service restart) or 1001
+ *                    (going away); fast backoff ("connecting")
+ *   unreachable      the fast budget is spent; one attempt every 30 s ("offline")
+ *   browser-offline  navigator.onLine is false; waits for `online` ("offline") */
+export type WSReason = "retrying" | "restart" | "unreachable" | "browser-offline"
+
+/** Whether a wanted socket is down right now: retrying after a drop, offline,
+ *  or dead. Not the first connect, and not "unavailable" (no realtime by
+ *  design). For surfaces that dim or flag data that may be stale. */
+export function isRealtimeDown(status: WSStatus | null | undefined, reason: WSReason | null | undefined): boolean {
+  if (status === "offline" || status === "error" || status === "disconnected") return true
+  return status === "connecting" && reason != null
+}
 
 /**
  * Thrown by a `getToken` callback when the ticket endpoint says realtime is not
@@ -58,11 +91,29 @@ function backoffDelay(attempt: number): number {
   return Math.min(base * Math.pow(2, attempt), max) + Math.random() * jitter
 }
 
-/** Maximum reconnect attempts before we give up and surface a terminal
- *  failure. With the backoff schedule above, 8 attempts ≈ 1+2+4+8+16+30
- *  +30+30 = ~2 minutes. After that, an "is the backend down?" status
- *  is more useful than yet another silent retry. */
-const MAX_RECONNECT_ATTEMPTS = 8
+/** The fast backoff budget. With the schedule above, 8 attempts ≈ 1+2+4+8
+ *  +16+30+30+30 = ~2 minutes. Past it the hook does not give up: it reports
+ *  "offline" (an "is the backend down?" status is more useful than another
+ *  silent "Reconnecting…") and tries every SLOW_RETRY_MS. */
+const FAST_RECONNECT_ATTEMPTS = 8
+
+/** The slow retry once the fast budget is spent ("retrying every 30 s"). */
+const SLOW_RETRY_MS = 30_000
+
+/** Close codes a server sends when it is restarting on purpose: 1012 (service
+ *  restart) and 1001 (going away). The backoff is the same; only the words
+ *  change ("Crewship is restarting"). crewshipd's hub sends neither today —
+ *  x/net/websocket closes with 1000 and a deploy drops the TCP connection
+ *  (1006) — but a proxy in front of it may. */
+const PLANNED_RESTART_CODES = new Set([1012, 1001])
+
+/** Window event every useWebSocket instance listens to: one "Retry now" wakes
+ *  every socket in the tab, not only the one whose banner was clicked. */
+const RETRY_EVENT = "crewship:realtime-retry"
+
+function browserOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false
+}
 
 /** Custom WS close code emitted by the server when it detects a revoked
  *  session mid-connection (see internal/ws/hub.go watchSessionRevocation).
@@ -108,9 +159,10 @@ const emitSessionExpired = broadcastSessionExpired
  *     session-expired and stop retrying.
  *   - Close code 4401 (server-side session revoke) → emit session-
  *     expired and stop retrying.
- *   - Reaching MAX_RECONNECT_ATTEMPTS → emit session-expired (the
- *     backend is unreachable in a way that probably means the user
- *     should re-authenticate when it comes back).
+ * A transport failure never stops it: past FAST_RECONNECT_ATTEMPTS it
+ * reports "offline" and retries every 30 s, and it retries at once on
+ * `online`, a tab becoming visible, window focus, or `retry()`. With the
+ * browser offline it waits for `online` instead of spending attempts.
  */
 export function useWebSocket({
   enabled = true,
@@ -121,12 +173,19 @@ export function useWebSocket({
   onConnect,
 }: UseWebSocketOptions) {
   const [status, setStatus] = useState<WSStatus>("disconnected")
+  const [reason, setReason] = useState<WSReason | null>(null)
+  const reasonRef = useRef<WSReason | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const connectionEpochRef = useRef(0)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const disconnectingRef = useRef(false)
   const terminatedRef = useRef(false)
   const unavailableRef = useRef(false)
+  // The last close was 1012/1001; cleared by the next open.
+  const plannedRestartRef = useRef(false)
+  // Waiting for the browser's `online` event: no timer, no socket.
+  const parkedRef = useRef(false)
 
   // Use refs for callbacks to prevent reconnection loops when consumers
   // pass non-memoized functions.
@@ -139,22 +198,20 @@ export function useWebSocket({
   useEffect(() => { onConnectRef.current = onConnect }, [onConnect])
   useEffect(() => { getTokenRef.current = getToken }, [getToken])
 
-  const updateStatus = useCallback((s: WSStatus) => {
+  const updateStatus = useCallback((s: WSStatus, r: WSReason | null = null) => {
+    reasonRef.current = r
+    setReason(r)
     setStatus(s)
     onStatusChangeRef.current?.(s)
   }, [])
 
-  // terminate has two flavors deliberately kept separate:
-  //   - terminateAuth(reason): an actual auth signal (null ticket from
-  //     /ws-token, close code 4401, in-stream session_revoked frame).
-  //     Stops retrying AND fires session-expired so the AuthProvider
-  //     hard-redirects to /login.
-  //   - terminateTransport(): the backend was unreachable past the
-  //     reconnect cap. Stops retrying with status="error" but does
-  //     NOT fire session-expired — the user's session is presumably
-  //     still valid; their backend just isn't.  Bouncing them to
-  //     /login on every restart-induced outage is exactly the UX
-  //     bug that prompted this whole rewrite.
+  // Only an actual auth signal (null ticket from /ws-token, close code 4401,
+  // in-stream session_revoked frame) stops retrying for good; it also fires
+  // session-expired so the AuthProvider hard-redirects to /login. A backend
+  // that is unreachable does not: the user's session is presumably still
+  // valid, their backend just isn't, and bouncing them to /login (or leaving
+  // them on a dead page) on every restart is the UX bug this hook exists
+  // to avoid. See scheduleRetry below.
   const terminateAuth = useCallback((reason: string) => {
     terminatedRef.current = true
     if (reconnectTimerRef.current) {
@@ -163,15 +220,6 @@ export function useWebSocket({
     }
     updateStatus("error")
     emitSessionExpired(reason)
-  }, [updateStatus])
-
-  const terminateTransport = useCallback(() => {
-    terminatedRef.current = true
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current)
-      reconnectTimerRef.current = undefined
-    }
-    updateStatus("error")
   }, [updateStatus])
 
   // Realtime does not exist for this session: stop for good, no banner, no
@@ -187,7 +235,38 @@ export function useWebSocket({
     updateStatus("unavailable")
   }, [updateStatus])
 
-  const connect = useCallback(async () => {
+  // The next attempt after a drop or a failed one. Fast backoff while the
+  // budget lasts ("connecting"), then every 30 s ("offline"); with the browser
+  // offline, no timer at all until `online` (see the listeners below). The
+  // ref breaks the connect ↔ scheduleRetry cycle.
+  const connectRef = useRef<(opts?: { announce?: boolean }) => Promise<void>>(async () => {})
+  const scheduleRetry = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    if (browserOffline()) {
+      parkedRef.current = true
+      updateStatus("offline", "browser-offline")
+      return
+    }
+    const attempts = reconnectAttemptsRef.current
+    let delay: number
+    if (attempts >= FAST_RECONNECT_ATTEMPTS) {
+      updateStatus("offline", "unreachable")
+      delay = SLOW_RETRY_MS + Math.random() * 1000
+    } else {
+      updateStatus("connecting", plannedRestartRef.current ? "restart" : "retrying")
+      delay = backoffDelay(attempts)
+    }
+    reconnectAttemptsRef.current = attempts + 1
+    reconnectTimerRef.current = setTimeout(() => { reconnectTimerRef.current = undefined; void connectRef.current() }, delay)
+  }, [updateStatus])
+
+  // `announce`: say "connecting" for this attempt even in the slow "offline"
+  // mode — a person pressed Retry now or the network came back. Automatic
+  // slow attempts stay "offline", so the warning does not blink every 30 s.
+  const connect = useCallback(async ({ announce = false }: { announce?: boolean } = {}) => {
     if (!enabled) return
     // Only `terminatedRef` is permanent — once we've decided we'll
     // never reconnect (auth dead / past the backoff cap), bail. A set
@@ -203,6 +282,12 @@ export function useWebSocket({
     // caught by the post-await guard below.
     if (terminatedRef.current) return
     disconnectingRef.current = false
+    parkedRef.current = false
+    const current = reasonRef.current
+    if (announce || (current !== "unreachable" && current !== "browser-offline")) {
+      updateStatus("connecting", current === "browser-offline" ? "retrying" : current)
+    }
+    const epoch = ++connectionEpochRef.current
 
     // Refresh-fetch the ticket on every (re)connect. A stale token
     // from before a backend restart would 401 the upgrade and trip
@@ -221,19 +306,12 @@ export function useWebSocket({
     try {
       token = await getTokenRef.current()
     } catch (err) {
-      if (terminatedRef.current || disconnectingRef.current) return
+      if (epoch !== connectionEpochRef.current || terminatedRef.current || disconnectingRef.current) return
       if (err instanceof WsUnavailableError) {
         terminateUnavailable()
         return
       }
-      const attempts = reconnectAttemptsRef.current
-      if (attempts >= MAX_RECONNECT_ATTEMPTS) {
-        terminateTransport()
-        return
-      }
-      const delay = backoffDelay(attempts)
-      reconnectAttemptsRef.current = attempts + 1
-      reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
+      scheduleRetry()
       return
     }
 
@@ -243,7 +321,7 @@ export function useWebSocket({
     // would clobber disconnectingRef back to false and open a leaked
     // connection that then wouldn't be closed by the original
     // disconnect call.
-    if (terminatedRef.current || disconnectingRef.current) return
+    if (epoch !== connectionEpochRef.current || terminatedRef.current || disconnectingRef.current) return
 
     if (!token) {
       // /ws-token returned null → apiFetch already emitted the auth
@@ -269,11 +347,11 @@ export function useWebSocket({
     const ws = new WebSocket(wsUrlObj.toString())
     wsRef.current = ws
 
-    updateStatus("connecting")
-
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       ws.send(JSON.stringify({ type: "auth", token }))
       reconnectAttemptsRef.current = 0
+      plannedRestartRef.current = false
       updateStatus("connected")
       // Re-establish subscriptions / resume in-flight streams on every
       // (re)connect — the new socket starts with no server-side state.
@@ -281,6 +359,7 @@ export function useWebSocket({
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       try {
         const parsed = JSON.parse(event.data)
         const result = wsMessageSchema.safeParse(parsed)
@@ -298,13 +377,14 @@ export function useWebSocket({
       }
     }
 
-    ws.onerror = () => {
-      updateStatus("error")
-    }
+    // No status change on error: a browser always follows it with close,
+    // which decides between a retry and the end. Setting "error" here made
+    // every retried drop flicker through the terminal state first.
+    ws.onerror = null
 
     ws.onclose = (event) => {
+      if (wsRef.current !== ws) return
       wsRef.current = null
-      updateStatus("disconnected")
 
       if (event.code === CLOSE_CODE_SESSION_REVOKED) {
         terminateAuth("session_revoked")
@@ -312,26 +392,19 @@ export function useWebSocket({
       }
       if (disconnectingRef.current || terminatedRef.current) return
 
-      const attempts = reconnectAttemptsRef.current
-      if (attempts >= MAX_RECONNECT_ATTEMPTS) {
-        // Backend's been down past the budget. The user's session is
-        // (presumably) still fine — kicking them to /login here was
-        // exactly the bug that prompted the rewrite. Surface the
-        // transport failure as status="error" and let the user retry
-        // by reloading the page.
-        terminateTransport()
-        return
-      }
-      const delay = backoffDelay(attempts)
-      reconnectAttemptsRef.current = attempts + 1
-      reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
+      if (PLANNED_RESTART_CODES.has(event.code)) plannedRestartRef.current = true
+      scheduleRetry()
     }
-  }, [url, enabled, updateStatus, terminateAuth, terminateTransport, terminateUnavailable])
+  }, [url, enabled, updateStatus, scheduleRetry, terminateAuth, terminateUnavailable])
+  useEffect(() => { connectRef.current = connect }, [connect])
 
   const disconnect = useCallback(() => {
+    connectionEpochRef.current++
     disconnectingRef.current = true
+    parkedRef.current = false
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
     }
     const ws = wsRef.current
     wsRef.current = null
@@ -378,7 +451,60 @@ export function useWebSocket({
     return () => disconnect()
   }, [connect, disconnect, enabled])
 
-  return { status, send, disconnect, reconnect: () => { void connect() } }
+  /**
+   * Cut a wait short: try now instead of at the next scheduled attempt.
+   * Only two states may be cut short — an attempt waiting on its timer, and
+   * one parked until the browser is back online. Anything else is a connect
+   * in flight (ticket request or socket opening) or an open socket, and a
+   * second connect would leak a socket. Never after an auth or an
+   * "unavailable" termination.
+   *
+   * `fresh` restarts the fast budget (the network came back, so the earlier
+   * failures say nothing). The budget is otherwise kept, so a slow-mode
+   * attempt that fails goes back to "offline" rather than to two more
+   * minutes of "Reconnecting…".
+   */
+  const wake = useCallback(({ fresh = false, announce = false, manual = false }: { fresh?: boolean; announce?: boolean; manual?: boolean }) => {
+    if (!enabled || terminatedRef.current) return
+    if (reconnectTimerRef.current === undefined && !parkedRef.current) return
+    // Focus and a visible tab do not override the browser's own verdict; a
+    // person pressing Retry now may (navigator.onLine can be wrong).
+    if (!manual && !fresh && browserOffline()) return
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    if (fresh) {
+      reconnectAttemptsRef.current = 0
+      reasonRef.current = plannedRestartRef.current ? "restart" : "retrying"
+    }
+    void connect({ announce })
+  }, [enabled, connect])
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return
+    const onOnline = () => wake({ fresh: true, announce: true })
+    const onVisible = () => { if (document.visibilityState === "visible") wake({}) }
+    const onFocus = () => wake({})
+    const onRetry = () => wake({ announce: true, manual: true })
+    window.addEventListener("online", onOnline)
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onFocus)
+    window.addEventListener(RETRY_EVENT, onRetry)
+    return () => {
+      window.removeEventListener("online", onOnline)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onFocus)
+      window.removeEventListener(RETRY_EVENT, onRetry)
+    }
+  }, [enabled, wake])
+
+  /** "Retry now": every socket in the tab tries at once (see RETRY_EVENT). */
+  const retry = useCallback(() => {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(RETRY_EVENT))
+  }, [])
+
+  return { status, reason, send, disconnect, reconnect: () => { void connect() }, retry }
 }
 
 /** Compute WS URL at runtime via the server-base seam (lib/server-base.ts).

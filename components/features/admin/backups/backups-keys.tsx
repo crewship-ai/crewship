@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Bell, BellRing, KeyRound, LockKeyhole } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -20,8 +20,8 @@ import {
   RECOVERY_SHEET_HREF, addRecipient, removeRecipient, saveBackupSettings, sendTestAlert, setRecoveryKit,
   useBackupSettings, useIncidents, useRecipients, useVaultKeys,
 } from "./use-backup-settings"
-import { perform, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import { perform, performConfirm, performSave } from "./use-backups-data"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Keys & alerts (instance setting): the AGE keys a backup is
@@ -64,7 +64,7 @@ export function BackupsKeys({ ctx }: { ctx: SectionCtx }) {
   )
 }
 
-const rowButton = "h-7 px-2.5 text-xs coarse:h-[2.75rem]"
+const rowButton = "h-7 px-2.5 text-xs coarse:h-[44px]"
 
 export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[]; ctx: SectionCtx; reload?: () => void }) {
   const [removing, setRemoving] = React.useState<BackupRecipient | null>(null)
@@ -114,7 +114,7 @@ export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[];
         ]}
         confirmLabel="Remove" onConfirm={async () => {
           if (!removing) return
-          if (await perform(ctx.demo, () => removeRecipient(removing.id), "Key removed", "The key could not be removed")) reload?.()
+          if (await performConfirm(ctx.demo, () => removeRecipient(removing.id), "Key removed", "The key could not be removed")) reload?.()
         }} />
     </>
   )
@@ -151,7 +151,7 @@ function VaultList({ vault, ctx, reload }: { vault: VaultKeysResponse; ctx: Sect
           { tone: "kept", text: "A restore on a new server unlocks credentials without re-entering them." },
         ]}
         confirmLabel="Turn on" onConfirm={async () => {
-          if (await perform(ctx.demo, () => setRecoveryKit(true), "Recovery kit on for new instance backups", "Could not turn the recovery kit on")) reload()
+          if (await performConfirm(ctx.demo, () => setRecoveryKit(true), "Recovery kit on for new instance backups", "Could not turn the recovery kit on")) reload()
         }} />
     </>
   )

@@ -31,8 +31,9 @@ This is step 3 of a master-key rotation:
      CREWSHIP_ENCRYPTION_KEY_VERSION=v2 (keep ENCRYPTION_KEY = old key),
      then restart crewship.
   3. Run:                           crewship admin reencrypt
-  4. When it reports failed: 0, the old key is no longer referenced by
-     any row and can be retired from the environment.
+  4. Keep the exact original ENCRYPTION_KEY value: journal and instance-audit
+     MACs still require this v1 root even when failed: 0 and no v1 envelopes
+     remain. Re-encryption does not re-sign audit history.
 
 The operation is idempotent — envelopes already at the current version are
 skipped — so re-running after an interruption only processes the remainder.

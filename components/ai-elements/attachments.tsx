@@ -22,11 +22,16 @@ export type Attachment = {
   size: number;
   type: string;
   url?: string;
-  status?: "uploading" | "ready" | "error";
-  /** Why the upload was refused. Shown on the chip as its tooltip; the chip
-   *  states the failure in words regardless, because a tooltip is not
-   *  reachable on a phone and not announced by a screen reader. */
+  /** `validating` = accepted and waiting in the single upload queue;
+   *  `cancelled` = stopped by the user, kept so it can be retried. */
+  status?: "validating" | "uploading" | "ready" | "error" | "cancelled";
+  /** The server's own words for a refusal. Kept in the store for debugging
+   *  only: it can name a path or echo a driver error, so it is NEVER rendered
+   *  (no text, no title, no aria-*). The chip shows `failureLabel` instead. */
   error?: string;
+  /** Short sanitized reason class ("too large", "network problem", ...), shown
+   *  as visible text on a failed chip. Never the server's own words. */
+  failureLabel?: string;
 };
 
 export type AttachmentsProps = ComponentProps<"div"> & {
@@ -35,12 +40,15 @@ export type AttachmentsProps = ComponentProps<"div"> & {
   /** Re-run a failed upload. Only offered for `status: "error"` chips, and
    *  only when the caller can actually do it (it needs the source File). */
   onRetry?: (id: string) => void;
+  /** Stop a queued or running upload without removing the chip. */
+  onCancel?: (id: string) => void;
 };
 
 export const Attachments = ({
   attachments,
   onRemove,
   onRetry,
+  onCancel,
   className,
   ...props
 }: AttachmentsProps) => (
@@ -55,6 +63,7 @@ export const Attachments = ({
           attachment={a}
           onRemove={onRemove}
           onRetry={onRetry}
+          onCancel={onCancel}
         />
       ))}
     </AnimatePresence>
@@ -65,6 +74,7 @@ export type AttachmentChipProps = {
   attachment: Attachment;
   onRemove?: (id: string) => void;
   onRetry?: (id: string) => void;
+  onCancel?: (id: string) => void;
 };
 
 /**
@@ -82,9 +92,12 @@ export type AttachmentChipProps = {
  * `data-status` is on the element on purpose — it is what a test asks instead
  * of matching Tailwind classes, and it is the same fact the label states.
  */
-export const AttachmentChip = ({ attachment, onRemove, onRetry }: AttachmentChipProps) => {
+export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: AttachmentChipProps) => {
   const failed = attachment.status === "error";
+  const cancelled = attachment.status === "cancelled";
+  const waiting = attachment.status === "validating";
   const uploading = attachment.status === "uploading";
+  const inFlight = uploading || waiting;
   const Icon = failed
     ? AlertTriangle
     : attachment.type.startsWith("image/")
@@ -101,10 +114,11 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry }: AttachmentChip
       exit={{ opacity: 0, scale: 0.85, x: -8 }}
       transition={spring.snappy}
       data-status={attachment.status ?? "ready"}
-      title={failed ? attachment.error : undefined}
+      title={failed ? attachment.failureLabel : undefined}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
-        uploading && "opacity-70",
+        "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-card border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
+        inFlight && "opacity-70",
+        cancelled && "border-dashed text-muted-foreground",
         failed && "border-destructive bg-destructive/10 text-destructive",
       )}
     >
@@ -115,19 +129,36 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry }: AttachmentChip
       {failed ? (
         // Not a colour, not an icon: the sentence. This is the one thing on
         // screen that stops a refused upload from reading as an attachment.
-        <span className="text-[10px] font-medium">Upload failed — not attached</span>
+        <span className="min-w-0 break-words text-label font-medium">
+          Upload failed — not attached
+          {attachment.failureLabel ? ` (${attachment.failureLabel})` : ""}
+        </span>
+      ) : cancelled ? (
+        <span className="text-label font-medium">Cancelled — not attached</span>
+      ) : waiting ? (
+        <span className="text-label text-muted-foreground">Waiting…</span>
       ) : uploading ? (
-        <span className="text-[10px] text-muted-foreground">Uploading…</span>
+        <span className="text-label text-muted-foreground">Uploading…</span>
       ) : (
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           {formatBytes(attachment.size)}
         </span>
       )}
-      {failed && onRetry && (
+      {inFlight && onCancel && (
+        <button
+          type="button"
+          onClick={() => onCancel(attachment.id)}
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-micro font-medium underline underline-offset-2 hover:bg-muted coarse:min-h-[44px] coarse:min-w-[44px]"
+          aria-label={`Cancel ${attachment.name}`}
+        >
+          Cancel
+        </button>
+      )}
+      {(failed || cancelled) && onRetry && (
         <button
           type="button"
           onClick={() => onRetry(attachment.id)}
-          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-destructive/15"
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-micro font-medium underline underline-offset-2 hover:bg-destructive/15 coarse:min-h-[44px] coarse:min-w-[44px]"
           aria-label={`Retry ${attachment.name}`}
         >
           Retry
@@ -137,7 +168,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry }: AttachmentChip
         <button
           type="button"
           onClick={() => onRemove(attachment.id)}
-          className="ml-0.5 rounded-full p-0.5 hover:bg-muted"
+          className="ml-0.5 rounded-full p-0.5 hover:bg-muted coarse:min-h-[44px] coarse:min-w-[44px] coarse:inline-flex coarse:items-center coarse:justify-center"
           aria-label={`Remove ${attachment.name}`}
         >
           <X className="h-3 w-3" />

@@ -1,7 +1,10 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import { useState } from "react"
 import { formatDateTime } from "@/lib/time"
+import { DocumentCompare } from "./document-compare"
+import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
@@ -17,7 +20,9 @@ function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }
   return <DocumentReadonly schema={snapshot.schema} content={snapshot.content} accessibleLabel={`Confirmed revision ${snapshot.rev}`} />
 }
 
-export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose }: DocumentHistoryProps) {
+export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review }: DocumentHistoryProps) {
+  const [confirmation, setConfirmation] = useState<string>()
+  const [comparing, setComparing] = useState<string>()
   // The caller must invalidate scope on current-human/workspace/Page/auth changes.
   // Never retain an old response merely because the new request is pending.
   const denied = list.status === "denied" || snapshot.status === "denied"
@@ -26,6 +31,9 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
   const selected = checkpoints.find(checkpoint => checkpoint.id === selectedId)
   const read = snapshot.status === "ready" && snapshot.scopeKey === scopeKey ? snapshot.data : undefined
   const exact = selected && read && read.page_id === pageId && read.id === selected.id && read.rev === selected.rev && read.schema === selected.schema
+  const confirmationKey = JSON.stringify([scopeKey, selectedId, read?.rev, read?.schema, restore?.baseKey])
+  const busy = restore?.status === "pending" || restore?.status === "uncertain"
+  const canRestore = Boolean(exact && read && supported(read.schema) && restore?.allowed && !busy && restore.status !== "denied")
   let listMessage: string | undefined
   if (!admitted) {
     listMessage = denied ? "History access is unavailable."
@@ -36,14 +44,24 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
   return <section aria-label="Document history" className="min-w-0 space-y-4 rounded-lg border p-4">
     <div className="flex items-center justify-between gap-3">
       <h2 className="font-semibold">Document history</h2>
-      <Button type="button" variant="ghost" className="coarse:min-h-12" onClick={onClose}>Close history</Button>
+      <Button type="button" variant="ghost" className="coarse:min-h-[44px]" disabled={busy} onClick={onClose}>Close history</Button>
     </div>
     <p className="text-sm text-muted-foreground">Read-only confirmed checkpoints. Browsing does not change your current draft.</p>
+    {restore?.status === "pending" && <p role="status">Waiting for restore confirmation…</p>}
+    {restore?.status === "uncertain" && <div role="alert">Restore is unconfirmed. Keep the original operation; do not create another restore.<Button onClick={restore.onRetry}>Retry exact restore</Button></div>}
+    {restore?.status === "error" && <p role="alert">Restore was refused. Refresh the saved state before confirming another restore.</p>}
+    {restore?.status === "denied" && <p role="alert">Restore access is unavailable.</p>}
+    {canRestore && <Button onClick={() => setConfirmation(confirmationKey)}>Restore selected checkpoint</Button>}
+    {canRestore && confirmation === confirmationKey && <div role="alertdialog" aria-label="Confirm checkpoint restore" aria-modal="true">
+      <p>Restore revision {read?.rev} as a new confirmed revision? Earlier write permissions will not be renewed.</p>
+      <Button onClick={() => { setConfirmation(undefined); restore?.onConfirm() }}>Confirm restore</Button>
+      <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
+    </div>}
     {listMessage ? <p role={denied || list.status === "error" ? "alert" : "status"}>{listMessage}</p> : <>
       {checkpoints.length === 0 ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
         {checkpoints.map(checkpoint => <li key={checkpoint.id}>
           <Button type="button" variant="outline" aria-pressed={checkpoint.id === selectedId}
-            className="h-auto min-h-12 w-full flex-wrap justify-start whitespace-normal break-all p-3 text-left"
+            className="h-auto coarse:min-h-[44px] w-full flex-wrap justify-start whitespace-normal break-all p-3 text-left"
             onClick={() => onSelect(checkpoint.id)}>
             <span>Revision {checkpoint.rev}</span>
             <span className="font-normal">{checkpoint.actor}</span>
@@ -53,6 +71,15 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
         </li>)}
       </ul>}
       {selectedId && <div className="space-y-2">
+        {exact && review && <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" className="coarse:min-h-[44px]" aria-pressed={comparing === selectedId} disabled={review.currentContent === undefined} onClick={() => setComparing(comparing === selectedId ? undefined : selectedId)}>Compare with saved version</Button>
+          {review.currentContent === undefined && <p role="status" className="text-sm">Loading current document…</p>}
+        </div>}
+        {exact && review && review.currentContent !== undefined && comparing === selectedId && <>
+          {review.hasLocalDraft && <p className="text-sm">Unsent edits are not included: this compares with the last saved version.</p>}
+          <DocumentCompare base={read.content} target={review.currentContent} baseLabel={`revision ${read.rev}`} targetLabel="the saved version" />
+        </>}
+        {exact && review?.actions && <HistoryActions key={selectedId} checkpointId={selectedId} revision={read.rev} headRev={review.headRev} hasLocalDraft={review.hasLocalDraft} actions={review.actions} onDownloadDraft={review.onDownloadDraft} onDone={review.onActionDone} />}
         {exact ? <ConfirmedContent key={`${scopeKey}/${selectedId}/${read.rev}`} snapshot={read} />
           : <p role={snapshot.status === "denied" || snapshot.status === "error" ? "alert" : "status"}>
             {snapshot.status === "loading" ? "Loading checkpoint…"

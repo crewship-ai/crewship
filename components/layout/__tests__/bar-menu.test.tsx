@@ -167,9 +167,9 @@ describe("BarMenuChips", () => {
       />,
     )
     expect(screen.getByRole("group", { name: "Show" })).toBeInTheDocument()
-    expect(screen.getByTestId("c-a")).toHaveTextContent("Live (2)")
+    expect(screen.getByTestId("c-a")).toHaveTextContent("Live 2")
     expect(screen.getByTestId("c-b")).toHaveTextContent(/^Recent$/)
-    expect(screen.getByTestId("c-c")).toHaveTextContent("Failed (0)")
+    expect(screen.getByTestId("c-c")).toHaveTextContent("Failed 0")
     expect(screen.getByTestId("c-b")).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("c-a")).toHaveAttribute("aria-pressed", "false")
 

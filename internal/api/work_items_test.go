@@ -235,8 +235,21 @@ func TestWorkItemGet_CarriesAttemptsAndHistoryAndNoPayload(t *testing.T) {
 	if detail.ID != "wk-detail" || detail.State != "running" || detail.SessionID != "sess-1" {
 		t.Fatalf("detail: %+v", detail)
 	}
-	if len(detail.Attempts) != 1 || detail.Attempts[0].RunID != "run-1" || detail.Attempts[0].CostUSD != 0.25 {
+	if len(detail.Attempts) != 1 || detail.Attempts[0].RunID != "run-1" {
 		t.Fatalf("attempts: %+v", detail.Attempts)
+	}
+	// #3590: a VIEWER gets the attempt without its cost; OWNER gets it.
+	if strings.Contains(rr.Body.String(), "cost_usd") {
+		t.Fatalf("VIEWER received cost_usd: %s", rr.Body.String())
+	}
+	ownerReq := workReq(t, "GET", "/work-items/wk-detail", "", user, ws, "OWNER")
+	ownerReq.SetPathValue("workItemId", "wk-detail")
+	ownerRR := httptest.NewRecorder()
+	h.Get(ownerRR, ownerReq)
+	var ownerDetail workItemDetailView
+	decodeJSON(t, ownerRR, &ownerDetail)
+	if len(ownerDetail.Attempts) != 1 || ownerDetail.Attempts[0].CostUSD != 0.25 {
+		t.Fatalf("OWNER attempts: %+v", ownerDetail.Attempts)
 	}
 	if len(detail.Events) != 1 || detail.Events[0].ToState != "queued" {
 		t.Fatalf("events: %+v", detail.Events)

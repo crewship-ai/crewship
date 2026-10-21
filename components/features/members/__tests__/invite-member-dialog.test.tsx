@@ -42,6 +42,12 @@ describe("InviteMemberDialog", () => {
     })
   })
 
+  // v67 parity (PAR-101): Add member is the page's blue primary action.
+  it("opens from the primary button", () => {
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Add member" })).toHaveAttribute("data-variant", "default")
+  })
+
   it("provisions the account instead of writing an invitation nobody delivers", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "new@example.com" }, 201))
     await submit()

@@ -251,9 +251,25 @@ export interface CreateSurfaceProps {
    * `<h1>`; the layout, not the surface, owns the breadcrumb.
    */
   presentation?: "dialog" | "page"
+  /**
+   * A state the person cannot dismiss, only resolve (the unavailable
+   * workspace): Esc, an overlay click and the phone sheet's drag do nothing,
+   * there is no grabber, and the overlay is the opaque page ground — nothing
+   * behind it shows through. Pair it with a header without `onClose`.
+   */
+  blocking?: boolean
+  /**
+   * Phone sheet height. `"auto"` (default) grows with the content up to 92 %
+   * of the viewport; `"full"` fills it, for a surface whose body is a list or
+   * a blocking state that should own the screen.
+   */
+  phoneHeight?: "auto" | "full"
   className?: string
   children: React.ReactNode
 }
+
+/** Phone sheet that fills the viewport (CreateSurface `phoneHeight="full"`). */
+const SHELL_SHEET_FULL = "max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
 
 export function CreateSurface({
   open,
@@ -266,6 +282,8 @@ export function CreateSurface({
   ariaLabel,
   restoreOpenerFocus = false,
   presentation = "dialog",
+  blocking = false,
+  phoneHeight = "auto",
   className,
   children,
 }: CreateSurfaceProps) {
@@ -347,7 +365,7 @@ export function CreateSurface({
             variant="ghost"
             size="sm"
             onClick={() => { pendingRef.current = null }}
-            className="mt-0 text-xs text-muted-foreground hover:text-foreground coarse:h-12 coarse:text-sm"
+            className="mt-0 text-xs text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:text-sm"
           >
             Keep editing
           </AlertDialogCancel>
@@ -360,7 +378,7 @@ export function CreateSurface({
               pendingRef.current = null
               run?.()
             }}
-            className="text-xs coarse:h-12 coarse:text-sm"
+            className="text-xs coarse:h-[44px] coarse:text-sm"
           >
             Discard
           </AlertDialogAction>
@@ -397,10 +415,14 @@ export function CreateSurface({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={requestOpenChange}>
+    <Dialog open={open} onOpenChange={blocking ? undefined : requestOpenChange}>
       <DialogContent
         ref={contentRef}
         aria-label={ariaLabel}
+        data-blocking={blocking || undefined}
+        overlayClassName={blocking ? "bg-background" : undefined}
+        onEscapeKeyDown={blocking ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={blocking ? (e) => e.preventDefault() : undefined}
         // Radix's own opt-out for the missing-description warning. The header
         // renders a description when it has one and nothing when it does not;
         // echoing the title into an sr-only node to silence the warning is what
@@ -428,9 +450,10 @@ export function CreateSurface({
             openerRef.current.focus({ preventScroll: true })
           }
         }}
-        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
+        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, phoneHeight === "full" && SHELL_SHEET_FULL, className)}
       >
-        <SheetGrabber />
+        {/* A sheet that cannot be dismissed has nothing to drag. */}
+        {!blocking && <SheetGrabber />}
         <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
       </DialogContent>
     </Dialog>
@@ -604,7 +627,12 @@ export interface CreateSurfaceHeaderProps {
   accent?: AccentName
   /** Renders the back arrow. Absent = no arrow, not a disabled one. */
   onBack?: () => void
-  onClose: () => void
+  /**
+   * The ×. Omit it only for a surface that cannot be dismissed (a blocking
+   * state); then no close button renders at all, rather than one that does
+   * nothing.
+   */
+  onClose?: () => void
   /** Right of the title, left of the close — step counters, a mode switch. */
   meta?: React.ReactNode
   /**
@@ -639,62 +667,74 @@ export function CreateSurfaceHeader({
   const titleProps = inDialog ? { asChild: true as const } : {}
 
   return (
-    <div className="shrink-0 border-b border-hairline px-4 py-2.5 sm:px-5 sm:py-3">
-      <div className="flex items-center gap-2">
+    <div className="shrink-0 border-b border-hairline px-4 py-3 sm:px-5 sm:py-3.5">
+      <div className="flex items-start gap-3">
         {onBack && (
           <Button
             variant="ghost"
             size="icon-xs"
             onClick={onBack}
             aria-label="Back"
-            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:w-[44px]"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
         )}
 
+        {/* v67: a 32 px tile, a 15 px bold title and one line under it. */}
         {(concept || icon) && (
-          <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="sm" />
+          <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="md" />
         )}
 
-        {/* One title element spanning the whole path. Two headings side by side
-            would make the accessible name "IssuesNew issue". */}
-        <Title {...titleProps}>
-          <Heading className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
-            {context != null && (
-              <>
-                <span
-                  className={cn(
-                    "truncate font-normal text-muted-foreground",
-                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
-                  )}
-                >
-                  {context}
-                </span>
-                <ChevronRight
-                  aria-hidden
-                  className={cn(
-                    "h-3 w-3 shrink-0 text-muted-foreground-soft",
-                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
-                  )}
-                />
-                {/* A real text node, or the accessible name concatenates.
-                 *
-                 * The comment above says one <h2> exists so the name is not
-                 * "IssuesNew issue" — and then the separator was an icon,
-                 * which contributes nothing, so the computed name was exactly
-                 * that: "SMONew issue". Measured in the browser, not guessed.
-                 * sub-bar.tsx already solved this with a literal " / "; this is
-                 * the same fix, hidden from sight because the chevron is the
-                 * visible separator. */}
-                <span className="sr-only"> › </span>
-              </>
-            )}
-            <span className="truncate text-foreground">{title}</span>
-          </Heading>
-        </Title>
+        <div className="min-w-0 flex-1">
+          {/* One title element spanning the whole path. Two headings side by
+              side would make the accessible name "IssuesNew issue". A plain
+              context is no longer drawn (v67 has no breadcrumb) but stays in
+              the name for assistive technology; an interactive one (New
+              issue's crew picker) is still shown. */}
+          <Title {...titleProps}>
+            <Heading className="flex min-w-0 items-center gap-1.5">
+              {context != null && (
+                <>
+                  <span
+                    className={cn(
+                      "truncate font-normal text-muted-foreground",
+                      keepContext ? "" : "sr-only",
+                    )}
+                  >
+                    {context}
+                  </span>
+                  <ChevronRight
+                    aria-hidden
+                    className={cn("h-3 w-3 shrink-0 text-muted-foreground-soft", !keepContext && "hidden")}
+                  />
+                  {/* A real text node, or the accessible name concatenates:
+                   * the chevron is an icon and contributes nothing, so
+                   * without this the computed name was "SMONew issue". */}
+                  <span className="sr-only"> › </span>
+                </>
+              )}
+              <span className="type-dialog-title truncate text-foreground">{title}</span>
+            </Heading>
+          </Title>
 
-        <div className="flex-1" />
+          {/* No description means NO node.
+           *
+           * This used to render `<DialogDescription className="sr-only">{title}`
+           * to silence Radix's missing-description warning. The cost was a
+           * screen reader reading "New project. New project." and
+           * `getByText(title)` matching twice. The warning is silenced
+           * properly instead — `CreateSurface` passes
+           * `aria-describedby={undefined}` to DialogContent. */}
+          {description != null &&
+            (inDialog ? (
+              <DialogDescription className="mt-0.5 truncate text-label text-muted-foreground">
+                {description}
+              </DialogDescription>
+            ) : (
+              <p className="mt-0.5 truncate text-label text-muted-foreground">{description}</p>
+            ))}
+        </div>
 
         {meta && (
           <div className="flex shrink-0 items-center gap-2 text-xs tabular-nums text-muted-foreground">
@@ -702,35 +742,18 @@ export function CreateSurfaceHeader({
           </div>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => guard(onClose)}
-          aria-label="Close"
-          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => guard(onClose)}
+            aria-label="Close"
+            className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-[44px] coarse:w-[44px] group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:w-[44px]"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
-
-      {/* No description means NO node.
-       *
-       * This used to render `<DialogDescription className="sr-only">{title}`
-       * to silence Radix's missing-description warning. The cost was not
-       * obvious until eleven surfaces migrated at once: a screen reader read
-       * "New project. New project.", and `getByText(title)` matched twice, so
-       * two agents had to rewrite existing assertions that were not wrong.
-       * The warning is silenced properly instead — `CreateSurface` passes
-       * `aria-describedby={undefined}` to DialogContent, which is Radix's own
-       * opt-out. */}
-      {description != null &&
-        (inDialog ? (
-          <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            {description}
-          </DialogDescription>
-        ) : (
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
-        ))}
     </div>
   )
 }
@@ -892,7 +915,7 @@ export function CreateSurfaceBody({
  * 44.16px by hand — one of them landed on `h-11` (40.5px) doing it, which is
  * exactly the `--spacing: 0.23rem` trap this file warns about at the top.
  */
-export const CREATE_SURFACE_INPUT = "h-8 text-xs coarse:h-12 coarse:text-base"
+export const CREATE_SURFACE_INPUT = "h-8 text-xs coarse:h-[44px] coarse:text-base"
 
 /* --------------------------------------------------------------------------
  * Structure inside the body — Section, Grid, Field, Choice, ToggleRow,
@@ -925,7 +948,7 @@ export function CreateSurfaceSection({
       {title != null && (
         <div className="flex items-center gap-1.5">
           {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/75">{title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground/75">{title}</h3>
           {/* A hint that truncates to "— a template fills the persona, model and t…"
               is worse than no hint. The section title survives; this does not. */}
           {hint != null && (
@@ -992,7 +1015,7 @@ export function CreateSurfaceField({
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <label
         htmlFor={htmlFor}
-        className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+        className="flex items-center gap-1 text-[12px] font-semibold text-muted-foreground"
       >
         {label}
         {required && (
@@ -1041,7 +1064,7 @@ export function CreateSurfaceChoice<T extends string>({
             onClick={() => onChange(o.value)}
             className={cn(
               "h-8 rounded-md border px-2.5 text-xs font-medium transition-colors",
-              "coarse:h-12 max-sm:flex-1 coarse:px-3 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1",
+              "coarse:h-[44px] max-sm:flex-1 coarse:px-3 group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1",
               active
                 ? "border-primary/40 bg-primary/15 text-primary-hover"
                 : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
@@ -1124,7 +1147,7 @@ export function CreateSurfaceDisclosure({
         // generous. `--spacing: 0.23rem` is why: py-3 is 11px a side, not 12,
         // and it is added to a 19px line rather than to 44. Callers cannot
         // patch it either; this component takes no className.
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-12 max-sm:py-3 group-data-[mobile=true]/surface:min-h-12 group-data-[mobile=true]/surface:py-3"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px] max-sm:py-3 group-data-[mobile=true]/surface:min-h-[44px] group-data-[mobile=true]/surface:py-3"
       >
         {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
         <span className="shrink-0 text-[13px] font-medium text-foreground">{label}</span>
@@ -1247,7 +1270,7 @@ export function CreateSurfacePill({
         // reach it either (40.5) — h-12 is the touch-target class in this
         // repo, and this is the control New issue and New project are made of.
         "coarse:px-3 coarse:text-sm group-data-[mobile=true]/surface:px-3",
-        "coarse:h-12 group-data-[mobile=true]/surface:h-12",
+        "coarse:h-[44px] group-data-[mobile=true]/surface:h-[44px]",
         !readOnly && "hover:bg-foreground/[0.08]",
         readOnly && "cursor-default",
         set ? "text-foreground/85" : "text-muted-foreground",
@@ -1542,7 +1565,7 @@ export function CreateSurfacePicker({
               onChange={(e) => search.onChange(e.target.value)}
               placeholder={search.placeholder ?? "Search…"}
               aria-label={search.placeholder ?? "Search"}
-              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary coarse:h-12 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm"
+              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary coarse:h-[44px] coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:text-sm"
             />
           </div>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground-soft">
@@ -1849,7 +1872,11 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
   hint?: React.ReactNode
   /** A "Create more" switch or an attachment control — never a third button. */
   aside?: React.ReactNode
-  onCancel: () => void
+  /**
+   * The Cancel. Omit it only where there is nothing to cancel — a blocking
+   * state, a review whose one answer is Done; then the footer has no Cancel.
+   */
+  onCancel?: () => void
   cancelLabel?: string
   /** At most one. `Back`, `Skip to defaults`, `Preview`. */
   secondary?: React.ReactNode
@@ -1889,6 +1916,9 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
   primaryIcon?: SurfaceIconComponent
 }
 
+/** A key in a footer hint, as a chip (v67 .kbd). */
+const KEY_CHIP = "rounded border border-border bg-card px-1 font-mono text-micro text-muted-foreground"
+
 export function CreateSurfaceFooter({
   hint: hintProp,
   aside,
@@ -1914,10 +1944,10 @@ export function CreateSurfaceFooter({
       hintProp
     ) : (
       <>
-        <kbd className="font-mono">⌘↵</kbd> to confirm
+        <kbd className={KEY_CHIP}>⌘↵</kbd> to confirm
         {footerInDialog && (
           <>
-            {" "}· <kbd className="font-mono">Esc</kbd> to cancel
+            {" "}· <kbd className={KEY_CHIP}>Esc</kbd> to cancel
           </>
         )}
       </>
@@ -1941,15 +1971,19 @@ export function CreateSurfaceFooter({
       )}
       <div className="flex-1 max-sm:hidden group-data-[mobile=true]/surface:hidden" />
       {aside}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
-        disabled={busy}
-        className="h-8 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
-      >
-        {cancelLabel}
-      </Button>
+      {/* type="button": inside a <form> a bare button submits it. */}
+      {onCancel && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
+          disabled={busy}
+          className="h-8 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
+        >
+          {cancelLabel}
+        </Button>
+      )}
       {secondary}
       {primaryLabel != null && onPrimary != null && (
       <Button
@@ -1957,7 +1991,7 @@ export function CreateSurfaceFooter({
         size="sm"
         onClick={onPrimary}
         disabled={primaryDisabled || busy}
-        className="h-8 gap-1.5 text-xs coarse:h-12 max-sm:flex-[2] coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
+        className="h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-[2] coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
       >
         {busy ? <Spinner className="h-3 w-3" /> : PrimaryIcon ? <PrimaryIcon className="h-3 w-3" /> : null}
         {primaryLabel}
@@ -1979,7 +2013,7 @@ export function CreateSurfaceSecondaryAction({
       variant="outline"
       size="sm"
       className={cn(
-        "h-8 gap-1.5 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
+        "h-8 gap-1.5 text-xs coarse:h-[44px] max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-[44px] group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
         className,
       )}
       {...props}

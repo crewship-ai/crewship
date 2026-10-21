@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { AlertTriangle, Check, ChevronDown, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
 import {

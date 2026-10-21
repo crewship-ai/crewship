@@ -74,7 +74,7 @@ const noop = () => {}
 describe("TurnRenderer", () => {
   describe("user role", () => {
     it("renders text content", () => {
-      render(<TurnRenderer turn={userTurn("hello world")} onCopy={noop} onFileClick={noop} />)
+      render(<TurnRenderer turn={userTurn("hello world")} onCopy={async () => true} onFileClick={noop} />)
       expect(screen.getByText("hello world")).toBeTruthy()
     })
 
@@ -85,7 +85,7 @@ describe("TurnRenderer", () => {
       }
       // Render must not crash; the user bubble is still emitted.
       const { container } = render(
-        <TurnRenderer turn={turn} onCopy={noop} onFileClick={noop} />,
+        <TurnRenderer turn={turn} onCopy={async () => true} onFileClick={noop} />,
       )
       expect(container.textContent).not.toContain("internal")
     })
@@ -101,7 +101,7 @@ describe("TurnRenderer", () => {
 
     it("shows the attachment paths of a sent message, line breaks intact", () => {
       const { container } = render(
-        <TurnRenderer turn={userTurn(withAttachment)} onCopy={noop} onFileClick={noop} />,
+        <TurnRenderer turn={userTurn(withAttachment)} onCopy={async () => true} onFileClick={noop} />,
       )
       expect(container.textContent).toContain("attachments/sess-1/invoice.pdf")
       const bubble = screen.getByText(/attachments\/sess-1\/invoice\.pdf/)
@@ -112,7 +112,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={userTurn(withAttachment)}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
           onEditUserMessage={noop}
         />,
@@ -124,7 +124,7 @@ describe("TurnRenderer", () => {
 
   describe("system role — system_init", () => {
     it("renders the Session started pill", () => {
-      render(<TurnRenderer turn={systemTurn("system_init")} onCopy={noop} onFileClick={noop} />)
+      render(<TurnRenderer turn={systemTurn("system_init")} onCopy={async () => true} onFileClick={noop} />)
       expect(screen.getByText(/Session started/)).toBeTruthy()
     })
 
@@ -132,7 +132,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -143,7 +143,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { tools: ["a", "b", "c"] })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -154,7 +154,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { tools: [] })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -163,7 +163,7 @@ describe("TurnRenderer", () => {
 
     it("carries data-turn-id like every other turn branch", () => {
       const { container } = render(
-        <TurnRenderer turn={systemTurn("system_init")} onCopy={noop} onFileClick={noop} />,
+        <TurnRenderer turn={systemTurn("system_init")} onCopy={async () => true} onFileClick={noop} />,
       )
       expect(container.querySelector('[data-turn-id="s1"]')).toBeTruthy()
     })
@@ -172,7 +172,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { claude_code_version: "2.1.204" })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -183,7 +183,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -199,7 +199,7 @@ describe("TurnRenderer", () => {
               { name: "github", type: "spawn", message: "ENOENT" },
             ],
           })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -215,7 +215,7 @@ describe("TurnRenderer", () => {
           turn={systemTurn("system_init", "", {
             mcp_server_errors: [{ name: "memory", type: "config", message: "boom" }],
           })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -226,7 +226,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -237,7 +237,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { mcp_server_errors: [] })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -248,7 +248,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("system_init", "", { model: "gpt-o5", tools: ["a", "b"] })}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -264,7 +264,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={systemTurn("error", "something blew up")}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
         />,
       )
@@ -278,13 +278,13 @@ describe("TurnRenderer", () => {
         ...assistantTurn(),
         parts: [makePart({ content: "Reading additional input from stdin...\n" })],
       }
-      const { container } = render(<TurnRenderer turn={turn} onCopy={noop} onFileClick={noop} />)
+      const { container } = render(<TurnRenderer turn={turn} onCopy={async () => true} onFileClick={noop} />)
       expect(container.textContent).toBe("")
       expect(screen.queryByTestId("assistant-turn-mock")).toBeNull()
     })
     it("delegates rendering to AssistantTurn", () => {
       render(
-        <TurnRenderer turn={assistantTurn("a-42")} onCopy={noop} onFileClick={noop} />,
+        <TurnRenderer turn={assistantTurn("a-42")} onCopy={async () => true} onFileClick={noop} />,
       )
       const probe = screen.getByTestId("assistant-turn-mock")
       expect(probe.getAttribute("data-turn-id")).toBe("a-42")
@@ -294,7 +294,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={assistantTurn("a1", false)}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
           isLastAssistant
           onRegenerate={vi.fn()}
@@ -307,7 +307,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={assistantTurn("a1", true)}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
           isLastAssistant
           onRegenerate={vi.fn()}
@@ -320,7 +320,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={assistantTurn("a1", false)}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
           isLastAssistant
         />,
@@ -332,7 +332,7 @@ describe("TurnRenderer", () => {
       render(
         <TurnRenderer
           turn={assistantTurn("a1", false)}
-          onCopy={noop}
+          onCopy={async () => true}
           onFileClick={noop}
           onRegenerate={vi.fn()}
         />,
@@ -352,7 +352,7 @@ describe("system_init — MCP skips without a server name", () => {
 
   it("labels a nameless skip by its category, not 'unnamed'", () => {
     render(
-      <TurnRenderer turn={systemTurn("system_init", "", sentinel)} onCopy={noop} onFileClick={noop} />,
+      <TurnRenderer turn={systemTurn("system_init", "", sentinel)} onCopy={async () => true} onFileClick={noop} />,
     )
     const chip = screen.getByLabelText(/MCP server.*skipped/i)
     expect(chip.getAttribute("aria-label")).toContain("unrecognized_shape")
@@ -365,7 +365,7 @@ describe("system_init — MCP skips without a server name", () => {
         turn={systemTurn("system_init", "", {
           mcp_server_errors: [{ name: "crewship-memory", type: "invalid_config" }],
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -388,7 +388,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
             github: { type: "spawn" },
           },
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -403,7 +403,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
         turn={systemTurn("system_init", "", {
           mcp_server_errors: { "crewship-memory": "spawn ENOENT" },
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -417,7 +417,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
         turn={systemTurn("system_init", "", {
           mcp_server_errors: ["crewship-memory", "github"],
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -431,7 +431,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
         turn={systemTurn("system_init", "", {
           mcp_server_errors: "crewship-memory failed to start",
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -446,7 +446,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
     render(
       <TurnRenderer
         turn={systemTurn("system_init", "", { mcp_server_errors: {} })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -457,7 +457,7 @@ describe("system_init — MCP skip reports in shapes the card did not expect", (
     render(
       <TurnRenderer
         turn={systemTurn("system_init", "", { mcp_server_errors: null })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -476,7 +476,7 @@ describe("system_init — fields that are not the strings they were typed as", (
         turn={systemTurn("system_init", "", {
           mcp_server_errors: [{ name: { server: "crewship-memory" }, type: "invalid_config" }],
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -490,7 +490,7 @@ describe("system_init — fields that are not the strings they were typed as", (
         turn={systemTurn("system_init", "", {
           mcp_servers: [{ name: { id: "crewship-memory" }, status: { state: "connected" } }],
         })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -502,7 +502,7 @@ describe("system_init — fields that are not the strings they were typed as", (
     render(
       <TurnRenderer
         turn={systemTurn("system_init", "", { model: { id: "claude-opus-4-7" } })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )
@@ -513,7 +513,7 @@ describe("system_init — fields that are not the strings they were typed as", (
     render(
       <TurnRenderer
         turn={systemTurn("system_init", "", { tools: "Bash" })}
-        onCopy={noop}
+        onCopy={async () => true}
         onFileClick={noop}
       />,
     )

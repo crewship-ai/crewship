@@ -230,10 +230,27 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('path: out', self.job(ci, 'playwright-pr'))
         self.assertIn('needs_bootstrap', self.job(ci, 'onboarding-journey'))
 
+    def test_throwaway_chat_specs_have_a_real_isolated_runner(self):
+        text = self.text('nightly-e2e.yml')
+        bucket = re.search(r'^  THROWAWAY_SPECS: >-\n((?:    [^\n]+\n)+)', text, re.M)
+        self.assertIsNotNone(bucket, 'isolated chat suites need an executable bucket')
+        self.assertEqual(set(bucket.group(1).split()), {
+            'e2e/chat-attachment-queue.spec.ts', 'e2e/chat-search.spec.ts',
+            'e2e/chat-model-picker.spec.ts'})
+        lane = self.job(text, 'e2e-gate')
+        for requirement in ('for spec in $THROWAWAY_SPECS',
+                            'scripts/throwaway-server.sh run', '--binary "$PWD/crewship"',
+                            'seed --offline-demo', 'CREWSHIP_THROWAWAY_MANIFEST',
+                            'export E2E_CREWSHIP_DATA_DIR=', 'export PLAYWRIGHT_BASE_URL="$CREWSHIP_SERVER"',
+                            '--workers=1', '--retries=0', '.stats.expected > 0', '.stats.skipped == 0',
+                            'cp playwright-nightly-report.json test-results/gate/report.json'):
+            self.assertIn(requirement, lane)
+        self.assertNotIn('continue-on-error:', lane)
+
     def test_every_browser_spec_is_classified_once(self):
         text = self.text('nightly-e2e.yml')
         paths = []
-        for name in ('GATE_SPECS', 'DRIFT_SPECS', 'EXCLUDED_SPECS'):
+        for name in ('GATE_SPECS', 'DRIFT_SPECS', 'HARBOR2_SPECS', 'THROWAWAY_SPECS', 'EXCLUDED_SPECS'):
             block = re.search(r'^  ' + name + r': >-\n((?:    [^\n]+\n)+)', text, re.M).group(1)
             paths.extend(block.split())
         self.assertEqual(len(paths), len(set(paths)), 'duplicate test bucket membership')

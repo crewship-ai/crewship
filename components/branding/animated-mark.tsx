@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { useReducedMotion } from "motion/react"
+import { useReducedMotionConfig } from "motion/react"
 import { MARK_SAILS, MARK_GEOMETRY } from "@/lib/brand-mark"
 
 /**
@@ -72,7 +72,9 @@ export function AnimatedMark({ variant = "swell", replayKey, className }: Props)
   // Both triggers below start at 0, so the clock has to as well.
   const clockRef = useRef(0)
   const originRef = useRef<number | null>(null)
-  const reduced = useReducedMotion()
+  // The app's own choice (Settings › Appearance › Reduce motion, passed down
+  // by <MotionConfig> in providers.tsx), falling back to the OS preference.
+  const reduced = useReducedMotionConfig() ?? false
 
   // Fire the sweep (and, for "assemble", the entrance) on demand. Kept out
   // of the draw effect so a step change does not tear down the RAF loop.

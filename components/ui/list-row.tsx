@@ -17,6 +17,12 @@ interface ListRowProps {
   id?: string
   "aria-label"?: string
   "data-testid"?: string
+  /** Native tooltip — the full name of a row whose label is truncated. */
+  title?: string
+  /** The row is the current page or item (a sidebar row for the open screen). */
+  "aria-current"?: React.AriaAttributes["aria-current"]
+  /** Key that activates the row, announced to assistive technology ("1"). */
+  "aria-keyshortcuts"?: string
   /** Style overrides — keep narrow; most styling should be className. */
   style?: React.CSSProperties
   /** Set to false on rare hot paths where layout animation is too expensive. */

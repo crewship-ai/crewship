@@ -98,7 +98,7 @@ func TestRoutineRecords_CostIsReportedUsageNotSpend(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnGet(covRecordsPath, clitest.JSONResponse(200, []runRecordRow{
-		{ID: "r-used", Status: "completed", Mode: "live", TriggeredVia: "manual", CostUSD: 0.0123, StartedAt: "2026-08-07T08:00:00Z"},
+		{ID: "r-used", Status: "completed", Mode: "live", TriggeredVia: "manual", CostUSD: usdPtr(0.0123), StartedAt: "2026-08-07T08:00:00Z"},
 		{ID: "r-none", Status: "completed", Mode: "live", TriggeredVia: "manual", StartedAt: "2026-08-07T07:00:00Z"},
 	}))
 	covSetupCli10(t, s.URL())

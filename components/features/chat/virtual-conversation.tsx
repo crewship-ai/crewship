@@ -46,7 +46,7 @@ interface VirtualConversationProps {
   historyLoading: boolean
   isStreaming: boolean
   animateAfter: number
-  onCopy: (s: string) => void
+  onCopy: (s: string) => Promise<boolean>
   onFileClick: (s: string) => void
   onRegenerate?: () => void
   onEditUserMessage?: (turnId: string, newContent: string) => void

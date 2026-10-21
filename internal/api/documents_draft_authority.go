@@ -63,6 +63,13 @@ func (h *documentAuthority) authenticateDocumentDraftAgent(w http.ResponseWriter
 // drafting purpose can reach its one created Page, still owned by that human.
 func (h *PageHandler) documentDraftScope(ctx context.Context, a *artifactRunAuthority, page string) (documentDraftScope, error) {
 	var scope documentDraftScope
+	selected, err := h.documentIterationRun(ctx, a)
+	if err != nil {
+		return scope, err
+	}
+	if selected {
+		return h.documentIterationScope(ctx, a, page)
+	}
 	consent, err := h.documentCreationAuthority(ctx, a)
 	if err != nil || !consent.Consumed.Valid || !consent.Page.Valid || page != "" && page != consent.Page.String {
 		return scope, errDocumentAccess
@@ -120,6 +127,13 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 func (h *PageHandler) documentDraftGuard(a *artifactRunAuthority, k documents.Key, operation string, ifRev int64) documents.MutationGuard {
 	return func(ctx context.Context, tx *sql.Tx, actor string, state documents.State) error {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
+		selected, err := h.documentIterationRun(ctx, a)
+		if err != nil {
+			return err
+		}
+		if selected {
+			return h.documentIterationGuard(a, k, operation, ifRev)(ctx, tx, actor, state)
+		}
 		scope, err := h.documentDraftScope(ctx, a, k.PageID)
 		if err != nil {
 			return err

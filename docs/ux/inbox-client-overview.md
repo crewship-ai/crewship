@@ -90,3 +90,56 @@ forms omit redundant permission-success text while retaining explanations for
 users who cannot decide. Crew navigation lives in the byline, without duplicate
 links below the same message. Source navigation, archival guards, evidence and
 all supported action handlers remain intact.
+
+
+## Harbor 2 layout — 2026-10-17
+
+Issue #3385, part of the Harbor 2 redesign (#3366, #3350). Supersedes the
+280 px column, the automatic preview and the triage pane described above.
+
+- **Panel (272 px, collapsible, SecondaryPanel).** Toolbar: search (`/`),
+  Filter, Select several, Sort. Filter opens the facets *in the panel* —
+  State (Unread only, Due within 24 hours), Attention (Decision, Input needed,
+  Review, Repair), Source type (the twelve real kinds) and Crew — and active
+  facets show as chips ("State: Unread only ×"). Sort is Urgency (expires
+  first, the default), Newest or Crew, remembered per user (`inbox.sort`).
+  Spaces To handle / Updates / History (keys 1–3) and an Overview row sit
+  above the sections. Rows: unread dot, sender avatar, title (bold while
+  unread), "{crew} · {kind}", expiry ("in 3h") or age, ×N for merged
+  notices.
+- **Attention.** The server's `attention_class` wins; rows written before the
+  contract are classed by kind (waitpoint → Decision, run needs human →
+  Input needed, proposals/memory → Review, failures and schedules → Repair).
+  `?attention=approvals|run-alerts|schedule-alerts` keeps its own blocking
+  rule and shows as a chip plus a card on the Overview.
+- **No automatic preview.** With nothing open the pane is the Overview
+  ("Your inbox, at a glance": counts, four attention tiles, By crew,
+  Expiring soon, Recent history). A previewed row put a live Approve button in
+  front of a reader who never chose it.
+- **Top bar.** Inbox › {kind}, Live, position n / N, Previous (K), Next (J),
+  Archive (E) — disabled until an open decision is decided, since the server
+  refuses to archive it — and the ⋯ menu (Mark unread, Archive, Restore). On
+  a phone the bar carries Back; the list, the detail and the Overview are
+  separate steps.
+- **One detail layout.** Sender and attention, title, message, the decision
+  block (heading, expiry, the facts it rests on) with its actions docked
+  bottom-right — ghost, secondary, then the primary as the right-most button
+  in DOM order — then "Where this came from", expandable run steps and
+  context, and who decides beside the buttons a role cannot use. Secrets show
+  as `••••` with Reveal. Wide desktop (≥ 1536 px) adds a sender rail with
+  "Earlier from".
+- **Receipts.** After a decision: the outcome, "Saved … · the record stays in
+  History", View record and, when another decision waits, Next to review · N.
+  History items open with the same receipt and View in Activity above the
+  request they settled.
+- **States.** Skeleton rows while loading, "Nothing waits for you" with Open
+  Activity and `crewship inbox`, a page error with Retry when the inbox
+  cannot load, one banner when a source is partial, and "No longer in your
+  inbox" (Open History / Back to To handle) for an unknown `?item=`.
+- **Confirmations.** Irreversible run-needs-human actions confirm in the
+  shared dialog instead of the browser's `confirm()`.
+- **Not shown (no backend yet).** Snooze, inbox sources that do not exist
+  yet, free-text answers for agent questions and credential requests, and
+  actions for held artifact creation and ready routine triggers. Attention
+  and Crew facets count the loaded feed; server-side filters are a separate
+  backend issue.

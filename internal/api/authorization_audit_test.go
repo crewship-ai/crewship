@@ -70,7 +70,10 @@ func newAuthorizationAuditFixture(t *testing.T) *authorizationAuditFixture {
 	}
 	t.Cleanup(router.Shutdown)
 	f.do = func(method, path, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, "/api/v1/workspaces/"+ws+path, &authorizationAuditBody{reader: strings.NewReader(body), before: f.beforeBody})
+		if !strings.HasPrefix(path, "/api/v1/") {
+			path = "/api/v1/workspaces/" + ws + path
+		}
+		req := httptest.NewRequest(method, path, &authorizationAuditBody{reader: strings.NewReader(body), before: f.beforeBody})
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Workspace-ID", ws)
 		req.Header.Set("Content-Type", "application/json")
@@ -123,7 +126,8 @@ func TestAuthorizationAuditCapabilities(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantPayload := map[string]any{"subject_user_id": f.target, "action": "capabilities_changed"}
-			if actor != f.owner || !reflect.DeepEqual(payload, wantPayload) {
+			public := journal.SerializeEntry(journal.Entry{Type: journal.EntryMemberCapabilitiesChanged, Payload: payload})["payload"]
+			if actor != f.owner || !reflect.DeepEqual(public, wantPayload) {
 				t.Fatalf("audit identity or capability privacy changed: actor=%s payload=%s", actor, raw)
 			}
 

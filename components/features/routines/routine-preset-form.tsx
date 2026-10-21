@@ -17,6 +17,8 @@ export function RoutinePresetForm({
   onSave,
   submitLabel = "Save inputs",
   allowDraft = false,
+  formId,
+  onReadyChange,
 }: {
   workspaceId: string
   slug: string
@@ -27,6 +29,13 @@ export function RoutinePresetForm({
   onSave: (inputs: Record<string, unknown>) => void
   submitLabel?: string
   allowDraft?: boolean
+  /**
+   * Inside a CreateSurface: the inputs form takes this id and the surface
+   * footer owns Cancel and the primary (see `InputsForm`'s `formId`).
+   */
+  formId?: string
+  /** Told whether the inputs form is mounted, so a footer can offer submit. */
+  onReadyChange?: (ready: boolean) => void
 }) {
   const [source, setSource] = useState("published")
   const [retry, setRetry] = useState(0)
@@ -73,6 +82,10 @@ export function RoutinePresetForm({
   }, [workspaceId, slug, version, source, key, retry])
 
   const specs = loaded?.key === key ? loaded.specs : null
+  const ready = specs !== null
+  useEffect(() => {
+    onReadyChange?.(ready)
+  }, [ready, onReadyChange])
   const save = (inputs: Record<string, unknown>) => {
     // Keep legacy keys that this schema does not describe. Editing a preset
     // must not silently erase information consumed by advanced expressions.
@@ -128,6 +141,7 @@ export function RoutinePresetForm({
       {specs && (
         <InputsForm
           key={key}
+          formId={formId}
           inputs={specs}
           initialInputs={initialInputs}
           submitting={submitting}
@@ -136,7 +150,7 @@ export function RoutinePresetForm({
           submitLabel={submitLabel}
         />
       )}
-      {!specs && (
+      {!specs && !formId && (
         <button
           type="button"
           disabled={submitting}

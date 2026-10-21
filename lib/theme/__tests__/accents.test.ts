@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
-import { ACCENTS, ACCENT_BOOT_SCRIPT, ACCENT_STORAGE_KEY, BRAND_TOKENS, DEFAULT_ACCENT, accentBlock, applyAccent, isAccentId } from "../accents"
+import { ACCENTS, ACCENT_BOOT_SCRIPT, ACCENT_STORAGE_KEY, BRAND_TOKENS, DEFAULT_ACCENT, STYLE_ACCENTS, accentBlock, applyAccent, isAccentChoice, isAccentId } from "../accents"
 
 const css = readFileSync(path.resolve(__dirname, "../../../app/styles/accents.css"), "utf8")
 
@@ -24,7 +24,34 @@ describe("accent registry and stylesheet", () => {
 
   it("has no accent block the registry does not list", () => {
     const inCss = new Set([...css.matchAll(/data-accent="([a-z-]+)"/g)].map((m) => m[1]))
-    expect([...inCss].sort()).toEqual(ACCENTS.map((a) => a.id).sort())
+    expect([...inCss].sort()).toEqual([...ACCENTS.map((a) => a.id), ...STYLE_ACCENTS.map((a) => a.id)].sort())
+  })
+
+  it.each(STYLE_ACCENTS.map((a) => a.id))("style accent %s defines every brand token in light and dark", (id) => {
+    for (const mode of ["light", "dark"] as const) {
+      expect([...accentBlock(css, id, mode).keys()].sort(), `${id} ${mode}`).toEqual([...BRAND_TOKENS].sort())
+    }
+  })
+
+  it("style accents are hidden: valid for a style to carry, never offered in the picker", () => {
+    const picker = new Set(ACCENTS.map((a) => a.id as string))
+    expect(STYLE_ACCENTS.length).toBeGreaterThanOrEqual(40)
+    for (const a of STYLE_ACCENTS) {
+      expect(picker.has(a.id), a.id).toBe(false)
+      expect(isAccentId(a.id), a.id).toBe(false)
+      expect(isAccentChoice(a.id), a.id).toBe(true)
+      expect(a.swatch, a.id).toMatch(/^#[0-9A-F]{6}$/)
+    }
+    expect(new Set(STYLE_ACCENTS.map((a) => a.id)).size).toBe(STYLE_ACCENTS.length)
+  })
+
+  it("boot script restores a style accent too", () => {
+    const store = new Map<string, string>([[ACCENT_STORAGE_KEY, "clay"]])
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null })
+    new Function(ACCENT_BOOT_SCRIPT)()
+    vi.unstubAllGlobals()
+    expect(document.documentElement.dataset.accent).toBe("clay")
+    document.documentElement.removeAttribute("data-accent")
   })
 
   it("never uses a status hue as an accent", () => {

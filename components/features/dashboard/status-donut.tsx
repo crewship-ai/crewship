@@ -59,7 +59,7 @@ export function StatusDonut({ data, centerLabel = "missions", onSelect }: Status
                   return (
                     <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
                       <tspan x={viewBox.cx} y={viewBox.cy} className="fill-foreground text-[20px] font-semibold tabular-nums">{total}</tspan>
-                      <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 14} className="fill-muted-foreground text-[9px] uppercase tracking-wider">{centerLabel}</tspan>
+                      <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 14} className="fill-muted-foreground text-[9px]">{centerLabel}</tspan>
                     </text>
                   )
                 }
@@ -81,7 +81,7 @@ export function StatusDonut({ data, centerLabel = "missions", onSelect }: Status
                 <span className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
                 {d.label}
               </span>
-              <span className="font-mono text-foreground/60 tabular-nums">{d.count}</span>
+              <span className="text-foreground/60 tabular-nums">{d.count}</span>
             </>
           )
           return onSelect ? (
