@@ -28,6 +28,11 @@ describe("chat export", () => {
     const md = await exported([user("Plan the launch"), reply("a1", "Step one is", "cancelled")])
     expect(md).toContain("## Riley\nStep one is\n_Stopped. The reply above is partial._\n")
   })
+  it("counts tool calls as part of the reply, as the chat does", async () => {
+    const tool = { id: "a1", role: "assistant", timestamp: at, turnState: "interrupted", parts: [{ type: "tool_call", content: "search", metadata: { tool_name: "search" } }] } as ChatTurn
+    const md = await exported([user("Plan the launch"), tool])
+    expect(md).toContain("> _Tool:_ `search`\n_Interrupted. The reply above is partial._\n")
+  })
   it("adds no note to a completed reply", async () => {
     const md = await exported([user("Hi"), reply("a1", "Hello", "completed")])
     expect(md).toMatch(/## Riley\nHello\n$/)

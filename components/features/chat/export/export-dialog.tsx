@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { turnEndText } from "../turn-end"
+import { visibleAgentText } from "@/lib/chat-text"
 
 interface ExportDialogProps {
   turns: ChatTurn[]
@@ -48,7 +49,8 @@ function turnsToMarkdown(turns: ChatTurn[], agentName?: string): string {
         else if (p.type === "tool_call")
           out.push(`> _Tool:_ \`${p.metadata?.tool_name ?? p.content}\``)
       }
-      const end = turnEndText(turn, !turn.parts.some((p) => p.type === "text" && p.content.trim()))
+      // Empty as the chat judges it: tool calls and thinking count as content.
+      const end = turnEndText(turn, !turn.parts.some((p) => p.type !== "text" || visibleAgentText(p.content) !== ""))
       if (end) out.push(`_${end}_`)
       out.push("")
     }
