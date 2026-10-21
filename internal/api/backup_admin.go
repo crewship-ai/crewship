@@ -6,16 +6,17 @@ package api
 // Extracted from backup.go for readability.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
@@ -208,16 +209,22 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	// Bundle bytes contain sensitive workspace contents (even encrypted,
 	// the metadata is plaintext). Disable proxy / browser caching so a
 	// compromised intermediary does not retain a copy after download.
-	w.Header().Set("Content-Type", "application/zstd")
+	if err := backupDownloadAuthority(r, h.db, false); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, http.StatusForbidden, "backup authorization lost")
+		} else {
+			replyInternalError(w, h.logger, "authorize backup download", err)
+		}
+		return
+	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = io.Copy(w, f)
+	n, copyErr := copyBackupDownload(w, r, h.db, f, false)
 
 	if user != nil {
-		WriteAuditLog(ctx, h.db, h.journal, "backup.download", "backup", path, user.ID, workspaceID, nil)
+		WriteAuditLog(context.WithoutCancel(ctx), h.db, h.journal, "backup.download", "backup", path, user.ID, workspaceID, map[string]any{"bytes": n, "complete": copyErr == nil && n == info.Size()})
 	}
 }
 

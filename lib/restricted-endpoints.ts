@@ -17,6 +17,17 @@
  * source: `{name}` matches one non-empty path segment.
  */
 export const RESTRICTED_FE_ENDPOINTS = [
+  "GET /api/v1/pages/{slug}/versions",
+  "GET /api/v1/pages/{slug}/export",
+  "GET /api/v1/pages/{slug}/document",
+  "GET /api/v1/pages/{slug}/document/checkpoints",
+  "GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",
+  "GET /api/v1/pages/{slug}/project",
+  "GET /api/v1/pages/{slug}/project/source",
+  "GET /api/v1/pages/{slug}/project/history",
+  "GET /api/v1/pages/{slug}/project/history/{revision}",
+  "GET /api/v1/pages/{slug}/project/history/{revision}/source",
+
  "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
  "PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
  "GET /api/v1/workspaces/{workspaceId}/access/me",
