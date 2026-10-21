@@ -17,7 +17,7 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 		return false, err
 	}
 	defer tx.Rollback()
-	written, err := writeAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp)
+	written, err := WriteAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp)
 	if err != nil || !written {
 		return written, err
 	}
@@ -27,9 +27,9 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 	return true, nil
 }
 
-// writeAssignmentResultCommentTx preserves requester authorization when lifecycle
+// WriteAssignmentResultCommentTx preserves requester authorization when lifecycle
 // settlement and its deterministic comment share an existing transaction.
-func writeAssignmentResultCommentTx(ctx context.Context, tx *sql.Tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp string) (bool, error) {
+func WriteAssignmentResultCommentTx(ctx context.Context, tx *sql.Tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp string) (bool, error) {
 	if assignmentID != "" {
 		var wrongTarget bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assignments WHERE id=? AND (workspace_id<>? OR mission_id IS NOT ?))`, assignmentID, workspaceID, missionID).Scan(&wrongTarget); err != nil {

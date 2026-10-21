@@ -173,7 +173,7 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		}
 		if commentBody != "" {
 			commentID := "assignment-comment:" + assignmentID
-			written, commentErr := writeAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
+			written, commentErr := WriteAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
 			if commentErr != nil {
 				if errors.Is(commentErr, runauthority.ErrUnavailable) || errors.Is(commentErr, runauthority.ErrIdentityMismatch) || errors.Is(commentErr, runauthority.ErrRequesterStale) {
 					e.logger.Warn("mission result comment withheld", "assignment_id", assignmentID, "error", commentErr)
