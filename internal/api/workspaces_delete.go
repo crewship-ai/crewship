@@ -7,9 +7,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 type deleteWorkspaceRequest struct {
@@ -92,6 +95,16 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	liveRole, err := invitationIssuerRole(r.Context(), tx, user.ID, workspaceID)
+	if err == sql.ErrNoRows || err == nil && liveRole != "OWNER" {
+		writeProblemContentType(w, r, http.StatusForbidden, "current workspace owner required")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize workspace deletion", err)
+		return
+	}
+
 	// Refuse deleting the caller's only workspace.
 	var otherCount int
 	if err := tx.QueryRowContext(r.Context(), `
@@ -108,6 +121,12 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var memberCount int
+	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM workspace_members WHERE workspace_id=?`, workspaceID).Scan(&memberCount); err != nil {
+		replyInternalError(w, h.logger, "snapshot workspace members for deletion", err)
+		return
+	}
+
 	crewIDs, err := softDeleteWorkspaceTx(r.Context(), tx, workspaceID, now)
 	if err != nil {
 		h.logger.Error("delete workspace", "error", err)
@@ -115,10 +134,28 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	notify, err := appendAuthorizationAudit(r.Context(), tx, h.journal, journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryType("workspace.deleted"), ActorType: journal.ActorUser, ActorID: user.ID,
+		Summary: "Workspace deleted", Payload: map[string]any{"workspace_id": workspaceID, "slug": slug, "crew_ids": crewIDs, "member_count": memberCount, "action": "workspace_deleted"},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit workspace deletion", err)
+		return
+	}
+
+	if err := acknowledgeWorkspaceDeletion(r.Context(), tx, workspaceID, now, crewIDs); err != nil {
+		replyInternalError(w, h.logger, "acknowledge workspace deletion", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit delete tx", "error", err)
 		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	if notify != nil {
+		notify()
 	}
 
 	// Realtime: tell connected clients the workspace (and its crews) are
@@ -184,4 +221,31 @@ func softDeleteWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, now str
 		return nil, fmt.Errorf("soft-delete workspace: %w", err)
 	}
 	return crewIDs, nil
+}
+
+func acknowledgeWorkspaceDeletion(ctx context.Context, tx *sql.Tx, workspace, now string, crews []string) error {
+	var deleted sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT deleted_at FROM workspaces WHERE id=?`, workspace).Scan(&deleted); err != nil {
+		return err
+	}
+	if !deleted.Valid || deleted.String != now {
+		return errors.New("workspace deletion not acknowledged")
+	}
+	var remaining int
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM workspace_members WHERE workspace_id=?)+(SELECT COUNT(*) FROM crews WHERE workspace_id=? AND deleted_at IS NULL)+(SELECT COUNT(*) FROM agents WHERE workspace_id=? AND deleted_at IS NULL)+(SELECT COUNT(*) FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id=?))`, workspace, workspace, workspace, workspace).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining != 0 {
+		return errors.New("workspace deletion cascade not acknowledged")
+	}
+	for _, id := range crews {
+		var stamp string
+		if err := tx.QueryRowContext(ctx, `SELECT deleted_at FROM crews WHERE id=? AND workspace_id=?`, id, workspace).Scan(&stamp); err != nil {
+			return err
+		}
+		if stamp != now {
+			return errors.New("workspace crew deletion not acknowledged")
+		}
+	}
+	return nil
 }

@@ -177,6 +177,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
     "crew.member_changed",
     "member.role_changed",
     "member.removed",
+    "workspace.deleted",
     ],
   },
   {

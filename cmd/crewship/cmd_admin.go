@@ -643,6 +643,14 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
 	}
 
+	// Local recovery shares the configured instance chain and final password /
+	// session acknowledgement with the HTTP writer, inside this same commit.
+	// This process has no access to the running server's stream registry;
+	// it cannot notify already-open streams in that process.
+	if err := api.AuditLocalPasswordResetTx(ctx, tx, userID, string(hashed), now, revoked); err != nil {
+		return fmt.Errorf("audit local password reset: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

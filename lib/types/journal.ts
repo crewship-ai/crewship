@@ -167,6 +167,7 @@ export const JOURNAL_ENTRY_TYPES = [
     "crew.member_changed",
     "member.role_changed",
     "member.removed",
+    "workspace.deleted",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",

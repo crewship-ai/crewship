@@ -275,6 +275,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "crew.member_changed": "audit",
   "member.role_changed": "audit",
   "member.removed": "audit",
+  "workspace.deleted": "audit",
   // Provisioning — container build lifecycle.
   "provisioning.queued": "provisioning",
   "provisioning.building": "provisioning",
@@ -516,6 +517,7 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "crew.member_changed": "crew member",
   "member.role_changed": "role",
   "member.removed": "member removed",
+  "workspace.deleted": "workspace−",
   "provisioning.queued": "prov·queue",
   "provisioning.building": "prov·build",
   "provisioning.complete": "prov·done",

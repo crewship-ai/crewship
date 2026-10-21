@@ -8,7 +8,6 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -32,10 +31,12 @@ type UserProfileHandler struct {
 	avatarRoot string
 }
 
-// NewUserProfileHandler wires the profile handler. sessions may be nil
-// (password change still succeeds; it just cannot revoke sibling
-// sessions).
+// NewUserProfileHandler wires the profile handler. A nil store uses the
+// handler database so password changes still revoke sibling sessions.
 func NewUserProfileHandler(db *sql.DB, logger *slog.Logger, store sessions.Store) *UserProfileHandler {
+	if store == nil {
+		store = sessions.NewDBStore(db)
+	}
 	return &UserProfileHandler{db: db, logger: logger, sessions: store}
 }
 
@@ -219,50 +220,85 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?",
-		string(newHash), now, user.ID); err != nil {
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "password change: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(r.Context(), `UPDATE users SET hashed_password=?,updated_at=? WHERE id=? AND hashed_password=?`, string(newHash), now, user.ID, hashed.String)
+	if err != nil {
 		replyInternalError(w, h.logger, "update password", err)
 		return
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		replyInternalError(w, h.logger, "acknowledge password", err)
+		return
+	}
+	if n != 1 {
+		replyError(w, http.StatusConflict, "password changed; retry with the current password")
+		return
+	}
+	if err := acknowledgePasswordTx(r.Context(), tx, user.ID, string(newHash)); err != nil {
+		replyInternalError(w, h.logger, "acknowledge password", err)
+		return
+	}
 
-	// Revoking sibling sessions is part of the password-rotation security
-	// contract — if it fails we must NOT report success, or the caller
-	// believes their old sessions are dead when they may still be live.
-	revoked, err := h.revokeOtherSessions(r, user.ID, user.SessionID)
+	ids, notify, err := passwordSessionsTx(r.Context(), tx, h.sessions, user.ID, user.SessionID)
 	if err != nil {
 		replyInternalError(w, h.logger, "revoke sessions on password change", err)
 		return
 	}
-
-	// Browser sessions are always cut; CLI tokens only on request. Like the
-	// session revocation, a failure here must fail the request — the caller
-	// asked for their tokens to be dead and would otherwise believe they are.
+	revoked := len(ids)
 	tokensRevoked := int64(0)
+	var tokenIDs []string
 	if req.RevokeCLITokens {
-		tx, err := h.db.BeginTx(r.Context(), nil)
-		if err != nil {
-			replyInternalError(w, h.logger, "revoke cli tokens: begin", err)
-			return
-		}
-		defer tx.Rollback() //nolint:errcheck
-		ids, err := revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
+		tokenIDs, err = revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
 		if err != nil {
 			replyInternalError(w, h.logger, "revoke cli tokens: audit", err)
 			return
 		}
-		tokensRevoked = int64(len(ids))
-		if err := ackCLITokenRevocationsTx(r.Context(), tx, ids, user.ID, now); err != nil {
+		if err := ackCLITokenRevocationsTx(r.Context(), tx, tokenIDs, user.ID, now); err != nil {
 			replyInternalError(w, h.logger, "revoke cli tokens: acknowledge", err)
 			return
 		}
-		if err := tx.Commit(); err != nil {
-			replyInternalError(w, h.logger, "revoke cli tokens: commit", err)
+		tokensRevoked = int64(len(tokenIDs))
+	}
+	if err := auditPasswordTx(r.Context(), tx, user.ID, "auth.password_changed", now, revoked, int(tokensRevoked)); err != nil {
+		replyInternalError(w, h.logger, "audit password change", err)
+		return
+	}
+	if err := acknowledgePasswordSessions(r.Context(), tx, user.ID, string(newHash), user.SessionID, ids); err != nil {
+		replyInternalError(w, h.logger, "acknowledge password mutation", err)
+		return
+	}
+
+	if err := ackCLITokenRevocationsTx(r.Context(), tx, tokenIDs, user.ID, now); err != nil {
+		replyInternalError(w, h.logger, "final token revocation acknowledge", err)
+		return
+	}
+	if req.RevokeCLITokens {
+		var remaining bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM cli_tokens WHERE user_id = ? AND revoked_at IS NULL)`, user.ID).Scan(&remaining); err != nil {
+			replyInternalError(w, h.logger, "check final token set", err)
 			return
 		}
-		if h.streams != nil {
-			h.streams.NotifyTokensRevoked(user.ID)
+		if remaining {
+			replyInternalError(w, h.logger, "acknowledge final token set", errors.New("unrevoked CLI token remains"))
+			return
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit password change", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
+	if req.RevokeCLITokens && tokensRevoked > 0 && h.streams != nil {
+		h.streams.NotifyTokensRevoked(user.ID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -270,38 +306,4 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		"sessions_revoked":   revoked,
 		"cli_tokens_revoked": tokensRevoked,
 	})
-}
-
-// revokeOtherSessions invalidates every active session for the user
-// except keepSid (the caller's current session). When keepSid is empty
-// (CLI-token auth — no user_sessions row) all sessions are revoked. A
-// non-nil error means the security guarantee could not be met and the
-// caller must fail the request.
-func (h *UserProfileHandler) revokeOtherSessions(r *http.Request, userID, keepSid string) (int, error) {
-	if h.sessions == nil {
-		return 0, nil
-	}
-	ctx := r.Context()
-	if keepSid == "" {
-		n, err := h.sessions.RevokeAllForUser(ctx, userID, sessions.ReasonPasswordChange)
-		if err != nil {
-			return 0, fmt.Errorf("revoke all sessions: %w", err)
-		}
-		return int(n), nil
-	}
-	list, err := h.sessions.ListActiveForUser(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("list active sessions: %w", err)
-	}
-	count := 0
-	for _, s := range list {
-		if s.ID == keepSid {
-			continue
-		}
-		if err := h.sessions.Revoke(ctx, s.ID, sessions.ReasonPasswordChange); err != nil {
-			return count, fmt.Errorf("revoke sibling session %s: %w", s.ID, err)
-		}
-		count++
-	}
-	return count, nil
 }

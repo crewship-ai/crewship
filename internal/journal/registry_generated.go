@@ -185,4 +185,5 @@ var AllEntryTypes = []EntryType{
 	EntryWorkClaimed,
 	EntryWorkLeaseLost,
 	EntryWorkNeedsReconciliation,
+	EntryType("workspace.deleted"), // internal/api/workspaces_delete.go:131:35
 }
