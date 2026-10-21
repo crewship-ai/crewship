@@ -826,6 +826,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         else {
           const profile = await response.json() as {mode:string;audience?:string}
           if (currentChatReadScopeRef.current !== chatReadScope) return false
+          // A draft's mount probe answered 404, so this authoritative answer is
+          // the first one for the scope; without it chat-scoped reads (linked
+          // issues, proposals, decisions) stay off until a reload.
+          if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
           if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
           else ok = false
         }
