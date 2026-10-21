@@ -40,6 +40,11 @@ func TestDocumentEncryptedForkPreservesOperationIdentity(t *testing.T) {
 	if _, err := store.InitRequest(t.Context(), key, requestID, fingerprint, 1, snapshot, projection, authorize(key)); err != nil {
 		t.Fatal(err)
 	}
+	initial, err := store.Checkpoints(t.Context(), key, authorize(key))
+	if err != nil || len(initial) != 1 {
+		t.Fatalf("source initial history: %v %v", initial, err)
+	}
+	initialID := initial[0]["id"].(string)
 	// C1 has no lease/checkpoint mutation API yet. Populate source runtime lease
 	// fields and a saved history row directly, then exercise the real bundle path.
 	if _, err := source.Exec(`UPDATE documents SET epoch=41,writer='source-engine',owner='source-owner',lease_until=4102444800000 WHERE workspace_id=? AND page_id=?`, workspace, page); err != nil {
@@ -72,13 +77,12 @@ func TestDocumentEncryptedForkPreservesOperationIdentity(t *testing.T) {
 	if epoch != 42 || writer != "" || owner != "" || lease != 0 {
 		t.Fatal("fork restored source writer credentials or failed epoch fence")
 	}
-	for table, want := range map[string]string{"document_receipts": requestID, "document_checkpoints": checkpointID} {
-		var id string
-		if err := target.QueryRow(`SELECT id FROM `+table+` WHERE workspace_id=? AND page_id=?`, fork.WorkspaceID, fork.PageID).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		if id != want {
-			t.Errorf("%s changed original scoped operation/history identity", table)
+	for table, identities := range map[string][]string{"document_receipts": {requestID}, "document_checkpoints": {initialID, checkpointID}} {
+		for _, want := range identities {
+			var id string
+			if err := target.QueryRow(`SELECT id FROM `+table+` WHERE workspace_id=? AND page_id=? AND id=?`, fork.WorkspaceID, fork.PageID, want).Scan(&id); err != nil || id != want {
+				t.Fatalf("%s changed original scoped identity %q: %q %v", table, want, id, err)
+			}
 		}
 	}
 	forkStore := documents.New(target, documents.Options{})
@@ -102,7 +106,11 @@ func TestDocumentEncryptedForkPreservesOperationIdentity(t *testing.T) {
 	}
 	for _, table := range []string{"documents", "document_receipts", "document_checkpoints"} {
 		var count int
-		if err := target.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 1 {
+		want := 1
+		if table == "document_checkpoints" {
+			want = 2
+		}
+		if err := target.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != want {
 			t.Fatalf("replay changed %s row count: %d %v", table, count, err)
 		}
 	}

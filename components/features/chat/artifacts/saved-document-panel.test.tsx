@@ -1,10 +1,13 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { apiFetch } from "@/lib/api-fetch"
+import { PageReferenceEntry } from "@/components/features/pages/page-reference-entry"
 import { SavedDocumentPanel, type SavedDocumentPanelProps } from "./saved-document-panel"
 
 const events = vi.hoisted(() => new Map<string, () => void>())
+const replace = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: (event: string, callback: () => void) => events.set(event, callback) }))
 const content = { type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Private saved body" }] }] }
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
@@ -24,11 +27,24 @@ it("opens the full editor by stable Page identity only after current metadata an
   expect(screen.queryByRole("link", { name: "Open full editor" })).toBeNull()
   await act(async () => resolve(response({ id: "page /&", name: "Private saved title", has_document: true })))
   const link = await screen.findByRole("link", { name: "Open full editor" })
-  expect(link).toHaveAttribute("href", "/pages?ref=%40page+%2F%26&workspace_id=ws+%2F%26")
+  expect(link).toHaveAttribute("href", "/pages?ref=page+%2F%26&workspace_id=ws+%2F%26")
   expect(link).toHaveAttribute("target", "_blank")
   expect(link).toHaveAttribute("rel", "noopener noreferrer")
   expect(screen.getByText("Private saved body")).toBeInTheDocument()
   expect(screen.getByText("Current saved document")).toBeInTheDocument()
+})
+it("links the full editor with the bare Page id that the /pages reference entry accepts", async () => {
+  // The entry adds the @ itself; an @ in ref made every click land on "Document unavailable".
+  const target = { workspaceId: "ws1", pageId: "cmvhw9fu5006e439fffa9", type: "document" as const, mode: "latest" as const }
+  vi.mocked(apiFetch).mockImplementation(async url => response(String(url).includes("/document?")
+    ? { page_id: target.pageId, schema: 3, rev: 4, content }
+    : { id: target.pageId, name: "Private saved title", has_document: true }))
+  render(<SavedDocumentPanel {...props()} workspaceId="ws1" target={target} />)
+  const href = (await screen.findByRole("link", { name: "Open full editor" })).getAttribute("href")!
+  cleanup()
+  render(<PageReferenceEntry workspaceId="ws1" search={href.slice(href.indexOf("?"))} />)
+  expect(screen.getByRole("status")).toHaveTextContent("Opening document")
+  expect(replace).toHaveBeenCalledWith("/pages/%40cmvhw9fu5006e439fffa9?workspace_id=ws1")
 })
 it.each([401, 403, 404, 503])("removes private content and the editor action after refresh returns %s", async status => {
   render(<SavedDocumentPanel {...props()} />)
@@ -85,5 +101,5 @@ it("tells the reader how to fill an empty saved document", async () => {
     ? { page_id: "page /&", schema: 3, rev: 1, content: { type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" } }] } }
     : { id: "page /&", name: "Private saved title", has_document: true }))
   render(<SavedDocumentPanel {...props()} />)
-  expect(await screen.findByText("This document is empty. Open the full editor to start writing, or ask the agent in this chat to draft it.")).toBeInTheDocument()
+  expect(await screen.findByText("This document is empty. Choose Edit here to start writing, or ask the agent in this chat to draft it.")).toBeInTheDocument()
 })

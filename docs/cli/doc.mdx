@@ -40,7 +40,10 @@ on a phone, use Back to chat. Modified clicks and native links open that saved
 identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
 If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
-a retry never creates another document. Creation keeps the requesting human as
+a retry never creates another document, including when the connection closes
+after the document has been saved but before its response reaches the agent.
+Retry from the same live run; do not generate a replacement mutation ID.
+Creation keeps the requesting human as
 owner. A one-shot admission grants no later access. If the original human request
 explicitly includes drafting, the same live run may save further guarded drafts
 of that one new document; it receives no access to another Page.

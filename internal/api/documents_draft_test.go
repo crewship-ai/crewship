@@ -91,7 +91,7 @@ func TestDocumentDraftCommitCursorReplayAndCheckpoint(t *testing.T) {
 	first["fingerprint"] = "changed original payload"
 	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", first), 409, "changed same-ID payload")
 	var head, cursor, receipts, pins, creations int
-	if e := f.rig.db.QueryRow(`SELECT d.head_rev,c.draft_rev,(SELECT COUNT(*) FROM document_receipts WHERE page_id=d.page_id),(SELECT COUNT(*) FROM document_checkpoints WHERE page_id=d.page_id),(SELECT COUNT(*) FROM document_creations WHERE page_id=d.page_id) FROM documents d JOIN document_creation_consents c ON c.result_page_id=d.page_id WHERE d.page_id=?`, created.PageID).Scan(&head, &cursor, &receipts, &pins, &creations); e != nil || head != 2 || cursor != 2 || receipts != 4 || pins != 1 || creations != 1 {
+	if e := f.rig.db.QueryRow(`SELECT d.head_rev,c.draft_rev,(SELECT COUNT(*) FROM document_receipts WHERE page_id=d.page_id),(SELECT COUNT(*) FROM document_checkpoints WHERE page_id=d.page_id),(SELECT COUNT(*) FROM document_creations WHERE page_id=d.page_id) FROM documents d JOIN document_creation_consents c ON c.result_page_id=d.page_id WHERE d.page_id=?`, created.PageID).Scan(&head, &cursor, &receipts, &pins, &creations); e != nil || head != 2 || cursor != 2 || receipts != 4 || pins != 2 || creations != 1 {
 		t.Fatalf("head=%d cursor=%d receipts=%d pins=%d creations=%d err=%v", head, cursor, receipts, pins, creations, e)
 	}
 }
@@ -218,7 +218,7 @@ func TestDocumentDraftPinFailureDoesNotPretendCommitRolledBack(t *testing.T) {
 	pin := map[string]any{"id": "committed-checkpoint", "fingerprint": "pin", "generation": 0, "ifRev": 1, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate draft one")}
 	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "checkpoint", pin), 500, "pin failure")
 	var head, cursor, receipts, pins int
-	if e := f.rig.db.QueryRow(`SELECT head_rev,(SELECT draft_rev FROM document_creation_consents WHERE result_page_id=documents.page_id),(SELECT COUNT(*) FROM document_receipts WHERE id='committed'),(SELECT COUNT(*) FROM document_checkpoints WHERE page_id=documents.page_id) FROM documents WHERE page_id=?`, created.PageID).Scan(&head, &cursor, &receipts, &pins); e != nil || head != 1 || cursor != 1 || receipts != 1 || pins != 0 {
+	if e := f.rig.db.QueryRow(`SELECT head_rev,(SELECT draft_rev FROM document_creation_consents WHERE result_page_id=documents.page_id),(SELECT COUNT(*) FROM document_receipts WHERE id='committed'),(SELECT COUNT(*) FROM document_checkpoints WHERE page_id=documents.page_id) FROM documents WHERE page_id=?`, created.PageID).Scan(&head, &cursor, &receipts, &pins); e != nil || head != 1 || cursor != 1 || receipts != 1 || pins != 1 {
 		t.Fatalf("committed point misreported:%d %d %d %d %v", head, cursor, receipts, pins, e)
 	}
 }

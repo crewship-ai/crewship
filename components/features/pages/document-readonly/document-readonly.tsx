@@ -1,6 +1,7 @@
 "use client"
 
-import { DOMSerializer, type Node as DocumentNode } from "@tiptap/pm/model"
+import { DOMSerializer } from "@tiptap/pm/model"
+import { isEmptyDocument } from "@/lib/documents/empty"
 import { documentSchema } from "@/lib/documents/schema"
 
 export interface DocumentReadonlyProps {
@@ -30,8 +31,7 @@ function confirmedContent(content: unknown, version: number) {
 export function DocumentReadonly({ schema, content, accessibleLabel, emptyText = "This document is empty." }: DocumentReadonlyProps) {
   const confirmed = confirmedContent(content, schema)
   if (!confirmed) return <p role="status">{unavailable}</p>
-  const empty = confirmed.node.children.every((child: DocumentNode) => child.type.name === "paragraph" && child.content.size === 0)
-  if (empty) return <div role="region" aria-label={accessibleLabel} className="rounded-md border p-4 text-sm text-muted-foreground"><p>{emptyText}</p></div>
+  if (isEmptyDocument(confirmed.node)) return <div role="region" aria-label={accessibleLabel} className="rounded-md border p-4 text-sm text-muted-foreground"><p>{emptyText}</p></div>
   return <div
     role="region"
     aria-label={accessibleLabel}

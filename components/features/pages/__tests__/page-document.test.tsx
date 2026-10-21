@@ -28,7 +28,11 @@ it("hydrates saved CRDT content before binding the editor without manufacturing 
   saved.destroy()
 })
 
-it("prompts in an empty document and drops the prompt once there is text", async () => {
+it.each([
+  ["text", (editor: Editor) => editor.commands.insertContent("First line")],
+  ["a table", (editor: Editor) => editor.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true })],
+  ["a heading", (editor: Editor) => editor.commands.toggleHeading({ level: 1 })],
+] as const)("prompts in an empty document and drops the prompt once it holds %s", async (_kind, add) => {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "empty-paragraph")
   saved.getXmlFragment("default").insert(0, [paragraph])
@@ -38,8 +42,11 @@ it("prompts in an empty document and drops the prompt once there is text", async
   expect(await screen.findByText(prompt)).toBeInTheDocument()
   const editor = (screen.getByLabelText("Document editor") as HTMLElement & { editor: Editor }).editor
   await waitFor(() => expect(editor.isEditable).toBe(true))
-  act(() => { editor.commands.insertContent("First line") })
-  await waitFor(() => expect(screen.queryByText(prompt)).toBeNull())
+  act(() => { expect(add(editor)).toBe(true) })
+  // Neither variant may stay: a save in flight swaps the long prompt for the short one.
+  await waitFor(() => expect(screen.queryByText(/This document is empty/)).toBeNull())
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 1700)) })
+  expect(screen.queryByText(/This document is empty/)).toBeNull()
   saved.destroy()
 })
 
