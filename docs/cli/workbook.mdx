@@ -1,0 +1,104 @@
+---
+title: Workbook
+---
+
+The experimental `workbook` commands are disabled on the server by default.
+They support personal, human-owned private Pages and native GridCraft JSON.
+There is no embedded spreadsheet editor or collaborative editing in this pilot.
+
+```bash
+crewship workbook import @PAGE_ID --file import.json
+crewship workbook read @PAGE_ID
+crewship workbook status @PAGE_ID import-1
+crewship workbook admit @PAGE_ID --file mandate.json
+crewship workbook revoke @PAGE_ID mandate-1
+crewship workbook agent --file packet.json
+```
+
+Import a native workbook with an immutable request envelope:
+
+```json
+{"mutation_id":"import-1","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[]}}}
+```
+
+The `snapshot` above is a placeholder: supply a valid workbook exported by the
+pinned GridCraft version. For an existing workbook, retain the read revision and
+generation as preconditions. Humans change workbook contents by importing files.
+The server rejects incomplete or unsupported workbook files.
+
+To authorize an already running agent to change one cell, the current human
+owner submits a retained mandate:
+
+```json
+{"mandate_id":"mandate-1","run_id":"RUN_ID","base_rev":1,"generation":1,"targets":["Sheet1!B2"]}
+```
+
+The run must have an existing live human chat principal and permitted crew
+policy. The host binds the instruction to that run and current Page version,
+seals the private chat and rechecks current authority on every operation. The
+mandate permits one original base; another instruction requires another mandate.
+It cannot authorize another run or expand to a different cell through a reread.
+
+An agent retains this exact packet for apply and uncertain retries:
+
+```json
+{"action":"apply","artifact_id":"PAGE_ID","mandate_id":"mandate-1","request":{"mutation_id":"cell-edit-1","mandate_id":"mandate-1","base_rev":1,"generation":1,"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}
+```
+
+For `read`, retain `action`, `artifact_id` and `mandate_id`; omit `request`.
+For `status`, use those fields with `action: "status"` and
+`mutation_id: "cell-edit-1"`. Agent commands use the fixed protected sidecar and
+original `CREWSHIP_AGENT_TOKEN`; human profiles, origin overrides and redirects
+are refused. MCP exposes `workbook_read`, `workbook_apply` and `workbook_status`
+only when the server configured the sidecar's workbook switch.
+
+API equivalents:
+
+| Method | Path | CLI |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/workbook` | `workbook read` |
+| POST | `/api/v1/pages/{slug}/workbook/operations` | `workbook import` |
+| GET | `/api/v1/pages/{slug}/workbook/operations/{mutation}` | `workbook status` |
+| POST | `/api/v1/pages/{slug}/workbook/mandates` | `workbook admit` |
+| DELETE | `/api/v1/pages/{slug}/workbook/mandates/{mandate}` | `workbook revoke` |
+| POST | Protected sidecar workbook transport (crew transport and signed run) | `workbook agent` |
+
+Status codes: `200` confirms the response; `400` rejects an invalid request;
+`401` requires a current human credential; `403` rejects effects outside a
+mandate; `404` hides missing or inaccessible workbooks; `409` reports a conflict,
+stale candidate or operation in progress; `429` reports capacity/history limits;
+`500` reports storage failure; `503` reports an unavailable experimental runtime.
+Every endpoint requires current authorization and returns `Cache-Control: no-store`.
+
+A receipt is immutable and confirms durable storage, with `durability: node`.
+Its status response separately reports delivery and the current head. Delivery
+remains pending until a qualified live transport is implemented. Unknown
+outcomes require querying status or retrying the original packet. Do not refresh
+its base revision automatically. Conflicts, revocation, an effect outside the
+mandate and exhausted worker capacity reject the candidate without a new revision.
+
+## `crewship workbook read <page-slug|@ID>`
+
+Read the confirmed native snapshot and its revision/generation.
+
+## `crewship workbook import <page-slug|@ID>`
+
+`--file <path|->` supplies the exact native import envelope. Retain it on retry.
+
+## `crewship workbook status <page-slug|@ID> <operation-id>`
+
+Read the original human operation receipt and current delivery/head information.
+
+## `crewship workbook admit <page-slug|@ID>`
+
+`--file <path|->` supplies a retained human mandate for one live run and cell.
+
+## `crewship workbook revoke <page-slug|@ID> <operation-id>`
+
+The operation ID here is the mandate ID to revoke. Revocation prevents further
+agent access and commits, including retries that would expose an old receipt.
+
+## `crewship workbook agent`
+
+`--file <path|->` supplies the unchanged agent read/apply/status packet. This path
+requires the original run credential and refuses server/profile overrides.

@@ -58,6 +58,7 @@ type Config struct {
 	Composio  ComposioConfig  `yaml:"composio"`
 	Documents DocumentsConfig `yaml:"documents"`
 	Slides    SlidesConfig    `yaml:"slides"`
+	GridCraft GridCraftConfig `yaml:"gridcraft"`
 	Audit     AuditConfig     `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
@@ -428,6 +429,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := c.GridCraft.validate(); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
 		return err
 	}
@@ -555,6 +559,12 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
 		cfg.Documents.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_ENABLED"); ok {
+		cfg.GridCraft.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_IMAGE"); ok {
+		cfg.GridCraft.Image = v
 	}
 	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
 		cfg.Slides.Enabled = v == "true" || v == "1"

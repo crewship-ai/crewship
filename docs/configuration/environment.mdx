@@ -601,3 +601,12 @@ zero selects 10,000. `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` selects the
 rolling admission window; zero selects 600 seconds and the maximum is 86,400.
 These limits preserve confirmed receipts and history. Exact retries retain their
 original operation identity; a temporary admission refusal does not erase them.
+
+### Experimental offline workbook engine
+
+`CREWSHIP_GRIDCRAFT_ENABLED` enables the experimental personal workbook API and
+agent tools; default `false`. Only `true` or `1` enables it. Activation requires
+independent runtime qualification and the operator-pinned image in
+`CREWSHIP_GRIDCRAFT_IMAGE`, an immutable `repository@sha256:<digest>` reference.
+The server never pulls the image or falls back to an unsandboxed executable.
+See [workbook commands](/docs/cli/workbook) for scope and request contracts.

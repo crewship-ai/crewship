@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/slides"
@@ -73,6 +74,10 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
+	{name: "WorkbookState", pointer: "/components/schemas/WorkbookState", value: mooring.State{}},
+	{name: "WorkbookReceipt", pointer: "/components/schemas/WorkbookReceipt", value: mooring.Receipt{}},
+	{name: "WorkbookStatus", pointer: "/components/schemas/WorkbookStatus", value: mooring.Status{}},
+	{name: "WorkbookMandate", pointer: "/components/schemas/WorkbookMandate", value: gridcraftMandate{}},
 	{name: "NativeSlidesState", pointer: "/components/schemas/NativeSlidesState", value: slides.State{}},
 	{name: "NativeSlidesReceipt", pointer: "/components/schemas/NativeSlidesReceipt", value: slides.Receipt{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},

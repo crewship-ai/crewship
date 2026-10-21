@@ -1564,6 +1564,9 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		if credentialIsolationFailedOpen(configFingerprint, req.Credentials) {
 			o.warnCredentialIsolationFailOpenOnce(req.AgentID)
 		}
+		if o.gridCraftEnabled {
+			configFingerprint += ":gridcraft-v1"
+		}
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
 		// #812: hand THIS agent its own per-agent bearer token. The agent
 		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
@@ -1643,14 +1646,15 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var ipcCfg *SidecarIPCConfig
 		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
-				BaseURL:     ipcBaseURL,
-				Token:       internalAPIToken,
-				AgentID:     req.AgentID,
-				AgentSlug:   req.AgentSlug,
-				CrewID:      req.CrewID,
-				WorkspaceID: req.WorkspaceID,
-				ChatID:      req.ChatID,
-				ContainerID: req.ContainerID,
+				GridCraftEnabled: o.gridCraftEnabled,
+				BaseURL:          ipcBaseURL,
+				Token:            internalAPIToken,
+				AgentID:          req.AgentID,
+				AgentSlug:        req.AgentSlug,
+				CrewID:           req.CrewID,
+				WorkspaceID:      req.WorkspaceID,
+				ChatID:           req.ChatID,
+				ContainerID:      req.ContainerID,
 				// #812: the boot agent's own per-agent token. req.CrewMembers
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.

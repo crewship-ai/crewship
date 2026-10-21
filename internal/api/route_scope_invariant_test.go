@@ -40,6 +40,7 @@ func TestEveryMutationRouteDeclaresScope(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 	if len(r.mutationRoutes) == 0 {
 		t.Fatal("mutationRoutes is empty: the route-table chokepoint is not wired")
 	}
@@ -75,6 +76,7 @@ func TestEveryMintableScopeMapsToARoute(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 	satisfiesSomeRoute := func(scope string) bool {
 		// A token holding exactly {scope}: does it satisfy any route's required
 		// scope (directly or via wildcard subsumption)?

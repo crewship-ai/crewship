@@ -142,5 +142,19 @@
     "export_formats": [],
     "execution_profile": "none",
     "authoring_skill": ""
+  },
+  {
+    "type_id": "gridcraft-workbook",
+    "schema_version": 1,
+    "viewer": "unavailable",
+    "editor": "unavailable",
+    "storage_adapter": "gridcraft-revisions-v1",
+    "projection_adapter": "none",
+    "anchor_kinds": [
+      "cell"
+    ],
+    "export_formats": [],
+    "execution_profile": "mooring-headless/v1",
+    "authoring_skill": ""
   }
 ]

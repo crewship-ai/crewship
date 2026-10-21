@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
@@ -810,6 +811,7 @@ func (s *Server) mountAPIRouter(
 	// from cfg.Keeper before this store existed, so an instance that was turned
 	// on (or off) through the API would otherwise run with the env's answer
 	// until somebody edited the setting again.
+	orch.SetGridCraftEnabled(cfg.GridCraft.Enabled)
 	orch.SetKeeperEnabled(keeperSettings.Effective().Enabled.Value)
 	keeperSettings.OnChange(func(eff keepercfg.Effective) {
 		if orch.KeeperEnabled() == eff.Enabled.Value {
@@ -1050,6 +1052,12 @@ func (s *Server) mountAPIRouter(
 	} else {
 		s.apiRouter = apiRouter
 		apiRouter.RegisterSlidesHuman(cfg.Slides.Enabled)
+		if cfg.GridCraft.Enabled {
+			runner, err := mooring.NewDockerRunner(cfg.GridCraft.Image)
+			if err == nil {
+				apiRouter.RegisterGridCraft(mooring.Options{Enabled: true, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, mooring.GridCraft{Runner: runner})
+			}
+		}
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
 		// credential monitor's tick when there is one, and runs on its own
 		// ticker otherwise — a ChatGPT login must be renewed whether or not

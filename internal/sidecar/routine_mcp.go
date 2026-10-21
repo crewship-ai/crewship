@@ -354,7 +354,11 @@ func (s *Server) respondRoutinesMCPInitialize(w http.ResponseWriter, req memoryM
 }
 
 func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, req memoryMCPRequest) {
-	result, _ := json.Marshal(map[string]any{"tools": routineMCPTools})
+	tools := routineMCPTools
+	if s.ipc != nil && s.ipc.GridCraftEnabled {
+		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), gridcraftMCPCatalog()...)
+	}
+	result, _ := json.Marshal(map[string]any{"tools": tools})
 	writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -379,6 +383,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	}
 
 	if s.respondDocumentCreateMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondGridCraftMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
 	if s.respondDocumentDraftMCPToolCall(w, r, req, params.Name, params.Arguments) {
