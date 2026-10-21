@@ -444,6 +444,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := ""
+	var notifyOwner func()
 	if joined == 0 {
 		slug = slugBase + "-" + workspaceID[:8]
 		// kind = personal: this one person's own space, kept apart from the
@@ -464,11 +465,16 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "retention defaults", err)
 			return
 		}
-		_, err = tx.ExecContext(r.Context(),
+		memberResult, err := tx.ExecContext(r.Context(),
 			"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 			memberID, workspaceID, userID, "OWNER", now)
 		if err != nil {
 			replyInternalError(w, h.logger, "insert membership", err)
+			return
+		}
+		notifyOwner, err = appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "signup_personal")
+		if err != nil {
+			replyInternalError(w, h.logger, "audit initial workspace owner", err)
 			return
 		}
 	}
@@ -479,6 +485,9 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	publishAudit()
+	if notifyOwner != nil {
+		notifyOwner()
+	}
 	h.logger.Info("signup: account created", "user_id", userID, "workspace", slug, "invitations_redeemed", joined)
 	writeSignupResponse(w)
 }
@@ -854,7 +863,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
+	memberResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
@@ -885,7 +894,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// don't auto-issue an admin token here because the bootstrap
 	// flow is unauthenticated up to this point; the user hasn't
 	// agreed to any 7-day expiry contract yet.
-	_, err = tx.ExecContext(r.Context(),
+	tokenResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?)",
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
@@ -893,9 +902,27 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := auditCLITokenTx(r.Context(), tx, userID, tokenID, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: token audit", err)
+		return
+	}
+	notifyOwner, err := appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "bootstrap")
+	if err != nil {
+		replyInternalError(w, h.logger, "bootstrap: audit initial workspace owner", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: acknowledge token", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "bootstrap: commit", err)
 		return
+	}
+
+	if notifyOwner != nil {
+		notifyOwner()
 	}
 
 	// One-shot: close the deploy-race window so a second POST gets 410
@@ -948,11 +975,8 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 // enforce server-side revocation (close 4401 if the session gets
 // revoked while the WS is up).
 //
-// For CLI auth: ticket is issued without a session id. The WS hub's
-// validator allows empty sid for kind=ws because CLI tokens have their
-// own revocation table (cli_tokens) that the hub does not consult mid-
-// stream — the trade-off is that revoking a CLI token does not kick
-// already-open WS connections; users should disconnect them manually.
+// CLI tickets carry the original CLI-token row ID and its expiry. Both kinds
+// are revalidated on upgrade and revoked through the shared stream registry.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -973,7 +997,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
+	jweToken, err := h.validator.IssueCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, user.CredentialExpiresAt)
 	if err != nil {
 		replyInternalError(w, h.logger, "issue ws ticket", err)
 		return

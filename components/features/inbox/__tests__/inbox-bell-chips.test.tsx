@@ -39,14 +39,15 @@ const wp = (over: Partial<InboxItem> = {}) =>
 
 describe("inboxKindChips", () => {
   it.each<{ name: string; classes: (InboxItem["attention_class"])[]; want: string[] }>([
-    { name: "nothing", classes: [], want: ["all:0"] },
-    { name: "unclassified rows count under All only", classes: [undefined, undefined], want: ["all:2"] },
+    { name: "nothing", classes: [], want: ["all:0", "decision", "input", "review", "repair"] },
+    // v67 draws All / Decisions / Input / Review / Repair whatever is in the list.
+    { name: "unclassified rows count under All only", classes: [undefined, undefined], want: ["all:2", "decision", "input", "review", "repair"] },
     {
-      name: "one chip per present class, fixed order, zero-count kinds hidden",
+      name: "every kind, fixed order, whether or not a row carries it",
       classes: ["repair", "decision", undefined, "decision", "review"],
-      want: ["all:5", "decision", "review", "repair"],
+      want: ["all:5", "decision", "input", "review", "repair"],
     },
-    { name: "input alone", classes: ["input"], want: ["all:1", "input"] },
+    { name: "input alone", classes: ["input"], want: ["all:1", "decision", "input", "review", "repair"] },
   ])("$name", ({ classes, want }) => {
     const items = classes.map((c, i) => item({ id: `i${i}`, kind: "message", attention_class: c }))
     const got = inboxKindChips(items).map((c) => (c.count != null ? `${c.id}:${c.count}` : c.id))
@@ -162,14 +163,20 @@ describe("InboxBellView chips", () => {
     fireEvent.click(screen.getByTestId("bell-trigger"))
   }
 
-  it("shows All with its count and only the kinds present", () => {
+  it("shows All with its count and every kind, as the wireframe draws them", () => {
     open()
-    expect(screen.getByTestId("bell-chip-all")).toHaveTextContent("All (3)")
+    expect(screen.getByTestId("bell-chip-all")).toHaveTextContent(/All\s*3/)
     expect(screen.getByTestId("bell-chip-all")).toHaveAttribute("aria-pressed", "true")
-    expect(screen.getByTestId("bell-chip-decision")).toBeInTheDocument()
-    expect(screen.getByTestId("bell-chip-repair")).toBeInTheDocument()
-    expect(screen.queryByTestId("bell-chip-input")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("bell-chip-review")).not.toBeInTheDocument()
+    for (const kind of ["decision", "input", "review", "repair"]) expect(screen.getByTestId(`bell-chip-${kind}`)).toBeInTheDocument()
+  })
+
+  it("says so when the chosen kind has no rows, and keeps the chip strip to come back from", () => {
+    open()
+    fireEvent.click(screen.getByTestId("bell-chip-review"))
+    expect(screen.getByTestId("bell-chip-review")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByText("Nothing in Review")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("bell-chip-all"))
+    expect(screen.getByTestId("bell-row-wp")).toBeInTheDocument()
   })
 
   it("filters both sections to the chosen kind", () => {
@@ -185,8 +192,8 @@ describe("InboxBellView chips", () => {
     expect(screen.queryByTestId("bell-row-fix")).not.toBeInTheDocument()
   })
 
-  it("hides the chip strip when All would be the only chip", () => {
-    open([item({ id: "msg", kind: "message", title: "Atlas replied" })])
+  it("hides the chip strip when there is nothing to filter", () => {
+    open([])
     expect(screen.queryByTestId("bell-chip")).not.toBeInTheDocument()
   })
 
@@ -212,5 +219,40 @@ describe("InboxBellView chips", () => {
     )
     fireEvent.click(screen.getByTestId("bell-trigger"))
     expect(screen.queryByRole("button", { name: /Approve Approve promote/ })).not.toBeInTheDocument()
+  })
+})
+
+describe("InboxBellView v67 anatomy (PAR-144, 152, 153)", () => {
+  const ITEMS = [wp({ title: "Approve promote" }), item({ id: "msg", kind: "message", title: "Atlas replied" })]
+  const open = () => {
+    render(<InboxBellView items={ITEMS} role="OWNER" onOpenItem={vi.fn()} onOpenInbox={vi.fn()} onDecideWaitpoint={vi.fn()} onMarkAllRead={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+  }
+
+  it("labels the groups in sentence case, not uppercase", () => {
+    open()
+    for (const label of ["Needs a decision", "Recent"]) {
+      const el = screen.getByText(label)
+      expect(el.className).not.toMatch(/uppercase|tracking-wider/)
+    }
+  })
+
+  it("puts Deny before Approve, Approve as the primary action", () => {
+    open()
+    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? "").filter((n) => /^(Approve|Deny) /.test(n))
+    expect(names).toEqual(["Deny Approve promote", "Approve Approve promote"])
+    expect(screen.getByRole("button", { name: "Approve Approve promote" }).className).toContain("bg-primary")
+  })
+
+  it("sets the row's category in sans, not mono", () => {
+    open()
+    const row = screen.getByTestId("bell-row-wp")
+    expect(row.querySelector(".font-mono")).toBeNull()
+  })
+
+  it("names the footer actions like the wireframe", () => {
+    open()
+    expect(screen.getByRole("button", { name: "Mark 2 read" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open inbox →" })).toBeInTheDocument()
   })
 })

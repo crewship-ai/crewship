@@ -1,8 +1,16 @@
 "use client"
 
-import { useState, type ImgHTMLAttributes } from "react"
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ImgHTMLAttributes, type RefObject } from "react"
 
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getAgentAvatarUrl, isAnimatableAvatarStyle, resolveAvatarStyle, shouldAnimateAvatar } from "@/lib/agent-avatar"
+import {
+  DEFAULT_AVATAR_ANIMATION,
+  DEFAULT_MOTION,
+  readAvatarAnimation,
+  readMotion,
+  subscribeAppearance,
+} from "@/lib/theme/appearance"
+import { prefersReducedMotion, subscribeReducedMotion } from "@/lib/motion"
 import { resolveStoredAvatarSrc } from "@/lib/agent-avatar-persist"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
@@ -29,6 +37,32 @@ export interface AgentAvatarProps
    * when it has none and should be generated from the seed.
    */
   avatarUrl?: string | null
+  /** Never animate, whatever the size and the viewer's settings. */
+  still?: boolean
+}
+
+const serverMotion = () => DEFAULT_MOTION
+const serverAvatarAnimation = () => DEFAULT_AVATAR_ANIMATION
+const serverReduced = () => false
+
+/**
+ * The rendered width of an animatable avatar, in CSS px; 0 until measured
+ * and for any style that cannot move (nothing to decide, so nothing to
+ * observe). Measured rather than passed in because ~100 call sites size the
+ * avatar with a class, and the text-size setting scales those classes.
+ */
+function useRenderedWidth(ref: RefObject<HTMLImageElement | null>, active: boolean): number {
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!active || !el) return
+    setWidth(el.offsetWidth)
+    if (typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(() => setWidth(el.offsetWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref, active])
+  return active ? width : 0
 }
 
 /**
@@ -52,6 +86,12 @@ export interface AgentAvatarProps
  *      to load. Generating always works, so it is never right to leave a
  *      broken-image icon on screen instead.
  *
+ * Voxel avatars (#3789) animate at AVATAR_ANIMATION_MIN_PX and above, and
+ * stay still below it, under Reduce motion: On, with Animated avatars off,
+ * with `still`, or (Reduce motion on System) when the OS asks for reduced
+ * motion — checked here and again by the SVG's own media query. The animation never carries meaning: status always has its own
+ * badge, dot or label beside the avatar.
+ *
  * Rendering never writes (#2876): an agent without a stored render is drawn
  * from its seed and left alone. Renders are stored where an agent is created
  * or edited, and by the explicit backfill — see lib/agent-avatar-persist.ts.
@@ -62,6 +102,7 @@ export function AgentAvatar({
   alt = "",
   className,
   avatarUrl,
+  still = false,
   ...rest
 }: AgentAvatarProps) {
   // Re-render when a lazy DiceBear collection finishes loading so the
@@ -77,9 +118,19 @@ export function AgentAvatar({
   const storedSrc = resolveStoredAvatarSrc(avatarUrl)
   const useStored = storedSrc !== null && failedUrl !== storedSrc
 
+  const ref = useRef<HTMLImageElement>(null)
+  const motion = useSyncExternalStore(subscribeAppearance, readMotion, serverMotion)
+  const avatarAnimation = useSyncExternalStore(subscribeAppearance, readAvatarAnimation, serverAvatarAnimation)
+  const osReducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, serverReduced)
+  const mayMove = !still && !useStored && isAnimatableAvatarStyle(resolveAvatarStyle(style))
+  const sizePx = useRenderedWidth(ref, mayMove)
+  const animated = mayMove && shouldAnimateAvatar({ style, sizePx, motion, avatarAnimation, osReducedMotion })
+
   return (
     <img
-      src={useStored ? storedSrc : getAgentAvatarUrl(seed, style)}
+      ref={ref}
+      src={useStored ? storedSrc : getAgentAvatarUrl(seed, style, animated ? { animated: true } : undefined)}
+      data-animated={animated ? "true" : undefined}
       alt={alt}
       className={cn("rounded-full", className)}
       onError={useStored ? () => setFailedUrl(storedSrc) : undefined}

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { RestrictedIssues } from "../restricted-issues"
+import { RestrictedIssues, sharedSearchRetrySeconds } from "../restricted-issues"
 
 const fetchMock = vi.hoisted(() => vi.fn())
 const identity = vi.hoisted(() => ({ user: "guest", workspace: "w" }))
@@ -277,3 +277,107 @@ it("retries an uncertain submission with the same operation key and resets after
   expect(keys[1]).toBe(keys[0])
   expect(keys[2]).not.toBe(keys[0])
 })
+
+it("keeps the current view and draft while a search budget pauses polling", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    let limited = false
+    let recovered = false
+    fetchMock.mockImplementation(async (path: string) => {
+      if (path.includes("restricted-issue-projects")) return response([])
+      if (limited && !recovered) return new Response(JSON.stringify({ error: "Shared issue searches are temporarily limited. Try again in 30s." }), { status: 429, headers: { "Retry-After": "30" } })
+      return response([{ ...row, title: recovered ? "Recovered issue" : "Shared issue" }])
+    })
+    show()
+    await screen.findByRole("link", { name: "Shared issue" })
+    fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "Keep this draft" } })
+    limited = true
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await screen.findByText(/Shared issue searches are temporarily limited/)
+    expect(screen.getByRole("link", { name: "Shared issue" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Search shared issues")).toHaveValue("Keep this draft")
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
+    expect(screen.queryByText("Issues unavailable")).toBeNull()
+    const before = fetchMock.mock.calls.filter(([path]) => path.includes("restricted-issues?")).length
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(fetchMock.mock.calls.filter(([path]) => path.includes("restricted-issues?")).length).toBe(before)
+    recovered = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000) })
+    expect(await screen.findByRole("link", { name: "Recovered issue" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Search" })).not.toBeDisabled()
+  } finally { vi.useRealTimers() }
+})
+
+it("bounds finite search Retry-After seconds", () => {
+  for (const [raw, expected] of [["3", 3], ["0", 1], ["999999", 3600], ["Infinity", 60], ["-1", 60], ["2.5", 60], [null, 60]] as const) expect(sharedSearchRetrySeconds(raw)).toBe(expected)
+})
+
+it("clears rate cooldown and cached results when the account or workspace changes", async () => {
+  let limited = false
+  fetchMock.mockImplementation(async (path: string) => {
+    if (path.includes("restricted-issue-projects")) return response([])
+    if (identity.user === "other") return response([{ ...row, id: "other-issue", title: "Other audience" }])
+    if (limited) return new Response("{}", { status: 429, headers: { "Retry-After": "60" } })
+    return response([row])
+  })
+  const view = show()
+  await screen.findByRole("link", { name: "Shared issue" })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "Private draft" } })
+  limited = true
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+  await screen.findByText(/Shared issue searches are temporarily limited/)
+  identity.user = "other"
+  identity.workspace = "other-ws"
+  view.rerender()
+  expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
+  await screen.findByRole("link", { name: "Other audience" })
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("")
+  expect(screen.getByRole("button", { name: "Search" })).not.toBeDisabled()
+  expect(screen.queryByText(/Shared issue searches are temporarily limited/)).toBeNull()
+})
+
+it("keeps the last successful results when a new search query is limited", async () => {
+  fetchMock.mockImplementation(async (path: string) => {
+    if (path.includes("restricted-issue-projects")) return response([])
+    if (new URL(path, "http://fixture.test").searchParams.has("q")) return new Response("{}", { status: 429, headers: { "Retry-After": "30" } })
+    return response([row])
+  })
+  show()
+  await screen.findByRole("link", { name: "Shared issue" })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "new query" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByText(/Shared issue searches are temporarily limited/)
+  expect(screen.getByRole("link", { name: "Shared issue" })).toBeInTheDocument()
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("new query")
+})
+
+for (const status of [401, 403, 404]) {
+  for (const changeQuery of [false, true]) {
+    it(`does not revive a denied projection after ${status} then 429 (${changeQuery ? "new query" : "same query"})`, async () => {
+      let phase: "success" | "denied" | "limited" | "recovered" = "success"
+      fetchMock.mockImplementation(async (path: string) => {
+        if (path.includes("restricted-issue-projects")) return response([])
+        if (phase === "denied") return response({}, status)
+        if (phase === "limited") return new Response("{}", { status: 429, headers: { "Retry-After": "1" } })
+        return response([{ ...row, title: phase === "recovered" ? "Fresh authorized issue" : "Shared issue" }])
+      })
+      show()
+      await screen.findByRole("link", { name: "Shared issue" })
+      phase = "denied"
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+      await screen.findByText("Issues unavailable")
+      expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
+      phase = "limited"
+      if (changeQuery) {
+        fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "another query" } })
+        fireEvent.click(screen.getByRole("button", { name: "Search" }))
+      } else fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+      await screen.findByText(/Shared issue searches are temporarily limited/)
+      expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
+      phase = "recovered"
+      await screen.findByRole("link", { name: "Fresh authorized issue" }, { timeout: 3000 })
+      expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
+    })
+  }
+}

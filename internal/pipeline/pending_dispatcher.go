@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -120,23 +121,27 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 	d.sem = make(chan struct{}, d.maxConcurrency)
 
 	d.sweep(ctx)
-	// The boot sweep stays immediate; only the ticker's phase is spread from
-	// the other sweepers started at boot (#1891).
-	if !jitter.Wait(ctx, d.stopCh, d.tick) {
-		return
+	// Wakeups are observed during the initial jitter as well as later ticks.
+	timer := time.NewTimer(jitter.Offset(d.tick))
+	defer timer.Stop()
+	var wake <-chan struct{}
+	if db, ok := d.store.db.(*sql.DB); ok {
+		wake = pendingWakeChannel(db)
 	}
-	t := time.NewTicker(d.tick)
-	defer t.Stop()
 	for {
 		select {
 		case <-d.stopCh:
 			return
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-wake:
 			d.sweep(ctx)
+		case <-timer.C:
+			d.sweep(ctx)
+			timer.Reset(d.tick)
 		}
 	}
+
 }
 
 // sweep expires past-ttl rows, then dispatches the due rows. Rows are
@@ -248,19 +253,33 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		_ = json.Unmarshal([]byte(pr.TagsJSON), &tags)
 	}
 
+	idempotencyKey := pr.IdempotencyKey
+	if idempotencyKey == "" {
+		idempotencyKey = ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano))
+	}
 	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
 	res, runErr := d.executor.Run(adm.Context(), RunInput{
-		PinnedVersion: pr.PinnedVersion,
-		PipelineID:    pr.PipelineID,
-		WorkspaceID:   pr.WorkspaceID,
-		Inputs:        inputs,
-		Mode:          ModeRun,
-		TierOverride:  Complexity(pr.TierOverride),
+		RunIDOverride:  pr.RunID,
+		IdempotencyKey: idempotencyKey,
+		DueAt:          pr.DueAt,
+		PinnedVersion:  pr.PinnedVersion,
+		PipelineID:     pr.PipelineID,
+		WorkspaceID:    pr.WorkspaceID,
+		Inputs:         inputs,
+		Mode:           ModeRun,
+		TierOverride:   Complexity(pr.TierOverride),
 		// Honour what the row says started it. Before pending_runs carried
 		// attribution this was hard-coded to schedule/self, so every
 		// automation-fired run reported a cron.
 		TriggeredVia:  triggeredVia,
 		TriggeredByID: triggeredByID,
+		OnStarted: func(runID string) {
+			writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := d.store.SetFiredRunID(writeCtx, pr, runID); err != nil {
+				d.logger.Warn("pending dispatcher: durable start link", "pending_id", pr.ID, "error", err)
+			}
+		},
 		// Spend from the same budget a call_pipeline hop spends from. A
 		// deferred run is where a composed cycle re-enters the process, so
 		// dropping the depth here is what made the cap unreachable.
@@ -277,9 +296,6 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		ChatOriginID:        pr.ChatOriginID,
 		Tags:                tags,
 		MetadataJSON:        pr.MetadataJSON,
-		// A one-time authoring row can be rearmed for a different date. The
-		// occurrence identifies the start; redispatch of that occurrence dedupes.
-		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),
 	})
 	// Run has returned; release busy admission before waiting on a writer gate.
 	adm.Done()
@@ -303,10 +319,26 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// inside one.
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
 	defer cancel()
+	unknown := false
 	if uerr := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		if res.Deduped {
+			var exists bool
+			if err := d.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipeline_runs WHERE id=? AND workspace_id=? AND pipeline_id=?)`, res.RunID, pr.WorkspaceID, pr.PipelineID).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				// A reservation is not proof of a start. Preserve uncertain
+				// work and its reservation without automatically retrying.
+				unknown = true
+				pr.ReasonCode = "recovery_unknown"
+				return d.store.FinishDispatchError(ctx, pr, "fired", "Reserved run does not exist in this scope; inspect before retrying.", nil)
+			}
+		}
 		return d.store.SetFiredRunID(ctx, pr, res.RunID)
 	}); uerr != nil {
 		d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
+	} else if !unknown {
+		d.recordWebhookOutcome(ctx, pr, res.RunID, res.Status)
 	}
 }
 
@@ -326,22 +358,36 @@ func pendingCapacityBackoff(attempt int) time.Duration {
 
 func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr PendingRun, runErr error) {
 	now := d.now().UTC()
+	pr.ReasonCode = "dispatch_failed"
 	status, reason := "failed", "Deferred start could not be dispatched. Check server logs using the pending ID."
 	var next *time.Time
 	// A dispatch cut short by cancellation (server shutdown or deploy) never
 	// produced a run, so it is retried like a capacity refusal instead of
 	// being finalized as failed. fireOne only gets here without a run ID.
 	interrupted := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil
-	if errors.Is(runErr, ErrConcurrencyLimitReached) || interrupted {
+	capacity := errors.Is(runErr, ErrConcurrencyLimitReached)
+	if capacity || interrupted {
+		pr.ReasonCode = "routine_capacity"
 		waiting := "Waiting for routine execution capacity."
-		if interrupted && !errors.Is(runErr, ErrConcurrencyLimitReached) {
+		if interrupted && !capacity {
+			pr.ReasonCode = "retry_backoff"
 			waiting = "Dispatch was interrupted before the run started; it will be retried."
 		}
 		switch {
 		case pr.ExpiresAt != nil && !now.Before(*pr.ExpiresAt):
-			status, reason = "expired", "Deferred start expired before execution capacity became available."
-		case pr.ExpiresAt == nil && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
-			reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			pr.ReasonCode = "expired"
+			status, reason = "expired", "Deferred start expired before dispatch."
+			if capacity {
+				pr.ReasonCode = "capacity_expired"
+				reason = "Deferred start expired before execution capacity became available."
+			}
+		case pr.ExpiresAt == nil && pr.RunID == "" && pr.DispatchAttempts >= maxPendingAttemptsWithoutTTL:
+			pr.ReasonCode = "dispatch_failed"
+			reason = "Dispatch remained interrupted after 10 attempts; no TTL was supplied."
+			if capacity {
+				pr.ReasonCode = "routine_capacity"
+				reason = "Execution capacity remained unavailable after 10 dispatch attempts; no TTL was supplied."
+			}
 		default:
 			status, reason = "pending", waiting
 			at := now.Add(pendingCapacityBackoff(pr.DispatchAttempts))
@@ -351,8 +397,10 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 			next = &at
 		}
 	} else if errors.Is(runErr, ErrPinnedVersionNotFound) {
+		pr.ReasonCode = "version_missing"
 		reason = "The accepted recipe version is no longer available."
 	} else if errors.Is(runErr, ErrRoutineNotActive) {
+		pr.ReasonCode = "routine_inactive"
 		reason = "The routine is no longer active."
 	}
 	// Finalize even when the execution context was canceled at shutdown. This
@@ -361,8 +409,28 @@ func (d *PendingRunDispatcher) recordDispatchError(ctx context.Context, pr Pendi
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quiesce.DefaultHoldCap+quiesce.DefaultDrainTimeout+time.Minute)
 	defer cancel()
 	if err := quiesce.Do(writeCtx, func(ctx context.Context) error {
+		if status == "pending" && pr.RunID != "" {
+			return d.store.requeueUnstartedClaim(ctx, pr, reason, next)
+		}
 		return d.store.FinishDispatchError(ctx, pr, status, reason, next)
 	}); err != nil {
 		d.logger.Error("pending dispatcher: persist dispatch failure", "pending_id", pr.ID, "error", err)
+	} else if status != "pending" {
+		d.recordWebhookOutcome(writeCtx, pr, "", "FAILED")
+	}
+}
+
+func (d *PendingRunDispatcher) recordWebhookOutcome(ctx context.Context, pr PendingRun, runID, status string) {
+	if pr.TriggeredVia != TriggeredViaWebhook || pr.TriggeredByID == "" {
+		return
+	}
+	db, ok := d.store.db.(*sql.DB)
+	if !ok {
+		return
+	}
+	bookCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := NewWebhookStore(db).RecordFire(bookCtx, pr.TriggeredByID, runID, status); err != nil {
+		d.logger.Warn("pending dispatcher: webhook outcome", "pending_id", pr.ID, "error", err)
 	}
 }

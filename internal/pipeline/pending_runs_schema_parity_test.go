@@ -82,3 +82,28 @@ func difference(a, b []string) []string {
 	}
 	return out
 }
+
+// The phase is separate from status; legacy rows and the run-store fixtures
+// must allow NULL without inventing evidence that setup already completed.
+func TestRunStartPhaseFixturesMatchMigration(t *testing.T) {
+	_, runs := openRunsTestDB(t)
+	defer runs.Close()
+	resume := openResumeTestDB(t)
+	defer resume.Close()
+	for name, db := range map[string]*sql.DB{
+		"migrated": testutil.MigratedSQLDB(t), "runs": runs, "resume": resume,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var kind string
+			var notNull int
+			var defaultValue sql.NullString
+			err := db.QueryRow(`SELECT type,"notnull",dflt_value FROM pragma_table_info('pipeline_runs') WHERE name='start_phase'`).Scan(&kind, &notNull, &defaultValue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != "TEXT" || notNull != 0 || defaultValue.Valid {
+				t.Fatalf("phase must be nullable TEXT without a default: %s %d %+v", kind, notNull, defaultValue)
+			}
+		})
+	}
+}

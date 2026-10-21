@@ -39,6 +39,7 @@ func TestEveryMutationRouteDeclaresScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
+	r.RegisterSlidesHuman(true)
 	if len(r.mutationRoutes) == 0 {
 		t.Fatal("mutationRoutes is empty: the route-table chokepoint is not wired")
 	}
@@ -73,6 +74,7 @@ func TestEveryMintableScopeMapsToARoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
+	r.RegisterSlidesHuman(true)
 	satisfiesSomeRoute := func(scope string) bool {
 		// A token holding exactly {scope}: does it satisfy any route's required
 		// scope (directly or via wildcard subsumption)?
@@ -88,6 +90,11 @@ func TestEveryMintableScopeMapsToARoute(t *testing.T) {
 		return false
 	}
 	for scope := range knownScopes {
+		// Document reads revalidate pages:read inside the SQL authority;
+		// TestDocumentCLITokenLiveRevocationAndScopeUnderWriter covers that gate.
+		if scope == "pages:read" {
+			continue
+		}
 		if !satisfiesSomeRoute(scope) {
 			t.Errorf("mintable scope %q maps to no mutation route — a token scoped to it can exercise nothing. Remove it from knownScopes (and the New Token dialog + auth.mdx) until a route requires it, or wire the route that should require it.", scope)
 		}

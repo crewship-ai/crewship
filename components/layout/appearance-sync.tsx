@@ -12,11 +12,14 @@ import { useWorkspace } from "@/hooks/use-workspace"
  * Carries the user's personal settings to the server (GET/PUT
  * /api/v1/me/preferences): appearance (hooks/use-appearance-sync.ts) and the
  * current workspace's notification sounds (hooks/use-sound-preferences-sync.ts).
+ * The workspace's default look reaches everyone who has not chosen their own
+ * (WSD-03).
  */
 export function AppearanceSync() {
   const { session } = useAuth()
-  const { workspaceId } = useWorkspace()
-  useAppearanceSync(true)
+  const { workspaceId, workspace } = useWorkspace()
+  // undefined until the workspace is known: nothing is inherited before that.
+  useAppearanceSync(true, workspace ? (workspace.appearance_default ?? null) : undefined)
   useSoundPreferencesSync(true, session?.user?.id, workspaceId)
   return null
 }

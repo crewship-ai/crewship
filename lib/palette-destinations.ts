@@ -100,7 +100,9 @@ const ENTRIES: Entry[] = [
   // ── Settings cards ────────────────────────────────────────────────────
   settingsCard("profile", "Profile", "Account", User, ["profile picture", "avatar", "email", "name", "password", "change password"]),
   settingsCard("profile", "Profile", "Workspace", Building2, ["my role", "organization", "joined"]),
-  settingsCard("profile", "Profile", "Sessions & access", Lock, ["sessions", "devices", "browsers", "sign out everywhere", "cli tokens", "api tokens", "new token", "revoke"]),
+  // Sessions & tokens is its own section with two cards (Harbor 2).
+  settingsCard("sessions", "Sessions & tokens", "Browsers & devices", Lock, ["sessions", "devices", "browsers", "sign out everywhere", "revoke session"]),
+  settingsCard("sessions", "Sessions & tokens", "CLI tokens", KeyRound, ["cli tokens", "api tokens", "new token", "revoke token"]),
   settingsCard("sounds", "Notification sounds", "Notification sounds", Volume2, ["sound", "do not disturb", "dnd", "volume", "mute"]),
   settingsCard("general", "General", "Identity", Building2, ["workspace name", "workspace logo", "slug", "agent language", "rename workspace"]),
   settingsCard("general", "General", "Usage", Gauge, ["counts", "agent avatars", "store missing avatars"]),
@@ -142,20 +144,20 @@ const ENTRIES: Entry[] = [
   },
 
   // ── Integrations ──────────────────────────────────────────────────────
-  { id: "int:connections", title: "Notification connections", trail: "Integrations › Outgoing notifications", href: "/integrations?tab=notifications&section=connections", icon: Bell, keywords: ["slack", "email", "discord", "teams", "telegram", "channels", "outgoing"] },
-  { id: "int:preferences", title: "My notification preferences", trail: "Integrations › Outgoing notifications", href: "/integrations?tab=notifications&section=preferences", icon: Bell, keywords: ["notify me", "alerts", "preferences"] },
-  { id: "int:deliveries", title: "Notification deliveries", trail: "Integrations › Outgoing notifications", href: "/integrations?tab=notifications&section=deliveries", icon: Bell, keywords: ["sent", "failed notifications", "delivery log"] },
-  { id: "int:endpoints", title: "Incoming webhooks", trail: "Integrations", href: "/integrations?tab=incoming&section=endpoints", icon: Webhook, keywords: ["webhook endpoints", "inbound", "trigger url"] },
-  { id: "int:incoming-routine", title: "Webhooks that start routines", trail: "Integrations › Incoming webhooks", href: "/integrations?tab=incoming&section=routine", icon: Webhook, keywords: ["routine webhook"] },
-  { id: "int:incoming-agent", title: "Webhooks that message agents", trail: "Integrations › Incoming webhooks", href: "/integrations?tab=incoming&section=agent", icon: Webhook, keywords: ["agent webhook"] },
-  { id: "int:incoming-page", title: "Webhooks that feed pages", trail: "Integrations › Incoming webhooks", href: "/integrations?tab=incoming&section=page", icon: Webhook, keywords: ["page webhook", "page data"] },
-  { id: "int:catalog", title: "App catalog", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=catalog", icon: Plug, keywords: ["apps", "install integration", "connectors", "marketplace"] },
-  { id: "int:accounts", title: "Connected accounts", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=accounts", icon: Plug, keywords: ["oauth", "sign in", "github", "google", "accounts"] },
-  { id: "int:agents", title: "Agent access to tools", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=agents", icon: Plug, keywords: ["agent access", "tool permissions"] },
-  { id: "int:tools", title: "Tools", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=tools", icon: Plug, keywords: ["mcp tools"] },
-  { id: "int:triggers", title: "Triggers", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=triggers", icon: Plug, keywords: ["events", "app triggers"] },
-  { id: "int:mcp", title: "MCP endpoints", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=mcp", icon: Server, keywords: ["mcp server", "endpoint"] },
-  { id: "int:crew-tools", title: "Crew tools", trail: "Integrations › Tools (MCP)", href: "/integrations?tab=tools&section=crew-tools", icon: Server, keywords: ["crew mcp servers"] },
+  { id: "int:connections", title: "Channels", trail: "Integrations › Channels", href: "/integrations?space=channels", icon: Bell, keywords: ["slack", "email", "discord", "teams", "telegram", "channels", "outgoing"] },
+  { id: "int:preferences", title: "My notifications", trail: "Integrations › Channels", href: "/integrations?space=channels&view=preferences", icon: Bell, keywords: ["notify me", "alerts", "preferences"] },
+  { id: "int:deliveries", title: "Notification deliveries", trail: "Integrations › Channels", href: "/integrations?space=channels&view=deliveries", icon: Bell, keywords: ["sent", "failed notifications", "delivery log"] },
+  { id: "int:endpoints", title: "Triggers", trail: "Integrations", href: "/integrations?space=triggers", icon: Webhook, keywords: ["webhook endpoints", "inbound", "trigger url"] },
+  { id: "int:incoming-routine", title: "Triggers that start routines", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=routine", icon: Webhook, keywords: ["routine webhook"] },
+  { id: "int:incoming-agent", title: "Triggers that start agents", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=agent", icon: Webhook, keywords: ["agent webhook"] },
+  { id: "int:incoming-page", title: "Triggers that feed pages", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=page", icon: Webhook, keywords: ["page webhook", "page data"] },
+  { id: "int:catalog", title: "App catalog", trail: "Integrations › Tools", href: "/integrations?space=tools&view=catalog", icon: Plug, keywords: ["apps", "install integration", "connectors", "marketplace"] },
+  { id: "int:accounts", title: "Connected apps", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["oauth", "sign in", "github", "google", "accounts"] },
+  { id: "int:agents", title: "Agent access to tools", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["agent access", "tool permissions"] },
+  { id: "int:tools", title: "Tools", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["mcp tools"] },
+  { id: "int:triggers", title: "Triggers", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["events", "app triggers"] },
+  { id: "int:mcp", title: "MCP endpoints", trail: "Integrations › Tools", href: "/integrations?space=tools&view=mcp", icon: Server, keywords: ["mcp server", "endpoint"] },
+  { id: "int:crew-tools", title: "Crew MCP servers", trail: "Integrations › Tools", href: "/integrations?space=tools&view=crew-tools", icon: Server, keywords: ["crew mcp servers"] },
 
   // ── Tabs inside pages ─────────────────────────────────────────────────
   { id: "inbox:action", title: "To handle", trail: "Inbox", href: "/inbox?view=action", icon: Inbox, keywords: ["todo", "needs me"] },
@@ -166,17 +168,19 @@ const ENTRIES: Entry[] = [
   { id: "inbox:schedule-alerts", title: "Schedule alerts", trail: "Inbox", href: "/inbox?attention=schedule-alerts", icon: Inbox, keywords: ["missed schedules"] },
   { id: "activity:work", title: "Work queue", trail: "Activity", href: "/activity?section=work", icon: Activity, keywords: ["queue", "assignments", "running work"] },
   { id: "activity:deliveries", title: "Webhook deliveries", trail: "Activity", href: "/activity?section=deliveries", icon: Activity, keywords: ["webhook log"] },
-  { id: "journal:timeline", title: "Timeline", trail: "Journal", href: "/journal?tab=timeline", icon: BookOpen, keywords: ["events", "audit", "log"] },
-  { id: "journal:runs", title: "Runs", trail: "Journal", href: "/journal?tab=runs", icon: BookOpen, keywords: ["executions", "run history"] },
-  { id: "journal:spend", title: "Spend", trail: "Journal", href: "/journal?tab=spend", icon: Coins, keywords: ["cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
-  { id: "routines:calendar", title: "Routine calendar", trail: "Routines", href: "/routines?tab=calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron"] },
+  // The Journal's three tabs, merged into Activity (F-02) and gated as before:
+  // OWNER / ADMIN only.
+  { id: "journal:timeline", title: "Technical log", trail: "Activity", href: "/activity?section=log", icon: BookOpen, keywords: ["journal", "timeline", "events", "audit", "log", "trace"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "journal:runs", title: "Fleet runs", trail: "Activity", href: "/activity?section=runs", icon: BookOpen, keywords: ["journal", "runs", "executions", "run history"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "journal:spend", title: "Spend", trail: "Activity", href: "/activity?mode=spend", icon: Coins, keywords: ["journal", "cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "calendar", title: "Calendar", trail: "Work", href: "/calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron", "dates", "routine calendar"] },
   { id: "issues:missions", title: "Missions", trail: "Issues", href: "/issues?mission_type=mission", icon: CircleDot, keywords: ["mission list"] },
   { id: "credentials:providers", title: "Model providers", trail: "Credentials", href: "/credentials?tab=providers", icon: KeyRound, keywords: ["providers", "pays with", "anthropic", "openai", "subscription"] },
 
   // ── Actions behind a button ───────────────────────────────────────────
   { id: "act:issue", kind: "action", title: "Create issue", trail: "Issues", href: "/issues?create=1", icon: Plus, keywords: ["new issue", "add issue", "ticket", "task"] },
   { id: "act:invite", kind: "action", title: "Invite member", trail: "Settings › Members", href: "/settings/members", icon: UserPlus, keywords: ["add person", "add user", "invite"], visible: (ctx) => isAdminTier(ctx.role) },
-  { id: "act:token", kind: "action", title: "Create CLI token", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Sessions & access")}`, icon: KeyRound, keywords: ["new token", "api key", "cli login"] },
+  { id: "act:token", kind: "action", title: "Create CLI token", trail: "Settings › Sessions & tokens", href: `/settings?tab=sessions&card=${settingsCardSlug("CLI tokens")}`, icon: KeyRound, keywords: ["new token", "api key", "cli login"] },
   { id: "act:password", kind: "action", title: "Change password", trail: "Settings › Profile", href: `/settings?tab=profile&card=${settingsCardSlug("Account")}`, icon: Lock, keywords: ["reset password"] },
   { id: "act:avatars", kind: "action", title: "Store missing avatars", trail: "Settings › General", href: `/settings?tab=general&card=${settingsCardSlug("Usage")}`, icon: Users, keywords: ["agent avatars", "faces"], visible: (ctx) => isAdminTier(ctx.role) },
 

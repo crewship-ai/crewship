@@ -13,6 +13,9 @@ import { z } from "zod"
 import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
+import { isKnownAppPath } from "@/lib/app-routes"
+import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
+import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -41,9 +44,22 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated"
 interface AuthContextValue {
   session: AuthSession | null
   status: AuthStatus
-  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
-  signOut: () => Promise<void>
+  /** `status` and `retryAfter` (seconds) are set when the server refused with
+   *  a status the page words on its own, e.g. 429 from the sign-in limiter. */
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string; status?: number; retryAfter?: number }>
+  /** Resolves false when the server did not confirm the sign-out (the
+   *  session is still alive), so the caller does not say "signed out". */
+  signOut: () => Promise<boolean | void>
   refresh: () => Promise<void>
+  /**
+   * Set while a cold load cannot reach the backend at all (#3787): the status
+   * stays "loading" — nobody is signed out — and the app shows "Crewship is
+   * restarting" with the time of the next try. Optional so test doubles need
+   * not supply it.
+   */
+  unreachable?: { retryAt: number } | null
+  /** Try the session again now instead of at `unreachable.retryAt`. */
+  retryNow?: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -62,6 +78,9 @@ export const sessionRetryPolicy = {
   maxAttempts: 5,
   baseMs: 500,
   capMs: 8000,
+  /** After the attempts above, a cold load that never reached the backend
+   *  tries once every this many ms ("Next try in N s"). */
+  unreachableRetryMs: 10_000,
 }
 
 type SessionResult =
@@ -132,14 +151,54 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
+  const [unreachable, setUnreachable] = useState<{ retryAt: number } | null>(null)
+  // Mirrors for the redirect listener and the retry loop, which are created
+  // once and would otherwise read the values of the render that made them.
+  const sessionRef = useRef<AuthSession | null>(null)
+  const statusRef = useRef<AuthStatus>("loading")
+  const unreachableTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => { sessionRef.current = session }, [session])
+  useEffect(() => { statusRef.current = status }, [status])
 
   // Monotonic generation guard: a newer refresh() (e.g. one fired by signIn)
   // supersedes any retry loop still backing off, so a stale loop can't
   // clobber fresh session state.
   const refreshGen = useRef(0)
 
+  const settle = useCallback(async (next: AuthSession | null, gen: number) => {
+    if (gen !== refreshGen.current) return
+    clearTimeout(unreachableTimer.current)
+    unreachableTimer.current = undefined
+    purgeOtherE2Recovery(next?.user.id ?? null)
+    await purgeOtherDocumentDrafts(next?.user.id ?? null)
+    if (gen !== refreshGen.current) return
+    setUnreachable(null)
+    setSession(next)
+    setStatus(next ? "authenticated" : "unauthenticated")
+  }, [])
+
+  // A cold load that has never reached the backend: one attempt per
+  // unreachableRetryMs until it answers. The status stays "loading" the whole
+  // time — a server that is restarting has not signed anybody out.
+  const probe = useCallback(async (gen: number) => {
+    clearTimeout(unreachableTimer.current)
+    unreachableTimer.current = undefined
+    if (gen !== refreshGen.current) return
+    const result = await fetchSession()
+    if (gen !== refreshGen.current) return
+    if (result.kind === "settled") {
+      await settle(result.session, gen)
+      return
+    }
+    const ms = sessionRetryPolicy.unreachableRetryMs
+    setUnreachable({ retryAt: Date.now() + ms })
+    unreachableTimer.current = setTimeout(() => { void probe(gen) }, ms)
+  }, [settle])
+
   const refresh = useCallback(async () => {
     const gen = ++refreshGen.current
+    clearTimeout(unreachableTimer.current)
+    unreachableTimer.current = undefined
 
     for (let attempt = 0; ; attempt++) {
       if (gen !== refreshGen.current) return // superseded by a newer refresh
@@ -147,9 +206,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.kind === "settled") {
         if (gen !== refreshGen.current) return
-        purgeOtherE2Recovery(result.session?.user.id ?? null)
-        setSession(result.session)
-        setStatus(result.session ? "authenticated" : "unauthenticated")
+        await settle(result.session, gen)
         return
       }
 
@@ -165,16 +222,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     if (gen !== refreshGen.current) return
     // Retries exhausted on transient failures only. Preserve an existing
-    // authenticated session — a real outage must never force a logout. Only a
-    // cold load that never once reached the backend settles on
-    // "unauthenticated", so the UI can offer login instead of spinning
-    // forever. (setSession is intentionally left untouched.)
-    setStatus((prev) => (prev === "authenticated" ? prev : "unauthenticated"))
-  }, [])
+    // authenticated session — a real outage must never force a logout. A
+    // cold load that never once reached the backend used to settle on
+    // "unauthenticated" and send the person to a login form that could not
+    // work either (#3787); it now stays "loading", reports `unreachable` (the
+    // app shows "Crewship is restarting") and keeps trying.
+    if (statusRef.current === "authenticated") return
+    const ms = sessionRetryPolicy.unreachableRetryMs
+    setUnreachable({ retryAt: Date.now() + ms })
+    unreachableTimer.current = setTimeout(() => { void probe(gen) }, ms)
+  }, [settle, probe])
+
+  const retryNow = useCallback(() => {
+    if (!unreachableTimer.current) return
+    void probe(refreshGen.current)
+  }, [probe])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // The network coming back is the moment to look again, not the next tick.
+  useEffect(() => {
+    if (!unreachable) return
+    window.addEventListener("online", retryNow)
+    return () => window.removeEventListener("online", retryNow)
+  }, [unreachable, retryNow])
+
+  useEffect(() => () => clearTimeout(unreachableTimer.current), [])
 
   // Hard-redirect to /login when apiFetch detects a terminal auth state
   // (refresh failed, session_revoked, etc). The BroadcastChannel echo
@@ -185,13 +260,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (typeof window === "undefined") return
 
     let redirected = false
-    const goLoginExpired = () => {
+    const goLoginExpired = async (reason?: string) => {
       if (redirected) return
+      // A path the app has no page for shows the not-found state, signed in
+      // or not (app/(dashboard)/layout.tsx). The static-export backend serves
+      // the dashboard there, whose first requests answer 401 for a visitor
+      // without a session — that is not an expired session, and the login
+      // page is not where an unknown link should lead.
+      if (!isKnownAppPath(window.location.pathname)) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
+      await purgeOtherDocumentDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
-      const params = new URLSearchParams({ reason: "expired" })
+      // no_credentials: the browser never had a session (or its cookies
+      // were cleared) — send it to sign in without saying anything expired.
+      // Otherwise the login page opens on its signed-out screen (#3787):
+      // expired, or revoked elsewhere — and may say who was signed in and
+      // that an unsent chat message is kept (lib/signed-out.ts).
+      const kind = signedOutKind(reason)
+      if (kind) rememberSignedOut(sessionRef.current?.user.email)
+      const params = new URLSearchParams(kind ? { reason: kind } : {})
       // Don't append ?redirect for /login itself or unsafe absolute URLs.
       // The check uses pathname (not pathname+search) so /login?reason=expired
       // — the URL we're about to redirect TO — is recognised as the
@@ -202,14 +292,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       window.location.replace(`/login?${params.toString()}`)
     }
-    const goLoginSignedOutElsewhere = () => {
+    const goLoginSignedOutElsewhere = async () => {
       if (redirected) return
       redirected = true
+      ++refreshGen.current
       purgeOtherE2Recovery(null)
-      window.location.replace("/login")
+      await purgeOtherDocumentDrafts(null)
+      window.location.replace(SIGNED_OUT_URL)
     }
 
-    const expiredHandler = () => goLoginExpired()
+    const expiredHandler = (e: Event) => { void goLoginExpired((e as CustomEvent<{ reason?: string }>).detail?.reason) }
     window.addEventListener(AUTH_EVENT, expiredHandler)
 
     let channel: BroadcastChannel | null = null
@@ -217,8 +309,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
-          if (ev.data?.type === "session-expired") goLoginExpired()
-          else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
+          if (ev.data?.type === "session-expired") void goLoginExpired(ev.data?.reason)
+          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere()
         }
       } catch {
         channel = null
@@ -247,7 +339,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null)
-        return { ok: false, error: data?.error ?? "Login failed" }
+        const error = data?.error ?? "Login failed"
+        if (res.status !== 429) return { ok: false, error }
+        // The sign-in limiter: the page words this one itself.
+        const retryAfter = Number(res.headers?.get?.("Retry-After"))
+        return { ok: false, error, status: 429, ...(retryAfter > 0 ? { retryAfter } : {}) }
       }
 
       const data = await res.json()
@@ -262,7 +358,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [refresh])
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (): Promise<boolean> => {
     // Gate the local reset on a successful (or already-expired) server
     // response. With revocation now enforced server-side, fanning out
     // "signed out" while the refresh chain is still active server-side
@@ -284,20 +380,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // Network error — leave local state intact so a transient outage
       // doesn't desync this tab from the still-active server session.
-      return
+      return false
     }
     if (!serverAcknowledged) {
-      return
+      return false
     }
+    ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
+    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
+    await purgeOtherDocumentDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.
     broadcastSignOut()
+    return true
   }, [])
 
   return (
-    <AuthContext value={{ session, status, signIn, signOut, refresh }}>
+    <AuthContext value={{ session, status, signIn, signOut, refresh, unreachable, retryNow }}>
       {children}
     </AuthContext>
   )
@@ -330,6 +430,12 @@ export function useAuth() {
 export function useSessionSafe() {
   const ctx = useContext(AuthContext)
   return { data: ctx?.session ?? null, status: ctx?.status ?? "loading" }
+}
+
+/** Whether an AuthProvider is mounted — for chrome that shows account
+ *  controls only inside the signed-in app (the sidebar's user row). */
+export function useAuthAvailable(): boolean {
+  return useContext(AuthContext) != null
 }
 
 /** Returns session data and auth status (drop-in replacement for next-auth useSession). */

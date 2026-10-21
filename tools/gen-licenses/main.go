@@ -15,6 +15,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -251,8 +252,17 @@ func linkedModules() (map[string]string, []string, error) {
 		if err != nil {
 			// A matrix cell that cannot even be listed is a build-matrix
 			// defect: the release pipeline builds it, so listing must work.
-			return nil, nil, fmt.Errorf("go list -deps GOOS=%s GOARCH=%s tags=%q %s: %w\n%s",
-				m.goos, m.goarch, m.tags, m.mainP, err, out)
+			var exitErr *exec.ExitError
+			var diagnostic string
+			if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+				diagnostic = string(exitErr.Stderr)
+				if len(diagnostic) > 8192 {
+					diagnostic = diagnostic[:4096] + "\n... stderr truncated ...\n" + diagnostic[len(diagnostic)-4096:]
+				}
+				diagnostic = "\nstderr:\n" + diagnostic
+			}
+			return nil, nil, fmt.Errorf("go list -deps GOOS=%s GOARCH=%s tags=%q %s: %w\n%s%s",
+				m.goos, m.goarch, m.tags, m.mainP, err, out, diagnostic)
 		}
 		cell := m.goos + "/" + m.goarch
 		if m.tags != "" {

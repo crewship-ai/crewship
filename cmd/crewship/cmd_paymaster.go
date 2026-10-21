@@ -361,7 +361,77 @@ Examples:
 	},
 }
 
+// paymasterCredentialSpendCmd hits /paymaster/credential-spend: what each API
+// key cost in a window (OWNER/ADMIN). Backs the Vault's "$ this month".
+var paymasterCredentialSpendCmd = &cobra.Command{
+	Use:   "credential-spend",
+	Short: "Metered spend per API key (credential) in a window",
+	Long: `Show what each API key cost, from the metered ledger. --range month is the
+calendar month so far (UTC), the window a provider bills by. Flat-rate
+subscription seats have no $ figure (see ` + "`paymaster subscriptions`" + `).
+OWNER or ADMIN only. Only the credential id is shown, never a value.
+
+Examples:
+  crewship paymaster credential-spend --range month
+  crewship paymaster credential-spend --format json | jq '.[] | {credential_id, cost_usd}'`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		q := url.Values{}
+		for _, k := range []string{"range", "since", "until"} {
+			if v, _ := cmd.Flags().GetString(k); v != "" {
+				q.Set(k, v)
+			}
+		}
+		path := "/api/v1/paymaster/credential-spend"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		resp, err := newAPIClient().Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Rows []struct {
+				CredentialID string  `json:"credential_id" yaml:"credential_id"`
+				CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+				CallCount    int64   `json:"call_count" yaml:"call_count"`
+				InTokens     int64   `json:"input_tokens" yaml:"input_tokens"`
+				OutTokens    int64   `json:"output_tokens" yaml:"output_tokens"`
+				LastUsedAt   string  `json:"last_ts" yaml:"last_ts"`
+			} `json:"rows" yaml:"rows"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(body.Rows, func() {
+			if len(body.Rows) == 0 {
+				fmt.Println("No metered spend recorded for any credential in this window.")
+				return
+			}
+			rows := make([][]string, 0, len(body.Rows))
+			for _, r := range body.Rows {
+				rows = append(rows, []string{r.CredentialID, fmt.Sprintf("$%.2f", r.CostUSD), fmt.Sprint(r.CallCount), fmt.Sprint(r.InTokens + r.OutTokens), r.LastUsedAt})
+			}
+			f.Table([]string{"CREDENTIAL", "COST", "CALLS", "TOKENS", "LAST USED"}, rows)
+		})
+	},
+}
+
 func init() {
+	paymasterCredentialSpendCmd.Flags().String("range", "month", "Time window (1h, 24h, 7d, 30d, month)")
+	paymasterCredentialSpendCmd.Flags().String("since", "", "Lower bound (RFC3339)")
+	paymasterCredentialSpendCmd.Flags().String("until", "", "Upper bound (RFC3339)")
+	paymasterCmd.AddCommand(paymasterCredentialSpendCmd)
+
 	paymasterByCrewCmd.Flags().String("range", "7d", "Time window (1h, 24h, 7d, 30d)")
 	paymasterByAgentCmd.Flags().String("range", "7d", "Time window (1h, 24h, 7d, 30d)")
 	paymasterTopCmd.Flags().Int("limit", 10, "Top N spenders")

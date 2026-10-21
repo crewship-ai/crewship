@@ -29,7 +29,7 @@ async function directDenied(actor) {
   const listener = request => { if (new URL(request.url()).pathname === '/api/v1/agents') sentAgentDirectory = true }
   pages[actor].on('request', listener)
   await open(actor, '/chat')
-  await expect(pages[actor].getByText('Not available with your access', { exact: true })).toBeVisible()
+  await expect(pages[actor].getByText(/ isn’t part of your access$/)).toBeVisible()
   pages[actor].off('request', listener)
   await check(`${actor} denied direct Chat URL never mounts agent directory`, !sentAgentDirectory)
 }
@@ -43,11 +43,15 @@ try {
       window.__trustedSettingsShown = false
       new MutationObserver(() => {
         if (document.querySelector('input[aria-label="Full name"],nav[aria-label="Settings sections"]')) window.__trustedSettingsShown = true
-        if ([...document.querySelectorAll('h1,h2')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
+        if ([...document.querySelectorAll('h1,h2')].some(node => node.textContent?.endsWith(' isn’t part of your access'))) window.__navigationUnavailableShown = true
       }).observe(document, { childList: true, subtree: true, characterData: true })
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  if (process.env.CREWSHIP_ISSUES_MANAGE_BROWSER === '1') {
+    const { knownProjectManage } = await import('./acceptance-known-project-manage-browser.mjs')
+    await knownProjectManage({fixture,contexts,pages,check,open,output})
+  } else {
   // Object sharing uses the real versioned policy and transactional audit.
   const projectResponse = await contexts.owner.request.post(`${fixture.server}/api/v1/projects?workspace_id=${fixture.workspace}`, {data:{name:'Client sharing project'}})
   if(projectResponse.status()!==201) throw new Error(`project fixture create ${projectResponse.status()}`)
@@ -573,7 +577,7 @@ try {
   await desktop.getByRole('menuitem', { name: /Empty workspace/ }).click()
   await desktop.keyboard.press('Escape')
   await expect(desktop.getByRole('menu')).toHaveCount(0)
-  await expect(desktop.getByText('Not available with your access', { exact: true })).toBeVisible()
+  await expect(desktop.getByText(/ isn’t part of your access$/)).toBeVisible()
   await expect(desktop.getByRole('link', { name: 'Chat', exact: true })).toHaveCount(0)
   await check('workspace switch does not borrow another membership Chat projection', true)
   await desktop.getByRole('button', { name: /^Current workspace:/ }).click()
@@ -585,7 +589,7 @@ try {
   await policy([])
   // Both tabs stay mounted on Chat; no navigation, reload, or manual refetch.
   for (const actor of ['desktop', 'phone']) {
-    await expect(pages[actor].getByText('Not available with your access', { exact: true })).toBeVisible({ timeout: 70000 })
+    await expect(pages[actor].getByText(/ isn’t part of your access$/)).toBeVisible({ timeout: 70000 })
     await expect(pages[actor].getByRole('link', { name: 'Chat', exact: true })).toHaveCount(0)
     await expect(pages[actor].getByText('Alex', { exact: true })).toHaveCount(0)
     await check(`${actor} open Chat revoked automatically by foreground watcher`, true, { elapsed_ms: Date.now() - started })
@@ -594,6 +598,7 @@ try {
   }
   await directDenied('other')
   await desktop.screenshot({ path: join(output, 'revoked-navigation.png') })
+  }
 } catch (error) {
   results.push({ name: 'browser harness', status: 'ERROR', error: String(error) })
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})

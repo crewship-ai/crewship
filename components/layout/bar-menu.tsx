@@ -71,6 +71,11 @@ export interface BarMenuProps {
    * `-badge`, `-popover`, `-backdrop`.
    */
   testId: string
+  /**
+   * The panel's width classes. Inbox keeps the 380 px default; Activity is a
+   * 480 px panel in v67 and, under md, a sheet that spans the viewport.
+   */
+  widthClass?: string
   children: React.ReactNode
 }
 
@@ -78,7 +83,7 @@ export interface BarMenuProps {
  * Trigger + panel. Controlled, because Activity ticks its elapsed times only
  * while the panel is open.
  */
-export function BarMenu({ icon: Icon, ariaLabel, badge, active = false, open, onOpenChange, testId, children }: BarMenuProps) {
+export function BarMenu({ icon: Icon, ariaLabel, badge, active = false, open, onOpenChange, testId, widthClass = "w-[380px]", children }: BarMenuProps) {
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const count = badge?.count ?? 0
 
@@ -147,7 +152,7 @@ export function BarMenu({ icon: Icon, ariaLabel, badge, active = false, open, on
               initial={{ opacity: 0, scale: 0.96, y: -4 }}
               animate={{ opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } }}
               exit={{ opacity: 0, scale: 0.96, y: -4, transition: { duration: 0.1 } }}
-              className="absolute right-0 top-9 z-50 w-[380px] overflow-hidden rounded-lg border border-foreground/[0.1] bg-card shadow-xl"
+              className={cn("absolute right-0 top-9 z-50 overflow-hidden rounded-lg border border-foreground/[0.1] bg-card shadow-xl", widthClass)}
               data-testid={`${testId}-popover`}
             >
               {children}
@@ -189,7 +194,7 @@ export function BarMenuBody({ children, className }: { children: React.ReactNode
 export interface BarMenuChip<T extends string = string> {
   id: T
   label: string
-  /** Rendered as "Label (n)". Omit for a chip that names a view, not a tally. */
+  /** Rendered after the label as a sans tabular figure ("Label 2"). Omit for a chip that names a view, not a tally. */
   count?: number
   /** "warn" for the chip whose rows are blocking someone. */
   tone?: "warn"
@@ -239,7 +244,7 @@ export function BarMenuChips<T extends string>({
             )}
           >
             {chip.label}
-            {chip.count != null ? ` (${chip.count})` : ""}
+            {chip.count != null && <>{" "}<span className="tabular-nums">{chip.count}</span></>}
           </button>
         )
       })}
@@ -248,7 +253,7 @@ export function BarMenuChips<T extends string>({
 }
 
 export interface BarMenuSectionProps {
-  /** Rendered uppercase — this is a group label, not a heading. */
+  /** A group label in sentence case (v67 `.menu-cap`), not a heading. */
   label: string
   count?: number
   /** "warn" for the group that is blocking someone. */
@@ -262,7 +267,7 @@ export function BarMenuSection({ label, count, tone, overflow, children }: BarMe
   return (
     <div data-testid={`bar-menu-section-${label.toLowerCase().replace(/\s+/g, "-")}`}>
       <div className="flex items-center gap-2 border-b border-foreground/[0.04] bg-surface-subtle/60 px-3 py-1">
-        <span className={cn("type-meta uppercase tracking-wider", tone === "warn" ? "text-warn" : "text-foreground/40")}>
+        <span className={cn("type-meta font-semibold", tone === "warn" ? "text-warn" : "text-foreground/40")}>
           {label}
         </span>
         {count != null && (
@@ -347,9 +352,9 @@ export function BarMenuRow({ leading, title, meta, trailing, actions, onClick, t
           {body}
         </button>
       )}
-      {/* Indented to the title column (px-3 + a 24px leading slot + gap-2.5)
+      {/* Indented to the title column (px-3 + a 28px leading slot + gap-2.5)
           so actions hang under the words they act on, not under the avatar. */}
-      {actions && <div className="flex items-center gap-2 pb-2 pl-[46px] pr-3">{actions}</div>}
+      {actions && <div className="flex items-center gap-2 pb-2 pl-[50px] pr-3">{actions}</div>}
     </li>
   )
 }
@@ -362,10 +367,12 @@ export function BarMenuRow({ leading, title, meta, trailing, actions, onClick, t
  * the navigation, so the kit takes the child rather than wrapping it.
  */
 export function BarMenuRowAction({
-  onClick, danger, disabled, asChild, children, ariaLabel, title,
+  onClick, danger, primary, disabled, asChild, children, ariaLabel, title,
 }: {
   onClick?: () => void
   danger?: boolean
+  /** The one action the row asks for (v67 `btn pri xs`): Approve, Decide, Answer. */
+  primary?: boolean
   disabled?: boolean
   asChild?: boolean
   children: React.ReactNode
@@ -374,7 +381,9 @@ export function BarMenuRowAction({
 }) {
   const className = cn(
     "type-meta inline-flex items-center gap-1 rounded-md border px-2 py-0.5 transition-colors",
-    danger
+    primary
+      ? "border-transparent bg-primary text-primary-foreground hover:bg-primary/90"
+      : danger
       ? "border-transparent text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
       : "border-foreground/[0.08] bg-foreground/[0.03] text-foreground/85 hover:bg-foreground/[0.06]",
     disabled && "opacity-50",

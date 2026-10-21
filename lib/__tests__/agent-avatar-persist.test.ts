@@ -32,6 +32,11 @@ vi.mock("@/lib/server-base", () => ({
 vi.mock("@/lib/agent-avatar", () => ({
   DEFAULT_AVATAR_STYLE: "bottts-neutral",
   AVATAR_STYLES: { "bottts-neutral": {}, lorelei: {}, thumbs: {} },
+  // This suite is about the store path of styles that CAN be stored; the
+  // voxel styles, which are never stored, have their own suite
+  // (agent-avatar-persist-voxel.test.ts).
+  resolveAvatarStyle: (s?: string | null) => (s && ["bottts-neutral", "lorelei", "thumbs"].includes(s) ? s : "bottts-neutral"),
+  isAnimatableAvatarStyle: () => false,
   preloadAvatarStyle: async (style: string) => {
     if (!h.preloadFails) h.loaded.add(style)
   },
@@ -176,7 +181,7 @@ describe("backfillAgentAvatars", () => {
       ],
       (url) => (url.includes("/a3/") ? 403 : url.includes("/a4/") ? 500 : 200),
     )
-    await expect(backfillAgentAvatars(WS)).resolves.toEqual({ total: 4, stored: 1, present: 1, refused: 1, failed: 1 })
+    await expect(backfillAgentAvatars(WS)).resolves.toEqual({ total: 4, stored: 1, present: 1, refused: 1, failed: 1, live: 0 })
     const puts = mockFetch.mock.calls.filter(([, init]) => init?.method === "PUT").map(([url]) => String(url))
     expect(puts).toEqual([
       "/api/v1/agents/a1/avatar?workspace_id=ws-1",

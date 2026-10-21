@@ -41,13 +41,34 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "13.25rem"
+// Harbor 2: 240 px open, a 56 px rail (pixels: the rail must not grow with
+// the user's text size, or the content column would shift).
+const SIDEBAR_WIDTH = "240px"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "4rem"
+const SIDEBAR_WIDTH_ICON = "56px"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 const SIDEBAR_MODE_KEY = "crewship_sidebar_mode"
 const SIDEBAR_RAIL_MODE_KEY = "crewship_sidebar_rail_mode"
 
+
+const TABLET_WIDTH_QUERY = "(min-width: 768px) and (max-width: 1279px)"
+
+function isTabletWidth(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(TABLET_WIDTH_QUERY).matches
+}
+
+function useTabletWidth(): boolean {
+  const [on, setOn] = React.useState(isTabletWidth)
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const mql = window.matchMedia(TABLET_WIDTH_QUERY)
+    const update = () => setOn(mql.matches)
+    update()
+    mql.addEventListener?.("change", update)
+    return () => mql.removeEventListener?.("change", update)
+  }, [])
+  return on
+}
 
 type SidebarMode = "hover" | "collapsed" | "pinned"
 
@@ -84,6 +105,13 @@ function useSidebar() {
 }
 
 
+/** For surfaces that also render outside a provider (a menu in a test, a
+ *  standalone page): the context, or null. */
+function useSidebarOptional() {
+  return React.useContext(SidebarContext)
+}
+
+
 function SidebarProvider({
   defaultOpen: _defaultOpen = true,
   open: openProp,
@@ -101,13 +129,16 @@ function SidebarProvider({
   const [openMobile, setOpenMobile] = React.useState(false)
   const [hoverExpanded, setHoverExpanded] = React.useState(false)
 
-  // Sidebar mode: hover (default), collapsed, pinned — persisted in localStorage
+  // Sidebar mode: pinned (default, v67), hover, collapsed — persisted in localStorage
   const [sidebarMode, _setSidebarMode] = React.useState<SidebarMode>(() => {
-    if (typeof window === "undefined") return "hover"
+    if (typeof window === "undefined") return "pinned"
     const stored = localStorage.getItem(SIDEBAR_MODE_KEY)
     if (stored === "collapsed" || stored === "pinned" || stored === "hover") return stored
-    return "hover"
+    return "pinned"
   })
+  // A tablet (768–1279) shows the rail whatever the choice: the width goes to
+  // the docked list and the content (v67). The choice is kept for a desk.
+  const tablet = useTabletWidth()
 
   const setSidebarMode = React.useCallback((mode: SidebarMode) => {
     _setSidebarMode(mode)
@@ -141,7 +172,7 @@ function SidebarProvider({
   }, [sidebarMode, setSidebarMode])
 
   // Derive open state from mode (pinned = open, hover/collapsed = closed)
-  const [_open, _setOpen] = React.useState(sidebarMode === "pinned")
+  const [_open, _setOpen] = React.useState(() => sidebarMode === "pinned" && !isTabletWidth())
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -160,8 +191,8 @@ function SidebarProvider({
   // Sync open state when mode changes
   React.useEffect(() => {
     if (isMobile) return
-    _setOpen(sidebarMode === "pinned")
-  }, [sidebarMode, isMobile])
+    _setOpen(sidebarMode === "pinned" && !tablet)
+  }, [sidebarMode, isMobile, tablet])
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
@@ -509,4 +540,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 }

@@ -118,6 +118,9 @@ interface ComposerState {
    * question above it. The sheet clears its own when it closes.
    */
   clearAttachments: (sessionId: string) => void
+  /** Drop every list whose key starts with `prefix` (a human+workspace scope
+   *  that is no longer current). An empty prefix never matches. */
+  dropAttachmentsByPrefix: (prefix: string) => void
   /** Drop every upload that answers a field of `formId` — the sheet closing,
    *  sent or abandoned. Its answers do not outlive it. */
   clearFormAttachments: (sessionId: string, formId: string) => void
@@ -193,6 +196,15 @@ export const useComposerStore = create<ComposerState>()(
           const list = s.attachments[sessionId]
           if (!list) return s
           return { attachments: withList(s.attachments, sessionId, list.filter((a) => !!a.owner)) }
+        }),
+      dropAttachmentsByPrefix: (prefix) =>
+        set((s) => {
+          if (!prefix) return s
+          const keys = Object.keys(s.attachments).filter((k) => k.startsWith(prefix))
+          if (keys.length === 0) return s
+          const next = { ...s.attachments }
+          for (const k of keys) delete next[k]
+          return { attachments: next }
         }),
       clearFormAttachments: (sessionId, formId) =>
         set((s) => {

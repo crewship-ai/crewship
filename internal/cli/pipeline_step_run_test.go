@@ -48,7 +48,7 @@ func TestStepRunRoutine_PostsFixtureAndDecodesVerdict(t *testing.T) {
 		t.Errorf("step_outputs not forwarded: %+v", gotBody["step_outputs"])
 	}
 	// Response decoded.
-	if !res.Valid || res.Model != "claude-haiku-4-5" || !res.Simulated || res.CostUSD != 0.0021 {
+	if !res.Valid || res.Model != "claude-haiku-4-5" || !res.Simulated || res.CostUSD == nil || *res.CostUSD != 0.0021 {
 		t.Errorf("decoded result = %+v", res)
 	}
 }

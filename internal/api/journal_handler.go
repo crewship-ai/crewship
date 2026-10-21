@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -67,7 +68,7 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"entries":     serializeEntries(entries),
+		"entries":     costAwareEntries(r.Context(), entries),
 		"next_cursor": next,
 		"count":       len(entries),
 	})
@@ -234,7 +235,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		if !h.streamAuthorityCurrent(r, workspaceID) {
 			return
 		}
-		writeSSEEvent(w, "entry", e)
+		if !auth.StreamCredentialCurrent(r.Context()) {
+			return
+		}
+		writeSSEEvent(r.Context(), w, "entry", e)
 		lastSeenTime = ts
 		lastSeenID = e.ID
 		hasWatermark = true
@@ -306,7 +310,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if !h.streamAuthorityCurrent(r, workspaceID) {
 				return false
 			}
-			writeSSEEvent(w, "entry", e)
+			if !auth.StreamCredentialCurrent(r.Context()) {
+				return false
+			}
+			writeSSEEvent(r.Context(), w, "entry", e)
 			lastSeenTime = ts
 			lastSeenID = e.ID
 		}
@@ -320,6 +327,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-heartbeat.C:
 			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return
+			}
+			if !auth.StreamCredentialCurrent(r.Context()) {
 				return
 			}
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
@@ -671,7 +681,7 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Reuse the list serializer so single-entry shape stays identical to
 	// the array form a client just paged through. The slice form is the
 	// only one that survived as the canonical serialiser.
-	writeJSON(w, http.StatusOK, serializeEntries([]journal.Entry{*entry})[0])
+	writeJSON(w, http.StatusOK, costAwareEntries(r.Context(), []journal.Entry{*entry})[0])
 }
 
 // Count serves GET /api/v1/journal/count. Returns the total number of
@@ -719,6 +729,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 }
 
 // Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// OWNER/ADMIN only (#3590).
 // Query params:
 //
 //	window=24h|7d|30d — default 24h
@@ -727,6 +738,9 @@ func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 
@@ -987,8 +1001,8 @@ func serializeEntries(entries []journal.Entry) []map[string]any {
 // writeSSEEvent frames one journal entry as an SSE message. Uses the
 // entry's ID as the SSE event ID so the client's automatic Last-Event-ID
 // handling lets reconnects skip already-seen rows.
-func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
-	payload := serializeEntries([]journal.Entry{e})[0]
+func writeSSEEvent(ctx context.Context, w http.ResponseWriter, eventType string, e journal.Entry) {
+	payload := costAwareEntries(ctx, []journal.Entry{e})[0]
 	data, _ := json.Marshal(payload)
 	_, _ = fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", e.ID, eventType, data)
 }
@@ -996,6 +1010,9 @@ func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
 // The opening middleware authenticates the credential; every emitted batch and
 // entry still needs current account, workspace and account-wide Guest authority.
 func (h *JournalHandler) streamAuthorityCurrent(r *http.Request, workspace string) bool {
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return false
+	}
 	user := UserFromContext(r.Context())
 	if user == nil {
 		return false

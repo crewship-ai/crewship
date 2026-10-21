@@ -303,11 +303,21 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := tx.ExecContext(r.Context(), `
+	tokenResult, err := tx.ExecContext(r.Context(), `
 		INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
 		VALUES (?, ?, ?, ?, 'STANDARD', ?)`,
-		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
+		tokenID, userID, tokenName, tokenHashHex, now)
+	if err != nil {
 		replyInternalError(w, h.logger, "cli pair redeem: insert cli_token", err)
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, userID, tokenID, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "cli pair redeem: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
+		replyInternalError(w, h.logger, "cli pair redeem: acknowledge", err)
 		return
 	}
 

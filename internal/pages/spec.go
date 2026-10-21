@@ -348,6 +348,17 @@ func (p PanelSpec) ProducerParts() (ProducerKind, string, error) {
 // ParseDocument parses and validates an authored page document. YAML is the
 // authoring format and JSON is a subset of it, so both are accepted.
 func ParseDocument(raw []byte) (*Document, error) {
+	return parseDocument(raw, false)
+}
+
+// ParseDocumentAllowEmpty parses a staged human Page using the same size,
+// field and YAML stream guards as ParseDocument, while permitting no panels.
+// Manifest and panel authors should continue to use ParseDocument.
+func ParseDocumentAllowEmpty(raw []byte) (*Document, error) {
+	return parseDocument(raw, true)
+}
+
+func parseDocument(raw []byte, allowEmpty bool) (*Document, error) {
 	if len(raw) > MaxSpecBytes {
 		return nil, newError(CodeTooLarge, "", "spec is %d bytes; the cap is %d", len(raw), MaxSpecBytes)
 	}
@@ -393,7 +404,7 @@ func ParseDocument(raw []byte) (*Document, error) {
 		return nil, newError(CodeInvalidSpec, "", "after the page document: %v", err)
 	}
 
-	if err := doc.Validate(); err != nil {
+	if err := doc.validate(allowEmpty); err != nil {
 		return nil, err
 	}
 	return &doc, nil
@@ -413,7 +424,13 @@ func trailingIsEmpty(d Document) bool {
 
 // Validate checks the document's shape and every declared limit. It resolves
 // nothing: whether crew/lookout exists is the handler's question.
-func (d *Document) Validate() error {
+func (d *Document) Validate() error { return d.validate(false) }
+
+// ValidateEmpty permits a staged human Page with no panels, before its first
+// artifact revision. Manifest/panel validation keeps requiring a panel.
+func (d *Document) ValidateEmpty() error { return d.validate(true) }
+
+func (d *Document) validate(allowEmpty bool) error {
 	if d.APIVersion != DocumentAPIVersion {
 		return newError(CodeInvalidSpec, "", "apiVersion %q; want %q", d.APIVersion, DocumentAPIVersion)
 	}
@@ -435,7 +452,7 @@ func (d *Document) Validate() error {
 	}
 
 	switch {
-	case len(d.Spec.Panels) == 0:
+	case len(d.Spec.Panels) == 0 && !allowEmpty:
 		return newError(CodeInvalidSpec, "",
 			"a page needs at least one panel; there is nothing to render and nothing to push to")
 	case len(d.Spec.Panels) > MaxPanelsPerPage:

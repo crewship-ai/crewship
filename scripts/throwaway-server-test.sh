@@ -101,7 +101,9 @@ check "foreign data_dir: manifest marked" "$(manifest_get "$tmp/state/out" state
 for bad in CREWSHIP_DATA_DIR=$tmp/live CREWSHIP_HOST=0.0.0.0 CREWSHIP_PORT=9999 \
            CREWSHIP_CONTAINER_PREFIX=live-prefix CREWSHIP_CONFIG=/etc/x \
            CREWSHIP_BOLT_PATH=/x.db CREWSHIP_LOG_PATH=/var/log CREWSHIP_STORAGE_BASE_PATH=/srv \
-           DATABASE_URL=file:/live.db HOME=/root PATH=/bin CREWSHIP_PAGE_PROJECTS_PATH=/outside/projects; do
+           DATABASE_URL=file:/live.db HOME=/root PATH=/bin CREWSHIP_PAGE_PROJECTS_PATH=/outside/projects \
+           CREWSHIP_DOCUMENTS_ENABLED=true CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET=/outside/a \
+           CREWSHIP_DOCUMENTS_SERVICE_SOCKET=/outside/s CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE=/outside/token; do
   key="${bad%%=*}"
   if (cmd_start envreject --binary /bin/true --env "$bad") >/dev/null 2>"$tmp/envreject.err"; then r=started; else r=refused; fi
   check "--env refuses $key" "$r" refused
@@ -123,10 +125,46 @@ FAKEBIN
 chmod +x "$tmp/bin/fake-crewship"
 : >"$FAKE_SERVER_ENV"
 FAKE_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+# --- --documents uses private owned paths, never caller-supplied credentials ---
+cat >"$tmp/check-documents.py" <<'PYDOC'
+import json, os, re, stat, sys
+from pathlib import Path
+manifest = Path(os.environ['CREWSHIP_THROWAWAY_MANIFEST'])
+data = json.loads(manifest.read_text())
+root = manifest.parent / 'documents'
+assert stat.S_IMODE(root.stat().st_mode) == 0o700
+for key, name in [('documents_authority_socket', 'authority.sock'),
+                  ('documents_service_socket', 'service.sock'),
+                  ('documents_service_token_file', 'service-token')]:
+    path = Path(data[key])
+    assert path == root / name and path.is_absolute() and len(os.fsencode(path)) <= 100
+secret_file = Path(data['documents_service_token_file'])
+assert stat.S_ISREG(secret_file.lstat().st_mode)
+assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
+secret = secret_file.read_text()
+assert re.fullmatch('[0-9a-f]{64}', secret)
+for name in ['manifest.json', 'server.log']:
+    assert secret not in (manifest.parent / name).read_text()
+for path in sys.argv[1:]:
+    assert secret not in Path(path).read_text()
+print('private documents paths verified')
+PYDOC
+# shellcheck disable=SC2094 # inspect current diagnostics for secret leakage, not as command input
+if (cmd_run docsok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" --documents -- \
+    python3 "$tmp/check-documents.py" "$FAKE_SERVER_ENV" "$tmp/docs.out" "$tmp/docs.err") >"$tmp/docs.out" 2>"$tmp/docs.err"; then r=passed; else r=failed; fi
+check "--documents run exposes only owned paths through manifest" "$r" passed
+check "--documents internally enables Go authority" \
+  "$(grep -c '^CREWSHIP_DOCUMENTS_ENABLED=true$' "$FAKE_SERVER_ENV" || true)" 1
+for setting in AUTHORITY_SOCKET=authority.sock SERVICE_SOCKET=service.sock SERVICE_TOKEN_FILE=service-token; do
+  check "--documents owns ${setting%%=*}" \
+    "$(grep -c "^CREWSHIP_DOCUMENTS_${setting%%=*}=$tmp/state/docsok/documents/${setting#*=}$" "$FAKE_SERVER_ENV" || true)" 1
+done
+check "--documents teardown removes private state" "$([[ -e "$tmp/state/docsok" ]] && echo left || echo gone)" gone
+
 cmd_start envok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
   --env CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true \
-  --env CREWSHIP_NEXTJS_URL=http://localhost:$FAKE_PORT --page-projects >/dev/null 2>&1
+  --env "CREWSHIP_NEXTJS_URL=http://localhost:$FAKE_PORT" --page-projects >/dev/null 2>&1
 check "fake server answered healthz (cmd_start returned)" "$(manifest_get "$tmp/state/envok" state)" running
 check "allowlisted --env reaches the server process" \
   "$(grep -c '^CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000' "$FAKE_SERVER_ENV")" 1
@@ -137,6 +175,12 @@ check "fixed identity keys still reach the server process" \
 check "--page-projects config lands under the instance dir" \
   "$(grep -c "^CREWSHIP_PAGE_PROJECTS_PATH=$tmp/state/envok/page-projects$" "$FAKE_SERVER_ENV")" 1
 check "--page-projects dir exists outside data/" "$([[ -d "$tmp/state/envok/page-projects" && ! -e "$tmp/state/envok/data/page-projects" ]] && echo yes)" yes
+check "without --documents, Go document settings are absent" \
+  "$(grep -c '^CREWSHIP_DOCUMENTS_' "$FAKE_SERVER_ENV" || true)" 0
+check "without --documents, no private document state is created" \
+  "$([[ -e "$tmp/state/envok/documents" ]] && echo created || echo absent)" absent
+check "without --documents, manifest socket path is empty" \
+  "$(manifest_get "$tmp/state/envok" documents_service_socket)" ""
 check "manifest records the owned projects dir" \
   "$(manifest_get "$tmp/state/envok" page_projects_dir)" "$tmp/state/envok/page-projects"
 
@@ -147,12 +191,27 @@ check "teardown removes the page-projects dir" "$([[ -e "$tmp/state/envok" ]] &&
 # port must no longer answer. A leftover here is what leaked an orphan in #1815.
 if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then r=still-listening; else r=closed; fi
 check "teardown terminated the fake server (no orphan)" "$r" closed
-[[ -f "$FAKE_SERVER_PID" ]] && kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true
+if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
 
 # --- --page-projects rejects escape attempts ---
 for bad_pp in ../escape /abs/path "a/b" data server.log manifest.json cli-config.yaml server.pid; do
   if (cmd_start ppreject --binary /bin/true --page-projects "$bad_pp") >/dev/null 2>&1; then r=started; else r=refused; fi
   check "--page-projects refuses '$bad_pp'" "$r" refused
 done
+
+# Documents accept no caller-selected path, and cannot share project storage.
+for bad_pp in documents documents/. documents/child ./documents; do
+  if (cmd_start docreject --binary /bin/true --documents --page-projects "$bad_pp") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "--documents refuses project collision '$bad_pp'" "$r" refused
+done
+if (cmd_start docreject --binary /bin/true --documents /outside) >/dev/null 2>&1; then r=started; else r=refused; fi
+check "--documents refuses an external path argument" "$r" refused
+long_root="$tmp/$(printf '%080d' 0)"
+if (STATE_ROOT="$long_root" cmd_start docreject --binary /bin/true --documents --port 8199) >/dev/null 2>&1; then r=started; else r=refused; fi
+check "--documents refuses paths over the byte limit before launch" "$r" refused
+check "overlong paths create no instance state" "$([[ -e "$long_root/docreject" ]] && echo created || echo absent)" absent
+if (STATE_ROOT="$tmp/state/../state" cmd_start docreject --binary /bin/true --documents --port 8199) >/dev/null 2>&1; then r=started; else r=refused; fi
+check "--documents refuses unclean paths" "$r" refused
+check "unclean paths create no instance state" "$([[ -e "$tmp/state/docreject" ]] && echo created || echo absent)" absent
 
 exit "$fail"

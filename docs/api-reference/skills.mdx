@@ -22,6 +22,8 @@ Most read endpoints accept a session or CLI token with workspace membership. Wri
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/generate`](#generate-skill) | AI-author a skill from intent |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/bulk-import`](#bulk-import-skills) | Import all SKILL.md files in a git repo |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}`](#delete-skill) | Delete a non-bundled skill |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive`](#archive-and-restore-a-skill) | Move a skill to the Archived view |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore`](#archive-and-restore-a-skill) | Bring an archived skill back |
 | `GET` | [`/api/v1/skills/proposed`](#list-proposed-skills) | List memory-proposed skills |
 | `POST` | [`/api/v1/skills/proposed/approve`](#approve-proposed-skill) | Approve a proposed skill |
 | `POST` | [`/api/v1/skills/proposed/reject`](#reject-proposed-skill) | Reject a proposed skill |
@@ -119,7 +121,7 @@ filters) only sees the caller's workspace.
     "updated_at": "2024-01-15T00:00:00Z",
     "lifecycle_state": "active",
     "needs_credentials": ["GITHUB_TOKEN"],
-    "usage": { "uses_7d": 12, "errors_7d": 1, "uses_total": 40, "last_used_at": "2024-01-15T09:12:00Z" },
+    "usage": { "uses_7d": 12, "uses_30d": 31, "errors_7d": 1, "errors_30d": 2, "uses_total": 40, "last_used_at": "2024-01-15T09:12:00Z" },
     "installed_on": [
       { "agent_id": "agt_1", "agent_slug": "viktor", "agent_name": "Viktor", "crew_name": "Engineering",
         "missing_credentials": [] }
@@ -159,7 +161,7 @@ filters) only sees the caller's workspace.
 | `description_quality` | string? | Description quality rating |
 | `lifecycle_state` | string | Curator sweep verdict: `active`, `stale`, `archived` or `deprecated` |
 | `needs_credentials` | string[] | Env-var names the skill expects an agent to hold (decoded `credential_requirements`); `[]` when none |
-| `usage` | object | This workspace's invocations: `uses_7d`, `errors_7d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
+| `usage` | object | This workspace's invocations: `uses_7d`, `uses_30d`, `errors_7d`, `errors_30d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
 | `installed_on` | array? | Agents of the caller's workspace holding the skill, with crew info and `missing_credentials` (the `needs_credentials` the agent is not delivered at run start). Omitted when no agent of the workspace holds it |
 
 ### Get Skill
@@ -376,6 +378,33 @@ This is a permanent delete, not a soft delete. `BUNDLED` skills cannot be remove
 |---|---|
 | `403` | Insufficient role, or attempt to delete a `BUNDLED` skill (re-seeded on server start) |
 | `404` | Skill not found |
+
+---
+
+### Archive and Restore a Skill
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore
+```
+
+The manual side of the keeper's lifecycle sweep. An archived skill is hidden from the library and from agent pickers; agents that already hold it keep it. `archive` sets `lifecycle_state` to `archived`, `restore` sets an archived skill back to `active`. Both are idempotent (a skill already in the target state answers `200` and writes no journal entry) and emit `skill.archived` / `skill.restored`.
+
+A restored skill is still judged by the sweep: when no agent holds it and nobody calls it, it is stale again after 30 days and archived after 90.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `200 OK`
+
+```json
+{ "skill_id": "skill_abc", "lifecycle_state": "archived" }
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role |
+| `404` | Skill not found |
+| `409` | The skill is `deprecated` (terminal) |
 
 ---
 

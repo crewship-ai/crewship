@@ -6,7 +6,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.apiFetch(..
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-dess", loading: false }) }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("sonner", () => ({ toast: h.toast }))
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: h.push }) }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: h.push }), usePathname: () => "/admin/backups" }))
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }))
 
 import { BackupsPage } from "../backups-page"
@@ -41,10 +41,10 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe("BackupsPage panel, like People & workspaces", () => {
-  it("leads back to Admin from the sub-bar and offers three views, the plans, the workspaces and the instance settings", async () => {
+  it("leads back to Admin from the top of its panel and offers three views, the plans, the workspaces and the instance settings", async () => {
     show()
     const p = panel()
-    expect(screen.getByRole("link", { name: "Back to Admin" })).toHaveAttribute("href", "/admin")
+    expect(within(p).getByRole("link", { name: "Back to Admin" })).toHaveAttribute("href", "/admin")
     expect(within(views()).getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Runs", "Restore"])
     for (const label of ["New plan", "Storage", "Keys & alerts"]) {
       expect(within(p).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()

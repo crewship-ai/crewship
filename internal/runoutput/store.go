@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const chunkBytes = 16 * 1024
@@ -26,12 +28,13 @@ var ErrLimit = errors.New("run output limit reached")
 var ErrClaimed = errors.New("run output directory already claimed")
 
 type Record struct {
-	Sequence uint64 `json:"sequence"`
-	Kind     string `json:"kind"`
-	Stream   string `json:"stream,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	ExitCode int    `json:"exit_code"`
-	Reason   string `json:"reason,omitempty"`
+	Sequence    uint64 `json:"sequence"`
+	Kind        string `json:"kind"`
+	Stream      string `json:"stream,omitempty"`
+	Data        []byte `json:"data,omitempty"`
+	ExitCode    int    `json:"exit_code"`
+	Reason      string `json:"reason,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
 }
 type checkpoint struct {
 	Version  int    `json:"version"`
@@ -159,6 +162,15 @@ func (s *Store) Write(stream string, data []byte) (int, error) {
 	return n, nil
 }
 func (s *Store) Finish(code int, reason string) error {
+	return s.FinishAt(code, reason, time.Now())
+}
+
+// FinishAt captures the terminal observation once; readers never replace it
+// with replay time. The caller owns the protected execution observation.
+func (s *Store) FinishAt(code int, reason string, completedAt time.Time) error {
+	if completedAt.IsZero() {
+		return errors.New("missing captured completion time")
+	}
 	if code < -1 || code > 255 || reason == "" || len(reason) > 512 {
 		return errors.New("invalid terminal result")
 	}
@@ -170,7 +182,7 @@ func (s *Store) Finish(code int, reason string) error {
 	if s.failed != nil && !errors.Is(s.failed, ErrLimit) {
 		return s.failed
 	}
-	err := s.appendLocked(Record{Kind: "exit", ExitCode: code, Reason: reason}, true)
+	err := s.appendLocked(Record{Kind: "exit", ExitCode: code, Reason: reason, CompletedAt: tsformat.Format(completedAt)}, true)
 	if err != nil {
 		s.failed = err
 	}

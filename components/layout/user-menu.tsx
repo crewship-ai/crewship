@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
-  Bell, BookOpen, ChevronDown, ChevronRight, CircleAlert, GitBranch, HelpCircle,
-  LogOut, MonitorSmartphone, Sparkles, SquareTerminal, User, Volume2,
+  Bell, BookOpen, ChevronDown, ChevronRight, ChevronsUpDown, CircleAlert, GitBranch, HelpCircle,
+  LogOut, MonitorSmartphone, Palette, Sparkles, SquareTerminal, User, Volume2,
 } from "lucide-react"
 
-import { useAuth } from "@/hooks/use-auth"
+import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { apiFetch } from "@/lib/api-fetch"
@@ -17,27 +17,20 @@ import {
 import { cn } from "@/lib/utils"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Badge } from "@/components/ui/badge"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { buildLabel } from "./sidebar-version"
+import { MenuSheet, MenuSheetItem, MenuSheetSeparator, MenuSheetSub } from "@/components/ui/menu-sheet"
+import { useSidebarOptional } from "@/components/ui/sidebar"
+import { buildLabel, editionName } from "@/lib/build-info"
 import { ThemeSwitcher } from "./theme-switcher"
 import { ConnectCliDialog } from "./connect-cli-dialog"
+import { afterSignOut } from "@/lib/signed-out"
 
-// External destinations for the user menu. Kept here (not env-driven) because
-// they are stable public properties; the docs site is the Mintlify source of
-// truth and Report an issue routes to the GitHub issue tracker.
-export const DOCS_URL = "https://docs.crewship.ai"
-export const GITHUB_URL = "https://github.com/crewship-ai/crewship"
-export const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
-export const RELEASES_URL = "https://github.com/crewship-ai/crewship/releases"
+import { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL } from "@/lib/crewship-links"
+export { DOCS_URL, GITHUB_URL, RELEASES_URL, SUPPORT_URL }
+
+/** OWNER → Owner, the way the role reads under a name. */
+function roleLabel(role: string): string {
+  return role.charAt(0) + role.slice(1).toLowerCase()
+}
 
 const ITEM = "gap-3 text-xs"
 const ICON = "h-4 w-4 text-muted-foreground"
@@ -56,14 +49,24 @@ const ICON = "h-4 w-4 text-muted-foreground"
  * left rail, because the workspace is the context of everything in that rail;
  * this menu is about the person, which holds across workspaces.
  */
-export function UserMenu() {
+export function UserMenu({ placement = "toolbar" }: {
+  /** "sidebar": the last row of the sidebar footer (Harbor 2) — avatar, name
+   *  and role, opening to the right. "toolbar": the phone top bar. "row": the
+   *  user row of the phone More sheet, opening upward. */
+  placement?: "toolbar" | "sidebar" | "row"
+} = {}) {
   const { session, signOut } = useAuth()
   const { workspace, workspaceId, role: workspaceRole } = useWorkspace()
-  // A restricted session (#2861) gets account security only — no pairing, no
-  // notification matrix — so those rows are not offered to it.
-  const trusted = useAccessMode() === "trusted"
+  // Guest browser pairing is account security (#3310). Profile and
+  // notification settings still require trusted access.
+  const accessMode = useAccessMode()
+  const trusted = accessMode === "trusted"
+  const canPair = accessMode !== "loading"
   const [open, setOpen] = useState(false)
   const [pairOpen, setPairOpen] = useState(false)
+  // v67 `pop-user`: above the user row at the sidebar's left edge while the
+  // sidebar is open; beside the rail when it is only a rail.
+  const sidebarOpen = useSidebarOptional()?.state !== "collapsed"
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
@@ -73,20 +76,53 @@ export function UserMenu() {
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-12 hover:bg-accent data-[state=open]:bg-accent transition-colors"
-            aria-label="User menu"
-          >
-            <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
-            <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72 p-0">
+      <MenuSheet
+        open={open}
+        onOpenChange={setOpen}
+        label="User menu"
+        popoverAlign={placement === "sidebar" && sidebarOpen ? "start" : "end"}
+        popoverSide={placement === "sidebar" ? (sidebarOpen ? "top" : "right") : placement === "row" ? "top" : "bottom"}
+        popoverOffset={placement === "sidebar" ? (sidebarOpen ? 6 : 8) : 4}
+        popoverClassName="w-[300px] p-0"
+        trigger={
+          placement === "sidebar" ? (
+            <button type="button" className="rail-user" aria-label="User menu">
+              <span className="relative shrink-0">
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-[28px]" textClassName="text-micro" />
+                <span
+                  data-slot="presence-dot"
+                  aria-hidden
+                  className="absolute -bottom-px -right-px size-2 rounded-full border-2 border-sidebar bg-success"
+                />
+              </span>
+              <span className="rail-label grid min-w-0 flex-1 leading-tight">
+                <span className="type-nav truncate font-semibold text-foreground">{userName}</span>
+                {workspaceRole && <span className="truncate text-micro text-muted-foreground-soft">{roleLabel(workspaceRole)}</span>}
+              </span>
+              <ChevronsUpDown className="rail-label size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+            </button>
+          ) : placement === "row" ? (
+            <button type="button" className="rail-user" aria-label="User menu">
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-6 shrink-0" textClassName="text-micro" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {userName}{workspaceRole ? ` · ${roleLabel(workspaceRole)}` : ""}
+              </span>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+            </button>
+          ) : (
+            <button
+              className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-[44px] hover:bg-accent data-[state=open]:bg-accent transition-colors"
+              aria-label="User menu"
+            >
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
+              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
+            </button>
+          )
+        }
+      >
           <div className="p-1">
-            <DropdownMenuItem asChild className="items-center gap-3 px-2 py-2.5">
+            <MenuSheetItem asChild className="items-center gap-3 px-2 py-2.5">
               <Link href="/settings?tab=profile" aria-label={`Your profile: ${userName}`}>
                 <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
                 <span className="min-w-0 flex-1">
@@ -95,10 +131,10 @@ export function UserMenu() {
                 </span>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
               </Link>
-            </DropdownMenuItem>
+            </MenuSheetItem>
             <div className="flex items-center gap-1.5 px-2 pb-1.5">
               <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">
-                {workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}
+                {workspaceRole ? roleLabel(workspaceRole) : "Loading role…"}
               </Badge>
               {workspace?.name && (
                 <span className="truncate text-micro text-muted-foreground" title={workspace.name}>
@@ -107,14 +143,20 @@ export function UserMenu() {
               )}
             </div>
           </div>
-          <DropdownMenuSeparator className="my-0" />
+          <MenuSheetSeparator />
           <div className="p-1">
-            <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=profile">
                 <User className={ICON} />
                 Profile &amp; account
               </Link>
-            </DropdownMenuItem>
+            </MenuSheetItem>
+            <MenuSheetItem asChild className={ITEM}>
+              <Link href="/settings?tab=appearance">
+                <Palette className={ICON} />
+                Appearance
+              </Link>
+            </MenuSheetItem>
             {/* Not a menu item: a row holding its own radiogroup, so picking a
                 theme keeps the menu open and the change is visible. */}
             <div className="flex h-8 items-center gap-3 px-2 text-xs">
@@ -124,22 +166,22 @@ export function UserMenu() {
             </div>
             {soundScope && <SoundsToggleItem key={soundScope} scope={soundScope} />}
             {trusted && (
-              <DropdownMenuItem asChild className={ITEM}>
+              <MenuSheetItem asChild className={ITEM}>
                 <Link href="/integrations?tab=notifications&section=preferences">
                   <Bell className={ICON} />
                   Notification preferences
                 </Link>
-              </DropdownMenuItem>
+              </MenuSheetItem>
             )}
-            <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetItem asChild className={ITEM}>
               <Link href="/settings?tab=sessions">
                 <MonitorSmartphone className={ICON} />
-                <span className="flex-1">Sessions &amp; CLI tokens</span>
+                <span className="flex-1 whitespace-nowrap">Sessions &amp; CLI tokens</span>
                 <ActiveSessionsCount />
               </Link>
-            </DropdownMenuItem>
-            {trusted && (
-              <DropdownMenuItem
+            </MenuSheetItem>
+            {canPair && (
+              <MenuSheetItem
                 className={ITEM}
                 onSelect={() => {
                   // Let the menu close first; a dialog opened from inside it
@@ -149,58 +191,56 @@ export function UserMenu() {
               >
                 <SquareTerminal className={ICON} />
                 Connect CLI…
-              </DropdownMenuItem>
+              </MenuSheetItem>
             )}
           </div>
-          <DropdownMenuSeparator className="my-0" />
+          <MenuSheetSeparator />
           <div className="p-1">
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className={ITEM}>
-                <HelpCircle className={ICON} />
-                Help &amp; resources
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-56">
-                <DropdownMenuItem asChild className={ITEM}>
+            <MenuSheetSub
+              label="Help & resources"
+              triggerClassName={ITEM}
+              contentClassName="w-56"
+              trigger={<><HelpCircle className={ICON} />Help &amp; resources</>}
+            >
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
                     <BookOpen className={ICON} />
                     Documentation
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
                     <Sparkles className={ICON} />
                     What&apos;s new
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
                     <CircleAlert className={ICON} />
                     Report an issue
                   </a>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className={ITEM}>
+                </MenuSheetItem>
+                <MenuSheetItem asChild className={ITEM}>
                   <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                     <GitBranch className={ICON} />
                     GitHub
                   </a>
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+                </MenuSheetItem>
+            </MenuSheetSub>
           </div>
-          <DropdownMenuSeparator className="my-0" />
-          <div className="flex items-center p-1">
-            <DropdownMenuItem
-              className={cn(ITEM, "flex-1 text-destructive")}
-              onClick={() => { signOut().then(() => window.location.href = "/login") }}
+          <MenuSheetSeparator />
+          <div className="p-1">
+            <MenuSheetItem
+              className={ITEM}
+              onClick={() => { signOut().then((ok) => { window.location.href = afterSignOut(ok) }) }}
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className={ICON} />
               Log out
-            </DropdownMenuItem>
-            <BuildFooter />
+            </MenuSheetItem>
           </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {trusted && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
+          {trusted && <BuildFooter />}
+      </MenuSheet>
+      {canPair && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
     </>
   )
 }
@@ -224,9 +264,8 @@ function SoundsToggleItem({ scope }: { scope: string }) {
 
   const on = prefs.enabled
   return (
-    <DropdownMenuItem
-      role="menuitemcheckbox"
-      aria-checked={on}
+    <MenuSheetItem
+      checked={on}
       className={ITEM}
       onSelect={(e) => {
         e.preventDefault()
@@ -250,7 +289,7 @@ function SoundsToggleItem({ scope }: { scope: string }) {
       >
         <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all", on ? "left-3.5" : "left-0.5")} />
       </span>
-    </DropdownMenuItem>
+    </MenuSheetItem>
   )
 }
 
@@ -271,21 +310,51 @@ function ActiveSessionsCount() {
     return () => { live = false }
   }, [])
   if (count === null) return null
-  return <span className="font-mono text-micro text-muted-foreground">{count} active</span>
+  return <span className="text-micro tabular-nums text-muted-foreground">{count} active</span>
 }
 
-/** Which build this is, at the foot of the menu — the first thing a bug
- *  report needs. Same read and label as the rail's SidebarVersion. */
+/** The foot of the menu (v67 `pu-ver`): "Community Edition · dev · a41d725" —
+ *  which Crewship this is, the first thing a bug report needs — and, when a
+ *  newer release exists, a link to it. The sidebar no longer carries this; an
+ *  instance admin can follow the build to the Admin overview. */
 function BuildFooter() {
-  const [label, setLabel] = useState<string | null>(null)
+  const instanceAdmin = useIsInstanceAdmin()
+  const [build, setBuild] = useState<{ label: string; update: string | null } | null>(null)
+  const [edition, setEdition] = useState<string | undefined>()
   useEffect(() => {
     let live = true
+    apiFetch("/api/v1/system/license")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((l) => { if (live && l?.edition) setEdition(l.edition) })
+      .catch(() => {})
     apiFetch("/api/v1/system/version")
       .then((r) => (r.ok ? r.json() : null))
-      .then((b) => { if (live && b?.current) setLabel(buildLabel(b)) })
+      .then((b) => {
+        if (live && b?.current) setBuild({ label: buildLabel(b), update: b.newer ? (b.url ?? RELEASES_URL) : null })
+      })
       .catch(() => {})
     return () => { live = false }
   }, [])
-  if (!label) return null
-  return <span className="shrink-0 px-2 font-mono text-micro text-muted-foreground-soft" data-testid="user-menu-build">{label}</span>
+  if (!build) return null
+  const text = (
+    <>
+      {edition && <><span data-testid="user-menu-edition">{editionName(edition)}</span> · </>}
+      <span data-testid="user-menu-build">{build.label}</span>
+    </>
+  )
+  const cls = "min-w-0 truncate text-micro text-muted-foreground-soft"
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2" data-testid="user-menu-footer">
+      {instanceAdmin ? (
+        <Link href="/admin?tab=overview" className={cn(cls, "hover:text-foreground hover:underline")}>{text}</Link>
+      ) : (
+        <span className={cls}>{text}</span>
+      )}
+      {build.update && (
+        <a href={build.update} target="_blank" rel="noopener noreferrer" className="shrink-0 text-micro font-medium text-primary hover:underline">
+          Update available
+        </a>
+      )}
+    </div>
+  )
 }

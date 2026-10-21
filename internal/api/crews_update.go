@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/serviceconfig"
@@ -216,6 +217,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("icon", *req.Icon)
 	}
 	if req.AvatarStyle != nil {
+		if !avatarstyle.Valid(*req.AvatarStyle) {
+			replyError(w, http.StatusBadRequest, avatarstyle.Problem(*req.AvatarStyle))
+			return
+		}
 		ub.Set("avatar_style", *req.AvatarStyle)
 	}
 	// #1627: this used to write both values straight through — not even the

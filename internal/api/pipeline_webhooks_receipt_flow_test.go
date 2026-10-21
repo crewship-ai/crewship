@@ -40,7 +40,7 @@ func TestPipelineWebhooks_ReceiptExpiryMakesTheSameIdentityNewWork(t *testing.T)
 	body := `{"event":"deploy"}`
 
 	first := fireAccepted(t, h, token, secret, body, "evt-expire")
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	inside := fireAccepted(t, h, token, secret, body, "evt-expire")
 	if inside["deduped"] != true || inside["run_id"] != first["run_id"] || inside["delivery_id"] != first["delivery_id"] {
 		t.Fatalf("redelivery inside the window = %v, want the original receipt %v", inside, first)
@@ -63,7 +63,7 @@ func TestPipelineWebhooks_ReceiptExpiryMakesTheSameIdentityNewWork(t *testing.T)
 	}
 
 	again := fireAccepted(t, h, token, secret, body, "evt-expire")
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if again["deduped"] != false || again["run_id"] == first["run_id"] || again["delivery_id"] == first["delivery_id"] {
 		t.Fatalf("redelivery after the window = %v, want new work with a new run, not %v", again, first)
 	}
@@ -100,7 +100,7 @@ func TestPipelineWebhooks_MigratedLegacyReceiptStillDeduplicates(t *testing.T) {
 	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"changed"}`, "evt-legacy"); rr.Code != 409 {
 		t.Fatalf("changed body against a migrated receipt = %d, want 409", rr.Code)
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	if n := countWebhookRows(t, h.db, `SELECT COUNT(*) FROM routine_webhook_receipts`); n != 1 {
 		t.Fatalf("%d receipts, want only the migrated one", n)
 	}
@@ -137,7 +137,7 @@ func TestPipelineWebhooks_BothSignatureProfilesRecordAndDeduplicate(t *testing.T
 	}
 	var stamped map[string]any
 	_ = json.Unmarshal(tsRR.Body.Bytes(), &stamped)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	var plainProfile, tsProfile string
 	if err := h.db.QueryRow(`SELECT profile FROM routine_webhook_receipts WHERE id = ?`, plain["delivery_id"]).Scan(&plainProfile); err != nil {

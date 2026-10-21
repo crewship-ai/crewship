@@ -3,13 +3,15 @@
 import * as React from "react"
 import Link from "next/link"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ArrowLeft, ChevronDown, SlidersHorizontal, type LucideIcon } from "lucide-react"
+import { ArrowLeft, ChevronDown, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
-import { SIDEBAR_WIDTH, SidebarCollapseButton, SidebarToolbar } from "@/components/layout/sidebar-kit"
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+import { SidebarToolbar } from "@/components/layout/sidebar-kit"
+import { SidebarRowTile } from "@/components/layout/row-tile"
+import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 /**
@@ -18,35 +20,42 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
  *
  * The rule it keeps: at most two navigation columns on screen — the app rail
  * and ONE side panel. Opening a nested page swaps the parent's panel (e.g.
- * the Settings sections) for this page's own. The way out is the first thing
- * on the sub-bar: a bordered "← <parent>" button, then the page's name and
- * what it is for. It always goes to the parent, not to browser history.
- * Never nest a nested page.
+ * the Settings sections) for this page's own. The way out is a bordered
+ * "← <parent>" control that always goes to the parent, not to browser
+ * history. Never nest a nested page.
  *
- * The panel used to repeat all of that at its top — "← Settings", the icon,
- * "Crew links" and the description — directly under a sub-bar that already
- * read "Settings / Crew links". Two copies of the path, and the one that
- * actually led back was small grey text. Now there is one header and the
- * back control looks like a control; the panel starts with its search.
+ * The side panel is the shared SecondaryPanel (Harbor 2, #3350 M3): 272 px,
+ * collapse remembered per user as `panel.<panelId>.collapsed`, and on a phone
+ * the same content in a bottom sheet opened from the top bar's panel button.
+ * Inside it (PNL-02, v67 `pk-back`) the "← <parent>" row comes first, above
+ * the page's `toolbar` (search, Filter; the collapse button is added), then
+ * the `facets` slot (an inline facet block), then the `spaces` (keys 1-9),
+ * then the page's DrillNavSections of DrillNavItems. On a phone, and on a
+ * page without a panel, the way back stays at the start of the sub-bar, and
+ * `mobileNav` (usually the page's view tabs) stays on the page.
  *
- * The panel is built like every other explorer sidebar (sidebar-kit): a
- * toolbar (search, Filter) with the collapse button, then collapsible
- * DrillNavSections of DrillNavItems. On a phone the panel becomes a bottom
- * sheet behind a "Filters" button in the sub-bar; `mobileNav` (usually the
- * page's view tabs) stays on the page.
+ * The page owns its head (SET-07, PRD SHL-05): the top bar is the path
+ * ("Settings / Members"; on a phone just the page, after the arrow back) and
+ * the section head - icon tile, title, one sentence, `note` on the right - is
+ * drawn here, once, before the page's data arrives. `head={false}` leaves it
+ * out for a page that shows only a no-access state.
  *
- * Used by Settings › Crew links, Settings › Audit log, and Admin › People &
- * workspaces, Security and Backups.
+ * Used by Settings › Crew links, Members, Audit log and Lifecycle hooks, and
+ * Admin › People & workspaces, Security and Backups.
  */
-export function DrillPage({
+export function DrillPage<S extends string = string>({
   parent,
   title,
   icon: Icon,
   description,
+  note,
+  head = true,
+  panelId,
   toolbar,
+  facets,
+  spaces,
   nav,
   mobileNav,
-  filterCount = 0,
   actions,
   children,
   className,
@@ -55,17 +64,30 @@ export function DrillPage({
   parent: { href: string; label: string; icon?: LucideIcon }
   title: string
   icon: LucideIcon
+  /** The head's one sentence about what the page is for. */
   description?: string
+  /** Right of the head: who may change what is here. */
+  note?: React.ReactNode
+  /** Draw the section head (default). False: a page with only a no-access state. */
+  head?: boolean
+  /** SecondaryPanel id, `drill-<route segment>` ("drill-crew-links"); it keys
+   *  the remembered collapse. Defaults to one derived from `title`. */
+  panelId?: string
   /** The panel's toolbar — SidebarSearch, a SidebarFilterPopover. The
    *  collapse button is added here. */
   toolbar?: React.ReactNode
+  /** Directly under the toolbar, above the spaces and sections: the inline
+   *  facet block (SidebarFacetBlock). Not inside the sections nav. */
+  facets?: React.ReactNode
+  /** The panel's spaces (By crew / All links / Matrix), on keys 1-9. */
+  spaces?: PanelSpacesConfig<S>
   /** The side panel's sections — DrillNavSection / DrillNavItem. Leave it
-   *  out for a page whose content is its own map (Lifecycle hooks): no panel,
-   *  no phone "Filters" button. */
+   *  out for a page whose content is its own map (Lifecycle hooks): no panel. */
   nav?: React.ReactNode
   /** What stays on the page on a phone, above the content. */
   mobileNav?: React.ReactNode
-  /** Active filters, for the phone's "Filters" button. */
+  /** @deprecated The phone "Filters" button is gone (the top bar's panel
+   *  button opens the panel sheet); accepted and ignored. */
   filterCount?: number
   /** Page actions, on the sub-bar. */
   actions?: React.ReactNode
@@ -73,135 +95,140 @@ export function DrillPage({
   className?: string
 }) {
   const isMobile = useIsMobile()
-  const reduce = useReducedMotion()
-  const [collapsed, setCollapsed] = usePersistentFlag(`drill-collapsed:${title}`)
-  const [sheetOpen, setSheetOpen] = React.useState(false)
-  const BackIcon = parent.icon
-
-  const filtersButton = isMobile && nav != null && (
-    <button
-      type="button"
-      onClick={() => setSheetOpen(true)}
-      data-slot="drill-filters"
-      className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium",
-        filterCount > 0 ? "border-primary/30 bg-primary/10 text-primary-hover" : "border-border text-muted-foreground",
-      )}
-    >
-      <SlidersHorizontal className="h-3.5 w-3.5" />
-      Filters
-      {filterCount > 0 && (
-        <span className="rounded-full bg-primary-hover px-1.5 text-[10px] font-bold tabular-nums text-background">{filterCount}</span>
-      )}
-    </button>
-  )
+  const id = panelId ?? `drill-${slugify(title)}`
+  // Runs before the panel reads its remembered state (a child renders after
+  // this initializer): the collapse set under the old key carries over once.
+  React.useState(() => migrateDrillCollapse(title, id))
+  const closeSheet = useCloseSecondaryPanelSheet()
+  const hasPanel = nav != null || facets != null || spaces != null
+  // With a panel the way back is the panel's first row (v67 pk-back), on a
+  // desk and on a tablet, where a drill page's panel is a docked list. On a
+  // phone the panel is a sheet, so the page keeps it on the sub-bar.
+  const backOnSubBar = isMobile || !hasPanel
 
   return (
     // One Save for the nested page, as in Settings (components/ui/page-save-bar).
     <PageSaveProvider>
     <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
+      {/* The path: "Settings / Members". On a phone the top bar already names
+          the area and the arrow is the way back, so the page is just its title. */}
       <SubBar
         icon={Icon}
-        title={title}
-        description={description}
+        title={isMobile ? title : parent.label}
+        section={isMobile ? undefined : title}
         ariaLabel={`${parent.label} / ${title}`}
-        actions={isMobile ? <>{actions}{filtersButton}</> : actions}
+        actions={actions}
         leading={
-          <span className="flex items-center gap-2">
-            <Link
-              href={parent.href}
-              data-slot="drill-back"
-              aria-label={`Back to ${parent.label}`}
-              className={cn(
-                "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background text-xs font-medium text-foreground/85 shadow-xs transition-colors hover:bg-accent hover:text-foreground",
-                isMobile ? "w-7 justify-center" : "pl-1.5 pr-2.5",
-              )}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {!isMobile && (
-                <>
-                  {BackIcon && <BackIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
-                  {parent.label}
-                </>
-              )}
-            </Link>
-            <span className="text-muted-foreground-soft" aria-hidden>/</span>
-          </span>
+          backOnSubBar ? (
+            <span className="flex items-center gap-2">
+              <DrillBack parent={parent} compact={isMobile} />
+              <span className="text-muted-foreground-soft" aria-hidden>/</span>
+            </span>
+          ) : undefined
         }
       />
       <div className="flex min-h-0 flex-1">
-        {!isMobile && nav != null && (
-          <motion.aside
-            initial={reduce ? false : { opacity: 0, x: 16 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.7, 0.2, 1] }}
-            data-collapsed={collapsed || undefined}
-            className={cn(
-              "flex shrink-0 flex-col border-r border-foreground/[0.06] bg-card transition-[width] duration-200",
-              collapsed ? "w-11" : SIDEBAR_WIDTH,
-            )}
-            aria-label={`${title} navigation`}
-          >
-            {collapsed ? (
-              <div className="flex flex-col items-center gap-2 py-2">
-                <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
+        {hasPanel && (
+          <SecondaryPanel kind="list" id={id} label={`${title} navigation`}>
+            {/* v67 pk-back: the way back is the panel's first row, above the
+                toolbar. On a phone the sheet has the arrow on the sub-bar. */}
+            {!backOnSubBar && (
+              <div className="px-2 pt-2" data-slot="drill-back-row">
+                <DrillBack parent={parent} />
               </div>
-            ) : (
-              <>
-                <SidebarToolbar>
-                  {toolbar ?? <span className="flex-1" />}
-                  <SidebarCollapseButton collapsed={false} onToggle={() => setCollapsed(true)} />
-                </SidebarToolbar>
-                <nav className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label={`${title} sections`}>{nav}</nav>
-              </>
             )}
-          </motion.aside>
+            {toolbar && <SidebarToolbar>{toolbar}</SidebarToolbar>}
+            <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+              {facets}
+              {spaces && <PanelSpaces<S> {...spaces} />}
+              {/* A pick inside the phone sheet closes it: the result is what the
+                  person wants to see next. On a desktop this does nothing. */}
+              <nav
+                aria-label={`${title} sections`}
+                onClick={(e) => { if ((e.target as HTMLElement).closest("[data-drill-close]")) closeSheet() }}
+              >
+                {nav}
+              </nav>
+            </div>
+          </SecondaryPanel>
         )}
         <div className="relative min-h-0 min-w-0 flex-1">
-          <main className={cn("h-full overflow-y-auto pb-20", className)}>
+          {/* A <div>, not a <main>: the shell's SidebarInset is the page's one
+              main landmark (ADM-08). */}
+          <div data-slot="drill-content" className={cn("h-full overflow-y-auto pb-20", className)}>
             {isMobile && mobileNav && (
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">{mobileNav}</div>
             )}
+            {head && <DrillHead icon={Icon} title={title} description={description} note={note} />}
             {children}
-          </main>
+          </div>
           <PageSaveBar />
         </div>
       </div>
-      {isMobile && nav != null && (
-        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetContent side="bottom" className="max-h-[85dvh] gap-0 rounded-t-2xl bg-card p-0" data-slot="drill-sheet">
-            <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-border" aria-hidden />
-            <SheetTitle className="px-4 pt-2 text-sm">{title}</SheetTitle>
-            <SheetDescription className="sr-only">Filters and sections for {title}</SheetDescription>
-            {toolbar && <SidebarToolbar>{toolbar}</SidebarToolbar>}
-            {/* A pick inside the sheet closes it: on a phone the result is what
-                the person wants to see next. */}
-            <nav
-              className="min-h-0 flex-1 overflow-y-auto pb-6"
-              aria-label={`${title} sections`}
-              onClick={(e) => { if ((e.target as HTMLElement).closest("[data-drill-close]")) setSheetOpen(false) }}
-            >
-              {nav}
-            </nav>
-          </SheetContent>
-        </Sheet>
-      )}
     </div>
     </PageSaveProvider>
   )
 }
 
-/** A per-browser flag (the collapsed panel), remembered across visits. */
-function usePersistentFlag(key: string): [boolean, (v: boolean) => void] {
-  const [value, setValue] = React.useState(false)
-  React.useEffect(() => {
-    try { setValue(window.localStorage.getItem(key) === "1") } catch { /* storage blocked */ }
-  }, [key])
-  const set = React.useCallback((v: boolean) => {
-    setValue(v)
-    try { window.localStorage.setItem(key, v ? "1" : "0") } catch { /* storage blocked */ }
-  }, [key])
-  return [value, set]
+/** The section head: tile, title, one sentence, and who may change things. */
+function DrillHead({ icon: Icon, title, description, note }: { icon: LucideIcon; title: string; description?: string; note?: React.ReactNode }) {
+  return (
+    <div data-slot="drill-head" className="flex flex-wrap items-center gap-3.5 px-4 pt-4 md:px-6 md:pt-6">
+      <span className="page-tile page-tile-40" aria-hidden><Icon /></span>
+      <div className="min-w-0 flex-[1_1_14rem]">
+        <h2 className="text-title font-semibold leading-tight tracking-tight text-foreground">{title}</h2>
+        {description && <p className="mt-0.5 text-body text-muted-foreground">{description}</p>}
+      </div>
+      {note != null && <span className="shrink-0 text-label text-muted-foreground" data-slot="drill-head-note">{note}</span>}
+    </div>
+  )
+}
+
+/** The plain "← <parent>" row (v67); the arrow alone when `compact`. */
+function DrillBack({ parent, compact = false }: { parent: { href: string; label: string; icon?: LucideIcon }; compact?: boolean }) {
+  const BackIcon = parent.icon
+  return (
+    <Link
+      href={parent.href}
+      data-slot="drill-back"
+      aria-label={`Back to ${parent.label}`}
+      className={cn(
+        "inline-flex h-7 items-center gap-1.5 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
+        compact ? "w-7 justify-center" : "pl-1.5 pr-2.5",
+      )}
+    >
+      <ArrowLeft className="h-3.5 w-3.5" />
+      {!compact && (
+        <>
+          {BackIcon && <BackIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
+          {parent.label}
+        </>
+      )}
+    </Link>
+  )
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+}
+
+/**
+ * The collapse used to be a per-browser flag, `drill-collapsed:<title>`
+ * ("1" / "0"). SecondaryPanel remembers it per user as
+ * `panel.<panelId>.collapsed`. When that was never set, the old value becomes
+ * its starting point; the old key is then dropped, so this happens once.
+ */
+export function migrateDrillCollapse(title: string, panelId: string): void {
+  try {
+    const legacyKey = `drill-collapsed:${title}`
+    const legacy = window.localStorage.getItem(legacyKey)
+    if (legacy == null) return
+    const key = `crewship.pref.panel.${panelId}.collapsed`
+    if (window.localStorage.getItem(key) == null) {
+      window.localStorage.setItem(key, JSON.stringify(legacy === "1"))
+    }
+    window.localStorage.removeItem(legacyKey)
+  } catch { /* storage blocked */ }
 }
 
 /**
@@ -231,7 +258,7 @@ export function DrillNavSection({
       {count != null && <span className="ml-auto tabular-nums">{count}</span>}
     </>
   )
-  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft"
+  const headClass = "flex w-full items-center gap-1.5 px-2 pb-1 pt-1 type-group-head text-muted-foreground-soft"
   return (
     <div className="px-1.5 pt-2.5" data-slot="drill-section">
       {collapsible ? (
@@ -269,6 +296,7 @@ export function DrillNavItem({
   selected,
   onSelect,
   icon,
+  tile,
   label,
   sub,
   meta,
@@ -280,6 +308,8 @@ export function DrillNavItem({
   selected?: boolean
   onSelect: () => void
   icon?: React.ReactNode
+  /** An icon on the kit's 24 px row tile (v67); `icon` is for anything else. */
+  tile?: LucideIcon
   label: React.ReactNode
   /** A second, quieter line. */
   sub?: React.ReactNode
@@ -304,17 +334,17 @@ export function DrillNavItem({
       className={cn(
         // kit-tap: 44px under a coarse pointer (globals.css), desktop density
         // untouched — these rows are the panel's whole navigation on a phone.
-        "kit-tap drill-row-in row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
+        "kit-tap drill-row-in row-interactive row-hover min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]",
         selected && "row-selected font-medium",
         muted && !selected && "text-muted-foreground",
       )}
     >
-      {icon}
+      {tile ? <SidebarRowTile icon={tile} active={selected} /> : icon}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub != null && <span className="block truncate text-[11px] font-normal text-muted-foreground">{sub}</span>}
       </span>
-      {meta != null && <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
+      {meta != null && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{meta}</span>}
     </button>
   )
 }

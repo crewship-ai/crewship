@@ -115,7 +115,11 @@ which REDEEMS a code. Backed by
 and
 [`GET /api/v1/auth/pair/poll`](/api-reference/auth#get-/api/v1/auth/pair/poll).
 
-Run it on a CLI that is already logged in, then paste the printed snippet
+Guest accounts start pairing from **user menu → Connect CLI…** in their
+verified browser session, then redeem with `crewship login --pair --code=…`.
+A Guest CLI bearer cannot issue another pairing code or widen its grants.
+
+Run it on a trusted CLI that is already logged in, then paste the printed snippet
 on the second machine — no browser required on either side:
 
 ```bash

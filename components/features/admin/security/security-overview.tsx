@@ -63,7 +63,7 @@ export function SecurityOverview({ status, posture, postureError, entries, works
 
       <SettingsCard icon={list.length || unchecked ? AlertTriangle : ShieldCheck} tint={unchecked ? "var(--destructive)" : list.length ? "var(--warn)" : "var(--success)"}
         title="Needs attention" description={unchecked ? "The server's setup could not be checked" : list.length ? "What to fix first, most pressing on top" : "Nothing in this server's setup stands out"}
-        actions={<span className="font-mono text-micro text-muted-foreground">{list.length}</span>}>
+        actions={<span className="text-micro tabular-nums text-muted-foreground">{list.length}</span>}>
         {unchecked && (
           <div data-finding="unchecked" className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />

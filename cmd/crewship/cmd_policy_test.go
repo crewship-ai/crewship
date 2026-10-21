@@ -34,6 +34,39 @@ func TestPolicyCmdStructure(t *testing.T) {
 	}
 }
 
+func TestPolicySetWholeRunApprovalExplicitBoolean(t *testing.T) {
+	saveCLIState(t)
+	m := &policyMock{t: t, getResp: `{"crew_id":"crew-eng","autonomy_level":"guided","behavior_mode":"warn","whole_run_approval":false}`}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+	for _, pair := range [][2]string{{"crew", "engineering"}, {"level", "guided"}, {"behavior", "warn"}} {
+		_ = policySetCmd.Flags().Set(pair[0], pair[1])
+	}
+	t.Cleanup(func() {
+		for _, pair := range [][2]string{{"crew", ""}, {"level", ""}, {"behavior", "warn"}, {"whole-run-approval", "false"}} {
+			_ = policySetCmd.Flags().Set(pair[0], pair[1])
+		}
+		policySetCmd.Flags().Lookup("whole-run-approval").Changed = false
+	})
+	for _, enabled := range []string{"true", "false"} {
+		m.mu.Lock()
+		m.putResp = `{"crew_id":"crew-eng","autonomy_level":"guided","behavior_mode":"warn","whole_run_approval":` + enabled + `}`
+		m.mu.Unlock()
+		_ = policySetCmd.Flags().Set("whole-run-approval", enabled)
+		if err := policySetCmd.RunE(policySetCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		m.mu.Lock()
+		err := json.Unmarshal(m.putBody, &body)
+		m.mu.Unlock()
+		if err != nil || body["whole_run_approval"] != (enabled == "true") {
+			t.Fatalf("request %v %v", body, err)
+		}
+	}
+}
+
 func TestPolicyGetFlags(t *testing.T) {
 	t.Parallel()
 	if policyGetCmd.Flags().Lookup("crew") == nil {

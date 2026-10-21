@@ -168,7 +168,7 @@ describe("choosing a seat", () => {
     expect(h.toast.success).not.toHaveBeenCalled()
     expect(h.apiFetch.mock.calls.filter(([,init])=>init?.method === "POST")).toHaveLength(2)
     await waitFor(()=>expect(screen.getByRole("button",{name:/pays with/i}).textContent?.includes(chatgpt.name)).toBe(restore))
-    if (!restore) expect(h.toast.error).toHaveBeenCalledWith(expect.stringContaining("could not be restored"))
+    if (!restore) expect(h.toast.error).toHaveBeenCalledWith(expect.stringContaining("could not be restored"), { duration: Infinity })
   })
   it("writes an AGENT binding under the seat's slot", async () => {
     serve([chatgpt, openaiKey])

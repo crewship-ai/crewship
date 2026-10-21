@@ -258,3 +258,17 @@ func (h *Hub) CanSubscribeChannel(ctx context.Context, userID, channel string) (
 	}
 	return h.channelAuth.CanSubscribe(ctx, userID, channel)
 }
+
+// CanReadCostsChannel answers the #3590 money rule for a non-socket reader of
+// channel (the run NDJSON stream). Without an authorizer that knows the rule
+// the answer is false, so the caller redacts.
+func (h *Hub) CanReadCostsChannel(ctx context.Context, userID, channel string) (bool, error) {
+	if h == nil || h.channelAuth == nil {
+		return false, nil
+	}
+	cr, ok := h.channelAuth.(costReader)
+	if !ok {
+		return false, nil
+	}
+	return cr.CanReadCosts(ctx, userID, channel)
+}

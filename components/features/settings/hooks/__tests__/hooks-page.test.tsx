@@ -265,3 +265,33 @@ describe("On a phone", () => {
     expect(await detail()).toHaveAccessibleName("An agent waits for approval hook")
   })
 })
+
+describe("Hooks load failure (COM-03)", () => {
+  it("is the kit PageBanner (alert, bad tone) and Retry loads again", async () => {
+    let fail = true
+    const normal = api.getMockImplementation()!
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (fail && !init?.method && url.startsWith("/api/v1/hooks")) return { ok: false, status: 500, json: async () => ({}) }
+      return normal(url, init)
+    })
+    render(<HooksPage />)
+    const banner = await screen.findByRole("alert")
+    expect(banner).toHaveAttribute("data-tone", "bad")
+    expect(banner).toHaveClass("page-banner", "page-banner-bad")
+    expect(banner).toHaveTextContent("The hooks could not be loaded")
+    expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+    fail = false
+    fireEvent.click(within(banner).getByRole("button", { name: "Retry" }))
+    await map()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it.each([true, false])("keeps the banner with the phone hook at %s", async (mobile) => {
+    h.mobile = mobile
+    const normal = api.getMockImplementation()!
+    api.mockImplementation(async (url: string, init?: RequestInit) =>
+      !init?.method && url.startsWith("/api/v1/hooks") ? { ok: false, status: 500, json: async () => ({}) } : normal(url, init))
+    render(<HooksPage />)
+    expect(await screen.findByRole("alert")).toHaveAttribute("data-tone", "bad")
+  })
+})

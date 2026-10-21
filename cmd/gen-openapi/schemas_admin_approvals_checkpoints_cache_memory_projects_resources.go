@@ -182,7 +182,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"crew_slug": nullable(str()), "crew_name": nullable(str()), "crew_color": nullable(str()),
 		"crew_icon": nullable(str()), "crew_avatar_style": nullable(str()), "missing_credentials": stringArray(),
 	})
-	skillUsage := object(map[string]any{"uses_7d": integer(), "errors_7d": integer(), "uses_total": integer(), "last_used_at": nullable(str())})
+	skillUsage := object(map[string]any{"uses_7d": integer(), "uses_30d": integer(), "errors_7d": integer(), "errors_30d": integer(), "uses_total": integer(), "last_used_at": nullable(str())})
 	skill := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable(str()),
 		"version": str(), "author": nullable(str()), "category": str(), "source": str(), "icon": nullable(str()),
@@ -460,7 +460,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			Response: object(map[string]any{
 				"space":   object(map[string]any{"ok": boolean(), "need_bytes": integer(), "free_bytes": integer()}, "ok", "need_bytes", "free_bytes"),
 				"format":  object(map[string]any{"ok": boolean(), "version": integer(), "converter": boolean()}, "ok", "version", "converter"),
-				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray()}, "ok", "detail", "warnings"),
+				"runtime": object(map[string]any{"ok": boolean(), "detail": str(), "warnings": stringArray(), "images_checked": integer(), "images_older": integer()}, "ok", "detail", "warnings", "images_checked", "images_older"),
 				// One runtime check per complete container environment (Track E).
 				"environments": array(object(map[string]any{
 					"crew": str(), "action": str(), "platform": str(), "host_platform": str(),

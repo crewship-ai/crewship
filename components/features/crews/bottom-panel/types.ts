@@ -7,7 +7,7 @@
 // that makes sense for its entity via BottomPanelProps.tabs.
 export type BottomTab =
   // crew / agent
-  | "messages" | "exec" | "yaml" | "docker" | "files" | "terminal"
+  | "exec" | "files" | "terminal"
   // issue / mission
   | "activity" | "runs" | "changes" | "comments"
   // routine
@@ -106,4 +106,6 @@ export interface BottomPanelProps {
   initialOpen?: boolean
   /** Notified when panel open state changes so parent can persist if desired. */
   onOpenChange?: (open: boolean) => void
+  /** Open the panel on this tab; a new `at` opens it again (the Terminal button). */
+  request?: { tab: BottomTab; at: number } | null
 }

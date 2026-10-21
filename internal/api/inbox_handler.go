@@ -233,6 +233,9 @@ type inboxListResponse struct {
 	Count       int                 `json:"count"`
 	UnreadCount int                 `json:"unread_count"`
 	HasMore     bool                `json:"has_more"`
+	// NextCursor is the opaque keyset position to pass as ?cursor= for the
+	// next page; empty on the last page (it is set exactly when has_more is).
+	NextCursor string `json:"next_cursor,omitempty"`
 	// ActiveByKind counts the caller's visible NOT-resolved items per kind,
 	// independent of the request's own state/kind filters. "Needs your
 	// attention" headlines count from this instead of len(Rows): the rows are
@@ -275,6 +278,27 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
+	// Keyset paging: ?cursor= is the next_cursor of the previous page. It
+	// replaces ?offset=, which shifts when a row is added or resolved mid-walk.
+	var after inboxCursor
+	cursorGiven := r.URL.Query().Get("cursor") != ""
+	if cursorGiven {
+		if r.URL.Query().Get("offset") != "" {
+			replyError(w, http.StatusBadRequest, "cursor and offset cannot be combined")
+			return
+		}
+		c, ok := decodeInboxCursor(r.URL.Query().Get("cursor"))
+		if !ok {
+			replyError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		after = c
+	}
+	filters, badFilter := parseInboxFilters(r.URL.Query(), time.Now)
+	if badFilter != "" {
+		replyError(w, http.StatusBadRequest, badFilter)
+		return
+	}
 
 	q := strings.Builder{}
 	q.WriteString(`SELECT id, workspace_id, kind, source_id,
@@ -315,9 +339,16 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		q.WriteString(" AND kind = ?")
 		args = append(args, kind)
 	}
+	q.WriteString(filters.clause)
+	args = append(args, filters.args...)
+	if cursorGiven {
+		q.WriteString(" AND (created_at < ? OR (created_at = ? AND id < ?))")
+		args = append(args, after.createdAt, after.createdAt, after.id)
+	}
 	// Fetch one extra row so clients can walk the entire feed without guessing
-	// whether a full page was the final page. The id tie-breaker keeps OFFSET
-	// pagination deterministic when several events share one timestamp.
+	// whether a full page was the final page. The id tie-breaker keeps both
+	// OFFSET and keyset pagination deterministic when several events share one
+	// timestamp.
 	q.WriteString(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
 	args = append(args, limit+1, offset)
 
@@ -364,11 +395,16 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	hasMore := scanned > limit
+	nextCursor := ""
 	// Guarded on len(out), not on hasMore: `scanned` counts rows the query
 	// returned and `out` holds the ones that survived Scan, so after a scan
 	// error the two differ and out[:limit] would be out of range.
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	if hasMore && len(out) > 0 {
+		last := out[len(out)-1]
+		nextCursor = inboxCursor{createdAt: last.CreatedAt, id: last.ID}.encode()
 	}
 	h.enrichAgentAvatars(r.Context(), out)
 	h.enrichEscalationFourEyes(r.Context(), workspaceID, out)
@@ -445,6 +481,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		Count:         len(out),
 		UnreadCount:   unreadCount,
 		HasMore:       hasMore,
+		NextCursor:    nextCursor,
 		ActiveByKind:  activeByKind,
 		DecisionCount: decisionCountPtr,
 	})

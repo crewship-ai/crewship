@@ -1,45 +1,41 @@
-import { useState } from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { IssuesToolbarStrip, issuesShowingLabel, formatCount, type IssuesToolbarStripProps } from "../issues-toolbar-strip"
-import type { SavedView } from "@/lib/types/mission"
 afterEach(cleanup)
-const saved: SavedView = { id: "v1", name: "Mine", filters_json: "{}", sort_json: null, view_type: "list", is_default: false, shared: true, created_at: "" }
-const defaults: IssuesToolbarStripProps = { issueViewMode: "board", onViewModeChange: vi.fn(), savedViews: [], savedViewsOpen: false, onSavedViewsOpenChange: vi.fn(), activeViewId: null, onActiveViewChange: vi.fn() }
-it("exposes current view and forwards both mode controls", () => {
-  const change = vi.fn()
-  const { rerender } = render(<IssuesToolbarStrip {...defaults} onViewModeChange={change} />)
-  expect(screen.getByRole("button", { name: "Board view" })).toHaveAttribute("aria-pressed", "true")
-  fireEvent.click(screen.getByRole("button", { name: "List view" }))
-  expect(change).toHaveBeenLastCalledWith("list")
-  rerender(<IssuesToolbarStrip {...defaults} issueViewMode="list" onViewModeChange={change} />)
-  expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute("aria-pressed", "true")
-  fireEvent.click(screen.getByRole("button", { name: "Board view" }))
-  expect(change).toHaveBeenLastCalledWith("board")
-  expect(screen.queryByText("Saved Views")).not.toBeInTheDocument()
+const defaults: IssuesToolbarStripProps = { statuses: [], onToggleStatus: vi.fn(), onClearStatuses: vi.fn(), shown: 13, groupBy: "status" }
+
+it("offers All plus the four statuses work moves through, and says what is shown", () => {
+  render(<IssuesToolbarStrip {...defaults} />)
+  const group = screen.getByRole("group", { name: "Filter issues by status" })
+  expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["All", "In progress", "In review", "Todo", "Backlog"])
+  expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true")
+  expect(screen.getByTestId("issues-count")).toHaveTextContent("13 issues · grouped by status")
 })
-it.each(["board", "list", "future"])("applies saved %s view then clears it without retaining a stale mode", async mode => {
-  const change = vi.fn()
-  function Harness() {
-    const [open, setOpen] = useState(false)
-    const [active, setActive] = useState<string | null>(null)
-    return <IssuesToolbarStrip {...defaults} savedViews={[{ ...saved, view_type: mode as SavedView["view_type"] }]} savedViewsOpen={open} onSavedViewsOpenChange={setOpen} activeViewId={active} onActiveViewChange={(id, type) => { change(id, type); setActive(id) }} />
-  }
-  render(<Harness />)
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Saved Views" }), { button: 0, ctrlKey: false })
-  const item = await screen.findByRole("menuitem", { name: /Mine/ })
-  expect(item).toHaveTextContent("shared")
-  fireEvent.click(item)
-  expect(change).toHaveBeenLastCalledWith("v1", mode === "future" ? undefined : mode)
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Mine" }), { button: 0, ctrlKey: false })
-  fireEvent.click(await screen.findByRole("menuitem", { name: "All Issues" }))
-  expect(change).toHaveBeenLastCalledWith(null, undefined)
-  expect(screen.getByRole("button", { name: "Saved Views" })).toBeInTheDocument()
+it("toggles a status chip and clears through All", () => {
+  const toggle = vi.fn()
+  const clear = vi.fn()
+  render(<IssuesToolbarStrip {...defaults} statuses={["REVIEW"]} onToggleStatus={toggle} onClearStatuses={clear} />)
+  expect(screen.getByRole("button", { name: "In review" })).toHaveAttribute("aria-pressed", "true")
+  expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false")
+  fireEvent.click(screen.getByRole("button", { name: "Todo" }))
+  expect(toggle).toHaveBeenCalledWith("TODO")
+  fireEvent.click(screen.getByRole("button", { name: "All" }))
+  expect(clear).toHaveBeenCalled()
 })
-it("falls back when the active view is absent and omits unshared badges", () => {
-  render(<IssuesToolbarStrip {...defaults} savedViews={[{ ...saved, shared: false }]} activeViewId="missing" savedViewsOpen />)
-  expect(screen.getByRole("menu", { name: "Saved Views" })).toBeInTheDocument()
-  expect(screen.getByRole("menuitem", { name: "Mine" })).not.toHaveTextContent("shared")
+it("names the grouping the list uses, and the board's own", () => {
+  const { rerender } = render(<IssuesToolbarStrip {...defaults} shown={1} groupBy="project" />)
+  expect(screen.getByTestId("issues-count")).toHaveTextContent("1 issue · grouped by project")
+  rerender(<IssuesToolbarStrip {...defaults} groupBy="none" />)
+  expect(screen.getByTestId("issues-count")).toHaveTextContent(/^13 issues$/)
+  rerender(<IssuesToolbarStrip {...defaults} groupBy="none" board />)
+  expect(screen.getByTestId("issues-count")).toHaveTextContent("grouped by status")
+})
+it("phone: a Filters chip opens the panel and counts the active facets", () => {
+  const open = vi.fn()
+  render(<IssuesToolbarStrip {...defaults} onOpenFilters={open} activeFilters={2} />)
+  fireEvent.click(screen.getByRole("button", { name: /Filters/ }))
+  expect(open).toHaveBeenCalled()
+  expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent("2")
 })
 it("presents server totals and prevents another page request while loading", () => {
   const load = vi.fn()

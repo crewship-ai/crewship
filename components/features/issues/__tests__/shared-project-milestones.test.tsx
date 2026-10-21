@@ -65,4 +65,22 @@ describe("shared project milestones",()=>{
   await waitFor(()=>expect(screen.queryByRole("article")).toBeNull())
   expect(screen.queryByText("New milestone",{exact:true})).toBeNull()
  })
+  it.each([401,403,404].flatMap(status=>[429,500].map(transient=>({status,transient}))))("does not resurrect milestone data after $status then $transient",async({status,transient})=>{
+    fetchMock.mockResolvedValue(response([item]))
+    const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})
+    const tree=<QueryClientProvider client={client}><SharedProjectMilestones workspaceId="w1" projectId="p1" userId="guest-a" /></QueryClientProvider>
+    const view=render(tree)
+    await screen.findByRole("article",{name:"Milestone Release"})
+    for(const code of [status,transient]){
+      fetchMock.mockResolvedValue(response({},code))
+      await act(async()=>{await client.invalidateQueries({queryKey:["restricted-project-milestones"]})})
+      view.rerender(<QueryClientProvider client={client}><SharedProjectMilestones workspaceId="w1" projectId="p1" userId="guest-a" /></QueryClientProvider>)
+      expect(screen.queryByRole("article",{name:"Milestone Release"})).toBeNull()
+      expect(screen.queryByText("New milestone")).toBeNull()
+      expect(screen.queryByRole("button",{name:"Remove milestone"})).toBeNull()
+    }
+    fetchMock.mockResolvedValue(response([item]))
+    await act(async()=>{await client.invalidateQueries({queryKey:["restricted-project-milestones"]})})
+    await screen.findByRole("article",{name:"Milestone Release"})
+  })
 })

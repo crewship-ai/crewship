@@ -125,7 +125,7 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 		return err
 	}
 	success := snapshot.Result.Reason == "exited" && code == 0 && !analysis.Failed
-	result := work.RunResult{ExitCode: &code, Metadata: analysis.Metadata}
+	result := work.RunResult{CompletedAt: snapshot.Result.CompletedAt, ExitCode: &code, Metadata: analysis.Metadata}
 	status := "FAILED"
 	if success {
 		status = "COMPLETED"
@@ -162,6 +162,9 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 	if owned {
 		if p.WorkspaceID != run.WorkspaceID || p.AgentID != run.AgentID || (p.CrewID != "" && p.CrewID != run.CrewID) {
 			return errors.New("retained work scope differs")
+		}
+		if p.Result.CompletedAt != snapshot.Result.CompletedAt {
+			return errors.New("retained completion timestamp differs from staged result")
 		}
 		status, result = p.Status, p.Result
 	}
@@ -218,7 +221,11 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 		} else if !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
 		}
-		entry := journal.RunTerminalReplay(run.ID, run.WorkspaceID, run.AgentID, started, kind, owned, result.ExitCode, result.ErrorMessage, result.Metadata)
+		eventTime, err := journal.RunTerminalEventTime(started, snapshot.Result.CompletedAt)
+		if err != nil {
+			return err
+		}
+		entry := journal.RunTerminalReplay(run.ID, run.WorkspaceID, run.AgentID, eventTime, kind, owned, result.ExitCode, result.ErrorMessage, result.Metadata)
 		if _, _, err = s.journalWriter.EmitReplaySync(ctx, entry); err != nil {
 			return err
 		}

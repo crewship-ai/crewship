@@ -113,7 +113,8 @@ describe("a person's workspace access", () => {
 
     fireEvent.click(within(card).getByRole("button", { name: "Remove from Acme" }))
     expect(calls("DELETE", "/members/u-jana")).toHaveLength(0)
-    fireEvent.click(within(card).getByRole("button", { name: "Remove" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove Jana from Acme?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }))
     await waitFor(() => expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-a/members/u-jana")).toHaveLength(1))
   })
 
@@ -125,7 +126,6 @@ describe("a person's workspace access", () => {
   })
 
   it("issues a new setup link for someone who has not signed in yet", async () => {
-    h.apiFetch.mockImplementationOnce(async () => res(USERS)).mockImplementationOnce(async () => res(WORKSPACES))
     render(<PeoplePage />)
     await openPerson("Perko")
     fireEvent.click(screen.getByRole("button", { name: "New setup link" }))
@@ -154,13 +154,15 @@ describe("a person who never signed in", () => {
 })
 
 describe("suspending", () => {
-  it("asks in place, then suspends", async () => {
+  it("asks through the shared confirmation, then suspends", async () => {
     render(<PeoplePage />)
     await openPerson("Jana")
     const zone = screen.getByRole("region", { name: "Danger zone" })
     fireEvent.click(within(zone).getByRole("button", { name: /Suspend/ }))
     expect(calls("POST", "/suspend")).toHaveLength(0)
-    fireEvent.click(within(zone).getByRole("button", { name: "Suspend Jana" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Suspend Jana?" })
+    expect(dialog).toHaveTextContent(/sessions end first/)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend Jana" }))
     await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people/u-jana/suspend")).toHaveLength(1))
   })
 
@@ -203,13 +205,18 @@ describe("a workspace", () => {
     const zone = await screen.findByRole("region", { name: "Danger zone" })
     fireEvent.change(within(zone).getByRole("combobox", { name: "New owner" }), { target: { value: "u-jana" } })
     fireEvent.click(within(zone).getByRole("button", { name: "Transfer" }))
-    fireEvent.click(within(zone).getAllByRole("button", { name: "Transfer" }).at(-1)!)
+    // Transfer names the new owner in the shared confirmation.
+    const transfer = await screen.findByRole("alertdialog", { name: "Make Jana the owner of Acme?" })
+    fireEvent.click(within(transfer).getByRole("button", { name: "Transfer" }))
     await waitFor(() => expect(body("POST", "/api/v1/admin/instance/workspaces/ws-a/transfer-ownership")).toEqual({ user_id: "u-jana" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
 
+    // Delete needs the typed slug.
     fireEvent.click(within(zone).getByRole("button", { name: /Delete…/ }))
-    const go = within(zone).getByRole("button", { name: "Delete Acme" })
+    const del = await screen.findByRole("alertdialog", { name: "Delete Acme?" })
+    const go = within(del).getByRole("button", { name: "Delete Acme" })
     expect(go).toBeDisabled()
-    fireEvent.change(within(zone).getByLabelText(/Type/), { target: { value: "acme" } })
+    fireEvent.change(within(del).getByLabelText(/Type/), { target: { value: "acme" } })
     fireEvent.click(go)
     await waitFor(() => expect(body("DELETE", "/api/v1/admin/instance/workspaces/ws-a")).toEqual({ confirm_slug: "acme" }))
   })
@@ -291,7 +298,46 @@ describe("workspaces and personal accounts", () => {
     fireEvent.click(within(card).getByRole("checkbox", { name: /Ivana Viewer's personal account/ }))
     fireEvent.click(within(card).getByRole("button", { name: /Remove 1 empty/ }))
     expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(0)
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }))
+    // The shared confirmation, saying what goes and what stays.
+    const dialog = await screen.findByTestId("confirm-dialog")
+    expect(within(dialog).getByText("Remove 1 empty personal account?")).toBeInTheDocument()
+    expect(dialog.querySelector("[data-tone=lost]")).toHaveTextContent(/Only accounts with no crews, agents or data/)
+    expect(dialog.querySelector("[data-tone=kept]")).toHaveTextContent(/keep signing in/)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }))
     await waitFor(() => expect(body("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ confirm_slug: "ivana-viewer-s-workspace" }))
+  })
+})
+
+describe("one confirm for one or many", () => {
+  it("suspending the selected people asks once through the shared confirmation", async () => {
+    render(<PeoplePage />)
+    const table = await screen.findByRole("region", { name: "People" })
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Jana" }))
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Perko" }))
+    const bar = screen.getByRole("toolbar", { name: "Change the selected people" })
+    fireEvent.click(within(bar).getByRole("button", { name: "Suspend" }))
+    const dialog = await screen.findByTestId("confirm-dialog")
+    expect(within(dialog).getByText("Suspend 2 people?")).toBeInTheDocument()
+    expect(dialog).toHaveTextContent(/sessions end first/)
+    expect(calls("POST", "/suspend")).toHaveLength(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend 2" }))
+    await waitFor(() => expect(calls("POST", "/suspend")).toHaveLength(2))
+  })
+})
+
+describe("People load failure (COM-03)", () => {
+  it("is the kit PageBanner (alert, bad tone) and Retry reads again", async () => {
+    const normal = h.apiFetch.getMockImplementation()!
+    let fail = true
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) =>
+      fail && String(u).startsWith("/api/v1/admin/users?") ? res({ error: "boom" }, 500) : normal(u, init))
+    render(<PeoplePage />)
+    const banner = await screen.findByRole("alert")
+    expect(banner).toHaveAttribute("data-tone", "bad")
+    expect(banner).toHaveClass("page-banner", "page-banner-bad")
+    expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+    fail = false
+    fireEvent.click(within(banner).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
   })
 })

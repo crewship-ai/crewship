@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
@@ -34,6 +35,8 @@ import type { IssuePriority, Project, ProjectStatus } from "@/lib/types/mission"
 export interface ProjectCardEdit {
   /** Agents that can lead the project. */
   agents: PickableAgent[]
+  /** Workspace people who can lead it too (PATCH lead_type "user"). Absent, only agents are offered. */
+  people?: { id: string; name: string }[]
   /** Records a change. On the project detail it lands in a draft that the
    *  page's floating Save bar commits; nothing is written until then. */
   patch: (body: Record<string, unknown>) => Promise<boolean>
@@ -188,6 +191,15 @@ export function ProjectHealthPicker({
   )
 }
 
+/** The lead's avatar: a person for lead_type "user", an agent otherwise. */
+export function LeadAvatar({ type, id, name, className }: { type?: "user" | "agent" | null; id?: string | null; name?: string | null; className?: string }) {
+  return type === "user" ? (
+    <UserAvatar name={name ?? undefined} email="" className={className} />
+  ) : (
+    <AgentAvatar seed={id ?? name ?? "lead"} className={cn("rounded-full", className)} alt="" />
+  )
+}
+
 export function ProjectLeadPicker({
   project,
   edit,
@@ -196,19 +208,20 @@ export function ProjectLeadPicker({
   edit: ProjectCardEdit
 }) {
   const [open, setOpen] = React.useState(false)
+  const people = edit.people ?? []
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Trigger label="Change lead">
         {project.lead_id ? (
-          <>
-            <AgentAvatar seed={project.lead_id} className="h-4 w-4 shrink-0 rounded-full" alt="" />
+          <span data-lead-kind={project.lead_type === "user" ? "user" : "agent"} className="inline-flex min-w-0 items-center gap-1.5">
+            <LeadAvatar type={project.lead_type} id={project.lead_id} name={project.lead_name} className="h-4 w-4 shrink-0" />
             <span className="truncate text-[12px]">{project.lead_name ?? "Lead"}</span>
-          </>
+          </span>
         ) : (
           <span className="text-[12px] text-muted-foreground-soft">No lead</span>
         )}
       </Trigger>
-      <PopoverContent align="start" sideOffset={4} className="w-[220px] p-1">
+      <PopoverContent align="start" sideOffset={4} className="max-h-72 w-[220px] overflow-y-auto p-1">
         <Option
           tone="muted"
           current={!project.lead_id}
@@ -221,10 +234,25 @@ export function ProjectLeadPicker({
         >
           No lead
         </Option>
+        {people.length > 0 && <p className="px-2 pb-0.5 pt-1.5 text-label font-semibold text-muted-foreground">People</p>}
+        {people.map((p) => (
+          <Option
+            key={p.id}
+            current={project.lead_type === "user" && project.lead_id === p.id}
+            onSelect={() => {
+              void edit.patch({ lead_type: "user", lead_id: p.id })
+              setOpen(false)
+            }}
+          >
+            <UserAvatar name={p.name} email="" className="size-4 shrink-0" />
+            <span className="truncate">{p.name}</span>
+          </Option>
+        ))}
+        {people.length > 0 && edit.agents.length > 0 && <p className="px-2 pb-0.5 pt-1.5 text-label font-semibold text-muted-foreground">Agents</p>}
         {edit.agents.map((a) => (
           <Option
             key={a.id}
-            current={project.lead_id === a.id}
+            current={project.lead_type !== "user" && project.lead_id === a.id}
             onSelect={() => {
               void edit.patch({ lead_type: "agent", lead_id: a.id })
               setOpen(false)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
@@ -317,7 +318,20 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		payload["trigger_message_id"] = runauthority.TriggerMessageFromContext(ctx)
 	}
 	if metadata != nil {
-		payload["metadata"] = metadata
+		cleanMetadata := make(map[string]interface{}, len(metadata))
+		for k, v := range metadata {
+			switch k {
+			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "human_authority", "trigger_message_id", "chat_origin_id":
+			default:
+				cleanMetadata[k] = v
+			}
+		}
+		payload["metadata"] = cleanMetadata
+		intent, ok := metadata["document_creation_intent"].(*documents.CreationIntent)
+		receipt := chataudience.ReceiptFromContext(ctx)
+		if ok && intent != nil && intent.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload["document_creation_intent"] = intent
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -343,8 +357,21 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 
 // UpdateRun updates a run's status, exit code, and metadata via the internal API.
 func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error {
+	return r.UpdateRunWithCompletion(ctx, runID, status, exitCode, errorMsg, metadata, "")
+}
+
+// CompletionTimeUpdater carries host-captured time independently of arbitrary
+// provider metadata. Legacy callers omit it and retain their original bytes.
+type CompletionTimeUpdater interface {
+	UpdateRunWithCompletion(context.Context, string, string, *int, *string, map[string]interface{}, string) error
+}
+
+func (r *IPCResolver) UpdateRunWithCompletion(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
+	if completedAt != "" {
+		payload["completed_at"] = completedAt
+	}
 	if exitCode != nil {
 		payload["exit_code"] = *exitCode
 	}

@@ -14,7 +14,7 @@ function show(){const client=new QueryClient({defaultOptions:{queries:{retry:fal
 afterEach(()=>{cleanup();vi.clearAllMocks()})
 
 describe("shared project details",()=>{
- it("shows readers details without offering management",async()=>{
+ it("respects read-only current credential hints without offering mutations",async()=>{
   fetchMock.mockResolvedValue(response({...initial,can_manage:false}));show()
   await screen.findByText("Client brief")
   expect(screen.queryByLabelText("Project name")).toBeNull()

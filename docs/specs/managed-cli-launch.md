@@ -202,6 +202,9 @@ The required managed-environment CI catalog includes this test. The
 orchestrator fixture remains separate and retains its stop/recovery/duplicate-run
 coverage and scoped host sudo requirement.
 
+Both ordinary completion and recovery fixtures await a helper marker emitted
+after capture reservation writes finish, before removing temporary directories.
+
 The standalone suite positively calibrates that a stale home executable can
 run on the legacy-style path, then verifies that the managed path runs the
 image artifact with literal argv, strips injected image/loader/shell-hook

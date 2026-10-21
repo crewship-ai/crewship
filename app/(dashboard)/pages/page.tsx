@@ -1,11 +1,14 @@
 "use client"
 
+import { Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedPages } from "@/components/features/pages/restricted-pages"
+import { PageReferenceEntry } from "@/components/features/pages/page-reference-entry"
 
 // /pages — the Pages surface (docs/specs/pages.md §9b).
 //
@@ -16,6 +19,12 @@ import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 //
 // Everything below the workspace gate lives in components/features/pages.
 export default function PagesPage() {
+  return <Suspense fallback={<Skeleton className="m-6 h-12" />}><PagesEntry /></Suspense>
+}
+
+function PagesEntry() {
+  const params = useSearchParams()
+  const search = params?.toString() ?? ""
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
@@ -32,6 +41,10 @@ export default function PagesPage() {
         </div>
       </div>
     )
+  }
+
+  if (new URLSearchParams(search).has("ref")) {
+    return <PageReferenceEntry workspaceId={workspaceId} search={search} />
   }
 
   return accessMode === "restricted" ? <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} /> : <PagesLayout workspaceId={workspaceId} />

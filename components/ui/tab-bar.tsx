@@ -90,7 +90,7 @@ function TabBarItem({ value, count, className, children }: TabBarItemProps) {
     >
       <span>{children}</span>
       {count !== null && count !== undefined && (
-        <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/50">
+        <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-micro tabular-nums text-foreground/50">
           {count}
         </span>
       )}

@@ -3,7 +3,7 @@
 // the draft's exact id and revision.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { RoutinePublishDialog, publicationSummary, scheduleImpact } from "../routine-publish-dialog"
 
 const h = vi.hoisted(() => ({ fetcher: vi.fn(), schedules: [] as unknown[] }))
@@ -97,7 +97,8 @@ describe("<RoutinePublishDialog>", () => {
     expect(after).toHaveTextContent("Run and 1 schedule following the latest version use v4 from the next start")
     expect(after).toHaveTextContent("1 pinned schedule stays on its version")
     expect(after).toHaveTextContent("1 running or waiting run keeps v3")
-    expect(after).toHaveTextContent("v3 stays in Versions and can be restored")
+    expect(after).toHaveTextContent("v3 stays in Versions.")
+    expect(after).not.toHaveTextContent("restored")
     const publish = screen.getByRole("button", { name: "Publish v4" })
     await waitFor(() => expect(publish).toBeEnabled())
     fireEvent.click(publish)
@@ -116,14 +117,14 @@ describe("<RoutinePublishDialog>", () => {
     expect(screen.getByRole("button", { name: "Publish v4" })).toBeDisabled()
   })
 
-  it("asks to approve capability changes only when the server refuses for them", async () => {
+  it("asks to approve capability changes when the server refuses for them", async () => {
     mockServer({ publish: { error: "Review the capability changes", risk_reasons: ["reaches a new host"] }, publishStatus: 409 })
     render(<RoutinePublishDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onPublished={() => {}} onDiscarded={() => {}} />)
-    expect(screen.queryByLabelText("Approve capability changes")).toBeNull()
+    expect(screen.queryByLabelText("I approve these for this routine")).toBeNull()
     const publish = screen.getByRole("button", { name: "Publish v4" })
     await waitFor(() => expect(publish).toBeEnabled())
     fireEvent.click(publish)
-    const approve = await screen.findByLabelText("Approve capability changes")
+    const approve = await screen.findByLabelText("I approve these for this routine")
     expect(screen.getByText(/reaches a new host/)).toBeInTheDocument()
     expect(publish).toBeDisabled()
     fireEvent.click(approve)
@@ -143,11 +144,47 @@ describe("<RoutinePublishDialog>", () => {
     const discard = screen.getByRole("button", { name: "Discard draft" })
     await waitFor(() => expect(discard).toBeEnabled())
     fireEvent.click(discard)
+    // The shared confirmation, not the browser's confirm().
+    const dialog = await screen.findByTestId("confirm-dialog")
+    expect(dialog).toHaveTextContent("v3 stays as it is.")
+    expect(window.confirm).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard draft" }))
     await waitFor(() => expect(discarded).toHaveBeenCalled())
     const call = h.fetcher.mock.calls.find(([, init]) => init?.method === "DELETE")!
     expect(call[0]).toBe("/api/v1/workspaces/ws/pipelines/invoice-intake/draft")
     expect(JSON.parse(String(call[1].body))).toEqual({ id: "drf_1", revision: 2 })
   })
+})
+
+it("shows new risk before publishing and requires the approve checkbox", async () => {
+  const safe = { steps: [{ id: "extract", type: "agent_run", agent_slug: "nora" }] }
+  const risky = { steps: [...safe.steps, { id: "post", type: "http", http: { url: "https://erp.example/ledger", credential_ref: { type: "erp" } } }], egress_targets: ["erp.example"] }
+  h.fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/invoice-intake/draft") && (!init || !init.method))
+      return json({ id: "drf_1", slug: "invoice-intake", revision: 2, base_pipeline_id: "pipe-1", base_revision: 3, updated_by: "usr_me", updated_at: new Date().toISOString(), document: { slug: "invoice-intake", name: "Invoice intake", definition: risky, author_crew_id: "crew_fin" } })
+    if (url.endsWith("/pipelines/test_run")) return json({ status: "DRY_RUN_OK", save_token: "tok_1" })
+    if (url.endsWith("/invoice-intake/publish")) return json({ slug: "invoice-intake" })
+    throw new Error(`unexpected ${url}`)
+  })
+  const done = vi.fn()
+  render(<RoutinePublishDialog open onOpenChange={() => {}} workspaceId="ws" routine={{ ...routine, definition: safe }} onPublished={done} onDiscarded={() => {}} />)
+  expect(await screen.findByTestId("publish-new-risk")).toHaveTextContent("New risk")
+  const publish = screen.getByRole("button", { name: "Publish v4" })
+  await waitFor(() => expect(screen.getByTestId("publish-checked")).toHaveTextContent("runs no agents"))
+  expect(publish).toBeDisabled()
+  fireEvent.click(screen.getByLabelText("I approve these for this routine"))
+  expect(publish).toBeEnabled()
+  fireEvent.click(publish)
+  await waitFor(() => expect(done).toHaveBeenCalled())
+  const call = h.fetcher.mock.calls.find(([url]) => String(url).endsWith("/publish"))!
+  expect(JSON.parse(String(call[1].body)).approve_risk).toBe(true)
+})
+
+it("Cancel, not Not now", async () => {
+  mockServer()
+  render(<RoutinePublishDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onPublished={() => {}} onDiscarded={() => {}} />)
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull()
 })
 
 it("marks People changed when a decision form changes inside a nested loop", () => {

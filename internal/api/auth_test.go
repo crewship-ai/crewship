@@ -434,7 +434,7 @@ func TestAuthWsToken_BrowserSession(t *testing.T) {
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/ws-token", nil)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com", Name: "Test"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com", Name: "Test", SessionID: "browser-session"}))
 	rr := httptest.NewRecorder()
 	h.WsToken(rr, req)
 
@@ -466,7 +466,7 @@ func TestAuthWsToken_CLIToken(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/ws-token", nil)
 	req.Header.Set("Authorization", "Bearer crewship_cli_someplaintext")
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "x@y.com", Name: "n"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "x@y.com", Name: "n", TokenID: "cli-token-row"}))
 	rr := httptest.NewRecorder()
 	h.WsToken(rr, req)
 	if rr.Code != http.StatusOK {

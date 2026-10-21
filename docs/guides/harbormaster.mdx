@@ -73,6 +73,29 @@ Before a run starts, the orchestrator calls the gate once with tool `agent_run`.
 
 Because the run-level mode is now sourced from policy on **every** dispatch path, the gate is live everywhere, not just interactive chat. Note that the baked-in default rule set does not match the `agent_run` tool, so raising a crew to `sync` does not block ordinary runs on its own — it takes effect once a rule matches the run (custom `agent_run` rules, cost, or a production target). The mode governs whether the rules are consulted at all.
 
+Operators can explicitly enable the existing whole-run rule for one crew:
+
+```bash
+crewship policy set --crew synthetic-gate-demo --level guided --whole-run-approval
+crewship policy get --crew synthetic-gate-demo --format json
+```
+
+`whole_run_approval` defaults to `false`; an omitted field preserves its saved
+value. The rule matches `agent_run` only. Autonomy still determines whether
+matches block (`strict`/`guided`), log without blocking (`trusted`) or are bypassed
+(`full`). Chat preflight and actual runtime load the same live crew setting.
+Reward tuning still applies, so use a new synthetic agent for an acceptance
+run rather than resetting another agent's approval history.
+
+For a bounded dev acceptance, create a dedicated synthetic crew and agent, enable
+the rule above, and read `crewship chat run-preflight CHAT_ID` before sending a
+human chat message. Confirm that the actual pending whole-run decision appears
+in `crewship chat decision list CHAT_ID`, review its source version, and answer
+through the existing decision API/CLI. Approving releases that specific run;
+rejecting starts no paid work. Change only this synthetic crew's setting back
+with `--whole-run-approval=false` when finished. Do not insert approval rows as
+substitute evidence: they do not prove that the runtime gate matched.
+
 ## Queue schema
 
 ```sql

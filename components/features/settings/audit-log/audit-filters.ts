@@ -206,6 +206,15 @@ export function rangeLabel(filters: AuditFilters): string {
   return "Custom range"
 }
 
+/** v67's one-line range for a card header: "last 7 d", "all time", or the custom days. */
+export function shortRangeLabel(filters: AuditFilters): string {
+  if (filters.range === "custom") return rangeLabel(filters)
+  if (filters.range === "all") return "all time"
+  const preset = AUDIT_RANGES.find((r) => r.value === filters.range)
+  const m = /^(\d+)([hd])$/.exec(filters.range)
+  return preset && m ? `last ${m[1]} ${m[2]}` : (preset?.label ?? "").toLowerCase()
+}
+
 /** "14:05 – 16:40", or with the day when the slice crosses one. */
 export function sliceLabel(from: string, to: string): string {
   const f = new Date(from), t = new Date(to)

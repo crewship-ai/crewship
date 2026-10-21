@@ -64,7 +64,7 @@ function setupFetch() {
  * failed to overwrite it would show up.
  */
 async function openImport(typedName = "Placeholder") {
-  render(<CreateCrewDialog workspaceId="ws_test" open onOpenChange={vi.fn()} onCreated={vi.fn()} />)
+  render(<CreateCrewDialog initialStart="template" workspaceId="ws_test" open onOpenChange={vi.fn()} onCreated={vi.fn()} />)
   fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: typedName } })
   fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
   fireEvent.click(await screen.findByRole("button", { name: /^Import YAML/ }))
@@ -125,7 +125,7 @@ describe("<CreateCrewDialog> — importing a manifest", () => {
       expect(screen.getByPlaceholderText("Engineering")).toHaveValue("Data Engineering")
     })
     expect(screen.getByPlaceholderText("engineering")).toHaveValue("data-eng")
-    expect(screen.getByText(/step 1 of 3/)).toBeInTheDocument()
+    expect(screen.getByText(/step 1 of 3/i)).toBeInTheDocument()
   })
 
   it("refuses a file that is not a crew manifest, by name", async () => {

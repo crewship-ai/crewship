@@ -3,56 +3,105 @@ package ws
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
 
-	"github.com/crewship-ai/crewship/internal/access"
-	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-// Compare the previous two-query decision with the single-snapshot hot path.
-// Both arms use current DB state for every delivery; neither caches an allow.
+// Model concurrent per-client delivery pumps sharing the production-sized
+// five-connection pool. One benchmark operation is one authorization frame.
 func BenchmarkChatDeliveryAuthorization(b *testing.B) {
-	db := testutil.MigratedSQLDB(b)
-	for _, q := range []string{
-		`INSERT INTO users(id,email) VALUES('bench-user','bench@access.test')`,
-		`INSERT INTO workspaces(id,name,slug) VALUES('bench-workspace','Bench','bench')`,
-		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('bench-member','bench-workspace','bench-user','MEMBER')`,
-		`INSERT INTO agents(id,workspace_id,name,slug) VALUES('bench-agent','bench-workspace','Agent','bench-agent')`,
-		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('bench-chat','bench-workspace','bench-agent','bench-user','private')`,
-	} {
-		if _, err := db.ExecContext(b.Context(), q); err != nil {
-			b.Fatal(err)
-		}
-	}
-	authorizer := NewDBChannelAuthorizer(db)
-	for _, combined := range []bool{false, true} {
-		name := "two_queries"
-		if combined {
-			name = "single_snapshot"
-		}
-		b.Run(name, func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				var allowed bool
-				var err error
-				if combined {
-					allowed, err = authorizer.CanDeliver(b.Context(), "bench-user", "session:bench-chat")
-				} else {
-					restricted, e := (access.Store{DB: db}).HasRestrictedMembership(b.Context(), "bench-user")
-					if e != nil || restricted {
-						b.Fatalf("ceiling: %v %v", restricted, e)
+	for _, scale := range [][2]int{{1, 1}, {16, 8}, {64, 16}} {
+		b.Run(fmt.Sprintf("clients%d/channels%d", scale[0], scale[1]), func(b *testing.B) {
+			db, counter := deliveryAuthorizationFixture(b, scale[0], scale[1])
+			auth := NewDBChannelAuthorizer(db)
+			for _, kind := range []string{"workspace", "agent", "session"} {
+				b.Run(kind, func(b *testing.B) {
+					b.ReportAllocs()
+					var next atomic.Int64
+					var failed atomic.Bool
+					var wg sync.WaitGroup
+					start := make(chan struct{})
+					for client := 0; client < scale[0]; client++ {
+						wg.Add(1)
+						go func(client int) {
+							defer wg.Done()
+							<-start
+							for {
+								i := next.Add(1) - 1
+								if i >= int64(b.N) {
+									return
+								}
+								channel := fmt.Sprintf("%s:bench-%s-%d", kind, kind, int(i)%scale[1])
+								if kind == "session" {
+									channel = fmt.Sprintf("session:bench-chat-%d-%d", client, int(i)%scale[1])
+								}
+								allowed, err := auth.CanDeliver(b.Context(), fmt.Sprintf("bench-user-%d", client), channel)
+								if err != nil || !allowed {
+									failed.Store(true)
+									return
+								}
+							}
+						}(client)
 					}
-					allowed, err = chataudience.CanRead(b.Context(), db, "bench-chat", "bench-user")
-				}
-				if err != nil || !allowed {
-					b.Fatalf("delivery denied: %v", err)
-				}
+					counter.Reset()
+					before := db.Stats()
+					b.ResetTimer()
+					close(start)
+					wg.Wait()
+					b.StopTimer()
+					after := db.Stats()
+					if failed.Load() {
+						b.Fatal("delivery denied")
+					}
+					b.ReportMetric(float64(counter.Count())/float64(b.N), "SQL/frame")
+					b.ReportMetric(float64(after.WaitCount-before.WaitCount)/float64(b.N), "waits/frame")
+					b.ReportMetric(float64(after.WaitDuration-before.WaitDuration)/float64(b.N), "wait-ns/frame")
+				})
 			}
 		})
 	}
+}
+
+// Every workload uses real registered migrations, native memberships, and
+// private chats belonging to the corresponding client. No synthetic allow.
+func deliveryAuthorizationFixture(t testing.TB, clients, channels int) (*sql.DB, *testutil.SQLCounter) {
+	t.Helper()
+	fixture := testutil.MigratedDB(t)
+	tx, err := fixture.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.ExecContext(t.Context(), q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for client := 0; client < clients; client++ {
+		exec(`INSERT INTO users(id,email) VALUES(?,?)`, fmt.Sprintf("bench-user-%d", client), fmt.Sprintf("bench%d@access.test", client))
+	}
+	for channel := 0; channel < channels; channel++ {
+		workspace := fmt.Sprintf("bench-workspace-%d", channel)
+		agent := fmt.Sprintf("bench-agent-%d", channel)
+		exec(`INSERT INTO workspaces(id,name,slug) VALUES(?, 'Bench',?)`, workspace, workspace)
+		exec(`INSERT INTO agents(id,workspace_id,name,slug) VALUES(?,?,'Agent',?)`, agent, workspace, agent)
+		for client := 0; client < clients; client++ {
+			user := fmt.Sprintf("bench-user-%d", client)
+			exec(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, fmt.Sprintf("bench-member-%d-%d", client, channel), workspace, user)
+			exec(`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, fmt.Sprintf("bench-chat-%d-%d", client, channel), workspace, agent, user)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return testutil.CountingSQLDB(t, fixture.Path(), 5)
 }
 
 // BenchmarkCanSubscribe_Parse isolates the parse/dispatch portion of

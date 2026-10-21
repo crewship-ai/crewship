@@ -82,8 +82,8 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"allow_rate", "deny_rate", "escalate_rate", "progressed_rate", "judge_failure_rate",
 		"p95_latency_ms", "min_samples", "alarm_progressed_rate", "alarm_judge_failure_rate")
 	policy := obj(map[string]any{
-		"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "set_by_user_id": str(), "set_at": dateTime(), "reason": str(),
-	})
+		"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": boolean(), "set_by_user_id": str(), "set_at": dateTime(), "reason": str(),
+	}, "crew_id", "autonomy_level", "behavior_mode", "whole_run_approval")
 	version := obj(map[string]any{
 		"current": str(), "latest": nullableStr(), "newer": boolean(), "url": nullableStr(), "commit": str(), "build_time": str(),
 		"dirty": boolean(), "go_version": str(), "os": str(), "arch": str(), "schema_version": integer(),

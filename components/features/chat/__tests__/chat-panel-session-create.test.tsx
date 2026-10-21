@@ -16,15 +16,16 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 // the void, and a sidebar stuck on "Untitled session".
 //
 // So: existence is something this panel has CONFIRMED, by creating the row or
-// by loading real messages for it — never something inferred from an empty
-// list. On the first send of a session it POSTs, once, and the redundant POST
-// for a row that already exists is free (INSERT OR IGNORE,
-// internal/api/agent_chats.go CreateChat).
+// by loading real messages or an authorized execution profile — never
+// inferred from an empty history list. A genuine draft POSTs once; an existing
+// shared row must not be recreated by its participant because CreateChat
+// correctly rejects a session ID owned by another creator.
 //
 // The mock exercises both the former 200/empty response and the current 404
 // response for an uncreated draft, so either answer still creates the row.
 // =============================================================================
 
+const viewer = vi.hoisted(() => ({ id: "user-1" }))
 const resubscribeSession = vi.fn()
 const sendMessage = vi.fn()
 const chatStub = {
@@ -34,7 +35,7 @@ const chatStub = {
   regenerateLastTurn: vi.fn(),
   editAndResend: vi.fn(),
   loadHistory: vi.fn(),
-  markHistoryUnavailable: vi.fn(),
+  markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(),
   resubscribeSession,
   isStreaming: false,
   connectionStatus: "connected",
@@ -42,7 +43,7 @@ const chatStub = {
 
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chatStub }))
 vi.mock("@/hooks/use-auth", () => ({
-  useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
+  useSessionSafe: () => ({ data: { user: { id: viewer.id } } }), useSession: () => ({ data: { user: { id: viewer.id } } }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
@@ -81,6 +82,9 @@ const panelProps = {
 let serverMessages: Record<string, { id: string; role: string; content: string; ts: string }[]> = {}
 let createStatus = 201
 let missingHistoryStatus = 200
+let profileStatus: number | undefined
+let profileMode = "trusted"
+const createdRows = new Set<string>()
 let creates: { url: string; body: Record<string, unknown> }[] = []
 /** Set to keep the create POST in flight for as long as a test needs. */
 let holdCreate: Promise<void> | null = null
@@ -91,7 +95,11 @@ function installFetch() {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
 
-    if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
+    if (u.includes("/execution-profile")) {
+      const id = u.split("/chats/")[1].split("/")[0]
+      const status = profileStatus ?? (serverMessages[id] || createdRows.has(id) ? 200 : 404)
+      return { ok: status === 200, status, json: async () => status === 200 ? { mode: profileMode, audience: "group" } : { error: "Chat not found" } } as unknown as Response
+    }
     if (u.includes("/messages")) {
       const id = u.split("/chats/")[1].split("/")[0]
       if (!serverMessages[id] && missingHistoryStatus === 404) {
@@ -114,6 +122,7 @@ function installFetch() {
       if (createStatus >= 400) {
         return { ok: false, status: createStatus, json: async () => ({ error: "nope" }) } as unknown as Response
       }
+      createdRows.add(body.session_id)
       return { ok: true, status: createStatus, json: async () => ({ id: body.session_id }) } as unknown as Response
     }
     return { ok: true, status: 200, json: async () => [] } as unknown as Response
@@ -130,10 +139,82 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
   beforeEach(() => {
     vi.clearAllMocks()
     serverMessages = {}
+    profileStatus = undefined
+    profileMode = "trusted"
+    viewer.id = "user-1"
+    createdRows.clear()
     createStatus = 201
     missingHistoryStatus = 200
     holdCreate = null
     installFetch()
+  })
+
+  it("sends into an authorized empty shared chat without a creator-only create POST", async () => {
+    serverMessages[panelProps.sessionId] = []
+    createStatus = 404 // The viewer is a participant, not this row's creator.
+    render(<ChatPanel {...panelProps} />)
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "@riley answer this synthetic question" } })
+    const submit = screen.getByRole("button", { name: /submit/i })
+    await waitFor(() => expect(submit).toBeEnabled())
+    fireEvent.click(submit)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledExactlyOnceWith("@riley answer this synthetic question"))
+    expect(creates).toHaveLength(0)
+    await waitFor(() => expect(input).toHaveValue(""))
+  })
+
+  it("rechecks revoked access before sending even after an empty shared row was confirmed", async () => {
+    serverMessages[panelProps.sessionId] = []
+    createStatus = 404
+    render(<ChatPanel {...panelProps} />)
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "Keep my revoked draft" } })
+    const submit = screen.getByRole("button", { name: /submit/i })
+    await waitFor(() => expect(submit).toBeEnabled())
+    profileStatus = 403
+    fireEvent.click(submit)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(creates).toHaveLength(0)
+    expect(input).toHaveValue("Keep my revoked draft")
+  })
+
+  it.each(["denied", "malformed"])("does not confirm an empty shared row from a %s mount profile", async (kind) => {
+    serverMessages[panelProps.sessionId] = []
+    createStatus = 404
+    if (kind === "denied") profileStatus = 403
+    else profileMode = "not-a-profile"
+    render(<ChatPanel {...panelProps} />)
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "Keep this unverified draft" } })
+    const submit = screen.getByRole("button", { name: /submit/i })
+    await waitFor(() => expect(submit).toBeEnabled())
+    fireEvent.click(submit)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(creates).toHaveLength(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(input).toHaveValue("Keep this unverified draft")
+  })
+
+  it("does not reuse another viewer's empty-row confirmation", async () => {
+    serverMessages[panelProps.sessionId] = []
+    createStatus = 404
+    const view = render(<ChatPanel {...panelProps} />)
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "Keep the new viewer draft" } })
+    await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled())
+    viewer.id = "different-viewer"
+    profileStatus = 403
+    view.rerender(<ChatPanel {...panelProps} />)
+    const currentInput = screen.getByRole("textbox")
+    fireEvent.change(currentInput, { target: { value: "Keep the new viewer draft" } })
+    const submit = screen.getByRole("button", { name: /submit/i })
+    await waitFor(() => expect(submit).toBeEnabled())
+    fireEvent.click(submit)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(creates).toHaveLength(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(currentInput).toHaveValue("Keep the new viewer draft")
   })
 
   // Pressing Send on a draft session starts a POST, and until it answers the
@@ -279,8 +360,8 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
   // EnsureChatSessionProvider), so the panel cannot word it per caller. The
   // wording therefore has to be true for both: the conversation could not be
   // started. What did not happen next — no message, no attachment — is said by
-  // the caller that knows, which for the upload is the per-file toast and the
-  // error chip.
+  // the caller that knows, which for the upload is the error chip and the
+  // composer notice.
   it("does not claim a message was sent when the create fails during an upload", async () => {
     createStatus = 500
     useComposerStore.setState({ attachments: {}, drafts: {} })
@@ -297,18 +378,12 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     // The create was attempted and refused — this is the upload path reaching
     // ensureSession, not a send.
     await waitFor(() => expect(creates).toHaveLength(1))
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-
-    const said = toastError.mock.calls
-      .map(([title, opts]) => `${title} ${JSON.stringify(opts ?? {})}`)
-      .join("\n")
-
-    // Nothing may describe a message. The user attached a file.
-    expect(said).not.toMatch(/message/i)
+    // No toast: the chip says Upload failed and the inline notice names the
+    // file, so nothing can cover Retry and nothing claims a message was sent.
+    await waitFor(() => expect(screen.getByRole("note").textContent).toContain("receipt.pdf"))
+    expect(toastError).not.toHaveBeenCalled()
+    const said = screen.getByRole("note").textContent ?? ""
     expect(said).not.toMatch(/wasn't sent|was not sent/i)
-    // And the thing that DID fail is still named.
-    expect(said).toMatch(/conversation/i)
-    expect(said).toContain("receipt.pdf")
     expect(sendMessage).not.toHaveBeenCalled()
   })
 

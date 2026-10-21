@@ -7,6 +7,7 @@ import {
   issuePriorityTone,
   projectHealthTone,
 } from "@/lib/issue-facts"
+import { formatStatus } from "@/lib/format-status"
 import type { Mission, Project, ProjectStats } from "@/lib/types/mission"
 
 // A fixed "now" so the relative-time facts are assertable. Every date in
@@ -227,25 +228,29 @@ describe("projectFacts", () => {
 })
 
 describe("tones", () => {
-  it("maps issue status onto the shared detail palette", () => {
+  it("maps issue status onto the StatusPill tone every other status pill uses", () => {
     expect(issueStatusTone("IN_PROGRESS")).toBe("blue")
-    expect(issueStatusTone("REVIEW")).toBe("purple")
+    expect(issueStatusTone("REVIEW")).toBe("warn")
     expect(issueStatusTone("COMPLETED")).toBe("success")
     expect(issueStatusTone("DONE")).toBe("success")
-    expect(issueStatusTone("FAILED")).toBe("destructive")
-    expect(issueStatusTone("BACKLOG")).toBe("default")
+    expect(issueStatusTone("FAILED")).toBe("danger")
+    expect(issueStatusTone("CANCELLED")).toBe("muted")
+    expect(issueStatusTone("BACKLOG")).toBe("muted")
+    for (const s of ["BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "FAILED", "CANCELLED", "DUPLICATE"] as const) {
+      expect(issueStatusTone(s)).toBe(formatStatus(s).tone)
+    }
   })
 
   it("keeps low priority out of the alarm colours", () => {
-    expect(issuePriorityTone("urgent")).toBe("destructive")
+    expect(issuePriorityTone("urgent")).toBe("danger")
     expect(issuePriorityTone("high")).toBe("warn")
-    expect(issuePriorityTone("low")).toBe("default")
-    expect(issuePriorityTone("none")).toBe("default")
+    expect(issuePriorityTone("low")).toBe("muted")
+    expect(issuePriorityTone("none")).toBe("muted")
   })
 
-  it("maps project health onto the shared detail palette", () => {
+  it("maps project health onto the StatusPill tones", () => {
     expect(projectHealthTone("on_track")).toBe("success")
     expect(projectHealthTone("at_risk")).toBe("warn")
-    expect(projectHealthTone("off_track")).toBe("destructive")
+    expect(projectHealthTone("off_track")).toBe("danger")
   })
 })

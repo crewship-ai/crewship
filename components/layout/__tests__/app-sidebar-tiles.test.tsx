@@ -1,6 +1,6 @@
-// The rail wears the same icon tiles as a nested page's collapsed panel
-// (DrillPage): every destination in a rounded tile, the page you are on
-// tinted in its concept's colour, the rest neutral until hovered.
+// Harbor 2 sidebar (#3350): every destination is a neutral 16 px icon and a
+// label; the page you are on is a raised row. Search sits under the
+// workspace; the mode menu, Settings, Admin and the user are in the footer.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
@@ -12,55 +12,68 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 37 }))
-vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true, useAuthAvailable: () => true }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
-vi.mock("@/components/layout/sidebar-version", () => ({ SidebarVersion: () => null }))
+vi.mock("@/components/layout/user-menu", () => ({ UserMenu: () => <div data-testid="user-menu" /> }))
 
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
 
 const tileOf = (name: string | RegExp) => screen.getByRole("link", { name }).querySelector("[data-slot=rail-tile]") as HTMLElement
 
-describe("the rail's icon tiles", () => {
+describe("the sidebar's rows", () => {
   beforeEach(() => cleanup())
 
-  it("puts every destination in a tile", () => {
+  it("gives every destination an icon in the same column", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
-    for (const name of ["Dashboard", /^Inbox/, "Chat", "Crews", "Settings", "Admin"]) {
+    for (const name of ["Dashboard", /^Inbox/, "Chat", "Crews", "Vault", "Settings", "Admin"]) {
       expect(tileOf(name), String(name)).not.toBeNull()
     }
   })
 
-  it("tints the page you are on in its concept's colour, and only that one", () => {
+  it("marks only the page you are on as current", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
-    const chat = tileOf("Chat")
-    expect(chat).toHaveAttribute("data-active", "true")
-    expect(chat.style.getPropertyValue("--ic")).toBe("var(--notice)")
-    expect(tileOf(/^Inbox/)).not.toHaveAttribute("data-active")
-    expect(tileOf(/^Inbox/).style.getPropertyValue("--ic")).toBe("var(--info)")
+    expect(screen.getByRole("link", { name: "Chat" })).toHaveAttribute("data-active", "true")
+    expect(screen.getByRole("link", { name: /^Inbox/ })).toHaveAttribute("data-active", "false")
+  })
+
+  it("puts search under the workspace and Settings, Admin and the user in the footer", () => {
+    render(<SidebarProvider><AppSidebar /></SidebarProvider>)
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument()
+    const footer = document.querySelector("[data-sidebar=footer]") as HTMLElement
+    expect(footer).toContainElement(screen.getByRole("link", { name: "Settings" }))
+    expect(footer).toContainElement(screen.getByRole("link", { name: "Admin" }))
+    expect(footer).toContainElement(screen.getByTestId("user-menu"))
   })
 })
 
 describe("one grid, one motion", () => {
-  beforeEach(() => { cleanup(); vi.mocked(localStorage.setItem).mockClear() })
+  // These pin the rail's own behaviour, so the device starts on the rail
+  // (a new device starts pinned since 2026-10-18; shell-v67.test.tsx).
+  beforeEach(() => {
+    cleanup()
+    vi.mocked(localStorage.setItem).mockClear()
+    vi.mocked(localStorage.getItem).mockImplementation((k: string) => (k === "crewship_sidebar_mode" ? "hover" : null))
+  })
   // vitest.setup mocks localStorage: read what the rail WROTE for the mode.
   const mode = () => vi.mocked(localStorage.setItem).mock.calls.filter(([k]) => k === "crewship_sidebar_mode").at(-1)?.[1]
 
-  it("keeps a group's heading as one row in both states, and the Inbox count on its tile", () => {
+  it("heads only Work and Build, and shows the Inbox count as a pill and on the rail icon", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
-    expect(document.querySelectorAll("[data-slot=rail-group-head]")).toHaveLength(4)
+    expect([...document.querySelectorAll("[data-slot=rail-group-head]")].map((h) => h.textContent)).toEqual(["Work", "Build"])
     expect(tileOf(/^Inbox/).querySelector("[data-slot=rail-badge]")).toHaveTextContent("37")
-    expect(screen.getByRole("link", { name: "Inbox, 37 unread" })).toBeInTheDocument()
+    const row = screen.getByRole("link", { name: "Inbox, 37 unread" })
+    expect(row.querySelector("[data-slot=rail-count]")).toHaveTextContent("37")
   })
 
   it("lets the Inbox count sit over the tile's corner instead of being clipped by its row", () => {
     // The badge overhangs the 2.25rem tile; the menu button's overflow-hidden
     // cut it to a blue sliver in the rail and shaved its top when open.
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
+    // The row's shape (overflow visible in both states) lives in .rail-row.
     const row = screen.getByRole("link", { name: "Inbox, 37 unread" })
-    expect(row.className).toMatch(/(^|\s)overflow-visible!/)
-    expect(row.className).toMatch(/group-data-\[collapsible=icon\]:overflow-visible!/)
+    expect(row.className).toMatch(/(^|\s)rail-row(\s|$)/)
   })
 
   // Radix opens a menu on pointerdown, which jsdom's click does not send.
@@ -74,7 +87,7 @@ describe("one grid, one motion", () => {
     expect(screen.getByRole("button", { name: "Sidebar: Expand on hover" })).toBeInTheDocument()
     const menu = openModes()
     const options = Array.from(menu.querySelectorAll("[role=menuitemradio]")).map((e) => e.textContent)
-    expect(options.map((t) => t?.split(/(?=[A-Z⌘])/)[0])).toEqual(["Expanded", "Expand on hover", "Collapsed"])
+    expect(options.map((t) => t?.split(/(?=Always|Icons|⌘)/)[0])).toEqual(["Expanded", "Expand on hover", "Collapsed"])
   })
 
   it("keeps icons only when Collapsed is chosen, and ⌘B returns to it after pinning", () => {

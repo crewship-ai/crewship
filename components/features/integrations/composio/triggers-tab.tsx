@@ -3,14 +3,12 @@
 import * as React from "react"
 import { Zap, Search } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 import { ToolkitIcon, EmptyHint, TableSkeleton } from "./shared"
 import type { TriggerType, TriggerTypesResp, TriggerInstance, ActiveTriggersResp } from "./types"
@@ -114,7 +112,7 @@ export function TriggersTab({
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
         <Zap className="h-3.5 w-3.5" /> Triggers
         <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
           · event subscriptions
@@ -128,7 +126,7 @@ export function TriggersTab({
 
       {/* Active instances */}
       <div className="rounded-xl border border-foreground/10 bg-card p-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="text-label font-semibold text-muted-foreground">
           Active triggers
         </div>
         {activeLoading ? (
@@ -201,7 +199,7 @@ export function TriggersTab({
                 {["Trigger", "Name", "Type", ""].map((h, i) => (
                   <th
                     key={i}
-                    className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    className="px-3 py-2.5 text-left text-micro font-semibold text-muted-foreground"
                   >
                     {h}
                   </th>
@@ -302,18 +300,30 @@ function TriggerModal({
     }
   }
 
+  const createDisabled = busy || !userId.trim()
+
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">Enable trigger</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!createDisabled) void create()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={Zap}
+        title="Enable trigger"
+        description={
+          <>
             Subscribe a Composio user to{" "}
             <span className="font-mono text-foreground/90">{trigger.slug}</span>. Events for that
             user&apos;s connected account will fire this trigger.
-          </DialogDescription>
-        </DialogHeader>
-
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody>
         <div className="mt-4 space-y-3">
           {users.length > 0 && (
             <div>
@@ -346,16 +356,14 @@ function TriggerModal({
         </div>
 
         {err && <div role="alert" className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={create} disabled={busy || !userId.trim()}>
-            {busy ? "Creating…" : "Create trigger"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel={busy ? "Creating…" : "Create trigger"}
+        onPrimary={create}
+        primaryDisabled={!userId.trim()}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }

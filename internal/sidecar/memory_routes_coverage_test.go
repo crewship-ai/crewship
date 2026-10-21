@@ -67,7 +67,10 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// E0 run lifecycle. handleRunEnd resolves the acting identity itself and
 	// ends only the run its OWN token binds, so there is no "end that other
 	// run" verb here to guard against in the first place.
-	"POST /agent/run/end": guardHandlerIdentity,
+	"POST /agent/run/end":           guardHandlerIdentity,
+	"POST /api/v1/documents/create": guardHandlerIdentity,
+	"GET /api/v1/documents/draft":   guardHandlerIdentity,
+	"POST /api/v1/documents/draft":  guardHandlerIdentity,
 	// Proposals require a verified token-bound live run in both handlers.
 	"POST /chat/proposal/create": guardHandlerIdentity,
 	"POST /chat/proposal/ /edit": guardHandlerIdentity,
@@ -345,6 +348,8 @@ func packageHandlerBodies(t *testing.T) map[string]string {
 // identityHelpers are the calls that resolve (and fail closed on) the acting
 // agent behind a sidecar request.
 var identityHelpers = []string{
+	// Document creation requires the original run-bound capability.
+	"identityForRunTokenCtx(r.Context(), token)",
 	"actingAgentID(r)",
 	"actingIdentity(r)",
 	// E0. actingRunIdentity is the resolver the other two now delegate to; it

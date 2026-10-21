@@ -100,6 +100,8 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"workspace_artifact_creation_policy",
+	"workspace_artifact_creation_crews",
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
@@ -179,6 +181,7 @@ var BackupTables = []string{
 	"issue_work",
 	"issue_executions",
 	"crew_templates",
+	"credential_folders", // credentials.folder_id → credential_folders, so folders land first (ODCH-VLT-01)
 	"credentials",
 	// Depth 2: workspace via crews
 	"crew_members",
@@ -216,7 +219,12 @@ var BackupTables = []string{
 	"agent_session_checkpoints",
 	"assignments",
 	"approvals_queue",
+	"routine_folders", // pipelines.folder_id → routine_folders, so folders land first (ODCH-RT-01)
 	"pipelines",
+	"routine_folder_members",   // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
+	"routine_templates",        // saved routine definitions (ODCH-RT-22); FK workspace only
+	"routine_test_results",     // latest Test run per definition hash (ODCH-RT-13); FK workspace only
+	"access_preset_selections", // informational choice; after membership and typed resource parents
 	"pipeline_versions",
 	"pipeline_drafts",
 	"pipeline_schedules",
@@ -311,6 +319,15 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"documents",
+	"document_creations",
+	"slides_heads",
+	"slides_revisions",
+	"slides_receipts",
+	"slides_object_ids",
+	"document_updates",
+	"document_receipts",
+	"document_checkpoints",
 	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
 	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
 	"page_versions",             // FK page_id → pages
@@ -640,6 +657,10 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
 				args = append(args, workspaceID)
 			}
+			where, args, err = includePresetSelectionUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
+			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {
 				return nil, err
@@ -715,7 +736,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -856,7 +877,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(f.table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -1031,6 +1052,8 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
 type RestoreDumpHooks struct {
+	// Bundle source versions only strengthen unsupported-transport refusals.
+	legacySourceVersions []int
 	// RejectNoOp refuses a nonempty dump whose rows all collided, before
 	// PostInsert/PreCommit can publish filesystem or service changes.
 	// The insert transaction rolls back and its statistics remain available.
@@ -1063,6 +1086,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		hooks = &RestoreDumpHooks{}
 	}
 	var stats RestoreStats
+	if err := rejectRunAdmissionInput(dump, false); err != nil {
+		return stats, err
+	}
+	if err := validatePrivateArtifactContextDump(dump, hooks.legacySourceVersions); err != nil {
+		return stats, err
+	}
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
 	// BeginTx. db.Conn pins us to a single pooled connection; we
@@ -1097,6 +1126,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
+	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
+		return stats, err
+	}
+	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
+		return stats, err
+	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
 	if err != nil {
 		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
@@ -1207,6 +1242,18 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row, err = safeDocumentRestoreRow(table, row)
+			if err != nil {
+				return stats, err
+			}
+			if table == "documents" {
+				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
+					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
+				}
+			}
+			if err := validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
+			}
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.
@@ -1256,6 +1303,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					continue
 				}
 				val := row[k]
+				if documentBinaryColumn(table, k) {
+					val, err = restoreDocumentBinary(val)
+					if err != nil {
+						return stats, fmt.Errorf("backup: %s.%s: %w", table, k, err)
+					}
+				}
 				// The one VALUE-level check in this loop, and it is
 				// deliberately here rather than in the PreInsert hook:
 				// PreInsert is composed by the caller (runner_restore.go),

@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -61,6 +62,15 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	documentsServiceSocket string
+	documentsClient        *http.Client
+	documentsSocket        string
+	documentsSecretFile    string
+	documentsServiceSecret string
+	documentStoreOptions   documents.Options
+	documentsStop          func(context.Context) error
+	documentsStopOnce      sync.Once
+
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
 	transcriptLock         func(context.Context) (func(), error)
@@ -220,6 +230,7 @@ type Router struct {
 	// the wrapped muxes above, retained so a runtime override from the admin
 	// Rate Limiters console (ratelimitStore.OnChange) can retune them in place
 	// — SetReqPerMin — without rebuilding the handler chain.
+	sharedSearch   *sharedSearchLimiter
 	authRL         *RateLimiter
 	apiRL          *RateLimiter
 	credTestRL     *RateLimiter
@@ -843,6 +854,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
+		sharedSearch:  newSharedSearchLimiter(),
 		mux:           newRouteMux(),
 		db:            db,
 		logger:        logger,
@@ -868,7 +880,17 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// BEFORE registerRoutes so every handler constructed there holds the
 	// decorated store. authMw keeps the raw store — it only reads
 	// (Get/TouchLastUsed) and never revokes.
-	notifiers := make([]SessionRevocationNotifier, 0, len(r.revokeNotifiers)+1)
+	notifiers := []SessionRevocationNotifier{r.authMw.streams}
+	if r.hub != nil {
+		r.hub.SetStreamAuthenticator(r.authMw.authenticateStream)
+	}
+	for _, notifier := range r.revokeNotifiers {
+		if consumer, ok := notifier.(interface {
+			SetStreamAuthenticator(func(context.Context, *auth.Claims) (context.Context, func(), error))
+		}); ok {
+			consumer.SetStreamAuthenticator(r.authMw.authenticateStream)
+		}
+	}
 	if r.hub != nil {
 		notifiers = append(notifiers, r.hub)
 	}
@@ -936,6 +958,24 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 		})
 	}
 
+	if r.documentsSocket != "" {
+		secret, err := documents.ReadServiceSecret(r.documentsSecretFile)
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs service credential: %w", err)
+		}
+		r.documentsServiceSecret = secret
+		handler, err := r.DocumentAuthority(context.Background(), secret)
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs authority: %w", err)
+		}
+		r.documentsStop, err = documents.ServePrivateUnix(r.documentsSocket, handler, func() error { return documents.New(r.db, documents.Options{}).InvalidateLeases(context.Background()) })
+		if err != nil {
+			r.Shutdown()
+			return nil, fmt.Errorf("Docs private listener: %w", err)
+		}
+	}
 	return r, nil
 }
 
@@ -981,6 +1021,17 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.documentsClient != nil {
+		r.documentsClient.CloseIdleConnections()
+	}
+	r.documentsStopOnce.Do(func() {
+		if r.documentsStop != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = r.documentsStop(ctx)
+		}
+	})
+
 	r.issueMutationWorker.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()

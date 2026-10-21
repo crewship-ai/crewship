@@ -5,7 +5,9 @@ package main
 // evolve their wire types without making the route scanner grow a second,
 // domain-specific parser.
 type DomainSchema struct {
-	Request map[string]any
+	// NoRequest marks audited operations whose handler never consumes a body.
+	NoRequest bool
+	Request   map[string]any
 	// RequestRequired opts an operation into a mandatory body without changing
 	// the legacy optional-body contract of other operations.
 	RequestRequired bool

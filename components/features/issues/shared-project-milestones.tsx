@@ -1,5 +1,6 @@
 "use client"
 
+import { useRestrictedProjection } from "@/hooks/use-restricted-projection"
 import { useId, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
@@ -19,18 +20,23 @@ export function SharedProjectMilestones({ workspaceId, projectId, userId }: { wo
   const [offset, setOffset] = useState(0)
   const key = ["restricted-project-milestones", userId, workspaceId, projectId]
   const base = `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-projects/${requireApiPathSegment(projectId)}/milestones`
-  const query = useQuery({ queryKey: [...key, offset], retry: false, refetchInterval: 15_000,
+  const projection = useRestrictedProjection<{ items: Milestone[]; total: number; canManage: boolean }>(JSON.stringify([...key, offset]))
+  const query = useQuery({ queryKey: [...key, offset], retry: false, staleTime: 0, refetchInterval: 15_000, refetchOnMount: "always",
     queryFn: async ({ signal }) => {
+      const read = projection.read(signal)
       const response = await apiFetch(`${base}?limit=100&offset=${offset}`, { signal })
-      if (!response.ok) throw new MilestoneReadError(response.status)
+      if (!response.ok) { read.reject(response.status); throw new MilestoneReadError(response.status) }
       const items = z.array(schema).parse(await response.json())
       if (items.some(item => item.project_id !== projectId)) throw new Error("Milestone access could not be confirmed.")
       const totalHeader = response.headers.get("X-Total-Count")
       const total = totalHeader !== null && /^\d+$/.test(totalHeader) ? Number(totalHeader) : NaN
       if (!Number.isSafeInteger(total) || total < 0) throw new Error("Milestone pagination could not be confirmed.")
-      return { items, total, canManage: response.headers.get("X-Can-Manage") === "true" }
+      const confirmed = { items, total, canManage: response.headers.get("X-Can-Manage") === "true" }
+      read.accept(confirmed)
+      return confirmed
     },
   })
+  const visible = projection.value
   const lost = query.error instanceof MilestoneReadError && [401, 403, 404].includes(query.error.status)
   const refreshed = () => { void client.invalidateQueries({ queryKey: key }) }
   return <section className="space-y-3 border-t pt-3" aria-label="Shared project milestones">
@@ -38,11 +44,11 @@ export function SharedProjectMilestones({ workspaceId, projectId, userId }: { wo
     <Button variant="outline" onClick={() => void query.refetch()}>Refresh milestones</Button>
     {query.isPending && <p role="status">Loading milestones…</p>}
     {query.isError && <p role="alert">{query.error.message}</p>}
-    {!lost && query.data && <>
-      {query.data.canManage && <MilestoneForm key={`${userId}:${workspaceId}:${projectId}:new`} base={base} disabled={query.isError} onSaved={refreshed} />}
-      {query.data.items.length === 0 && <p className="text-sm text-muted-foreground">No milestones on this page.</p>}
-      {query.data.items.map(item => <MilestoneCard key={item.id} item={item} base={base} disabled={query.isError} onSaved={refreshed} />)}
-      <div className="flex gap-2"><Button variant="outline" disabled={offset === 0 || query.isError} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous milestones</Button><Button variant="outline" disabled={offset + 100 >= query.data.total || query.isError} onClick={() => setOffset(offset + 100)}>Next milestones</Button></div>
+    {!lost && visible && <>
+      {visible.canManage && <MilestoneForm key={`${userId}:${workspaceId}:${projectId}:new`} base={base} disabled={query.isError} onSaved={refreshed} />}
+      {visible.items.length === 0 && <p className="text-sm text-muted-foreground">No milestones on this page.</p>}
+      {visible.items.map(item => <MilestoneCard key={item.id} item={item} base={base} disabled={query.isError} onSaved={refreshed} />)}
+      <div className="flex gap-2"><Button variant="outline" disabled={offset === 0 || query.isError} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous milestones</Button><Button variant="outline" disabled={offset + 100 >= visible.total || query.isError} onClick={() => setOffset(offset + 100)}>Next milestones</Button></div>
     </>}
   </section>
 }
@@ -86,7 +92,7 @@ function MilestoneForm({ item, base, disabled, onSaved }: { item?: Milestone; ba
     <label htmlFor={`${id}-name`} className="block text-sm">Milestone name</label><Input id={`${id}-name`} value={name} maxLength={4096} disabled={save.isPending} onChange={event => setName(event.target.value)} required />
     <label htmlFor={`${id}-description`} className="block text-sm">Milestone description</label><Textarea id={`${id}-description`} value={description} maxLength={65536} disabled={save.isPending} onChange={event => setDescription(event.target.value)} />
     <label htmlFor={`${id}-target`} className="block text-sm">Milestone target date</label><Input id={`${id}-target`} type="date" value={target} disabled={save.isPending} onChange={event => setTarget(event.target.value)} />
-    <label htmlFor={`${id}-status`} className="block text-sm">Milestone status</label><select id={`${id}-status`} className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-12" value={status} disabled={save.isPending} onChange={event => setStatus(event.target.value)}>{!["active", "completed", "cancelled"].includes(status) && <option value={status}>{status}</option>}<option value="active">Active</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
+    <label htmlFor={`${id}-status`} className="block text-sm">Milestone status</label><select id={`${id}-status`} className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-[44px]" value={status} disabled={save.isPending} onChange={event => setStatus(event.target.value)}>{!["active", "completed", "cancelled"].includes(status) && <option value={status}>{status}</option>}<option value="active">Active</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
     {item && <><label htmlFor={`${id}-position`} className="block text-sm">Milestone position</label><Input id={`${id}-position`} type="number" min={0} max={1000000} value={position} disabled={save.isPending} onChange={event => setPosition(Number(event.target.value))} /></>}
     {changed && item && <div role="status"><p className="text-sm">This milestone changed after your draft started.</p><Button type="button" variant="outline" disabled={disabled || save.isPending} onClick={() => { setName(item.name); setDescription(item.description); setTarget(item.target_date); setStatus(item.status); setPosition(item.position); setVersion(item.version); setConflict(false); save.reset() }}>Load current milestone</Button></div>}
     <Button type="submit" disabled={disabled || changed || !name.trim() || save.isPending}>{save.isPending ? "Saving…" : item ? "Save milestone" : "Create milestone"}</Button>

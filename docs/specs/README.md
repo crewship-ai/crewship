@@ -24,10 +24,16 @@ public contract here. Superseded a spec? Move it to
 
 ## Runtime, authority and budgets
 
+- [Routine version authority identity](routine-version-authority.md): immutable content/authority storage with preserved history and integer pins; no publication activation.
+
+- [Publication grant provenance](routine-publication-grant-bindings.md): host-only exact selected-grant and issuer membership bindings; no publication or execution activation.
+
 - [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
   files, profiles and content-free attempt records.
 - [Member resource policy](member-resource-policy.md): the administration API/CLI
   for restricted member authority; does not itself enable model execution.
+- [Shared Issues management](issues-manage.md): bounded project and milestone
+  administration, separate destructive rights, live authority and conflicts.
 - [Credentials vault](credentials-vault.md): credential types, storage and
   mounting conventions, with implementation provenance.
 - [Trusted provider budgets](trusted-llm-hard-budgets.md): reservations before

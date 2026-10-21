@@ -23,7 +23,7 @@
 // agents, and decided an agent's frozen face by who looked first. Writes now
 // happen only where a person chose to change something.
 
-import { getAgentAvatarSVG, preloadAvatarStyle, DEFAULT_AVATAR_STYLE, AVATAR_STYLES } from "@/lib/agent-avatar"
+import { getAgentAvatarSVG, isAnimatableAvatarStyle, preloadAvatarStyle, resolveAvatarStyle } from "@/lib/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 import { readTotalCount } from "@/hooks/use-paged-list"
 import { getAuthMode, withServerBase } from "@/lib/server-base"
@@ -64,8 +64,10 @@ export interface AvatarSubject {
  *   refused — the caller may not edit this agent, or it is gone (403/404).
  *   failed  — anything else: no workspace, generator unavailable, 4xx/5xx,
  *             network. The agent keeps generating from its seed.
+ *   live    — its style is always drawn live, so there is nothing to store
+ *             (the animatable voxel styles, #3789; see storeAgentAvatar).
  */
-export type AvatarStoreOutcome = "stored" | "present" | "refused" | "failed"
+export type AvatarStoreOutcome = "stored" | "present" | "refused" | "failed" | "live"
 
 /**
  * The (seed, style) the dashboard draws this agent with: its own seed or its
@@ -76,7 +78,7 @@ export function avatarInputs(agent: AvatarSubject, crewStyle?: string | null): {
   const wanted = agent.avatar_style || agent.crew?.avatar_style || crewStyle || null
   return {
     seed: agent.avatar_seed || agent.slug,
-    style: wanted && AVATAR_STYLES[wanted] ? wanted : DEFAULT_AVATAR_STYLE,
+    style: resolveAvatarStyle(wanted),
   }
 }
 
@@ -87,6 +89,14 @@ export function avatarInputs(agent: AvatarSubject, crewStyle?: string | null): {
  * Never rejects: a render is an optimisation, so a failure here must not turn
  * a successful save into an error. The outcome says what happened for
  * callers that report it (the explicit backfill does).
+ *
+ * The voxel styles (#3789) are never stored. DiceBear 10's markup carries an
+ * XML comment and `<use href>`, both outside the server's stored-avatar
+ * allowlist (validateAgentAvatarSVG), and widening that allowlist for `<use>`
+ * is not worth it for a render that would also freeze the animation: a stored
+ * render is a static `<img>`. They are drawn live from @dicebear/core-v10 and
+ * @dicebear/styles-v10, pinned to exact versions, and the stability test pins
+ * their bytes, so a dependency bump that would change their faces fails CI.
  */
 export async function storeAgentAvatar(
   agent: AvatarSubject,
@@ -94,6 +104,7 @@ export async function storeAgentAvatar(
   crewStyle?: string | null,
 ): Promise<AvatarStoreOutcome> {
   if (agent.avatar_url) return "present"
+  if (isAnimatableAvatarStyle(avatarInputs(agent, crewStyle).style)) return "live"
   // The PUT sits behind wsCtx and is refused without a workspace (#2196).
   if (!agent.id || !workspaceId) return "failed"
   try {
@@ -129,6 +140,8 @@ export interface AvatarBackfillResult {
   present: number
   refused: number
   failed: number
+  /** Agents whose style is always drawn live (voxel); nothing to store. */
+  live: number
 }
 
 /**
@@ -144,7 +157,7 @@ export async function backfillAgentAvatars(
   workspaceId: string,
   options: { crewId?: string; signal?: AbortSignal } = {},
 ): Promise<AvatarBackfillResult> {
-  const result: AvatarBackfillResult = { total: 0, stored: 0, present: 0, refused: 0, failed: 0 }
+  const result: AvatarBackfillResult = { total: 0, stored: 0, present: 0, refused: 0, failed: 0, live: 0 }
   let offset = 0
   for (;;) {
     const params = new URLSearchParams({ workspace_id: workspaceId, limit: "500", offset: String(offset) })

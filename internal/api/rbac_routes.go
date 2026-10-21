@@ -103,6 +103,10 @@ const scopeSelf = "self"
 // enumeration test fails the build, and requireRoleScopeMW denies scoped
 // tokens at runtime.
 func scopeForRoute(pattern string) string {
+	if strings.HasPrefix(pattern, "/api/v1/pages/{slug}/document/") ||
+		strings.HasPrefix(pattern, "/api/v1/pages/{slug}/slides/") {
+		return "pages:write"
+	}
 	segs := strings.Split(strings.TrimPrefix(pattern, "/api/v1/"), "/")
 	if len(segs) == 0 || segs[0] == "" {
 		return ""
@@ -137,7 +141,7 @@ func scopeForRoute(pattern string) string {
 		// deploy), so it shares that resource's scope rather than inventing
 		// a new one.
 		return "crews:write"
-	case "credentials", "credential-rotations", "provider-logins":
+	case "credentials", "credential-rotations", "credential-folders", "provider-logins":
 		// A device-code sign-in ends in a credential create (#2428), so a
 		// token scoped to credentials may start one.
 		return "credentials:write"
@@ -178,6 +182,9 @@ func scopeForRoute(pattern string) string {
 		// would make it mean something.
 		return "workspace:admin"
 	case "chats":
+		if has("document-results") {
+			return "pages:read"
+		}
 		// Source proposals and decisions keep their canonical mutation scope.
 		// Their handlers enforce live source authority and replay eligibility.
 		if has("proposals") {

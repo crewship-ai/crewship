@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -167,6 +168,9 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		debug["agent_logs"] = []interface{}{}
 	}
 
+	if !h.allowPrivateArtifactDiagnostics(w, r, agentID, workspaceID) {
+		return
+	}
 	writeJSON(w, http.StatusOK, debug)
 }
 
@@ -213,7 +217,11 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	var data map[string]interface{}
-	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+	decoded := json.NewDecoder(resp.Body).Decode(&data) == nil
+	if !h.allowPrivateArtifactDiagnostics(w, r, agentID, workspaceID) {
+		return
+	}
+	if decoded {
 		if logs, ok := data["logs"]; ok {
 			writeJSON(w, http.StatusOK, logs)
 			return
@@ -335,6 +343,11 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Query().Has("projection") {
+		h.chatSourceMessages(w, r)
+		return
+	}
+
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
@@ -350,7 +363,44 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
 		return
 	}
-	h.proxyJSON(w, resp)
+	// The IPC read may outlive the initial authorization. Recheck the current
+	// artifact-context seal and require the OWNER inspection audit before any
+	// transcript bytes are released to this human.
+	allowed, err = chataudience.CanReadArtifactConversation(r.Context(), h.db, chatID, user.ID, WorkspaceIDFromContext(r.Context()), false)
+	if err != nil || !allowed {
+		resp.Body.Close()
+		if err != nil {
+			replyInternalError(w, h.logger, "authorize private conversation output", err)
+		} else {
+			replyError(w, http.StatusNotFound, "Chat not found")
+		}
+		return
+	}
+	if canReadCosts(r.Context()) {
+		h.proxyJSON(w, resp)
+		return
+	}
+	// Message metadata carries the run's total_cost_usd / model_usage (#3590).
+	h.proxyCostRedactedJSON(w, resp)
+}
+
+// proxyCostRedactedJSON is proxyJSON with the costvis fields removed. A body
+// that is not JSON is refused rather than passed through unredacted.
+func (h *ProxyHandler) proxyCostRedactedJSON(w http.ResponseWriter, resp *http.Response) {
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
+		return
+	}
+	out, err := costvis.RedactJSON(raw)
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(out)
 }
 
 // AgentContainerFiles lists files inside the agent's running container.
