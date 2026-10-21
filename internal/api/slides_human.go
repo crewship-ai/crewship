@@ -13,9 +13,9 @@ import (
 
 var errSlidesHumanAccess = errors.New("Slides access denied")
 
-// RegisterSlidesHuman explicitly installs schema-1 human read/initialization.
+// RegisterSlidesHuman explicitly installs schema-1 human read/initialization/patch.
 // Call once after NewRouter and before serving. Disabled installs no routes.
-// It enables no other operations, image transport, editor or agent authority.
+// It enables no image transport or agent authority.
 func (r *Router) RegisterSlidesHuman(enabled bool) {
 	if !enabled {
 		return
@@ -28,6 +28,8 @@ func (r *Router) RegisterSlidesHuman(enabled bool) {
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides/revisions/{revision}", authed(wsCtx(http.HandlerFunc(h.read))))
 	// openapi: responses 200,400,401,403,404,409,429,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/initialize", roleInline, h.initialize)
+	// openapi: responses 200,400,401,403,404,409,429,500
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/slides", roleInline, h.patch)
 }
 
 type slidesHumanHTTP struct {
@@ -183,7 +185,10 @@ func (h *slidesHumanHTTP) read(w http.ResponseWriter, r *http.Request) {
 	if !h.pages.auditPrivateOwnerAccess(w, r, record) {
 		return
 	}
-	writeJSON(w, 200, state)
+	writeJSON(w, 200, struct {
+		slides.State
+		Rev int64 `json:"rev"`
+	}{state, state.Revision})
 }
 func (h *slidesHumanHTTP) initialize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -212,4 +217,68 @@ func (h *slidesHumanHTTP) initialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, result)
+}
+
+// slidesPatchResponse is the current authorized conflict snapshot.
+type slidesPatchResponse struct {
+	Deck         slides.Deck `json:"deck"`
+	Rev          int64       `json:"rev"`
+	OrderVersion int64       `json:"order_version"`
+}
+
+// The success receipt always names its mutation; a conflict has no receipt.
+type slidesPatchResult struct {
+	slidesPatchResponse
+	MutationID string `json:"mutation_id"`
+}
+
+func (h *slidesHumanHTTP) patch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	key, err := h.key(r, true)
+	if err != nil {
+		slidesHumanError(w, err)
+		return
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, slides.MaxDeckBytes))
+	if err != nil {
+		replyError(w, 400, "bounded Slides request required")
+		return
+	}
+	request, err := slides.DecodePatch(raw)
+	if err != nil {
+		replyError(w, 400, "invalid Slides patch: "+err.Error())
+		return
+	}
+	if request.SchemaVersion != slides.SchemaVersion || request.TargetSchemaVersion != nil {
+		slidesHumanError(w, slides.ErrSchema)
+		return
+	}
+	receipt, err := h.store.Patch(r.Context(), key, request, h.authorize(r, key, true, nil))
+	conflict := errors.Is(err, slides.ErrConflict) || errors.Is(err, slides.ErrDuplicate)
+	if err != nil && !conflict {
+		slidesHumanError(w, err)
+		return
+	}
+	// Never return a captured pre-conflict deck: reauthorize current custody,
+	// credential and membership while fetching the fresh head. A successful retry
+	// fetches its original immutable revision, even if the current head advanced.
+	revision := receipt.Revision
+	if conflict {
+		revision = 0
+	}
+	state, readErr := h.store.Read(r.Context(), key, revision, h.authorize(r, key, true, nil))
+	if readErr != nil {
+		slidesHumanError(w, readErr)
+		return
+	}
+	if state.SchemaVersion != slides.SchemaVersion {
+		slidesHumanError(w, slides.ErrSchema)
+		return
+	}
+	response := slidesPatchResponse{Deck: state.Deck, Rev: state.Revision, OrderVersion: state.OrderVersion}
+	if conflict {
+		writeJSON(w, 409, response)
+		return
+	}
+	writeJSON(w, 200, slidesPatchResult{response, receipt.MutationID})
 }

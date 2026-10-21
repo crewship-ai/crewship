@@ -100,7 +100,45 @@ func TestSlidesHumanBinary(t *testing.T) {
 	if plural := require("", "slides", "read", "@slides-binary-page"); string(plural) != string(saved) {
 		t.Fatalf("canonical slides command differs from singular alias: %s", plural)
 	}
-	for _, op := range []string{"patch", "restore", "reorder", "history", "export"} {
+	hash, _ := slides.SlideHash(state.Deck.Slides[0])
+	notes := "Saved through the real executable"
+	patch := slides.PatchRequest{PageID: fixture.Deck.DeckID, SchemaVersion: 1, BaseRev: 1, MutationID: "binary-patch", Operations: []slides.Operation{{Op: "set_notes", SlideID: state.Deck.Slides[0].ID, IfHash: hash, Notes: &notes}}}
+	patchBody, err := json.Marshal(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := require(string(patchBody), "slides", "patch", "@slides-binary-page", "--file", "-")
+	var applied struct {
+		Deck     slides.Deck `json:"deck"`
+		Rev      int64       `json:"rev"`
+		Order    int64       `json:"order_version"`
+		Mutation string      `json:"mutation_id"`
+	}
+	if json.Unmarshal(edited, &applied) != nil || applied.Rev != 2 || applied.Order != 1 || applied.Mutation != "binary-patch" || applied.Deck.Slides[0].Notes != notes {
+		t.Fatalf("patch response %s", edited)
+	}
+	if replay := require(string(patchBody), "slide", "patch", "@slides-binary-page", "--file", "-"); string(replay) != string(edited) {
+		t.Fatalf("patch replay %s", replay)
+	}
+	saved = require("", "slides", "read", "@slides-binary-page")
+	if json.Unmarshal(saved, &state) != nil || state.Revision != 2 || state.Deck.Slides[0].Notes != notes {
+		t.Fatalf("saved patch %s", saved)
+	}
+	patch.MutationID = "binary-stale"
+	stale, _ := json.Marshal(patch)
+	out, conflictErr := run(string(stale), "slides", "patch", "@slides-binary-page", "--file", "-")
+	var conflict struct {
+		Rev  int64       `json:"rev"`
+		Deck slides.Deck `json:"deck"`
+	}
+	if conflictErr == nil || json.NewDecoder(strings.NewReader(string(out))).Decode(&conflict) != nil || conflict.Rev != 2 || conflict.Deck.DeckID != fixture.Deck.DeckID {
+		t.Fatalf("stale current snapshot %v %s", conflictErr, out)
+	}
+	var revisions int
+	if err = db.QueryRow(`SELECT count(*) FROM slides_revisions WHERE page_id='slides-binary-page'`).Scan(&revisions); err != nil || revisions != 2 {
+		t.Fatalf("revisions %d %v", revisions, err)
+	}
+	for _, op := range []string{"restore", "reorder", "history", "export"} {
 		if out, e := run("", "slide", op, "binary-slides"); e == nil {
 			t.Fatalf("unsupported %s: %s", op, out)
 		}

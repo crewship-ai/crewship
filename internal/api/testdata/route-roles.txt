@@ -138,6 +138,7 @@ PATCH /api/v1/notification-channels/{id} roleInline
 PATCH /api/v1/notification-providers/{provider} roleInstance
 PATCH /api/v1/page-folders/{slug} roleSelf
 PATCH /api/v1/pages/{slug} roleSelf
+PATCH /api/v1/pages/{slug}/slides roleInline
 PATCH /api/v1/projects/{projectId} roleCreate
 PATCH /api/v1/recurring-issues/{recurringId} roleCreate
 PATCH /api/v1/saved-views/{viewId} roleCreate

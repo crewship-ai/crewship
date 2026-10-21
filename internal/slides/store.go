@@ -358,3 +358,64 @@ func (s *Store) InitializeTx(ctx context.Context, tx *sql.Tx, key Key, request I
 	}
 	return s.write(ctx, tx, key, State{}, request.Deck, request.MutationID, "initialize", hash, actor, ObjectIDs(request.Deck), false)
 }
+
+// Patch commits a strictly validated candidate under the live writer fence.
+// Receipt lookup precedes head preconditions so exact retries retain their
+// original revision even after subsequent edits, while rechecking authority.
+func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, authorize Authorize) (result Receipt, err error) {
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return result, err
+	}
+	request, err = DecodePatch(raw)
+	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	hash, err := requestHash(key, "patch", request)
+	if err != nil {
+		return result, err
+	}
+	err = s.tx(ctx, key, authorize, func(tx *sql.Tx, actor string) error {
+		if request.PageID != key.PageID {
+			return ErrConflict
+		}
+		previous, found, e := receipt(ctx, tx, key, request.MutationID, hash, actor, "patch")
+		if e != nil {
+			return e
+		}
+		if found {
+			result = previous
+			return nil
+		}
+		current, e := readState(ctx, tx, key, 0)
+		if e != nil {
+			return e
+		}
+		if request.BaseRev != current.Revision || request.SchemaVersion != current.SchemaVersion || (request.IfOrderVersion != nil && *request.IfOrderVersion != current.OrderVersion) {
+			return ErrConflict
+		}
+		candidate, e := ApplyPatch(current.Deck, request)
+		if e != nil {
+			if errors.Is(e, ErrConflict) {
+				return e
+			}
+			return fmt.Errorf("%w: %v", ErrInvalid, e)
+		}
+		// Reserve every newly introduced identity, including an insert subsequently
+		// removed in the same batch. Deleted historical IDs can never be recycled.
+		inserted := map[string]string{}
+		for _, op := range request.Operations {
+			if op.Op == "insert_element" && op.Element != nil {
+				inserted[op.Element.ID] = "element"
+			}
+			if op.Op == "insert_slide" && op.Slide != nil {
+				for id, kind := range ObjectIDs(Deck{Slides: []Slide{*op.Slide}}) {
+					inserted[id] = kind
+				}
+			}
+		}
+		result, e = s.write(ctx, tx, key, current, candidate, request.MutationID, "patch", hash, actor, inserted, false)
+		return e
+	})
+	return
+}
