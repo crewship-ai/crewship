@@ -52,6 +52,11 @@ An agent can also call `doc_create` in the Crewship routines MCP tools with the
 same four fields. The tool uses the same run permission and saved result; an
 exact retry can recover that result across the CLI and MCP interfaces.
 
+An admitted run of an agent added to an already running crew can create and
+draft its Document without restarting the shared crew container. The host still
+checks the run capability, the requesting human's current access and the original
+creation or drafting permission; startup roster labels do not grant access.
+
 ## `crewship doc draft`
 
 Save progress while fulfilling an admitted creation request. The original human

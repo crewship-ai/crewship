@@ -309,7 +309,7 @@ func (s *Server) handleDocumentDraft(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "draft view has no request body", 400)
 		return
 	}
-	response, err := s.boundedHostRequest(r, r.Method, "/api/v1/internal/documents/draft", raw, 64<<10)
+	response, err := s.documentHostRequest(r, r.Method, "/api/v1/internal/documents/draft", raw, 64<<10)
 	if err != nil {
 		http.Error(w, "draft outcome unavailable; retain the exact packet", 503)
 		return

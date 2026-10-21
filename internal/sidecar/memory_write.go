@@ -1236,6 +1236,15 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 	if !ok {
 		return nil, &memoryHostTransportError{err: errors.New("acting agent identity could not be resolved")}
 	}
+	return s.sendBoundedHostRequest(r, method, path, body, responseLimit, slug)
+}
+
+// sendBoundedHostRequest preserves the existing bounded IPC transport. Its
+// callers separately establish the route's required acting identity.
+func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64, slug string) (*memoryHostResponse, error) {
+	if s.ipc == nil {
+		return nil, &memoryHostTransportError{err: errors.New("IPC not configured")}
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), memoryHostIPCTimeout)
 	defer cancel()
@@ -1256,7 +1265,9 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 	if capability := bearerToken(r); capability != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+capability)
 	}
-	httpReq.Header.Set(actingAgentSlugHeader, slug)
+	if slug != "" {
+		httpReq.Header.Set(actingAgentSlugHeader, slug)
+	}
 
 	// The sent/not-sent evidence R5 turns on. GotConn fires once this call
 	// has a connection to write the request onto; before that there is
