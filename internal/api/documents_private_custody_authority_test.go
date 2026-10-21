@@ -49,12 +49,16 @@ func TestDocumentStorePrivateCustodyRestrictedElsewhere(t *testing.T) {
 					t.Errorf("native read: %v", err)
 				}
 				pins, err := store.Checkpoints(ctx, key, authority.authorize(request, key, false, false))
-				if err != nil || len(pins) != 1 {
-					t.Errorf("native checkpoints count=%d: %v", len(pins), err)
+				// Init retains revision zero alongside the explicit checkpoint.
+				if err != nil || len(pins) != 2 {
+					t.Fatalf("native checkpoints count=%d: %v", len(pins), err)
 				}
-				pin, err := store.CheckpointRead(ctx, key, "private-pin", authority.authorize(request, key, false, false))
-				if err != nil || string(pin.Snapshot) != "private-snapshot" {
-					t.Errorf("native checkpoint read: %v", err)
+				for _, listed := range pins {
+					id := listed["id"].(string)
+					pin, err := store.CheckpointRead(ctx, key, id, authority.authorize(request, key, false, false))
+					if err != nil || string(pin.Snapshot) != "private-snapshot" {
+						t.Errorf("native checkpoint %q read: %v", id, err)
+					}
 				}
 			}
 			read() // Healthy actual Store calibration, before any restriction.
