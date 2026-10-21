@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -265,6 +266,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // In-flight create per viewer/workspace/session, so two sends in the same tick (a
   // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
   const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
+  // Scopes whose create the server refused (403/404: someone else's session ID,
+  // or one that is gone). Arriving cannot tell a draft from such a chat, so the
+  // refusal is the first definitive answer; the ref serves the click-time read,
+  // the state the notice.
+  const refusedRowsRef = useRef<Set<string>>(new Set())
+  const [refusedScopes, setRefusedScopes] = useState<ReadonlySet<string>>(() => new Set())
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
   // animation. Bumped on every session swap so loaded-from-history turns
@@ -766,7 +773,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           `/api/v1/agents/${requireApiPathSegment(agentId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
         )
-        if (!res.ok) return false
+        if (!res.ok) {
+          if (res.status === 403 || res.status === 404) { refusedRowsRef.current.add(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
+          return false
+        }
+        if (refusedRowsRef.current.has(chatReadScope)) { refusedRowsRef.current.delete(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
         confirmedRowsRef.current.add(chatReadScope)
         if (currentChatReadScopeRef.current !== chatReadScope) return false
         // The conversation begins here, not at mount: a draft session is a URL
@@ -844,7 +855,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
     if (currentChatReadScopeRef.current !== chatReadScope) return false
     if (!ok) {
-      toast.error("Couldn't start this conversation. Check your connection and try again.")
+      toast.error(refusedRowsRef.current.has(chatReadScope)
+        ? "This conversation isn't available to you. Start a new chat to continue."
+        : "Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
   }, [canChat,waitingForSignIn,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
@@ -1407,7 +1420,17 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </Conversation>
   )
 
-  const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
+  const conversationUnavailable = refusedScopes.has(chatReadScope)
+  const unavailableNotice = conversationUnavailable ? (
+    <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
+      <p>This conversation isn&apos;t available to you. It may be private to someone else, or it no longer exists. Your draft is still in the box below.</p>
+      {onNewConversation
+        ? <button type="button" onClick={onNewConversation} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</button>
+        : <Link href={`/chat/${encodeURIComponent(agentSlug)}?new=1`} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</Link>}
+    </div>
+  ) : null
+
+  const prepareProjectInputs = !conversationUnavailable && executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
     <div className="px-4 pb-2">
       <Button variant="outline" size="sm" className="coarse:min-h-[44px]" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
         setPreparingProjectInputs(true)
@@ -1490,6 +1513,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
             />
           </div>
         )}
+        {unavailableNotice}
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
@@ -1628,6 +1652,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           }
         />
         </div>
+        {unavailableNotice}
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
