@@ -238,6 +238,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	// The private document was created through the actual agent CLI for a
 	// MEMBER. Separate authenticated identities exercise production routing,
 	// the real Node service, catalogs and access reports through a real binary.
+	var initialCheckpointID string
 	for _, role := range []string{"OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"} {
 		id := "managed-private-" + role
 		pagesSeedUser(t, h, workspace, id, strings.ToLower(role)+"@private.example", role)
@@ -271,10 +272,19 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				}
 				if len(args) > 1 && args[1] == "checkpoints" {
 					var history struct {
-						Checkpoints []json.RawMessage `json:"checkpoints"`
+						Checkpoints []struct {
+							ID     string `json:"id"`
+							Rev    int64  `json:"rev"`
+							Schema int    `json:"schema"`
+						} `json:"checkpoints"`
 					}
-					if json.Unmarshal(out, &history) != nil || history.Checkpoints == nil || len(history.Checkpoints) != 0 {
-						t.Fatalf("actual history list before checkpoint: %s", out)
+					if json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].Rev != 0 || history.Checkpoints[0].Schema != 3 {
+						t.Fatalf("actual initial history: %s", out)
+					}
+					initialCheckpointID = history.Checkpoints[0].ID
+					pinned, err := invoke("doc", "checkpoint", "@"+created.PageID, initialCheckpointID)
+					if err != nil || !bytes.Contains(pinned, []byte("Pilot with one team")) {
+						t.Fatalf("actual initial checkpoint body: %v %s", err, pinned)
 					}
 				}
 			} else if err == nil || !bytes.Contains(out, []byte("404")) || bytes.Contains(out, []byte("Launch plan")) {
@@ -494,7 +504,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			if err := h.db.QueryRow(`SELECT count(*) FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&checkpoints); err != nil {
 				t.Fatal(err)
 			}
-			if head != 1 || cursor != 1 || checkpointRev != 1 || receipts != 3 || checkpoints != 1 {
+			if head != 1 || cursor != 1 || checkpointRev != 1 || receipts != 3 || checkpoints != 2 {
 				t.Fatalf("retry/conflict changed durable rows: head%d cursor%d pin%d receipts%d pins%d", head, cursor, checkpointRev, receipts, checkpoints)
 			}
 		}
@@ -605,7 +615,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				Schema int    `json:"schema"`
 			} `json:"checkpoints"`
 		}
-		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
+		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 2 || history.Checkpoints[1].ID != initialCheckpointID || history.Checkpoints[1].Rev != 0 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
 			t.Fatalf("history lost confirmed checkpoint identity: %s", out)
 		}
 		var historical struct {
@@ -617,12 +627,15 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != 3 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
 			t.Fatalf("historical read did not preserve the immutable saved body: %s", out)
 		}
+		if out := readHistory("checkpoint", "@"+created.PageID, initialCheckpointID); json.Unmarshal(out, &historical) != nil || historical.Rev != 0 || historical.ID != initialCheckpointID || !bytes.Contains(out, []byte("Pilot with one team")) || bytes.Contains(out, []byte("Human intervening content")) || bytes.Contains(out, []byte("CONFIRMED-A")) {
+			t.Fatalf("human edit changed initial confirmed history: %s", out)
+		}
 		for _, check := range []struct {
 			query string
 			want  int
 		}{
 			{`SELECT count(*) FROM document_creations`, 1}, {`SELECT count(*) FROM documents`, 1},
-			{`SELECT count(*) FROM document_checkpoints`, 1}, {`SELECT count(*) FROM document_receipts`, 4},
+			{`SELECT count(*) FROM document_checkpoints`, 2}, {`SELECT count(*) FROM document_receipts`, 4},
 			{`SELECT count(*) FROM page_grants WHERE subject_type='agent'`, 0},
 			{`SELECT count(*) FROM document_receipts WHERE id='managed-draft-b'`, 0},
 		} {
