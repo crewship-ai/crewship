@@ -110,7 +110,7 @@ func TestGenericPublicationGuardTriggerWritesRollBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded := guardPublishedVersion(t, store, p)
+	bounded, missing := guardPublishedVersion(t, store, p), 99
 	schedules := NewScheduleStore(db)
 	in := SaveScheduleInput{WorkspaceID: p.WorkspaceID, Name: "kept", TargetPipelineID: p.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Enabled: true}
 	saved, err := schedules.SaveValidated(t.Context(), in)
@@ -159,13 +159,15 @@ func TestGenericPublicationGuardTriggerWritesRollBack(t *testing.T) {
 	if _, err := db.Exec(`UPDATE pipelines SET head_version=2 WHERE id=?`, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	in.ID, in.TargetPipelineVersion = "", nil
-	if _, err := schedules.SaveValidated(t.Context(), in); !errors.Is(err, ErrInvalidTrigger) {
-		t.Fatalf("bounded schedule create: %v", err)
-	}
-	wi.ID, wi.TargetPipelineVersion = "", nil
-	if _, err := webhooks.Save(t.Context(), wi); !errors.Is(err, ErrInvalidTrigger) {
-		t.Fatalf("bounded webhook create: %v", err)
+	for _, pin := range []*int{nil, &missing} {
+		in.ID, in.TargetPipelineVersion = "", pin
+		if _, err := schedules.SaveValidated(t.Context(), in); !errors.Is(err, ErrInvalidTrigger) {
+			t.Fatalf("bounded schedule create: %v", err)
+		}
+		wi.ID, wi.TargetPipelineVersion = "", pin
+		if _, err := webhooks.Save(t.Context(), wi); !errors.Is(err, ErrInvalidTrigger) {
+			t.Fatalf("bounded webhook create: %v", err)
+		}
 	}
 	var n int
 	if err := db.QueryRow(`SELECT (SELECT count(*) FROM pipeline_schedules)+(SELECT count(*) FROM pipeline_webhooks)`).Scan(&n); err != nil || n != 2 {

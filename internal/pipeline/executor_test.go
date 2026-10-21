@@ -114,8 +114,7 @@ func fakePipeline(t *testing.T, slug, definitionJSON, authorCrew, authorAgent st
 	return p
 }
 
-// Real-run nested targets are selected from storage, including their authority.
-// Preserve the existing parser/status/preflight fixtures rather than bypassing it.
+// Legacy HEAD0 targets preserve parser/status fixtures without inventing an archive.
 func persistPipelineFixture(t *testing.T, store *Store, p *Pipeline) {
 	t.Helper()
 	status := p.Status
@@ -123,15 +122,10 @@ func persistPipelineFixture(t *testing.T, store *Store, p *Pipeline) {
 		status = "active"
 	}
 
-	_, err := store.db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,author_agent_id,status) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, p.ID, p.WorkspaceID, p.Slug, p.Name, p.DefinitionJSON, p.DefinitionHash, p.AuthorCrewID, p.AuthorAgentID, status)
+	_, err := store.db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,author_agent_id,status,head_version) VALUES(?,?,?,?,?,?,?,?,?,0) ON CONFLICT(id) DO NOTHING`, p.ID, p.WorkspaceID, p.Slug, p.Name, p.DefinitionJSON, p.DefinitionHash, p.AuthorCrewID, p.AuthorAgentID, status)
 	if err != nil {
 		t.Fatal("persist nested fixture", err)
 	}
-	_, err = store.db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id) VALUES(?,?,1,?,?,'agent',?) ON CONFLICT(id) DO NOTHING`, p.ID+"-v1", p.ID, p.DefinitionJSON, p.DefinitionHash, p.AuthorAgentID)
-	if err != nil {
-		t.Fatal("persist nested fixture archive", err)
-	}
-
 }
 
 func openExecutorTestDB(t *testing.T) (*Store, *Resolver, func()) {

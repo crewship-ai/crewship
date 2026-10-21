@@ -116,6 +116,13 @@ func legacyHeadNativeRow(t *testing.T, db *sql.DB, id any) []any {
 	if err := rows.Scan(pointers...); err != nil {
 		t.Fatal(err)
 	}
+	// Compare every original column; the additive publication field has its own default assertion.
+	if columns[len(columns)-1] == "publication_authority_fingerprint" {
+		if values[len(values)-1] != "legacy-trusted:v1" {
+			t.Fatalf("legacy publication authority default changed: %v", values[len(values)-1])
+		}
+		values = values[:len(values)-1]
+	}
 	for i, value := range values {
 		if b, ok := value.([]byte); ok {
 			copyBytes := make([]byte, len(b))

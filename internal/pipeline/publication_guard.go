@@ -43,11 +43,7 @@ func (s *Store) loadGenericSelected(ctx context.Context, id, workspace string, p
 	if err != nil {
 		return nil, fmt.Errorf("load generic recipe: %w", err)
 	}
-	selected := head
-	if pin != nil {
-		selected = *pin
-	}
-	if selected < 0 {
+	if pin == nil && head < 0 {
 		return nil, ErrNotFound
 	}
 	if err := classifyGenericSelection(pin, versionID, fingerprint, fingerprintText, noManifest, physical, physicalText); err != nil {
@@ -83,6 +79,10 @@ func checkGenericPublication(ctx context.Context, q publicationQuery, id, worksp
 	}
 	if selected < 0 {
 		return ErrNotFound
+	}
+	// A future trusted pin keeps its legacy write contract; execution still requires its archive.
+	if version != nil && !archive.Valid {
+		return checkGenericPublication(ctx, q, id, workspace, nil)
 	}
 	return classifyGenericSelection(version, archive, fingerprint, fingerprintText, noManifest, physical, physicalText)
 }
