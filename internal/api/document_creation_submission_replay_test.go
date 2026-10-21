@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -248,17 +250,37 @@ func TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary(t *testing.T)
 	// A still-connected author whose live membership loses trust cannot use
 	// the retained submission to recover its original message identity.
 	mustExec(t, f.rig.db, `UPDATE workspace_members SET access_mode='restricted',capabilities='[]',access_revision=access_revision+1 WHERE workspace_id=? AND user_id=?`, f.a.WorkspaceID, f.a.HumanUserID)
+	allowed, authErr := ws.NewDBChannelAuthorizer(f.rig.db).CanSubscribe(t.Context(), f.a.HumanUserID, "session:"+f.a.ChatID)
+	if authErr != nil || allowed {
+		t.Fatalf("membership revocation was not effective: allowed=%v err=%v", allowed, authErr)
+	}
+	closedTransport := func(err error) bool {
+		return errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
+	}
 	_ = retry.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := websocket.JSON.Send(retry, packet); err != nil {
+	if err := websocket.JSON.Send(retry, packet); err != nil && !closedTransport(err) {
 		t.Fatal(err)
 	}
 	var denied ws.ServerMessage
-	receiveErr := websocket.JSON.Receive(retry, &denied)
-	if receiveErr != nil && !errors.Is(receiveErr, io.EOF) {
-		t.Fatal(receiveErr)
+	var receiveErr error
+	for {
+		receiveErr = websocket.JSON.Receive(retry, &denied)
+		if receiveErr != nil {
+			if !closedTransport(receiveErr) {
+				t.Fatal(receiveErr)
+			}
+			break
+		}
+		// A slow actual CLI build can queue the Hub's empty keepalive.
+		// No chat/result/terminal frame is skipped by this loop.
+		if denied.Type == "ping" && denied.Payload == nil && denied.Channel == "" && denied.Seq == 0 {
+			continue
+		}
+		break
 	}
-	// The live authorization sweep may close the revoked socket before the
-	// explicit denial arrives. EOF exposes no retained result or message ID.
+	// The live authorization sweep may close the revoked socket before
+	// either write or read. A confirmed closed socket exposes no retained
+	// result bytes; timeouts and unrelated errors are not accepted.
 	if receiveErr == nil {
 		deniedRaw, _ := json.Marshal(denied)
 		if denied.Type != "error" || strings.Contains(string(deniedRaw), "already accepted") || strings.Contains(string(deniedRaw), "Original message") {
