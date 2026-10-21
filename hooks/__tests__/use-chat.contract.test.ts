@@ -197,6 +197,31 @@ describe("bounded canonical recovery", () => {
 })
 
 describe("current human authority", () => {
+  it("keeps a stopped turn the server did not persist across a history refetch, in place, without duplicating it", () => {
+    const hook = setup()
+    const user = { id: "user-1", role: "user", content: "hi", timestamp: new Date("2026-10-18T11:59:59Z"), runId: "run-1" } satisfies ChatMessage
+    act(() => { hook.result.current.sendMessage("hi") })
+    send({ ...envelope(1), type: "turn", part_id: undefined, payload: { turn: { state: "running" } } })
+    act(() => hook.result.current.stopGeneration())
+    send({ ...envelope(2), type: "turn", part_id: undefined, payload: { turn: { state: "cancelled" } } })
+    const later = { id: "user-2", role: "user", content: "next", timestamp: new Date("2026-10-18T12:00:05Z") } satisfies ChatMessage
+    // The server persisted no assistant message for the stopped run.
+    act(() => hook.result.current.loadHistory([user, later]))
+    expect(hook.result.current.turns.map(turn => [turn.role, turn.turnState])).toEqual([["user", undefined], ["assistant", "cancelled"], ["user", undefined]])
+    expect(hook.result.current.isStreaming).toBe(false)
+    // Once history carries the run, the local copy is not kept beside it.
+    act(() => hook.result.current.loadHistory([user, { id: "a-1", role: "assistant", content: "", timestamp: new Date("2026-10-18T12:00:00Z"), runId: "run-1",
+      checkpoint: { version: 1, run_id: "run-1", turn_id: "turn-1", through_seq: 2, turn_state: "cancelled" }, parts: [{ id: "p", type: "text", content: "", run_id: "run-1", turn_id: "turn-1" }] }, later]))
+    expect(hook.result.current.turns.filter(turn => turn.runId === "run-1" && turn.role === "assistant")).toHaveLength(1)
+    act(() => hook.result.current.loadHistory([user], { reset: true }))
+    expect(hook.result.current.turns.map(turn => turn.role)).toEqual(["user"])
+  })
+  it("drops a stopped unpersisted turn on explicit reset", () => {
+    const hook = setup()
+    send({ ...envelope(1), type: "turn", part_id: undefined, payload: { turn: { state: "failed" } } })
+    act(() => hook.result.current.loadHistory([], { reset: true }))
+    expect(hook.result.current.turns).toEqual([])
+  })
   it("preserves an absent in-flight turn on refresh but clears it on explicit reset", () => {
     const hook = setup()
     send(envelope(1, "partial"))
