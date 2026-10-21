@@ -63,7 +63,7 @@ const hrefOf = (name: string | RegExp) =>
 describe("CommandPalette — every place in the app", () => {
   it("keeps the cards out of an empty palette and finds them as you type", async () => {
     openPalette()
-    await screen.findByRole("group", { name: /navigation/i })
+    await screen.findByRole("group", { name: /go to/i })
     expect(screen.queryByRole("group", { name: /settings & sections/i })).not.toBeInTheDocument()
 
     type("danger")
@@ -81,7 +81,7 @@ describe("CommandPalette — every place in the app", () => {
   it("finds a section by what is in it, not just its name", async () => {
     openPalette()
     type("slack")
-    expect(hrefOf(/Notification connections/)).toBe("/integrations?tab=notifications&section=connections")
+    expect(hrefOf(/^Channels/)).toBe("/integrations?space=channels")
   })
 
   it("offers a member only what a member can open", async () => {
@@ -93,7 +93,7 @@ describe("CommandPalette — every place in the app", () => {
     type("backups")
     expect(screen.queryByRole("option", { name: /Backup/ })).not.toBeInTheDocument()
     type("token")
-    expect(hrefOf(/Create CLI token/)).toBe("/settings?tab=profile&card=sessions-and-access")
+    expect(hrefOf(/Create CLI token/)).toBe("/settings?tab=sessions&card=cli-tokens")
   })
 
   it("finds missions, schedules, automations and crew tools, each linked to itself", async () => {
@@ -119,7 +119,7 @@ describe("CommandPalette — every place in the app", () => {
     FIXTURES["/api/v1/missions"] = { error: "nope" }
     FIXTURES["/automations"] = [{ unexpected: true }]
     openPalette()
-    await screen.findByRole("group", { name: /navigation/i })
+    await screen.findByRole("group", { name: /go to/i })
     expect(screen.queryByRole("group", { name: /missions/i })).not.toBeInTheDocument()
   })
 

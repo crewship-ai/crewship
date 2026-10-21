@@ -257,3 +257,64 @@ func TestCLIParityIsCountedPerPath(t *testing.T) {
 		t.Errorf("an exempt path must not be listed as an offender:\n%s", err)
 	}
 }
+
+// Exercise the real command source, not hand-written route declarations: both
+// endpoints are already sent by the CLI, behind a callback or format builder.
+func TestCLIPathShapesRealBudgetAndTemplateCallers(t *testing.T) {
+	for _, tt := range []struct{ name, file, route string }{
+		{"callback request", "cmd_crew_budget.go", "/api/v1/crews/{crewId}/budget"},
+		{"formatted suffix", "cmd_routine_templates.go", "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use"},
+		{"peer index", "cmd_feedback.go", "/api/v1/agents/{agentId}/peers"},
+		{"peer entry", "cmd_feedback.go", "/api/v1/agents/{agentId}/peers/{userId}"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			text, err := os.ReadFile(filepath.Join("..", "..", "cmd", "crewship", tt.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// postJSON is the existing package-level request wrapper used by
+			// the template command. Include its real implementation as well.
+			sources := []docFile{{Path: "cmd/crewship/" + tt.file, Text: string(text)}}
+			if tt.file == "cmd_routine_templates.go" {
+				text, err := os.ReadFile(filepath.Join("..", "..", "cmd", "crewship", "api_helpers.go"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				sources = append(sources, docFile{Path: "cmd/crewship/api_helpers.go", Text: string(text)})
+			}
+			shapes, err := cliPathShapes(sources)
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes := map[string]bool{normalizeRoutePath(tt.route): true}
+			if callers := cliCallers(tt.route, shapes, routes); !slices.Contains(callers, "cmd/crewship/"+tt.file) {
+				t.Fatalf("actual CLI caller missing for %s; shapes=%v", tt.route, shapes)
+			}
+		})
+	}
+}
+
+func TestCLIPathShapesCallbackSinksStayDeclarationScoped(t *testing.T) {
+	source := docFile{Path: "cmd/crewship/cmd_callback.go", Text: `package main
+func request(call func(*Client,string) error) { call(client,"/api/v1/actual") }
+func describe(call func(*Client,string) error) { call(client,"/api/v1/help-only") }
+func invoke() {
+ request(func(c *Client,path string) error { return c.Get(path) })
+ describe(func(c *Client,path string) error { return log(path) })
+}
+`}
+	shapes, err := cliPathShapes([]docFile{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range shapes {
+		got = append(got, s.Shape)
+	}
+	if !slices.Contains(got, "api/v1/actual") {
+		t.Errorf("request callback missing: %v", got)
+	}
+	if slices.Contains(got, "api/v1/help-only") {
+		t.Errorf("non-request callback falsely covered: %v", got)
+	}
+}

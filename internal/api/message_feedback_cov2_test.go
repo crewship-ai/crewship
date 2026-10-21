@@ -104,14 +104,10 @@ func TestFB2_Create_ChatResolutionFailures(t *testing.T) {
 	})
 }
 
-func TestFB2_Create_PersistedIDLookupFallback(t *testing.T) {
+func TestFB2_Create_MissingPersistedSourceFailsClosed(t *testing.T) {
 	bed := setupFeedbackTestBed(t)
-	// Make only SELECTs against message_feedback fail after the insert:
-	// SQLite can't do that via trigger, so instead drop the table between
-	// insert and lookup using a trigger that renames? Not possible —
-	// instead make the post-insert SELECT fail by deleting the row from
-	// inside an AFTER INSERT trigger. The lookup then hits ErrNoRows and
-	// the handler must fall back to the generated id.
+	// A deleted persisted source cannot verify a revision or memory status.
+	// Never report a generated id as successful saved feedback in this case.
 	if _, err := bed.h.db.Exec(`
 		CREATE TRIGGER fb2_eat_row AFTER INSERT ON message_feedback
 		BEGIN DELETE FROM message_feedback WHERE id = NEW.id; END`); err != nil {
@@ -120,11 +116,11 @@ func TestFB2_Create_PersistedIDLookupFallback(t *testing.T) {
 	seedConvMessage(t, bed.h.db, "m-fb2", bed.chatID, "agent-fb")
 	rr := covFB2Post(t, bed.h, bed.userID,
 		`{"message_id":"m-fb2","chat_id":"`+bed.chatID+`","signal":"helpful","reason":"good"}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"id":`) {
-		t.Errorf("body = %q, want generated id fallback", rr.Body.String())
+	if strings.Contains(rr.Body.String(), `"memory"`) || strings.Contains(rr.Body.String(), `"id"`) {
+		t.Errorf("missing source must not claim a persisted id or memory status: %s", rr.Body.String())
 	}
 }
 

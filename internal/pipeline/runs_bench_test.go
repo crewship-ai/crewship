@@ -20,6 +20,8 @@ func openStepOutputsBenchDB(b *testing.B) *RunStore {
 	b.Cleanup(func() { db.Close() })
 	if _, err := db.ExecContext(context.Background(), `
 CREATE TABLE pipeline_runs (
+invocation_source_run_id TEXT,
+chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL,
     pipeline_id         TEXT NOT NULL,

@@ -154,6 +154,8 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 			return
 		}
 		h.logActivity(r.Context(), sourceID, actorType, actorID, "parent_changed", req.TargetIdentifier)
+		broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, sourceID, false)
+		broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, targetID, false)
 		broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated",
 			map[string]string{"id": sourceID, "identifier": ident})
 		writeJSON(w, http.StatusCreated, map[string]string{
@@ -186,6 +188,8 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 
 	h.logActivity(r.Context(), sourceID, actorType, actorID,
 		"relation_added", req.RelationType+" "+req.TargetIdentifier)
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, sourceID, false)
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, targetID, false)
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated",
 		map[string]string{"id": sourceID, "identifier": ident})
 

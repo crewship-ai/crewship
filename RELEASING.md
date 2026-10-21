@@ -35,6 +35,40 @@ Before tagging, verify:
       prod VM tracks `release` and a stale branch means you ship from
       old code.
 
+## Execution-authority rollout (#3068)
+
+Before upgrading **each** stage or production instance to the Issue-operation
+authority contract, run the new release's read-only doctor against that exact
+instance's existing database. A report from a development or demo database is
+not evidence for another target. The production owner performs the production
+audit and rollout; development agents must not access production.
+
+```bash
+DATABASE_URL='file:/absolute/path/to/target/crewship.db' crewship doctor execution-origins --json
+```
+
+Review the blocked and uncertain records with the operator before deployment;
+the report inventories possible impact, does not authorize work, and does not
+certify an upgrade. Unknown legacy queued work requires fresh authenticated
+admission. Retain the report privately with the target identity and release SHA.
+
+After deploying the matching backend and sidecar artifacts, recycle each
+affected crew's retained container to refresh its bind-mounted sidecar and
+credentials. Coordinate a safe idle window first: account for running and
+queued work and prevent new dispatch during that window. The command removes
+the runtime container; it is not a graceful drain and must not interrupt active
+work. Select the target server/workspace in the authenticated CLI, then run:
+
+```bash
+crewship crew restart-agents <slug-or-id>
+```
+
+The next agent execution recreates the container. Verify an authorized Issue
+write before declaring the new authority guarantees active. After a restore,
+web-origin recurring templates pause at their next firing until reviewed and
+saved/re-enabled in a fresh full authenticated session; see
+[restore authorization](docs/guides/backup.mdx#restore).
+
 ## Cutting the tag
 
 ```bash

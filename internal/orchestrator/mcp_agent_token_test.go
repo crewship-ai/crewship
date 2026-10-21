@@ -36,6 +36,7 @@ func TestFirstPartyMCPSpecs_AllCarryAgentToken(t *testing.T) {
 		"crewship-memory":   memoryMCPSpec("some-agent"),
 		"crewship-routines": routinesMCPSpec(),
 		"crewship-notify":   notifyMCPSpec(),
+		"crewship-issues":   issuesMCPSpec(),
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
@@ -61,6 +62,7 @@ func TestFirstPartyMCPClaudeJSON_AllCarryAgentToken(t *testing.T) {
 		},
 		"crewship-routines": injectRoutinesMCPIntoClaudeJSON,
 		"crewship-notify":   injectNotifyMCPIntoClaudeJSON,
+		"crewship-issues":   injectIssuesMCPIntoClaudeJSON,
 	}
 	for name, fn := range inject {
 		t.Run(name, func(t *testing.T) {
@@ -99,11 +101,12 @@ func TestFirstPartyMCPClaudeJSON_DoesNotLeakLiteralToken(t *testing.T) {
 	for name, out := range map[string]string{
 		"crewship-routines": mustInject(t, injectRoutinesMCPIntoClaudeJSON),
 		"crewship-notify":   mustInject(t, injectNotifyMCPIntoClaudeJSON),
+		"crewship-issues":   mustInject(t, injectIssuesMCPIntoClaudeJSON),
 	} {
 		if !strings.Contains(out, "${CREWSHIP_AGENT_TOKEN}") {
 			t.Errorf("%s: header is not a ${VAR} reference: %s", name, out)
 		}
-		for _, leaked := range []string{"agtv1.", "crwv1."} {
+		for _, leaked := range []string{"agtv1.", "agtv2.", "crwv1."} {
 			if strings.Contains(out, leaked) {
 				t.Errorf("%s: a resolved token prefix %q reached .mcp.json: %s", name, leaked, out)
 			}

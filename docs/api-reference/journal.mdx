@@ -9,6 +9,10 @@ tag: Stable
 The Crew Journal is the canonical, append-only event log for a workspace. These endpoints let you read entries (with rich filtering), stream them live over SSE, count a filtered set, look up display metadata for journal cards, and set the one operator-mutable field — the priority marker. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
 
 <Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
+<Note>
   Every endpoint requires authentication and is workspace-scoped via the session context. `workspace_id` is always pulled from the session, never from query params — cross-workspace reads are impossible.
 </Note>
 
@@ -147,6 +151,8 @@ GET /api/v1/journal/stream
 
 Server-Sent Events feed. Same query-param filters as List (limit is forced to 50 for the seed batch).
 
+Replay and live delivery recheck current account and workspace authority before sending entries. Suspension, membership removal, workspace deletion or a Guest restriction anywhere ends an existing stream without sending later entries. Database failures during this authority check also end the stream. A caller already lacking this authority receives 403 before streaming starts.
+
 **Response headers:**
 
 ```
@@ -200,6 +206,7 @@ data: {...}
 | Status | Condition |
 |---|---|
 | 401 | No workspace context. |
+| 403 | Current account or workspace authority is unavailable. |
 | 400 | Bad query parameters. |
 | 500 | Streaming not supported by writer (ResponseWriter doesn't implement `http.Flusher`). |
 
@@ -334,7 +341,7 @@ GET /api/v1/journal/lookup
 there are no query parameters.
 The authenticated workspace context determines the lookup scope.
 
-Returns workspace-scoped crews, agents, and missions for journal-card enrichment (palette colours and lucide icons). Fetched once on page mount; the frontend invalidates it from realtime crew/agent/mission events. Backend handler: `internal/api/journal_lookup.go`.
+Returns workspace-scoped crews, agents, missions and people for journal-card enrichment (palette colours and lucide icons). `people` lists this workspace's members by id and display name (never an email), so a row's `actor_id` reads as a name. Fetched once on page mount; the frontend invalidates it from realtime crew/agent/mission events. Backend handler: `internal/api/journal_lookup.go`.
 
 **Response:** `200 OK`
 
@@ -348,6 +355,9 @@ Returns workspace-scoped crews, agents, and missions for journal-card enrichment
   ],
   "missions": [
     {"id":"MIS-42","title":"Migrate auth","status":"IN_PROGRESS"}
+  ],
+  "people": [
+    {"id":"usr_jana","name":"Jana Nováková"}
   ]
 }
 ```
@@ -364,6 +374,8 @@ Each list is capped at 1000 rows; workspaces beyond that get a useful subset. Em
 | `agents[].avatar_seed` | string? | Deterministic seed; the frontend renders an avatar from this. |
 | `agents[].avatar_style` | string? | Avatar style hint (`pixel-art`, `lorelei`, ...). |
 | `missions[].status` | string | A mission status: `PLANNING`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED` — or, for an issue row, an issue status (`BACKLOG`, `TODO`, `DUPLICATE` as well). `COMPLETED` is retired (B13, #2383): the column holds `DONE`. |
+| `people[].id` | string | A user id, as journal entries carry it in `actor_id`. Members of this workspace only. |
+| `people[].name` | string | Display name; empty when the person set none. No email is returned. |
 
 Soft-deleted crews and agents (`deleted_at IS NOT NULL`) are filtered out. Missions have no soft-delete column; all rows are returned, ordered by `created_at DESC` within the cap.
 
@@ -376,6 +388,8 @@ The journal entries themselves never carry display strings — they store stable
 ## Spend rollup
 
 Cost rollup over `cost.incurred` journal entries and `pipeline_runs.cost_usd` (#1404) — a separate, journal-native surface from [Paymaster](/api-reference/paymaster)'s `/api/v1/paymaster/spend/*`.
+
+**Authorization:** caller must hold `OWNER` or `ADMIN` on the workspace. Every other role gets `403`.
 
 ```
 GET /api/v1/journal/spend
@@ -425,6 +439,7 @@ GET /api/v1/journal/spend
 |---|---|
 | 400 | Bad `window` or `top`. |
 | 401 | No workspace context. |
+| 403 | Caller is not `OWNER` / `ADMIN`. |
 | 500 | DB error. |
 
 CLI: `crewship spend --window 7d --top 10` — see [`crewship spend`](/cli/spend).

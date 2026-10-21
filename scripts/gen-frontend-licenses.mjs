@@ -32,6 +32,35 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependabot integration (2026-10-20): exact registry tarballs inspected,
+  // SHA-512 matched to pnpm-lock.yaml; no package-level license text shipped.
+  "@ai-sdk/provider-utils@5.0.62": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.62.tgz",
+  "@next/env@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/env/-/env-16.4.2.tgz",
+  "@next/swc-linux-x64-gnu@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.4.2.tgz",
+  "@next/swc-linux-x64-musl@16.4.2": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.4.2.tgz",
+  "@rollup/rollup-linux-x64-gnu@4.64.10": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.64.10.tgz",
+  "@rollup/rollup-linux-x64-musl@4.64.10": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.64.10.tgz",
+  "@sentry/server-runtime-injection@11.8.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-runtime-injection/-/server-runtime-injection-11.8.0.tgz",
+  "@sentry/server-utils@11.8.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-utils/-/server-utils-11.8.0.tgz",
+  // Dependency recovery (2026-10-16): inspected each exact registry tarball,
+  // matched its SHA-512 against pnpm-lock.yaml, and checked package.json.
+  // These packages ship no package-level license text; keep explicit notices.
+  "@ai-sdk/provider-utils@5.0.60": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.60.tgz",
+  "@napi-rs/canvas-linux-x64-gnu@1.0.11": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@napi-rs/canvas-linux-x64-gnu/-/canvas-linux-x64-gnu-1.0.11.tgz",
+  "@napi-rs/canvas-linux-x64-musl@1.0.11": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@napi-rs/canvas-linux-x64-musl/-/canvas-linux-x64-musl-1.0.11.tgz",
+  "@next/env@16.4.1": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/env/-/env-16.4.1.tgz",
+  "@next/swc-linux-x64-gnu@16.4.1": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.4.1.tgz",
+  "@next/swc-linux-x64-musl@16.4.1": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.4.1.tgz",
+  "@oxc-parser/binding-linux-x64-gnu@0.152.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@oxc-parser/binding-linux-x64-gnu/-/binding-linux-x64-gnu-0.152.0.tgz",
+  "@oxc-parser/binding-linux-x64-musl@0.152.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@oxc-parser/binding-linux-x64-musl/-/binding-linux-x64-musl-0.152.0.tgz",
+  "@sentry/server-runtime-injection@11.4.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-runtime-injection/-/server-runtime-injection-11.4.0.tgz",
+  "@sentry/server-utils@11.4.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-utils/-/server-utils-11.4.0.tgz",
+  "@rolldown/binding-linux-x64-gnu@1.2.14": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.14.tgz",
+  "@rolldown/binding-linux-x64-musl@1.2.14": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.14.tgz",
+  // XLSX dependency audit (2026-10-15): exact npm 0.1.20 tarball and upstream
+  // v0.1.20 tree contain no license text. package.json declares MIT; preserve
+  // that declaration honestly as an EXCEPTION-NOTICE, not invented copyright.
+  "worker-f@0.1.20": "package.json declares MIT; upstream v0.1.20 commit 32742a0f8a57f19968c73539a09ecb3606efa3f9 also ships no license text: https://gitlab.com/catamphetamine/worker-f/-/blob/32742a0f8a57f19968c73539a09ecb3606efa3f9/package.json",
   // Dependency refresh (2026-10-05): inspected the exact registry tarballs
   // linked in PR #2915 and checked their package.json license declarations.
   // None ships a package-level license text; provider-utils only includes a

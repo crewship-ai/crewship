@@ -187,8 +187,8 @@ func TestHandlePipelinesRun_RoutesToRunPathAndForwardsBody(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if gotPath != "/api/v1/workspaces/ws/pipelines/foo/run" {
-		t.Errorf("path = %q, want .../foo/run (not /dry_run)", gotPath)
+	if gotPath != "/api/v1/internal/pipelines/run" {
+		t.Errorf("path = %q, want attributed internal run", gotPath)
 	}
 	inputs, _ := gotBody["inputs"].(map[string]any)
 	if inputs["name"] != "alice" {

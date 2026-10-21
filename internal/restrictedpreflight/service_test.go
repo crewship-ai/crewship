@@ -106,7 +106,7 @@ func fixture(t *testing.T) (*Service, *executor) {
 		if user == "h2" {
 			project = "p2"
 		}
-		_, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "project", ID: project, Operation: "read"}})
+		_, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "project", ID: project, Operation: "read"}})
 		if err != nil {
 			t.Fatal(err)
 		}

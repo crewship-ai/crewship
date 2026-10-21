@@ -1,0 +1,36 @@
+---
+title: "Unshare"
+description: "Revoke selected explicit routine or project operations from a Guest."
+icon: "link-slash"
+stability: experimental
+tag: Experimental
+---
+
+# crewship unshare
+
+## `unshare <routine|project> <resource-id>`
+
+Trusted workspace OWNER/ADMIN members can remove only the selected operations
+from an existing Guest. Resource arguments are IDs. Other grants, issuer metadata
+and account mode remain unchanged. A stale revision fails with 409 without retry.
+
+```bash
+crewship unshare routine ROUTINE_ID --with client@example.com --operation run
+crewship unshare project PROJECT_ID --with MEMBER_ID --operation read
+```
+
+### Flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--with <member>` | required | Existing membership ID, user ID or exact email. |
+| `--operation <operation>` | required | Routine `view`, `run` or `edit`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Repeat or use comma-separated values. |
+
+Removing `edit` revokes collaborative draft access while preserving an existing
+View share on the published definition. Removing View also prevents draft reads
+and writes, even if Edit remains stored. Direct Guest publication is separate.
+
+Use [`share list`](./share) to inspect the
+current shares. [`share`](./share) adds operations or explicitly reissues them.
+These commands never convert a trusted account to Guest or grant missing agent
+prerequisites automatically.

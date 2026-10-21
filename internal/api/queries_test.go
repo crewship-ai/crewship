@@ -393,7 +393,7 @@ func TestResolveEscalation_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
 	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
-	req = req.WithContext(ctx)
+	req = req.WithContext(withUser(ctx, &AuthUser{ID: userID}))
 	w := httptest.NewRecorder()
 
 	h.ResolveEscalation(w, req)
@@ -501,7 +501,7 @@ func TestResolveEscalation_WithAction(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
 	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
-	req = req.WithContext(ctx)
+	req = req.WithContext(withUser(ctx, &AuthUser{ID: userID}))
 	w := httptest.NewRecorder()
 
 	h.ResolveEscalation(w, req)
@@ -546,7 +546,7 @@ func TestResolveEscalation_RedirectAction(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
 	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
-	req = req.WithContext(ctx)
+	req = req.WithContext(withUser(ctx, &AuthUser{ID: userID}))
 	w := httptest.NewRecorder()
 
 	h.ResolveEscalation(w, req)
@@ -662,7 +662,7 @@ func TestResolveEscalation_NotifiesWaiter(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 		req.SetPathValue("escalationId", "esc1")
 		ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
-		req = req.WithContext(ctx)
+		req = req.WithContext(withUser(ctx, &AuthUser{ID: userID}))
 		w := httptest.NewRecorder()
 		h.ResolveEscalation(w, req)
 		if w.Code != http.StatusOK {
@@ -724,8 +724,7 @@ func TestWaitForEscalationResponse_ResolvesBeforeTimeout(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Go ahead","action":"approve"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
-	req = req.WithContext(ctx)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	w := httptest.NewRecorder()
 	h.ResolveEscalation(w, req)
 	if w.Code != http.StatusOK {

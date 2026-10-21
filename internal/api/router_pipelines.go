@@ -28,6 +28,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// draft with a workspace-scoped save proof; the internal test_run route
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.runTokenSecret = r.internalToken
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
 	// The routine detail's `files` member reads the author crew's shared
@@ -59,6 +60,18 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// invoking A routine, and fanning one out across a 50-item batch is a
 	// different amount of spend to hand a member.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResult))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
+	// openapi: query limit:integer offset:integer; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineRunHistory))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineRunHistory))))
+	// openapi: responses 200,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraft))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", roleInline, r.restrictedRoutineDraft)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))
@@ -140,6 +153,24 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// handler body, so they are declared here.
 	// openapi: responses 200,400,401,403,409,500,503
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", roleCreate, pipes.ApproveWaitpoint)
+	// Health table (ODCH-RT-07): last 20 outcomes, success rate and a rolling
+	// window of runs and spend per routine. Its own path, not under
+	// /pipelines/, so no routine slug can shadow it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-health", authed(wsCtx(http.HandlerFunc(pipes.GetHealth))))
+	// Routine templates (ODCH-RT-22). Their own path so no slug can shadow it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-templates", authed(wsCtx(http.HandlerFunc(pipes.ListTemplates))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-templates/{id}", authed(wsCtx(http.HandlerFunc(pipes.GetTemplate))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-templates", roleCreate, pipes.CreateTemplate)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}", roleCreate, pipes.DeleteTemplate)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-templates/{id}/use", roleCreate, pipes.UseTemplate)
+	// Routine folders (ODCH-RT-01): organise the Routines panel. Literal
+	// "move" under /pipeline-folders cannot collide with {id}, which only has
+	// PATCH and DELETE.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-folders", authed(wsCtx(http.HandlerFunc(pipes.ListFolders))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-folders", roleCreate, pipes.CreateFolder)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-folders/move", roleCreate, pipes.MoveToFolder)
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}", roleCreate, pipes.UpdateFolder)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-folders/{id}", roleCreate, pipes.DeleteFolder)
 	// Pipeline schedules — cron triggers for saved pipelines (the
 	// Routines integration). CRUD-only; the scheduler runs in-process
 	// in cmd_start and reads the table directly.
@@ -171,7 +202,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// collide with the per-slug route the way /pipelines/runs/... would
 	// (see the comment below on /pipeline-runs/).
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/checkup", authed(wsCtx(http.HandlerFunc(pipes.GetCheckup))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", authed(wsCtx(http.HandlerFunc(pipes.GetOriginBinding))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", roleManage, pipes.ClearOriginBinding)
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", roleManage, pipes.SetBudget)
 	// Appearance is presentation, so it sits at the create tier rather
 	// than manage: picking an icon is not an operational act, and a
@@ -196,6 +230,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/calendar", authed(wsCtx(http.HandlerFunc(pipes.RoutineCalendar))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics", authed(wsCtx(http.HandlerFunc(pipes.RoutineCalendarICS))))
 	// #1844. The #863 sub-span I/O gate is read in resolveIOStep
 	// (pipeline_runs.go), not in GetRun's body, so neither name reached the
 	// spec. ?include_io=1 inlines every span's input/output, ?io_step=<stepId>
@@ -243,6 +278,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// enabled / rate limit, with the token never rotating and the signing
 	// secret rotating only when the caller explicitly opts in.
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.UpdateWebhook)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test", roleCreate, pipes.DryRunWebhook)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
 	// Routine webhook receipts — what a routine delivery leaves behind:
 	// its identity, the body's fingerprint and the run it produced. Read

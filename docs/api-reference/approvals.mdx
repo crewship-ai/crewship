@@ -29,6 +29,19 @@ The Harbormaster approval queue is the human-in-the-loop gate for agent actions 
 
 ## Endpoints
 
+Host-correlated synchronous `agent_run` approvals additionally require current
+trusted access to the original chat generation. Hidden sources are excluded
+before list pagination, `count`, `has_more`, detail reads and the agent's pending
+approval badge. Other approval sources retain their existing read policy.
+
+Retention and GDPR erasure still hard-delete approval rows. Before deleting a
+verified private source, the same transaction appends a host-only
+`approval.source_retired` journal marker containing only its workspace and
+approval ID. This preserves private classification of immutable history without
+retaining request text, user identities, run/chat correlation or answer receipts.
+If that append fails, the source deletion rolls back. Journal read surfaces
+withhold the marker and its retained source projections.
+
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | [`/api/v1/approvals`](#list-approvals) | List approval requests |

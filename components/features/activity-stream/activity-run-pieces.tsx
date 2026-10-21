@@ -68,7 +68,7 @@ export function BranchRow({
           <span className="w-3.5" />
         )}
         <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", node.status ? RUN_TONE_DOT[tone] : "bg-muted-foreground/40")} />
-        <span className="w-14 shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground-soft">{kind.label}</span>
+        <span className="w-14 shrink-0 text-micro capitalize text-muted-foreground-soft">{kind.label}</span>
         <button
           type="button"
           onClick={() => onOpenNode(node.kind, node.ref)}

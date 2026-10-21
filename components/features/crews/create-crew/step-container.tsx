@@ -112,7 +112,7 @@ export function StepContainer({ state, setState, onPickImage, activeSection }: S
 // Egress
 // =============================================================================
 
-function NetworkSection({ state, setState }: Props) {
+export function NetworkSection({ state, setState }: Props) {
   const modeId = useId()
   const [editingHosts, setEditingHosts] = useState(false)
   const restricted = state.networkMode === "restricted"
@@ -167,7 +167,7 @@ function NetworkSection({ state, setState }: Props) {
 // Sizing — folded away, because it is an administrator's question
 // =============================================================================
 
-function SizeDisclosure({ state, setState, defaultOpen = false }: Props & { defaultOpen?: boolean }) {
+export function SizeDisclosure({ state, setState, defaultOpen = false }: Props & { defaultOpen?: boolean }) {
   const summary = useMemo(() => {
     const ttl = state.ttlHours == null ? "no auto-stop" : `stops after ${state.ttlHours} h`
     return `${state.cpus} ${state.cpus === 1 ? "core" : "cores"} · ${prettyMemory(state.memoryMB)} · ${ttl}`

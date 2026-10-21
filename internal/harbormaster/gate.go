@@ -26,6 +26,8 @@ type GateInput struct {
 	// every call its own cohort and silently defeats auto-tuning (#2234).
 	// It is also the input the rule Evaluator matches against.
 	Args map[string]any
+	// Correlation is trusted host provenance, never rule or reward input.
+	Correlation map[string]any
 	// Review is caller-supplied context for a human deciding the request
 	// (e.g. a scrubbed prompt preview). It rides alongside Args in the
 	// stored payload under the "review" key but is deliberately excluded
@@ -60,7 +62,9 @@ type GateInput struct {
 //
 // When no rule matches, Gate returns NotGated=true and Approved=true so
 // callers can use a single boolean check (`if dec.Approved { ... }`).
-func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, in GateInput) (Decision, error) {
+func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, in GateInput) (decision Decision, gateErr error) {
+	// Capture the effective mode after tuning on every return path.
+	defer func() { decision.EffectiveMode = in.Mode }()
 	if in.Mode == ModeNone || eval == nil {
 		return Decision{NotGated: true, Approved: true}, nil
 	}
@@ -86,8 +90,9 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 	}
 
 	payload := map[string]any{
-		"tool": in.Tool,
-		"args": in.Args,
+		"tool":      in.Tool,
+		"args":      in.Args,
+		"gate_mode": in.Mode.String(),
 	}
 	// review is a sibling of args, not nested under it, so a stored row
 	// still says exactly what call was gated (args) alongside the extra
@@ -97,6 +102,9 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 	// for every other tool is unchanged.
 	if len(in.Review) > 0 {
 		payload["review"] = in.Review
+	}
+	if len(in.Correlation) > 0 {
+		payload["correlation"] = in.Correlation
 	}
 	req := Request{
 		WorkspaceID: in.WorkspaceID,

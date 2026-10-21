@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -79,7 +80,11 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
-	rows, err := harbormaster.List(r.Context(), h.db, workspaceID, status, limit+1, offset)
+	viewer := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewer = user.ID
+	}
+	rows, err := harbormaster.ListFiltered(r.Context(), h.db, workspaceID, status, limit+1, chataudience.RunApprovalVisibilitySQL, chataudience.VerifiedRunApprovalReadArgs(viewer), offset)
 	if err != nil {
 		h.logger.Error("approvals list", "err", err)
 		replyError(w, http.StatusInternalServerError, "list failed")
@@ -88,6 +93,9 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	hasMore := len(rows) > limit
 	if hasMore {
 		rows = rows[:limit]
+	}
+	for i := range rows {
+		rows[i] = approvalReadProjection(rows[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"rows": rows, "status": status, "count": len(rows), "has_more": hasMore,
@@ -103,7 +111,12 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	row, err := harbormaster.Get(r.Context(), h.db, workspaceID, id)
+	viewer := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewer = user.ID
+	}
+	args := append(chataudience.VerifiedRunApprovalReadArgs(viewer), id)
+	visible, err := harbormaster.ListFiltered(r.Context(), h.db, workspaceID, "", 1, "("+chataudience.RunApprovalVisibilitySQL+") AND aq.id=?", args)
 	if err == harbormaster.ErrNotFound {
 		replyError(w, http.StatusNotFound, "not found")
 		return
@@ -113,7 +126,7 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "get failed")
 		return
 	}
-	if row == nil {
+	if len(visible) == 0 {
 		// harbormaster.Get returns (nil, nil) for a missing row that
 		// didn't map to ErrNotFound (e.g., an ID that's malformed but
 		// the driver didn't complain). Surface as 404 so the UI
@@ -122,7 +135,7 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, row)
+	writeJSON(w, http.StatusOK, approvalReadProjection(visible[0]))
 }
 
 // Decide serves POST /api/v1/approvals/{id}/decide with body
@@ -179,6 +192,9 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		// ok
+	case errors.Is(err, harbormaster.ErrDecisionDenied):
+		replyError(w, http.StatusForbidden, "whole-run approval access denied")
+		return
 	case errors.Is(err, harbormaster.ErrNotFound):
 		replyError(w, http.StatusNotFound, "not found")
 		return

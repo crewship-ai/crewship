@@ -100,7 +100,11 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
-	status, respBody := s.savePipeline(r.Context(), body, authorAgentID, s.requestChatID(r))
+	ctx, ok := s.routineOrigin(w, r)
+	if !ok {
+		return
+	}
+	status, respBody := s.savePipeline(ctx, body, authorAgentID, s.requestChatID(r))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(respBody)
@@ -208,6 +212,7 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		"author_agent_id":  authorAgentID,
 		"author_chat_id":   authorChatID,
 		"save_token":       testRunResult.SaveToken,
+		"source_run_id":    routineSourceRun(ctx),
 		"target_crew_slug": body.Crew,
 		// B8 (#2359): forwarded verbatim. The main API's InternalSave does
 		// the validation and the atomic routine+version+trigger transaction
@@ -335,6 +340,7 @@ func (s *Server) runPipeline(ctx context.Context, body routineRunRequest, invoki
 		"inputs":            body.Inputs,
 		"invoking_crew_id":  s.ipc.CrewID,
 		"invoking_agent_id": invokingAgentID,
+		"source_run_id":     routineSourceRun(ctx),
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal run body"})
@@ -383,18 +389,9 @@ func (s *Server) handlePipelinesGet(w http.ResponseWriter, r *http.Request, slug
 	s.proxyIPCJSON(w, r, http.MethodGet, path, "pipeline-get", nil)
 }
 
-// handlePipelinesRun invokes a saved pipeline through the PUBLIC run
-// route with the internal token.
-//
-// It used to stamp X-Crewship-Invoking-{Crew,Agent} on the request so the
-// executor could record who triggered the run. That never carried
-// identity anywhere: proxyIPCJSON builds a fresh upstream request and
-// forwards only X-Internal-Token, and crewshipd no longer reads those
-// headers at all — on a JWT route they were only ever a way for a caller
-// to invent a crew. Agent-invoked runs that need attribution go through
-// the run_routine MCP tool (runPipeline → /api/v1/internal/pipelines/run),
-// where the identity travels in the body and is verified server-side
-// against the token's crew binding and the agents table.
+// handlePipelinesRun invokes the same attributed internal run path as the
+// run_routine MCP tool. Source run/agent identity is verified server-side.
+// Dry runs use the public read-only planning route through trusted sidecar IPC.
 //
 // POST /pipelines/{slug}/run
 func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug string) {
@@ -413,18 +410,25 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "marshal body"})
 		return
 	}
-	suffix := "/run"
-	if body.DryRun {
-		suffix = "/dry_run"
-	}
-	// #812: a forged per-agent token is still refused here, even though this
-	// route has no channel to carry the acting agent upstream (see the doc
-	// comment) — the run_routine MCP tool is the attributed path.
-	if _, ok := s.actingAgentID(r); !ok {
-		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+	// #812: refuse forged per-agent tokens before either execution or dry run.
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
-	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + suffix
+	if !body.DryRun {
+		ctx, ok := s.routineOrigin(w, r)
+		if !ok {
+			return
+		}
+		status, result := s.runPipeline(ctx, routineRunRequest{Slug: slug, Inputs: body.Inputs}, agentID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(result)
+		return
+	}
+
+	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + "/dry_run"
 	s.proxyIPCJSON(w, r, http.MethodPost, path, "pipeline-run", bodyJSON)
 }
 
@@ -524,6 +528,9 @@ func (s *Server) ipcRequestJSON(ctx context.Context, method, path string, body [
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Internal-Token", s.ipc.Token)
+	if token := routineSourceToken(ctx); token != "" {
+		req.Header.Set("X-Crewship-Run-Token", token)
+	}
 
 	resp, err := ipcClient.Do(req)
 	if err != nil {

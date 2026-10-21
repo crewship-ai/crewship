@@ -375,8 +375,8 @@ func TestRunAssignment_ContainerError_FailsAssignment(t *testing.T) {
 func TestFinishAssignment_CompletedWithMissionComment(t *testing.T) {
 	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
 	_ = crewID
-	// missions row matching group_id (chat_id) and NO mission_tasks link →
-	// the completion-comment block fires.
+	// The persisted mission target matches group_id (chat_id), with no
+	// mission_tasks link, so the completion-comment block fires.
 	if _, err := h.db.Exec(`
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 'trace-asg-2', 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`,
@@ -388,6 +388,11 @@ func TestFinishAssignment_CompletedWithMissionComment(t *testing.T) {
 		VALUES ('asg-fin-1', ?, ?, ?, ?, 'task', 'RUNNING', ?, datetime('now'))`,
 		wsID, chatID, leadID, workerID, chatID); err != nil {
 		t.Fatalf("seed assignment: %v", err)
+	}
+
+	// Group/chat identity alone does not authorize a result comment.
+	if _, err := h.db.Exec(`UPDATE assignments SET mission_id = ? WHERE id = ? AND workspace_id = ?`, chatID, "asg-fin-1", wsID); err != nil {
+		t.Fatalf("bind assignment mission: %v", err)
 	}
 
 	h.finishAssignment(context.Background(), "asg-fin-1", "", chatID, "asg-worker", wsID,
@@ -434,6 +439,11 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 		VALUES ('asg-fin-2', ?, ?, ?, ?, 'task', 'RUNNING', ?, datetime('now'))`,
 		wsID, chatID, leadID, workerID, chatID); err != nil {
 		t.Fatalf("seed assignment: %v", err)
+	}
+
+	// Group/chat identity alone does not authorize a result comment.
+	if _, err := h.db.Exec(`UPDATE assignments SET mission_id = ? WHERE id = ? AND workspace_id = ?`, chatID, "asg-fin-2", wsID); err != nil {
+		t.Fatalf("bind assignment mission: %v", err)
 	}
 
 	h.finishAssignment(context.Background(), "asg-fin-2", "", chatID, "asg-worker", wsID,

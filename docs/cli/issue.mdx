@@ -22,6 +22,7 @@ crewship issue <subcommand> [flags]
 |---------|-------------|
 | `list` | List issues in the workspace |
 | `get` | Show issue details |
+| `revision` | Read current field and aggregate revision counters |
 | `create` | Create a new issue |
 | `update` | Update an issue |
 | `delete` | Delete an issue |
@@ -58,6 +59,42 @@ crewship issue <subcommand> [flags]
 
 ---
 
+## `crewship issue revision`
+
+```bash
+crewship issue revision ENG-42
+crewship issue revision ENG-42 --format yaml
+crewship issue revision ENG-42 --workspace platform
+```
+
+Returns `{ "revision": 3, "aggregate_revision": 8 }` for an issue identifier or
+internal ID. These are current integer counters, not timestamps. The field
+revision covers the issue row; the aggregate revision includes covered child
+data. Unrelated run and automation state needs its own refresh.
+
+The command requires authentication and a selected workspace. With a configured
+workspace it calls `GET /api/v1/issues/{identifier}/revision`. An explicit global
+`--workspace` selection uses the equivalent
+`GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision` route.
+Both authorize the same selected workspace. Missing and inaccessible issues
+fail with `404`; restricted sessions are unsupported.
+
+Default output is JSON; the global output format also supports YAML and NDJSON.
+Global `--filter` applies a jq expression to the JSON response. This read never
+changes issue state or starts a run.
+
+## Retrying edits and comments
+
+```bash
+crewship issue update ENG-42 --title 'Fix loading' --expected-revision 7 --idempotency-key edit-7
+crewship issue comment ENG-42 --body 'Verified' --idempotency-key comment-7
+```
+
+Keep the key and expected revision unchanged when retrying after a timeout.
+A stale revision or changed payload under the same key returns a conflict.
+Omitting these flags preserves legacy behavior. Use `issue revision` to inspect
+the current revision before making a new edit.
+
 ## `crewship issue list`
 
 List issues in the workspace with optional filters.
@@ -68,6 +105,8 @@ crewship issue list --status IN_PROGRESS --crew backend-team
 crewship issue list --priority high --label bug
 crewship issue list --search "auth flow"
 crewship issue list --counts --crew backend-team
+crewship issue list --needs reply
+crewship issue list --mine --counts
 ```
 
 | Flag | Type | Default | Description |
@@ -77,6 +116,13 @@ crewship issue list --counts --crew backend-team
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--assignee` | `string` | | Filter by assignee ID. |
 | `--label` | `string` | | Filter by label name. |
+| `--owner` | `string` | | Only issues owned by this user ID, or `me`. |
+| `--delegate` | `string` | | Only issues delegated to this agent ID. |
+| `--work-mode` | `string` | | Who holds the work: `agent` or `human`. |
+| `--mine` | `bool` | `false` | My work: open issues I own or hold as the worker. |
+| `--working` | `bool` | `false` | Agents working: an agent holds the issue and its session is active. |
+| `--needs` | `string` | | `reply` (open issue I own or hold where a session is `awaiting_input` or `error`, or the execution needs a person) or `review` (in `REVIEW`, client acceptance on, and I am the requester). |
+| `--blocked` | `bool` | `false` | Blocked: an open issue blocks it. |
 | `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
 | `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
 | `--offset` | `int` | `0` | Skip this many rows. Page with `--offset 50`, `--offset 100`, … |
@@ -134,6 +180,7 @@ Create a new issue.
 ```bash
 crewship issue create --crew backend-team --title "Fix login bug" --priority high
 crewship issue create --crew backend-team --title "Add caching" --assignee viktor --labels <label-id>
+crewship issue create --crew backend-team --title "Rotate keys" --owner jana@example.com --delegate viktor
 ```
 
 | Flag | Type | Default | Description |
@@ -145,6 +192,8 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--status` | `string` | `BACKLOG` | Starting status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED`, `DUPLICATE` — anything not one step from `BACKLOG` is refused with a 400. |
 | `--assignee` | `string` | | Who the issue goes to. With the default `--assignee-type agent`, an agent slug or ID (resolved client-side) — this sets the issue's **delegate**. With `--assignee-type user`, a workspace member's email or user ID — this sets the issue's human **owner**. |
 | `--assignee-type` | `string` | `agent` | `agent` (writes `delegate_agent_id`) or `user` (writes `owner_user_id`). Any other value is rejected before a request is sent. |
+| `--owner` | `string` | | The accountable person: a workspace member's email or user ID. Sets `owner_user_id`. Can be combined with `--delegate`; refused together with `--assignee`. |
+| `--delegate` | `string` | | The agent that does the work: a slug or ID. Sets `delegate_agent_id`. Can be combined with `--owner`; refused together with `--assignee`. |
 | `--labels` | `string` | | Comma-separated label IDs. |
 | `--due-date` | `string` | | Due date in ISO 8601 format. |
 | `--project-id` | `string` | | Attach to a project (ID). |
@@ -229,6 +278,7 @@ The comment body can be passed as positional arguments after the identifier, or 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--body` | `string` | | Comment body (alternative to positional args). |
+| `--guest-visible` | `bool` | `false` | Explicitly publish this new comment to Guests with project Read. Project issues only; agent mentions must stay private. |
 | `--mention` | `string` | | Mention an agent by slug. Repeatable. Resolved against the workspace agent roster (same lookup as `--assignee` elsewhere) and prepended to the body as the real `[@slug](crewship:agent/<id>)` link the server requires — one per mention, space-separated, before the rest of the text. Fails with a clear error naming the slug and the workspace's real agents if a slug does not resolve. `--mention` alone with no other text is a valid comment. |
 
 <Warning>
@@ -734,3 +784,162 @@ crewship issue bulk update --ids ms_a,ms_b --labels lbl_bug,lbl_p0
 | `--labels` | string | | Comma-separated label IDs. **REPLACES** the existing label set on each issue; empty string clears all labels. |
 
 At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).` — the two counts differ when some IDs were 404 or 403.
+
+### `crewship issue deliveries failed`
+
+List failed issue mutation delivery jobs in the selected workspace. Requires a
+current trusted OWNER/ADMIN membership and `workspace:admin` token scope when
+scoped. The response contains sanitized metadata and error codes, never the
+job payload, requester receipt or raw transport error. This command is read-only;
+it cannot retry or reauthorize work.
+
+```bash
+crewship issue deliveries failed --limit 50
+crewship issue deliveries failed --cursor NEXT_CURSOR --limit 50 --format json
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--limit` | `50` | Maximum failed jobs per page, from 1 to 100. |
+| `--cursor` | | Opaque `next_cursor` from the preceding page. |
+
+Pages are ordered by creation time and ID. Cursors are bound to the viewer and
+workspace. A page contains `jobs`, `has_more` and `next_cursor`; there is no
+workspace-wide total. Global output format and filter flags are supported.
+
+## `crewship issue shared`
+
+List or read the current Guest projection of issues in shared projects. This
+command uses project grants and does not request the shared workspace board.
+
+```bash
+crewship issue shared --project PROJECT_ID --limit 100 --offset 0
+crewship issue shared --search "client request" --project PROJECT_ID
+crewship issue shared ISSUE_IDENTIFIER --format json
+```
+
+| Flag | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `--project` | string | none | Restrict the list to a granted project ID. |
+| `--limit` | integer | 100 | Rows per page, 1–500; larger values are rejected. |
+| `--offset` | integer | 0 | Pagination offset, 0–1,000,000. |
+| `--search` | string | none | Literal title/identifier substring, maximum 256 Unicode characters, sent as `q`; only valid when listing. |
+
+Listing requires project.list; detail requires project.read. A revoked or
+foreign issue returns 404, never a cached body. No issue mutations, comments,
+related-resource metadata or run history are returned.
+
+
+Search stays within live shared-project grants and never matches descriptions or
+comments. SQLite ASCII case folding applies; `%` and `_` are literal. Search does
+not change pagination offsets automatically in CLI; pass `--offset 0` for a new
+search. Combining `--search` with an issue identifier is rejected locally.
+
+Shared collection requests use the same per-user/workspace budget as the browser
+and every CLI token: default 20/minute (burst 15), plus 20/minute (burst 5) per
+project or all-project selection. Empty search and pagination count too. A 429
+prints the server retry guidance and exits 6 without retrying automatically.
+Wait before rerunning; HTTP scripts should honor `Retry-After` seconds.
+
+Trusted collaborators can explicitly publish a new project comment with
+`crewship issue comment CLIENT-1 --body "Staff answer" --guest-visible`.
+Omitting `--guest-visible` keeps it private. Agent mentions must remain in private
+comments; publication and its audit commit together.
+
+## `crewship issue shared projects`
+
+List the Guest's visible projects, including empty ones, with contribution and
+intake readiness columns. Requires a live project List grant.
+
+```bash
+crewship issue shared projects
+```
+
+## `crewship issue shared create`
+
+```bash
+crewship issue shared create --project PROJECT_ID --title "Client request" --description "Brief"
+```
+
+`--project` and `--title` are required. Requires project Read and Contribute;
+the administrator must configure an intake crew first. Creates an unassigned
+Backlog request. The caller cannot choose an execution crew, agent, assignee or
+routine. Description is optional; maximum title/description sizes are 4096/65536
+bytes. Mutations use the existing `workspace:admin` token scope in addition to
+resource grants; this scope does not make a Guest an administrator.
+
+`--idempotency-key` optionally binds a retry to this exact creation request; keep it unchanged after a lost response.
+
+## `crewship issue shared comment`
+
+```bash
+crewship issue shared comment CLIENT-1 --project project-id --body "Client question"
+```
+
+Requires Read and Contribute. `--body` is required, 1–32768 bytes. The comment
+is shared with readers of this project; private staff comments remain private.
+The route does not resolve or trigger agent mentions.
+
+The required `--project` confirms the audience of the draft. If the issue has moved, the server returns 409; review the new project before sending again.
+
+`--idempotency-key` optionally binds a retry to this exact comment and expected project audience; conflicting requests are refused.
+
+## `crewship issue shared comments`
+
+```bash
+crewship issue shared comments CLIENT-1 --format json
+```
+
+Requires Read. Shows the latest 100 explicitly shared comments with generic author
+labels. Moving the issue to another project does not publish its old shared
+thread to a different client. IDs or identifiers are accepted.
+
+## `crewship issue shared move`
+
+```bash
+crewship issue shared move CLIENT-1 --status TODO
+```
+
+Requires Read and Contribute. `--status` is required: BACKLOG or TODO. Only
+intake work can move between those states. Execution, review, terminal states
+and project reassignment retain the trusted workflow. A 409 is returned if the
+issue has already entered that workflow. No mutation retries a denied request.
+
+Guest `issue shared create`, `comment` and `move` accept `--idempotency-key`.
+Keep the key unchanged when retrying the same command after a lost response;
+a conflicting key is not retried automatically. The server rechecks current
+grants and project audience before replaying a saved result.
+
+
+A linked queued, running or waiting routine blocks intake moves and deletion
+with HTTP 409, including after its issue execution becomes superseded. The CLI
+reports the refusal without retrying the mutation. Project reassignment is not
+a Guest intake operation.
+
+## `crewship issue shared-delete-preview`
+
+Review one Guest issue before permanent removal. Requires current project Read,
+Manage and explicit `delete_issues` shares. Returns its project, status, reviewed
+version and current credential's deletion eligibility. Private comments and
+execution history are not returned.
+
+```bash
+crewship issue shared-delete-preview CLIENT-1 -o json
+```
+
+## `crewship issue shared-delete`
+
+Permanently remove the reviewed issue, its comments and attachments. Only Backlog
+or Cancelled issues without active assignments/executions or sub-issues are eligible. A changed
+project/version returns 409; review again and explicitly resubmit. The command
+never fetches a replacement version or retries a deletion automatically.
+
+```bash
+crewship issue shared-delete CLIENT-1 --project project_123 --version REVIEWED_VERSION --confirm
+```
+
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--project <id>` | yes | Project from the reviewed preview. |
+| `--version <version>` | yes | Exact 64-character snapshot from the preview. |
+| `--confirm` | yes | Explicit permanent-deletion confirmation. |

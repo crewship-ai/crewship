@@ -346,7 +346,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		if lastActive.Valid && lastActive.String != "" {
 			u.LastActiveAt = &lastActive.String
 		}
-		if suspended.Valid && suspended.String != "" {
+		if suspended.Valid {
 			u.SuspendedAt = &suspended.String
 			if suspendedReason.Valid && suspendedReason.String != "" {
 				u.SuspendedReason = &suspendedReason.String

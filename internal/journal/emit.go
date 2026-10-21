@@ -645,12 +645,12 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 	defer w.writeMu.Unlock()
 
 	return withTx(ctx, w.db, func(tx *sql.Tx) error {
-		return w.persistBatchTx(ctx, tx, batch)
+		return w.persistBatchTx(ctx, tx, batch, false)
 	})
 }
 
 // persistBatchTx extends the chain inside the caller's write transaction.
-func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) error {
+func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, checked bool) error {
 	stmt, err := tx.PrepareContext(ctx, insertSQL)
 	if err != nil {
 		return fmt.Errorf("journal: prepare: %w", err)
@@ -727,7 +727,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) 
 			ExpiresAt: expiresStr,
 		})
 
-		_, err = stmt.ExecContext(ctx,
+		insertArgs := []any{
 			e.ID,
 			e.WorkspaceID,
 			nullable(e.CrewID),
@@ -750,9 +750,23 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) 
 			entryHash,
 			// priority_at_emit — the same value the hash above committed to.
 			priorityOrNormal(e.Priority),
-		)
+		}
+		insertResult, err := stmt.ExecContext(ctx, insertArgs...)
 		if err != nil {
 			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
+		}
+		affected, err := insertResult.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("journal: acknowledge insert %s: %w", e.Type, err)
+		}
+		if affected != 1 {
+			return fmt.Errorf("journal: insert %s affected %d rows, want 1", e.Type, affected)
+		}
+
+		if checked {
+			if err := acknowledgeTxInsert(ctx, tx, insertArgs); err != nil {
+				return err
+			}
 		}
 
 		head.seq = seq

@@ -166,3 +166,23 @@ it("finds the current human worker instead of the previous agent after takeover"
   rerender({ ...args, search: "", filterAgentId: "agent" })
   expect(result.current.visible).toEqual([])
 })
+
+describe("useFilteredIssues — owner, who holds the work, label", () => {
+  const issues = [
+    issue({ id: "o1", owner: { id: "u1" }, delegate: { id: "ag1" }, labels: [{ id: "l1", name: "docs", color: "", label_group: null }] }),
+    issue({ id: "o2", owner: { id: "u2" }, work_mode: "human", worker_user_id: "u2", worker_name: "Jana" }),
+    issue({ id: "o3", owner: { id: "u1" } }),
+  ]
+  const base = { issues, search: "", selectedProjectId: null, filterProjectId: null, filterCrewId: null, filterAgentId: null, filterStatuses: [], filterPriority: null }
+
+  it.each([
+    [{ filterOwnerId: "u1" }, ["o1", "o3"]],
+    [{ filterHolder: "agent" as const }, ["o1"]],
+    [{ filterHolder: "person" as const }, ["o2"]],
+    [{ filterLabel: "docs" }, ["o1"]],
+    [{ filterOwnerId: "u1", filterLabel: "docs" }, ["o1"]],
+  ])("%j", (extra, want) => {
+    const { result } = renderHook(() => useFilteredIssues({ ...base, ...extra }))
+    expect(result.current.visible.map((i) => i.id)).toEqual(want)
+  })
+})

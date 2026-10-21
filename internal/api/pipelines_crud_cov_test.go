@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // ---------------------------------------------------------------------------
@@ -296,7 +298,7 @@ func TestCovPCSave_ExistingSlug_UpsertsInPlace(t *testing.T) {
 	// only fires on a genuine UNIQUE race the pre-check missed, which the
 	// public handler can't deterministically trigger here.)
 	h, userID, wsID, crewID := covPCHandler(t)
-	covPCInsertPipeline(t, h.db, wsID, "dup_pln", "dup", crewID, 0, 1, 0)
+	saved := seedArchivedAPIFixture(t, h.db, wsID, "dup", covPCDef("dup"), pipeline.AuthorMeta{CrewID: crewID, Via: pipeline.AuthoredViaUser})
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(covPCSaveBody("dup", crewID, nil)))
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
@@ -305,9 +307,12 @@ func TestCovPCSave_ExistingSlug_UpsertsInPlace(t *testing.T) {
 		t.Fatalf("status = %d body=%s, want 201 (upsert)", rr.Code, rr.Body.String())
 	}
 	// Authorship flips to the user_api path on the update.
-	var via string
-	if err := h.db.QueryRow(`SELECT authored_via FROM pipelines WHERE id='dup_pln'`).Scan(&via); err != nil {
+	var id, via string
+	if err := h.db.QueryRow(`SELECT id,authored_via FROM pipelines WHERE workspace_id=? AND slug='dup'`, wsID).Scan(&id, &via); err != nil {
 		t.Fatalf("readback: %v", err)
+	}
+	if id != saved.ID {
+		t.Fatal("upsert replaced the original archived routine identity")
 	}
 	if via != "user_api" {
 		t.Errorf("authored_via = %q, want user_api after upsert", via)

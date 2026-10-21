@@ -29,6 +29,7 @@ func covCPSeedPairing(t *testing.T, h *CliPairHandler, userID, code string) {
 		VALUES (?, ?, ?, 'pending', ?, ?)`,
 		"covcp-"+code, userID, code,
 		now.Format(time.RFC3339), now.Add(10*time.Minute).Format(time.RFC3339))
+	execOrFatal(t, h.db, `UPDATE cli_pairings SET source_session_id=? WHERE code=?`, pairTestSession(t, h.db, userID), code)
 }
 
 func covCPRedeem(h *CliPairHandler, code string) *httptest.ResponseRecorder {

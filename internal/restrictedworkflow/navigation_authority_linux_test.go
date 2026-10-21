@@ -88,7 +88,7 @@ func TestNavigationZeroRunFastPathIsOnlyNecessaryAuthority(t *testing.T) {
 	check(false) // h2's independent run grant cannot qualify h1.
 	replace([]access.Right{{Kind: "agent", ID: "agent", Operation: "discover"}})
 	check(false)
-	replace([]access.Right{{Kind: "agent", ID: "agent", Operation: "run"}})
+	replace([]access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}})
 	if _, err := s.db.Exec(`UPDATE agents SET deleted_at=datetime('now') WHERE id='agent'`); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestNavigationZeroRunFastPathIsOnlyNecessaryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(false) // Undeleting does not resurrect grants removed by the scope trigger.
-	replace([]access.Right{{Kind: "agent", ID: "agent", Operation: "run"}})
+	replace([]access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}})
 	check(true)
 	// A valid run grant to another local agent satisfies only the cheap filter;
 	// it must never authorize a recipe using the original ungranted agent.

@@ -8,6 +8,10 @@ tag: Stable
 
 # Cost
 
+<Note>
+Cost figures are readable by workspace `OWNER` and `ADMIN` only. For any other role the server answers `403` ("Spend requires OWNER or ADMIN") and the command prints that reason.
+</Note>
+
 `cmd/crewship/cmd_cost.go` is a high-density single-screen cost summary for the impatient. [`crewship paymaster ...`](/cli/paymaster) exposes the underlying rollups in full fidelity; `cost` is what you reach for when you just want to know "how much am I spending and on what?" without remembering which subcommand to run.
 
 Composes three paymaster endpoints into one view:

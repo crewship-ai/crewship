@@ -60,6 +60,7 @@ type Part struct {
 // bridges that gap so they still render.
 type Message struct {
 	ID          string    `json:"id"`
+	RunID       string    `json:"run_id,omitempty"`
 	ChatID      string    `json:"session_id"`
 	AgentID     string    `json:"agent_id,omitempty"`
 	Role        Role      `json:"role"`
@@ -190,6 +191,7 @@ func (a *PartAccumulator) Parts() []Part {
 // JSONL via Read.
 type SearchHit struct {
 	ID          string    `json:"id"`
+	RunID       string    `json:"run_id,omitempty"`
 	SessionID   string    `json:"session_id"`
 	AgentID     string    `json:"agent_id"`
 	Role        Role      `json:"role"`
@@ -259,25 +261,8 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	}
 	data = append(data, '\n')
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	f, ok := s.files[sessionID]
-	if !ok {
-		dir := filepath.Join(s.basePath, "conversations")
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			return fmt.Errorf("create conversation dir: %w", err)
-		}
-		path := filepath.Join(dir, sessionID+".jsonl")
-		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-		if err != nil {
-			return fmt.Errorf("open conversation file: %w", err)
-		}
-		s.files[sessionID] = f
-	}
-
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write message: %w", err)
+	if err := s.appendJSONL(sessionID, data); err != nil {
+		return err
 	}
 
 	// Dual-write the searchable mirror. The JSONL above is the durable
@@ -294,6 +279,74 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	return nil
 }
 
+// SyncSession commits the triggering transcript before a run admission can
+// reference it. Unlike periodic Flush, errors must prevent execution.
+func (s *Store) SyncSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateID(sessionID); err != nil {
+		return fmt.Errorf("invalid session ID: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.files[sessionID]
+	if f == nil {
+		// Restore closes cached descriptors. A different chat's existing transcript
+		// still needs its durability barrier; never create missing history here.
+		root, err := os.OpenRoot(s.basePath)
+		if err != nil {
+			return fmt.Errorf("open conversation storage: %w", err)
+		}
+		defer root.Close()
+		f, err = root.OpenFile("conversations/"+sessionID+".jsonl", os.O_WRONLY, 0)
+		if err != nil {
+			return fmt.Errorf("open existing conversation session: %w", err)
+		}
+		defer f.Close()
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat conversation session: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return fmt.Errorf("conversation session has no appended message")
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync conversation session: %w", err)
+	}
+	return nil
+}
+
+// appendJSONL serializes file handles only. Never hold this mutex while
+// acquiring a database connection: restore publishes under its DB transaction
+// and must be able to fence JSONL writers without a Store-to-DB lock cycle.
+func (s *Store) appendJSONL(sessionID string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, ok := s.files[sessionID]
+	if !ok {
+		dir := filepath.Join(s.basePath, "conversations")
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("create conversation dir: %w", err)
+		}
+		path := filepath.Join(dir, sessionID+".jsonl")
+		var err error
+		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+		if err != nil {
+			return fmt.Errorf("open conversation file: %w", err)
+		}
+		s.files[sessionID] = f
+	}
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write message: %w", err)
+	}
+
+	return nil
+}
+
 // appendMirror inserts the searchable row. Triggers (migration v111) keep
 // conversation_messages_fts in sync, so this is a single INSERT.
 func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message) error {
@@ -302,10 +355,10 @@ func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message)
 		authorUserID = msg.AuthorUserID
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID,
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)
@@ -498,4 +551,42 @@ func validateID(s string) error {
 		return fmt.Errorf("invalid ID: %q", s)
 	}
 	return nil
+}
+
+// SnapshotTranscripts briefly fences file writes while backup pins read
+// descriptors and sizes. It leaves cached append descriptors open and does
+// not fsync: the snapshot reads the same page-cache bytes written by Append.
+func (s *Store) SnapshotTranscripts(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	return s.mu.Unlock, nil
+}
+
+// LockTranscripts fences append writers through restore publication and commit.
+// Closing cached append descriptors prevents restored files from
+// leaving subsequent messages on an unlinked inode. Call release exactly once.
+func (s *Store) LockTranscripts(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	var first error
+	for id, f := range s.files {
+		if err := f.Sync(); err != nil && first == nil {
+			first = err
+		}
+		if err := f.Close(); err != nil && first == nil {
+			first = err
+		}
+		delete(s.files, id)
+	}
+	if first != nil {
+		s.mu.Unlock()
+		return nil, first
+	}
+	return s.mu.Unlock, nil
 }

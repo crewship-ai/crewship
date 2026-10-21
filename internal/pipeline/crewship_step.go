@@ -47,9 +47,11 @@ type CrewshipActions interface {
 // resulting event resolve the originating run and inherit its chain budget
 // instead of starting a fresh one.
 type CrewshipRequest struct {
-	Verb        string
-	Args        map[string]any
-	WorkspaceID string
+	ChatOriginID string `json:"-"` // Server-owned execution lineage.
+	OperationKey string
+	Verb         string
+	Args         map[string]any
+	WorkspaceID  string
 	// CrewID is the routine's AUTHOR crew — the principal whose autonomy
 	// level bounds the action, and the crew the created row is attributed to.
 	CrewID  string
@@ -170,6 +172,22 @@ var crewshipVerbs = map[string]crewshipVerb{
 		PolicyAction: "escalation_create",
 		RequiredArgs: []string{"from_slug", "reason", "chat_id"},
 		Summary:      "Raise an escalation to a human",
+	},
+	"page.create": {
+		Method: "POST",
+		// The same door the save_page tool uses for an agent
+		// (internal/api/pages_internal_save.go): the page is owned by the
+		// routine's author crew, and a crew whose autonomy holds page_create
+		// creates nothing (a held decision is a refusal on an unattended run).
+		// Filing it in a folder is deliberately NOT here: a folder's sharing is
+		// decided by people, and a step must not widen who reaches a page.
+		Path:         "/api/v1/internal/pages/save",
+		PolicyAction: "page_create",
+		RequiredArgs: []string{"name", "panels"},
+		// The page has an owner (the crew) and needs no acting agent: the
+		// route accepts an empty agent_id.
+		RequiresActingAgent: false,
+		Summary:             "Create a page (name and panels) owned by the routine's author crew",
 	},
 	"page.write": {
 		Method: "PUT",

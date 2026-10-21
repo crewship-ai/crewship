@@ -48,6 +48,20 @@ type orchestrationHandlers struct {
 func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox", authed(wsCtx(http.HandlerFunc(r.failedIssueMutationJobs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/proposals", authed(wsCtx(http.HandlerFunc(r.chatProposals))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/proposals/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatProposalShow))))
+	r.authedMut("PATCH", "/api/v1/chats/{chatId}/proposals/{sourceId}", roleInline, r.chatProposalMutate)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/confirm", roleInline, r.chatProposalConfirm)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/discard", roleInline, r.chatProposalDiscard)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/run-preflight", authed(wsCtx(http.HandlerFunc(r.chatRunPreflight))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions", authed(wsCtx(http.HandlerFunc(r.chatDecisionList))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatDecisionGet))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer", roleInline, r.chatDecisionAnswer)
+	r.mux.Handle("GET /api/v1/operations/{operationId}", authed(wsCtx(http.HandlerFunc(r.chatEntityOperation))))
+	r.mux.Handle("GET /api/v1/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/run-profile", authed(wsCtx(http.HandlerFunc(r.restrictedRunProfile))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/restricted-cli-chats", roleSelf, r.createRestrictedCLIContext)
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
@@ -131,6 +145,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	r.issueMutationHandler = issues
 	issues.routines = r.PipelinesHandler
 	issues.SetJournal(r.Journal())
 	issues.SetStoragePath(r.storagePath)
@@ -444,6 +459,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
+	// openapi: query range:string since:string until:string
+	r.mux.Handle("GET /api/v1/paymaster/credential-spend", authed(wsCtx(http.HandlerFunc(ph.CredentialSpend))))
 
 	// Chains: the causal graph around one anchor (issue identifier, issue id,
 	// run id, routine id or slug, assignment id, inbox item id) in a single
@@ -507,9 +524,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// one query instead of fanning out to four.
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
 	ih.SetJournal(r.Journal())
-	// openapi: query limit:integer offset:integer
+	// openapi: query limit:integer offset:integer cursor:string q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	// openapi: query q:string space:string unread:boolean attention:string deadline:string now:string day_end:string crew:string agent:string kind:string
+	r.mux.Handle("GET /api/v1/inbox/counts", authed(wsCtx(http.HandlerFunc(ih.Counts))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.authedMut("PATCH", "/api/v1/inbox/{id}", roleSelf, ih.PatchState)
 	// Acting on a run_needs_human card (B15, #2389): answer resumes the

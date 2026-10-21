@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -162,9 +163,9 @@ import (
 // — the subject's own records are deleted, a capability with a NOT NULL
 // issuer is revoked, history is anonymised — in one transaction, with one
 // receipt key per table. The file header there argues each table; the one
-// non-obvious call is credentials, whose NOT NULL created_by is handed to a
-// custodian (the admin running the erasure) rather than the credential being
-// deleted out from under the agents that use it.
+// non-obvious call is live credentials, whose required created_by is handed
+// to a custodian rather than deleting a secret agents still use. Retired
+// credentials instead clear created_by without requiring a custodian.
 //
 // # The contract: unnamed IN THIS WORKSPACE, on the tables enumerated here
 //
@@ -385,6 +386,12 @@ func (h *AdminGDPRHandler) finalizeGDPRAction(ctx context.Context, id string, sc
 	if finalErr != nil {
 		status = "failed"
 		errMsg = finalErr.Error()
+		var needsManual *ErrPagesNeedManualTransfer
+		if errors.As(finalErr, &needsManual) {
+			// Audit storage is not a private Page view. Preserve the failure
+			// reason and matcher IDs without copying Page names into history.
+			errMsg = "page_ownership_transfer_required: unresolved Page IDs " + strings.Join(needsManual.PageIDs, ", ")
+		}
 	}
 	if _, err := h.db.ExecContext(ctx, `
 		UPDATE gdpr_actions
@@ -432,7 +439,8 @@ func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, action
 //   - every table in identitySteps (admin_gdpr_erase_identity.go) no longer
 //     names the subject in this workspace: their own records and the
 //     capabilities they issued are gone, their attribution on history is
-//     cleared, their credentials have a custodian (#2308).
+//     cleared, live credentials have a custodian and retired creators are
+//     anonymized (#2308).
 //   - gdpr_actions has a 'delete' row with scope_json + status=
 //     'completed' (or 'failed' with error populated).
 //
@@ -499,12 +507,29 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 				"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
 		}
 		h.finalizeGDPRAction(r.Context(), actionID, scope, err)
-		writeJSON(w, status, map[string]any{
+		response := map[string]any{
 			"action_id":    actionID,
 			"data_subject": targetID,
 			"workspace_id": wsID,
 			"error":        msg,
-		})
+		}
+		if needsManual != nil {
+			// The GDPR route also admits instance-only administrators. Re-read
+			// current Page visibility after the failed custody transaction;
+			// middleware's role snapshot may have changed during body upload.
+			ph := NewPageHandler(h.db, nil, h.logger)
+			role, roleErr := ph.liveContentHumanRole(r.Context(), wsID, actorID)
+			detailed := roleErr == nil && canRole(role, "manage")
+			if !detailed && !isInstanceAdmin(r, h.db) {
+				response["error"] = "active trusted administrator required"
+				writeJSON(w, http.StatusForbidden, response)
+				return
+			}
+			for key, value := range pageOwnershipConflictPayload("cannot erase this user: ", needsManual, detailed) {
+				response[key] = value
+			}
+		}
+		writeJSON(w, status, response)
 		return
 	}
 
@@ -651,17 +676,20 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 	// counted once in RowsAffected, not twice. See the file header "Why
 	// erase approvals_queue rather than add it to the excluded list" for
 	// why this table is erased at all.
-	res, err = h.db.ExecContext(r.Context(),
-		`DELETE FROM approvals_queue WHERE workspace_id = ? AND (requested_by = ? OR decided_by = ?)`,
-		wsID, targetID, targetID)
+	approvalWriter := h.journal
+	if _, noop := approvalWriter.(noopEmitter); noop {
+		approvalWriter = nil
+	}
+	approvalDeleted, approvalErr := harbormaster.DeleteSources(r.Context(), h.db, approvalWriter, wsID, `(requested_by=? OR decided_by=?)`, targetID, targetID)
+	err = approvalErr
 	if err != nil {
 		h.logger.Warn("gdpr delete: approvals_queue delete failed",
 			"action_id", actionID, "err", err)
 		if firstErr == nil {
 			firstErr = err
 		}
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		scope.ApprovalsQueue = int(n)
+	} else if approvalDeleted > 0 {
+		scope.ApprovalsQueue = int(approvalDeleted)
 	}
 
 	// 5) user_models: the operator model — the one surface holding the
@@ -781,7 +809,8 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	// 7) everything else that names the subject in this workspace (#2308):
 	// their own records go, the capabilities they issued are revoked, their
-	// attribution on history is cleared, their credentials get a custodian.
+	// attribution on history is cleared; live credentials get a custodian,
+	// while retired credentials clear their creator.
 	// See admin_gdpr_erase_identity.go for the per-table argument. Same
 	// shape as step 6: one transaction, a zeroed receipt on failure, and a
 	// 207 rather than a refusal because rows have already gone by now.

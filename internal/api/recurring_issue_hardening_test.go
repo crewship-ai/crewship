@@ -91,6 +91,9 @@ func TestRecurringIssueDispatcher_FireIdempotent(t *testing.T) {
 	// A distinct occurrence (different bucket) is a new fire.
 	row2 := row
 	row2.nextRunBucket = "2020-01-02T00:00:00Z"
+	// The next occurrence must actually be due in persistent state, not only
+	// in a stale tick snapshot. The previous fire advanced the real schedule.
+	execOrFatal(t, h.db, `UPDATE recurring_issues SET next_run=? WHERE id=?`, row2.nextRunBucket, row2.id)
 	d.fireOne(ctx, row2)
 	if got := count(); got != 2 {
 		t.Fatalf("distinct occurrence created total %d issues, want 2", got)

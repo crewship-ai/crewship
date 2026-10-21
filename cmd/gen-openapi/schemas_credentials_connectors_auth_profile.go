@@ -60,7 +60,31 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"created_at": str(), "last_used_at": nullableString(), "revoked_at": nullableString(), "scopes": array(str()),
 	})
 
+	// credential_folders.go uses the same JSON fields for create and patch;
+	// parent_id is nullable, while an omitted patch field is unchanged.
+	folderFields := func() map[string]any {
+		return map[string]any{
+			"name":                   map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
+			"description":            map[string]any{"type": "string", "maxLength": 500},
+			"parent_id":              nullableString(),
+			"reveal_policy":          map[string]any{"type": "string", "enum": []string{"inherit", "admins", "nobody"}},
+			"min_security_level":     map[string]any{"type": "integer", "minimum": 1, "maximum": 4},
+			"default_security_level": map[string]any{"type": "integer", "minimum": 1, "maximum": 4},
+			"remind_after_days":      map[string]any{"type": "integer", "minimum": 0, "maximum": 3650},
+		}
+	}
+	folder := object(map[string]any{
+		"id": str(), "parent_id": nullableString(), "name": str(), "description": str(),
+		"reveal_policy": str(), "remind_after_days": integer(), "min_security_level": integer(),
+		"default_security_level": map[string]any{"type": "integer", "nullable": true},
+		"credential_count":       integer(), "created_at": str(), "updated_at": str(),
+	}, "id", "parent_id", "name", "description", "reveal_policy", "remind_after_days", "min_security_level", "default_security_level", "credential_count", "created_at", "updated_at")
+
 	components := map[string]any{
+		"CredentialFolder":              folder,
+		"CredentialFolderList":          array(ref("CredentialFolder")),
+		"CredentialFolderCreateRequest": request(folderFields(), "name"),
+		"CredentialFolderUpdateRequest": request(folderFields()),
 		"CredentialRoutineDependent": object(map[string]any{
 			"slug": str(), "name": str(), "type": str(),
 			"resolution": map[string]any{"type": "string", "enum": []string{"would_resolve", "another_credential", "unavailable"}},
@@ -111,6 +135,11 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 	// Request bodies for these routes are owned by schemas_request_core_resources_v2.go
 	// and schemas_integrations_auth_request_bodies.go; only responses are declared here.
 	credentialRoutes := map[string]DomainSchema{
+		"GET /api/v1/credential-folders":               {Response: ref("CredentialFolderList"), SuccessStatuses: []string{"200"}},
+		"POST /api/v1/credential-folders":              {Request: ref("CredentialFolderCreateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"201"}},
+		"PATCH /api/v1/credential-folders/{folderId}":  {Request: ref("CredentialFolderUpdateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"200"}},
+		"DELETE /api/v1/credential-folders/{folderId}": {SuccessStatuses: []string{"204"}},
+
 		// Bare array by default; `?paginate=true` switches to the
 		// {credentials, next_cursor, limit} envelope (credentials.go:217).
 		"GET /api/v1/credentials": {Response: map[string]any{"oneOf": []any{ref("CredentialList"), ref("CredentialPage")}}}, "POST /api/v1/credentials": {Response: credential},

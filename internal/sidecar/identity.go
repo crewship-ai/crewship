@@ -115,8 +115,8 @@ func (s *Server) identityForRunTokenCtx(ctx context.Context, tok string) (agentI
 			// so its identity is stable for the rest of the run and so the
 			// registry can later be told it ended. The chat is unknown on this
 			// path (the token binds workspace/agent/run and deliberately not a
-			// chat id, which is not identity), so runChatID falls back to the
-			// boot chat until the orchestrator supplies one.
+			// chat id, which is not identity). The host must recover the
+			// execution chat; it must never borrow the sidecar boot chat.
 			s.registerRunFromToken(run, ag)
 			return ag, s.slugForAgentID(ag, run), run, true, true
 		}
@@ -185,8 +185,8 @@ func (s *Server) slugForAgentID(agentID, runID string) string {
 // who raised it or from where. assignment.go already said so in a comment; this
 // is the fix for it.
 //
-// Degrades to the boot chat, not to empty: a v1 token carries no run, and a
-// record with no chat at all is worse than one with the old, imprecise chat.
+// Only legacy identities without a run retain the boot-chat fallback. An
+// unknown v2 execution chat stays empty for authoritative host recovery.
 func (s *Server) requestChatID(r *http.Request) string {
 	_, _, runID, _, _ := s.actingRunIdentity(r)
 	return s.runChatID(runID)
@@ -203,12 +203,14 @@ func (s *Server) requestChatID(r *http.Request) string {
 // about it. A per-run token can: the run registry knows the chat the run was
 // dispatched for.
 //
-// Falls back to the boot chat when the run is unknown, which keeps a v1 token
-// and a pre-E0 sidecar behaving exactly as before rather than losing the chat
-// reference entirely.
+// Only a missing run identity falls back to the legacy boot chat. A known
+// run with unknown chat must be resolved from the durable host journal.
 func (s *Server) runChatID(runID string) string {
 	if st, known := s.runs.lookup(runID); known && st.ChatID != "" {
 		return st.ChatID
+	}
+	if runID != "" {
+		return ""
 	}
 	if s.ipc != nil {
 		return s.ipc.ChatID

@@ -28,7 +28,11 @@ export function setWorkspaceRequestAvailability(id: string | null, ready: boolea
 }
 function independent(input: RequestInfo | URL, init?: RequestInit) {
   const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-  const path = new URL(raw, "http://workspace.invalid").pathname
+  const url = new URL(raw, "http://workspace.invalid")
+  const path = url.pathname
+  // Explicit workspace requests remain fenced, even from account/admin screens.
+  if (url.searchParams.has("workspace_id")) return false
+  if (path.startsWith("/api/v1/admin/") || path === "/api/v1/users/me" || path.startsWith("/api/v1/users/me/") || path.startsWith("/api/v1/me/")) return true
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
   if (!path.startsWith("/api/")) return true
   if (method === "GET" && path === "/api/v1/workspaces") return true
@@ -36,6 +40,7 @@ function independent(input: RequestInfo | URL, init?: RequestInit) {
     "/api/auth/csrf": ["GET"], "/api/auth/session": ["GET"],
     "/api/auth/callback/credentials": ["POST"], "/api/auth/signout": ["POST"],
     "/api/auth/token/refresh": ["POST"], "/api/v1/auth/config": ["GET"],
+    "/api/v1/auth/invitation/accept": ["POST"],
     "/api/v1/auth/sessions": ["GET"], "/api/v1/auth/cli-tokens": ["GET", "POST"],
     "/api/v1/users/me": ["GET", "PATCH", "PUT"], "/api/v1/users/me/password": ["POST"],
   }

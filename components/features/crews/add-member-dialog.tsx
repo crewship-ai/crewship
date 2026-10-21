@@ -3,15 +3,12 @@
 import { useState, useEffect } from "react"
 import { Spinner } from "@/components/ui/spinner"
 
-import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import {
   Select,
   SelectContent,
@@ -19,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { CrewMember } from "@/lib/types/crew"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -105,16 +102,22 @@ export function AddMemberDialog({
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add Member to Crew</DialogTitle>
-          <DialogDescription>
-            Select a workspace member to add to this crew.
-          </DialogDescription>
-        </DialogHeader>
+  const canSubmit = !!selectedUserId && !submitting && !loading
 
+  return (
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      onSubmit={() => { if (canSubmit) void handleSubmit() }}
+    >
+      <CreateSurfaceHeader
+        concept="crews"
+        title="Add Member to Crew"
+        description="Select a workspace member to add to this crew."
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody>
         {loading ? (
           <div className="flex items-center justify-center py-6">
             <Spinner className="h-5 w-5 text-muted-foreground" />
@@ -137,23 +140,14 @@ export function AddMemberDialog({
             </SelectContent>
           </Select>
         )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={!selectedUserId || submitting || loading}>
-            {submitting ? (
-              <>
-                <Spinner className="mr-2 h-4 w-4" />
-                Adding...
-              </>
-            ) : (
-              "Add Member"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={submitting ? "Adding..." : "Add Member"}
+        onPrimary={() => void handleSubmit()}
+        primaryDisabled={!selectedUserId || loading}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
 }

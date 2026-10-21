@@ -78,7 +78,7 @@ func TestStaticFileHandler_NestedExactPath(t *testing.T) {
 func TestStaticFixturesDoNotNameDeletedRoutes(t *testing.T) {
 	deleted := []string{
 		// /crews/agents — no page.tsx, no crews/agents.html in the export.
-		// app/(dashboard)/agents/page.tsx redirects to /crews instead.
+		// app/(legacy)/agents/page.tsx redirects to /crews instead.
 		"crews/agents.html",
 	}
 	fs := fakeFS()

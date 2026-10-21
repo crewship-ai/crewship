@@ -10,12 +10,14 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 )
@@ -175,8 +177,28 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := UserFromContext(r.Context())
+	if actor == nil {
+		replyError(w, 401, "Authentication required")
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin member creation", err)
+		return
+	}
+	defer tx.Rollback()
+	if err := memberCreateActorIn(r.Context(), tx, actor.ID, workspaceID, req.Role); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, 403, "Forbidden")
+		} else {
+			replyInternalError(w, h.logger, "authorize member creation", err)
+		}
+		return
+	}
+
 	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		workspaceID, req.UserID).Scan(&existingID)
 	if err == nil {
@@ -189,7 +211,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userExists bool
-	err = h.db.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
+	err = tx.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "User not found")
 		return
@@ -202,12 +224,29 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	memberID := generateCUID()
 
-	_, err = h.db.ExecContext(r.Context(),
+	result, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		memberID, workspaceID, req.UserID, req.Role, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert member", err)
 		return
+	}
+
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge member insert", errors.Join(err, errors.New("membership insert did not affect one row")))
+		return
+	}
+	notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, req.UserID, req.Role, now, access.Membership{ID: memberID, Mode: "trusted", Revision: 1})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit member creation", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit member creation", err)
+		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	writeJSON(w, http.StatusCreated, memberResponse{
@@ -291,7 +330,26 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	if err := departWorkspace(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
-			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
+			// Middleware admission may be stale after waiting for the writer.
+			// This workspace route has no instance-admin exception to Page access.
+			ph := NewPageHandler(h.db, nil, h.logger)
+			liveRole, roleErr := ph.liveContentHumanRole(r.Context(), workspaceID, actorID)
+			if roleErr != nil || !canRole(liveRole, "manage") {
+				replyError(w, http.StatusForbidden, "active trusted workspace administrator required")
+				return
+			}
+			if liveRole != "OWNER" {
+				var private bool
+				if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM pages WHERE workspace_id=? AND owner_user_id=? AND private_audience=1)`, workspaceID, memberUserID).Scan(&private); err != nil {
+					replyInternalError(w, h.logger, "authorize custody conflict", err)
+					return
+				}
+				if private {
+					writeJSON(w, 409, map[string]string{"code": "page_ownership_transfer_required", "error": "workspace OWNER must select a private artifact successor before removing this member"})
+					return
+				}
+			}
+			replyPageOwnershipConflict(w, "cannot remove this member: ", needsManual)
 			return
 		}
 		replyInternalError(w, h.logger, "remove member", err)
@@ -376,8 +434,10 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 }
 
 type createInvitationRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	AccessMode string         `json:"access_mode"`
+	Rights     []access.Right `json:"rights"`
+	Email      string         `json:"email"`
+	Role       string         `json:"role"`
 }
 
 func generateToken() (string, error) {
@@ -426,6 +486,17 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if req.AccessMode == "" {
+		req.AccessMode = "trusted"
+	}
+	if req.AccessMode != "trusted" && req.AccessMode != "restricted" || req.AccessMode == "trusted" && len(req.Rights) > 0 || req.AccessMode == "restricted" && req.Role == "ADMIN" {
+		replyError(w, 400, "Guest invitations require a non-administrator role")
+		return
+	}
+	if req.Rights == nil {
+		req.Rights = []access.Right{}
+	}
+
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Authentication required")
 		return
@@ -451,6 +522,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusForbidden, "Only workspace owner can invite with ADMIN role")
 		return
 	}
+	if err = access.ValidateRights(r.Context(), tx, workspaceID, req.Rights); err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
+
 	if h.license != nil {
 		if err := h.license.CheckMemberLimit(r.Context(), tx, workspaceID); err != nil {
 			if license.IsLimitError(err) {
@@ -502,10 +578,10 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	}
 
 	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at,access_mode,rights_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		invID, workspaceID, req.Email, req.Role, user.ID, invitationTokenHash(token),
-		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
+		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), req.AccessMode, marshalInvitationRights(req.Rights))
 	if err != nil {
 		replyInternalError(w, h.logger, "insert invitation", err)
 		return
@@ -585,10 +661,18 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 		return err // *ErrPagesNeedManualTransfer passes through for a 409
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	removed, err := tx.ExecContext(ctx,
 		"DELETE FROM workspace_members WHERE user_id = ? AND workspace_id = ?",
-		memberUserID, workspaceID); err != nil {
+		memberUserID, workspaceID)
+	if err != nil {
 		return fmt.Errorf("delete member: %w", err)
+	}
+	removedCount, err := removed.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count removed members: %w", err)
+	}
+	if removedCount != 1 {
+		return fmt.Errorf("member removal affected %d rows, expected one", removedCount)
 	}
 
 	// crew_members has no workspace_id of its own (prisma/schema.prisma:
@@ -613,10 +697,30 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 			return err
 		}
 	}
+	actorType := journal.ActorUser
+	if actorID == "" {
+		actorType = journal.ActorSystem
+	}
+	notify, err := appendAuthorizationAudit(ctx, tx, j, journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryMemberRemoved,
+		ActorType: actorType, ActorID: actorID, Summary: "Workspace member removed",
+		Payload: map[string]any{"subject_user_id": memberUserID, "action": "member_removed"},
+	})
+	if err != nil {
+		return fmt.Errorf("audit member removal: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit member removal: %w", err)
 	}
+	if notify != nil {
+		notify()
+	}
 	emitPageOwnerTransferJournals(ctx, j, workspaceID, actorID, memberUserID, transferred)
 	return nil
+}
+
+func marshalInvitationRights(rights []access.Right) string {
+	raw, _ := json.Marshal(rights)
+	return string(raw)
 }

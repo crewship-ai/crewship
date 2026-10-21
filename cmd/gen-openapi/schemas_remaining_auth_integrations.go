@@ -33,6 +33,7 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"id": str(), "workspace_id": str(), "message_id": str(), "chat_id": nullable(str()), "trace_id": nullable(str()),
 		"signal": map[string]any{"type": "string", "enum": []string{"helpful", "not_helpful", "inaccurate", "unsafe", "edit", "regenerate"}},
 		"reason": nullable(str()), "user_id": nullable(str()), "created_at": str(),
+		"revision": integer(), "memory": object(map[string]any{"status": str(), "entry_id": str()}),
 	})
 	hook := object(map[string]any{
 		"id": str(), "workspace_id": str(), "crew_id": nullable(str()), "event": str(), "handler_kind": str(),
@@ -70,7 +71,7 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"POST /api/v1/labels":                                         {Response: ref("RemainingLabel")},
 		"PATCH /api/v1/labels/{labelId}":                              {Response: ref("RemainingLabel")},
 		"DELETE /api/v1/labels/{labelId}":                             {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
-		"POST /api/v1/feedback":                                       {Response: object(map[string]any{"id": str()})},
+		"POST /api/v1/feedback":                                       {Response: object(map[string]any{"id": str(), "revision": integer(), "memory": object(map[string]any{"status": str(), "entry_id": str()})})},
 		"GET /api/v1/feedback":                                        {Response: object(map[string]any{"feedback": array(ref("RemainingFeedback"))})},
 		"DELETE /api/v1/feedback":                                     {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
 		"GET /api/v1/hooks":                                           {Response: object(map[string]any{"rows": array(ref("RemainingHook")), "count": integer()})},

@@ -135,6 +135,12 @@ func setupMCPConfig(
 		logger.Warn("notify MCP injection failed; agent will have no notify_send tool", "error", err)
 	}
 
+	if injected, err := injectIssuesMCPIntoClaudeJSON(mcpJSON); err == nil {
+		mcpJSON = injected
+	} else if logger != nil {
+		logger.Warn("issues MCP injection failed; agent will use HTTP issue tools", "error", err)
+	}
+
 	homeDir := agentHomeDir(agentSlug, runID)
 	// Write config file (600 perms, owned by agent user).
 	// Use base64 encoding to prevent shell injection if mcpJSON contains

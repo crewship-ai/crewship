@@ -264,13 +264,13 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		return s
 	}
 	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id, lead_planning)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?, 1)`,
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id, lead_planning, chat_origin_id)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?, 1, (SELECT chat_origin_id FROM missions WHERE id=? AND workspace_id=?))`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
 		"[PLANNING] "+title.String,
 		ms.ID,
 		now,
-		ms.ID, nullIfEmpty(ms.AuthorAgentID), nullIfEmpty(ms.CreatedByUserID),
+		ms.ID, nullIfEmpty(ms.AuthorAgentID), nullIfEmpty(ms.CreatedByUserID), ms.ID, ms.WorkspaceID,
 	)
 	if err != nil {
 		e.logger.Error("create planning assignment", "error", err, "mission_id", ms.ID)

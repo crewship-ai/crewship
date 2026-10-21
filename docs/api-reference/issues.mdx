@@ -88,6 +88,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `project_id` | string | -- | Filter by project |
 | `crew_id` | string | -- | Filter by crew |
 | `assignee_id` | string | -- | Filter by assignee |
+| `owner_id` | string | -- | Filter by human owner: a user ID, or `me` for the caller |
+| `delegate_id` | string | -- | Filter by agent delegate |
+| `work_mode` | string | -- | Who holds the work: `agent` or `human`; anything else is `400` |
+| `mine` | string | -- | `1`: My work, open issues the caller owns or holds as the worker |
+| `working` | string | -- | `1`: Agents working, open issues an agent holds whose session is `active` or `stale` |
+| `needs` | string | -- | `reply`: open issues the caller owns or holds where a person is wanted: a session is `awaiting_input` or `error`, or the active execution is `needs_human`. `review`: issues in `REVIEW` with client acceptance on (`client_review_required`) that the caller requested (`created_by`; the owner when an agent created the issue). Anything else is `400` |
+| `blocked` | string | -- | `1`: Blocked, an open issue blocks it (`blocks` / `blocked_by` relation) |
 | `label` | string | -- | Filter by label name |
 | `q` | string | -- | Search in title or identifier (LIKE match), on the server |
 | `search` | string | -- | Older alias of `q` |
@@ -95,6 +102,8 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
 | `counts` | string | -- | `1` to also compute per-status totals under the same filters as the page (every filter applied, `limit`/`offset` ignored). Answered in the `X-Status-Counts` header; the body is unchanged. Any other value is ignored. |
+
+The view filters above (`owner_id` ... `blocked`) are the Issues panel's quick views. They combine with every other filter by AND, are scoped to the caller's workspace, and reach `X-Total-Count` and `counts=1` as well, so a view's count is exact rather than the size of a loaded page. "Open" means a status outside `DONE`, `COMPLETED`, `CANCELLED` and `DUPLICATE`. Views about the caller (`me`, `mine`, `needs`) match nothing when the request carries no user (a token without one); they never widen to every issue.
 
 The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 
@@ -282,6 +291,8 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `status` | string | No | `"BACKLOG"` | Starting status. Validated like a transition from `BACKLOG`, so only `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED` or `DUPLICATE` are accepted; a terminal start stamps `completed_at` |
 | `assignee_type` | string | No | `null` | `"user"` or `"agent"`. Decides which typed slot `assignee_id` fills: `user` writes the human **owner** (`owner_user_id`), `agent` writes the agent **delegate** (`delegate_agent_id`). Required when `assignee_id` is set |
 | `assignee_id` | string | No | `null` | A workspace member's user ID (`user`) or an agent ID (`agent`) in this workspace; anything else is `400` |
+| `owner_user_id` | string | No | `null` | The accountable person: a user ID of a member of this workspace. Sets the human owner. Can be sent together with `delegate_agent_id`; refused (`400`) together with `assignee_id` |
+| `delegate_agent_id` | string | No | `null` | The agent that does the work: an agent ID in this workspace. Sets the delegate, so the agent holds the work. Can be sent together with `owner_user_id`; refused (`400`) together with `assignee_id` |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
 | `project_id` | string | No | `null` | Parent project ID |
 | `estimate` | integer | No | `null` | Effort/points estimate |
@@ -1240,6 +1251,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `body` | string | Yes | Comment text |
+| `guest_visible` | boolean | No | Explicitly share this new comment with Guests who can read the current project; defaults to false. Project issues only. |
+| `expected_project_id` | string | With sharing | Project observed when choosing the shared audience. A changed project returns 409 and does not publish the draft. |
 
 ```json
 {
@@ -1248,6 +1261,13 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 ```
 
 **Response:** `201 Created` -- comment object with `author_type: "user"`.
+
+`guest_visible: true` appears when the comment is shared with the issue’s current
+project. Historical comments and omitted flags stay private. Agent mentions must remain
+in private comments; a shared comment containing one is refused with 400. Shared publication
+is bound to that project; moving the issue does not publish the old thread to
+new project readers. The trusted list includes private and shared comments;
+Guests use the dedicated [shared-comment routes](/api-reference/workspaces#read-guest-shared-comments).
 
 ---
 
@@ -1969,3 +1989,76 @@ milestone is not in the workspace.
 | `medium` | Medium priority |
 | `high` | High priority |
 | `urgent` | Urgent priority |
+
+
+## Read issue revisions
+
+`GET /api/v1/issues/{identifier}/revision`
+
+`GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision`
+
+Request path parameters are `identifier` and, for the workspace alias,
+`workspaceId`. Neither route accepts a request body.
+
+Both routes require authentication and selected workspace membership. Only
+ordinary trusted sessions are supported. The identifier can also be the issue's
+internal ID. A workspace path must agree with the authorized selected workspace;
+it never overrides that workspace.
+
+Response (`200`):
+
+```json
+{"revision":1,"aggregate_revision":1}
+```
+
+`revision` changes when issue fields change; `aggregate_revision` also covers
+related comments, labels, links, attachments and sub-issues. They describe
+issue data, not unrelated execution or automation freshness. Existing issue
+GET responses include these counters and `allowed_actions` for the current
+viewer. Joined identity names, membership visibility, current execution state
+and allowed actions are read-time projections: they may change while these
+counters stay equal. An open detail must refetch on focus, reconnect and a
+bounded interval while visible. Counter equality alone does not establish that
+the complete detail is live. Actual mutations reauthorize and validate state.
+
+Missing, foreign-workspace and inaccessible issues return `404`; backend
+failures return `503`. Responses set `Cache-Control: no-store`.
+
+
+### Safe retries and human edit conflicts
+
+`PATCH /api/v1/crews/{crewId}/issues/{identifier}` accepts `expected_revision`
+in its body or a numeric `If-Match` header, optionally quoted. Both must agree
+when supplied together. This is an issue-field precondition; wildcard, weak and
+multiple HTTP validators are unsupported. It does not identify the complete
+joined detail as an HTTP ETag.
+
+PATCH and `POST /api/v1/crews/{crewId}/issues/{identifier}/comments` accept an
+`Idempotency-Key` of 1–200 UTF-8 bytes. Retry the same intent with the same key.
+A successful replay returns the original response and status with
+`Idempotency-Replayed: true`; `Operation-ID` identifies the saved operation.
+Changed intent returns `409` with `error: operation_key_conflict`. A stale edit
+returns `409` with `error: revision_conflict` and the current `revision`.
+
+These operation errors use the `{error,...}` JSON envelope. Existing business
+validation conflicts, such as open child issues preventing completion, retain
+the existing Problem Details envelope. Both have Content-Type application/json.
+Clients must handle both documented shapes; this release preserves their wire
+format rather than converting existing errors. Missing current authority is
+rechecked before replay and does not return the stored response.
+
+## Failed issue mutation deliveries
+
+`GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox?state=failed`
+returns read-only delivery diagnostics for current trusted workspace OWNER/ADMIN
+members. Scoped tokens also require `workspace:admin`. Restricted accounts are
+denied. The response uses `Cache-Control: no-store`.
+
+Optional `limit` is 1–100 (default 50); `cursor` is the opaque next-page token
+bound to the viewer and workspace. Jobs are ordered by `(created_at, id)`.
+The response is `{jobs, next_cursor, has_more}`. Each job has `id`, `kind`,
+`attempts`, `max_attempts`, `created_at`, nullable `failed_at` and `error_code`
+(`invalid_payload`, `delivery_exhausted`, `authority_revoked` or `unknown`). No payload, requester
+receipt, raw delivery error or inaccessible job count is returned. There is no
+retry endpoint. Invalid page arguments return 400, authorization failures 403,
+and unavailable diagnostics 503.

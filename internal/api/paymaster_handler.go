@@ -36,12 +36,18 @@ func (h *PaymasterHandler) SpendByCrew(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SpendByCrew(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-crew", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.CrewSpend{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
 }
@@ -52,6 +58,9 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 	crewID := r.PathValue("crewId")
@@ -82,6 +91,9 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("paymaster spend-by-agent", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.AgentSpend{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "crew_id": crewID})
 }
@@ -124,6 +136,9 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
 		replyError(w, http.StatusBadRequest, "mission_id required")
@@ -160,6 +175,9 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !requireSpendReader(w, r) {
+		return
+	}
 	since, _ := parseWindow(r)
 	limit := 10
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -172,6 +190,9 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("paymaster top-spenders", "err", err)
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	if rows == nil {
+		rows = []paymaster.TopSpender{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "limit": limit, "since": since})
 }
@@ -225,6 +246,33 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "logins": logins, "since": since, "until": until})
 }
 
+// CredentialSpend serves GET /api/v1/paymaster/credential-spend: the metered $
+// each API key cost in the window (?range=month is the calendar month so far,
+// UTC). OWNER and ADMIN only, like the provider accounts it describes; no
+// secret value is involved.
+func (h *PaymasterHandler) CredentialSpend(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
+		return
+	}
+	since, until := parseWindow(r)
+	rows, err := paymaster.SpendByCredential(r.Context(), h.db, workspaceID, since, until)
+	if err != nil {
+		h.logger.Error("paymaster credential-spend", "err", err)
+		replyError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	if rows == nil {
+		rows = []paymaster.CredentialSpend{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
+}
+
 // parseWindow accepts ?since=<RFC3339>&until=<RFC3339> or ?range=7d|24h|1h
 // and returns sensible defaults (7 days back) when absent.
 func parseWindow(r *http.Request) (time.Time, time.Time) {
@@ -252,6 +300,9 @@ func parseWindow(r *http.Request) (time.Time, time.Time) {
 			since = now.Add(-7 * 24 * time.Hour)
 		case "30d":
 			since = now.Add(-30 * 24 * time.Hour)
+		case "month":
+			// The calendar month so far, UTC — the window a provider bills by.
+			since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 		}
 	}
 	return since, until

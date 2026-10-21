@@ -4,14 +4,31 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-func audienceDB(t *testing.T) *sql.DB {
+func audienceDB(t *testing.T, legacy ...bool) *sql.DB {
 	t.Helper()
-	db := testutil.MigratedDB(t).DB
+	var db *sql.DB
+	legacyAdministrator := len(legacy) > 0 && legacy[0]
+	restrictedRole := "MEMBER"
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if legacyAdministrator {
+		// Reproduce a pre-invariant database, then apply the real migration below.
+		// Do not remove or disable triggers in a fully migrated fixture.
+		db = testutil.NewMemDB(t)
+		if err := database.MigrateSkipping(t.Context(), db, logger, "guest_administrator_invariant"); err != nil {
+			t.Fatal(err)
+		}
+		restrictedRole = "ADMIN"
+	} else {
+		db = testutil.MigratedDB(t).DB
+	}
 	audienceExec(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('ws','Workspace','ws'),('foreign','Foreign','foreign')`)
 	audienceExec(t, db, `INSERT INTO agents(id,workspace_id,name,slug) VALUES('agent','ws','Agent','agent'),('other-agent','ws','Other','other'),('foreign-agent','foreign','Foreign','foreign')`)
 	for _, member := range []struct{ user, role, mode, workspace string }{
@@ -20,7 +37,7 @@ func audienceDB(t *testing.T) *sql.DB {
 		{"owner", "OWNER", "trusted", "ws"},
 		{"admin", "ADMIN", "trusted", "ws"},
 		{"restricted", "MEMBER", "restricted", "ws"},
-		{"restricted-admin", "ADMIN", "restricted", "ws"},
+		{"restricted-admin", restrictedRole, "restricted", "ws"},
 		{"outsider", "OWNER", "trusted", "foreign"},
 		{"hybrid", "MEMBER", "trusted", "ws"},
 	} {
@@ -52,6 +69,14 @@ func audienceDB(t *testing.T) *sql.DB {
 		audienceExec(t, db, `INSERT INTO chat_participants(chat_id,user_id,role) VALUES('group',?,'member')`, participant)
 	}
 	audienceExec(t, db, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,operation,created_by,created_at) VALUES('chat-grant','restricted-member','agent','agent','chat','owner','2026-10-02T00:00:00Z')`)
+	if legacyAdministrator {
+		if err := database.Migrate(t.Context(), db, logger); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE workspace_members SET role='ADMIN' WHERE user_id='restricted-admin'`); err == nil {
+			t.Fatal("upgrade did not activate administrator invariant")
+		}
+	}
 	return db
 }
 
@@ -80,7 +105,7 @@ func TestAudienceAuthorizationMatrix(t *testing.T) {
 		{"restricted owner with exact chat grant", "restricted-own", "restricted", true, false},
 		{"restricted participant with exact chat grant", "group", "restricted", true, false},
 		{"restricted grant cannot read another private chat", "private", "restricted", false, false},
-		{"restricted administrator inherits no role authority", "private", "restricted-admin", false, false},
+		{"restricted member inherits no role authority", "private", "restricted-admin", false, false},
 		{"restricted participant needs a grant", "group", "restricted-admin", false, false},
 		{"restricted membership elsewhere blocks shared runtime", "hybrid-own", "hybrid", true, false},
 		{"legacy provenance fails closed", "legacy", "owner", false, false},
@@ -140,7 +165,7 @@ func TestAudienceRevocationAndExactGrant(t *testing.T) {
 }
 
 func TestRestrictedAdministratorChatGrantDoesNotWidenAudience(t *testing.T) {
-	db := audienceDB(t)
+	db := audienceDB(t, true)
 	audienceExec(t, db, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,operation,created_by,created_at) VALUES('admin-chat-grant','restricted-admin-member','agent','agent','chat','owner','2026-10-02T00:00:00Z')`)
 	for _, tc := range []struct {
 		chat string

@@ -78,7 +78,10 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/agents/{agentId}/notification-channels", "RemainingAgentNotificationChannelsV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaV1", object(map[string]any{"agent_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
 	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", array(anyObject()))
-	add("GET", "/api/v1/agents/{agentId}/peers", "RemainingAgentPeersV1", array(anyObject()))
+	components["FeedbackPreferenceV1"] = object(map[string]any{"id": str(), "revision": integer(), "feedback_id": str(), "source_revision": integer(), "chat_id": str(), "message_id": str(), "reason": str(), "value": str(), "status": str(), "source_type": str()})
+	add("GET", "/api/v1/agents/{agentId}/peers", "RemainingAgentPeersV1", object(map[string]any{"agent_id": str(), "peers": array(anyObject()), "preferences": array(ref("FeedbackPreferenceV1"))}))
+	addNoContent("PATCH", "/api/v1/agents/{agentId}/peers/{userId}")
+	addRequest("PATCH", "/api/v1/agents/{agentId}/peers/{userId}", "FeedbackPreferenceCorrectionV1", object(map[string]any{"entry_id": str(), "revision": integer(), "reason": str()}))
 	add("GET", "/api/v1/agents/{agentId}/peers/{userId}", "RemainingAgentPeerV1", object(map[string]any{"agent_id": str(), "user_id": str(), "consent": boolean(), "facts": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	// AgentHandler.ListRuns writes []runResponse — the same row as GET /runs.
 	add("GET", "/api/v1/agents/{agentId}/runs", "RemainingAgentRunsV1", array(ref("Run")))
@@ -140,6 +143,19 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// ProvisionStatus builds a map: provenance and job progress are conditional,
 	// while these base keys are written on every successful response.
 	provisionStatus["required"] = []string{"devcontainer_config", "devcontainer_config_defaulted", "cached_image", "config_hash", "toolchain", "agents_pending_restart", "status"}
+	summaryCrew := object(map[string]any{"id": str(), "slug": str(), "name": str(), "error": str()})
+	summaryCrew["required"] = []string{"id", "slug", "name"}
+	provisionSummary := object(map[string]any{"failed": array(summaryCrew), "needs_provision": array(summaryCrew), "total": integer()})
+	provisionSummary["required"] = []string{"failed", "needs_provision", "total"}
+	crewBudget := object(map[string]any{"crew_id": str(), "window": str(), "limit_usd": nullable("number"), "mode": str(), "spent_usd": map[string]any{"type": "number"}, "state": str()})
+	crewBudget["required"] = []string{"crew_id", "window", "limit_usd", "spent_usd", "state"}
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		add(method, "/api/v1/crews/{crewId}/budget", "CrewBudgetV1", crewBudget)
+	}
+	released := object(map[string]any{"id": str(), "expired_at": str(), "released": boolean()})
+	released["required"] = []string{"id", "expired_at", "released"}
+	add("POST", "/api/v1/agents/{agentId}/release", "AgentReleasedV1", released)
+	add("GET", "/api/v1/crews/provisioning-summary", "CrewProvisioningSummaryV1", provisionSummary)
 	add("GET", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionStatusV1", provisionStatus)
 	revision := object(map[string]any{"id": str(), "definition_hash": str(), "build_hash": str(), "image_id": str(), "toolchain": inventory, "created_at": str()})
 	revision["required"] = []string{"id", "definition_hash", "build_hash", "image_id", "toolchain", "created_at"}
@@ -214,7 +230,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaUpdatedV1", ref("RemainingAgentPersonaV1"))
 	add("POST", "/api/v1/agents/{agentId}/persona/suggest", "RemainingAgentPersonaSuggestionV1", object(map[string]any{"content": str(), "rationale": str()}))
 	add("PATCH", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningUpdatedV1", ref("RemainingAgentLearningV1"))
-	addAction("DELETE", "/api/v1/agents/{agentId}/peers/{userId}", "RemainingAgentPeerDeletedV1")
+	addNoContent("DELETE", "/api/v1/agents/{agentId}/peers/{userId}")
 	addAction("POST", "/api/v1/agents/{agentId}/skills", "RemainingAgentSkillAddedV1")
 	addAction("DELETE", "/api/v1/agents/{agentId}/skills/{skillId}", "RemainingAgentSkillRemovedV1")
 	addAction("POST", "/api/v1/agents/{agentId}/credentials", "RemainingAgentCredentialAddedV1")
@@ -227,7 +243,12 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", object(map[string]any{"content": str()}))
 	addRequest("PATCH", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningRequestV1", object(map[string]any{"enabled": boolean(), "mode": str()}))
 	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
-	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", object(map[string]any{"autonomy": str(), "execution": str(), "approval_required": boolean()}))
+	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
+	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
+	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "exclusiveMinimum": 0}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
+	crewBudgetRequest["required"] = []string{"limit_usd"}
+	addRequest("PUT", "/api/v1/crews/{crewId}/budget", "CrewBudgetRequestV1", crewBudgetRequest)
+	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", crewPolicyRequest)
 
 	// Remaining subroute actions. These handlers deliberately return compact
 	// maps (or a file/task envelope), rather than the parent resource.
@@ -330,6 +351,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"POST /api/v1/workspaces/{workspaceId}/skills/bulk-import",
 		"POST /api/v1/workspaces/{workspaceId}/skills/import",
 		"DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}",
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive",
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore",
 	} {
 		method, path, name := splitSchemaRouteName(route)
 		add(method, path, "Remaining"+name+"V1", action)

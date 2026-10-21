@@ -1,0 +1,230 @@
+"use client"
+
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { ArrowLeft, CircleDot, RefreshCw } from "lucide-react"
+import { SubBar, SubBarIconButton, SubBarSecondary } from "@/components/layout/sub-bar"
+import { StatusPill } from "@/components/ui/status-pill"
+import { STATUS_TEXT } from "./issues-view-model"
+import { SharedIssueDelete } from "./shared-issue-delete"
+import { SharedProjectDetails } from "./shared-project-details"
+import { useEffect, useId, useRef, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { z } from "zod"
+import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { useSession } from "@/hooks/use-auth"
+import { AccessNotice, useAccessContext } from "@/components/features/restricted/access-notice"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+
+const issueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string(), project_name: z.string(), can_read: z.boolean(), can_contribute: z.boolean().default(false), can_delete_issues: z.boolean().default(false), description: z.string().optional() })
+const projectSchema = z.object({ id: z.string(), name: z.string(), can_contribute: z.boolean(), intake_ready: z.boolean(), can_manage: z.boolean().default(false) })
+const commentSchema = z.object({ id: z.string(), body: z.string(), author: z.string(), created_at: z.string() })
+type Issue = z.infer<typeof issueSchema>
+type Project = z.infer<typeof projectSchema>
+
+class IssueReadError extends Error {
+  constructor(readonly status: number, message: string) { super(message) }
+}
+export function sharedSearchRetrySeconds(value: string | null): number {
+  if (!value || !/^\d+$/.test(value)) return 60
+  const seconds = Number(value)
+  return Number.isFinite(seconds) ? Math.max(1, Math.min(3600, seconds)) : 60
+}
+
+const accessLost = (error: unknown) => error instanceof IssueReadError && [401, 403, 404].includes(error.status)
+
+async function issueRequest(path: string, method: string, body: unknown, key: string) {
+  const response = await apiFetch(path, { method, headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: JSON.stringify(body) })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null)
+    throw new Error(response.status === 404 ? "Your project access changed. Ask your administrator to check it." : typeof detail?.error === "string" ? detail.error : "Your change was not saved. Your draft is kept.")
+  }
+  return response.json()
+}
+
+// Keep an uncertain submission's key for explicit retries. Clear it only
+// after success; a new payload or audience is a new operation.
+function useIssueRequest() {
+  const pending = useRef<{ fingerprint: string; key: string } | null>(null)
+  return {
+    send: (path: string, method: string, body: unknown) => {
+      const fingerprint = JSON.stringify([path, method, body])
+      if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, key: crypto.randomUUID() }
+      return issueRequest(path, method, body, pending.current.key)
+    },
+    clear: () => { pending.current = null },
+  }
+}
+
+/** Guests use dedicated project projections and never mount the trusted board. */
+export function RestrictedIssues({ identifier }: { identifier?: string | null }) {
+  const router = useRouter()
+  const { workspaceId } = useWorkspace()
+  const { data: session } = useSession()
+  const context = useAccessContext()
+  const filterScope = JSON.stringify([session?.user.id, workspaceId])
+  const [filter, setFilter] = useState({ scope: "", draft: "", q: "", offset: 0 })
+  const currentFilter = filter.scope === filterScope ? filter : { scope: filterScope, draft: "", q: "", offset: 0 }
+  const { q, offset } = currentFilter
+  const [cooldown, setCooldown] = useState({ scope: "", until: 0 })
+  const [lastView, setLastView] = useState<{ scope: string; identifier: typeof identifier; items: Issue[] } | null>(null)
+  const until = cooldown.scope === filterScope ? cooldown.until : 0
+  const searchBlocked = !identifier && until > Date.now()
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCooldown(previous => previous.scope === filterScope ? previous : { scope: filterScope, until: 0 })
+      setLastView(previous => previous?.scope === filterScope ? previous : null)
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [filterScope])
+  useEffect(() => {
+    if (!until) return
+    const timer = setTimeout(() => setCooldown(previous => previous.scope === filterScope ? { scope: filterScope, until: 0 } : previous), Math.max(0, until - Date.now()))
+    return () => clearTimeout(timer)
+  }, [until, filterScope])
+  const searchId = useId()
+  const setOffset = (next: number) => setFilter({ ...currentFilter, offset: next })
+  const base = workspaceId ? `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-issues` : ""
+  const query = useQuery<Issue[]>({
+    queryKey: ["restricted-issues", session?.user.id, workspaceId, identifier, offset, q],
+    enabled: !!workspaceId && !!session?.user.id && !searchBlocked, retry: false, refetchInterval: searchBlocked ? false : 15_000,
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === session?.user.id && previousQuery?.queryKey[2] === workspaceId && previousQuery?.queryKey[3] === identifier ? previous : undefined,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ limit: "100", offset: String(offset) })
+      if (q) params.set("q", q)
+      const path = identifier ? `${base}/${requireApiPathSegment(identifier)}` : `${base}?${params}`
+      const response = await apiFetch(path, { signal })
+      if (!response.ok) {
+        if (!signal.aborted && [401, 403, 404].includes(response.status)) setLastView(previous => previous?.scope === filterScope && previous.identifier === identifier ? null : previous)
+        if (!identifier && response.status === 429 && !signal.aborted) setCooldown({ scope: filterScope, until: Date.now() + sharedSearchRetrySeconds(response.headers.get("Retry-After")) * 1000 })
+        throw new IssueReadError(response.status, response.status === 404 ? "Access unavailable" : "Issues unavailable")
+      }
+      const data = await response.json()
+      const items = identifier ? [issueSchema.parse(data)] : z.array(issueSchema).parse(data)
+      if (!signal.aborted) setLastView({ scope: filterScope, identifier, items })
+      return items
+    },
+  })
+  const projects = useQuery({
+    queryKey: ["restricted-issue-projects", session?.user.id, workspaceId],
+    enabled: !!base && !!session?.user.id && !identifier, retry: false, refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
+      const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId!)}/restricted-issue-projects`, { signal })
+      if (!response.ok) throw new IssueReadError(response.status, "Project access is unavailable")
+      return z.array(projectSchema).parse(await response.json())
+    },
+  })
+  const limited = !identifier && query.error instanceof IssueReadError && query.error.status === 429
+  // Render only a successful projection for this viewer/workspace/detail.
+  // A definitive denial clears it; React Query cache/placeholder data cannot
+  // restore denied titles on a later rate limit or failed query.
+  const visibleIssues = (query.data !== undefined || limited) && lastView?.scope === filterScope && lastView.identifier === identifier ? lastView.items : undefined
+  return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
+    {/* The page chrome is the top bar, as on every other page: the crumb,
+        Back from a shared issue, Refresh on the list. */}
+    <SubBar
+      icon={CircleDot}
+      title={identifier ? "Shared issues" : "Issues shared with you"}
+      section={identifier ? <span className="font-mono">{identifier}</span> : undefined}
+      ariaLabel="Shared issues"
+      leading={identifier ? <SubBarIconButton icon={ArrowLeft} aria-label="Back to issues" onClick={() => router.push("/issues")} /> : undefined}
+      actions={identifier ? undefined : <SubBarSecondary icon={RefreshCw} disabled={searchBlocked} onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</SubBarSecondary>}
+    />
+    <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
+    {!identifier && <form className="touch-form space-y-2" onSubmit={event => { event.preventDefault(); if (searchBlocked) return; setFilter({ ...currentFilter, q: currentFilter.draft.trim(), offset: 0 }) }}>
+      <label htmlFor={searchId} className="text-sm font-medium">Search shared issues</label>
+      <div className="flex gap-2"><Input id={searchId} type="search" maxLength={256} value={currentFilter.draft} onChange={event => setFilter({ ...currentFilter, draft: event.target.value })} /><Button type="submit" disabled={searchBlocked}>Search</Button>{q && <Button type="button" variant="outline" disabled={searchBlocked} onClick={() => setFilter({ scope: filterScope, draft: "", q: "", offset: 0 })}>Clear search</Button>}</div>
+      <p className="text-xs text-muted-foreground">Search titles and identifiers in projects shared with you.</p>
+    </form>}
+    {!identifier && !accessLost(projects.error) && workspaceId && projects.data?.some(project => project.can_manage) && <SharedProjectDetails key={`${session?.user.id}:${workspaceId}`} workspaceId={workspaceId} projects={projects.data.filter(project => project.can_manage)} />}
+    {!identifier && !accessLost(projects.error) && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
+    {limited && <p role="status" className="text-sm text-muted-foreground">Shared issue searches are temporarily limited. Your search and current view are kept. {searchBlocked ? `Try again in ${Math.max(1, Math.ceil((until - Date.now()) / 1000))}s.` : "You can retry now."}</p>}
+    {query.isPending && <p role="status">Loading shared issues…</p>}
+    {!limited && query.isError && (!visibleIssues || accessLost(query.error)) && <AccessNotice kind={accessLost(query.error) ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
+    {!limited && (!query.isError || !accessLost(query.error)) && visibleIssues?.length === 0 && (q ? <p role="status">No matching shared issues. Try another search or clear the filter.</p> : <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />)}
+    {!limited && query.isError && visibleIssues && !accessLost(query.error) && <p role="status" className="text-sm text-muted-foreground">Issues could not be refreshed. Your current view and drafts are kept; refresh before posting.</p>}
+    {(!query.isError || !accessLost(query.error)) && visibleIssues?.map(issue => <IssueCard key={`${session?.user.id}:${workspaceId}:${issue.id}`} issue={issue} detail={!!identifier} mutationsDisabled={query.isError} base={base} userId={session?.user.id} />)}
+    {!identifier && (!query.isError || limited) && <div className="flex gap-2">
+      <Button variant="outline" disabled={searchBlocked || offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</Button>
+      <Button variant="outline" disabled={searchBlocked || (visibleIssues?.length ?? 0) < 100} onClick={() => setOffset(offset + 100)}>Next</Button>
+    </div>}
+  </main>
+}
+
+function NewIssue({ base, projects, disabled }: { base: string; projects: Project[]; disabled: boolean }) {
+  const id = useId()
+  const client = useQueryClient()
+  const [projectId, setProjectId] = useState("")
+  const [title, setTitle] = useState("")
+  const [description, setDescription] = useState("")
+  const [created, setCreated] = useState<Pick<Issue, "identifier" | "can_read"> | null>(null)
+  const request = useIssueRequest()
+  const eligible = projects.filter(project => project.can_contribute)
+  const selected = eligible.find(project => project.id === projectId)
+  const save = useMutation({
+    mutationFn: async () => {
+      const result = issueSchema.safeParse(await request.send(base, "POST", { project_id: projectId, title, description }))
+      if (!result.success || !result.data.id || !result.data.identifier || result.data.project_id !== projectId) throw new Error("Could not confirm the created issue. Your draft is kept; retry to confirm the result.")
+      return result.data
+    },
+    onMutate: () => setCreated(null),
+    onSuccess: async saved => { request.clear(); setCreated({ identifier: saved.identifier, can_read: saved.can_read }); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
+  })
+  return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">New issue</summary>
+    <form className="touch-form mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
+      <label htmlFor={`${id}-project`} className="block text-sm">Project</label>
+      <select id={`${id}-project`} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-[44px]" value={projectId} disabled={disabled || save.isPending} onChange={event => setProjectId(event.target.value)}><option value="">Choose a project</option>{eligible.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+      {selected && !selected.intake_ready && <p role="status" className="text-sm text-muted-foreground">Ask your administrator to configure this project’s issue intake crew.</p>}
+      <label htmlFor={`${id}-title`} className="block text-sm">Title</label><Input id={`${id}-title`} value={title} maxLength={4096} disabled={save.isPending} onChange={event => setTitle(event.target.value)} required />
+      <label htmlFor={`${id}-description`} className="block text-sm">Description</label><Textarea id={`${id}-description`} value={description} maxLength={65536} disabled={save.isPending} onChange={event => setDescription(event.target.value)} />
+      <p className="text-xs text-muted-foreground">Creates an unassigned request in Backlog. An authorized workspace member can review it and start work.</p>
+      <Button type="submit" disabled={disabled || !selected?.intake_ready || !title.trim() || save.isPending}>{save.isPending ? "Creating…" : "Create issue"}</Button>
+      {save.isError && <p role="alert" className="text-sm">{save.error.message}</p>}
+      {created && <div><p role="status" className="text-sm">Created {created.identifier}.</p>{created.can_read && <Link className="inline-flex min-h-9 items-center text-sm text-primary underline coarse:min-h-[44px]" href={`/issues/${encodeURIComponent(created.identifier)}`}>Open {created.identifier}</Link>}</div>}
+    </form>
+  </details>
+}
+
+function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: Issue; detail: boolean; base: string; userId?: string; mutationsDisabled: boolean }) {
+  const client = useQueryClient()
+  const [draft, setDraft] = useState("")
+  const [audience, setAudience] = useState<{ id: string; name: string } | null>(null)
+  const audienceChanged = !!draft && audience?.id !== issue.project_id
+  const commentRequest = useIssueRequest()
+  const statusRequest = useIssueRequest()
+  const commentId = useId()
+  const path = `${base}/${requireApiPathSegment(issue.id)}`
+  const comments = useQuery({
+    queryKey: ["restricted-issue-comments", userId, base, issue.id, issue.project_id], enabled: detail && issue.can_read,
+    retry: false, refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
+      const response = await apiFetch(`${path}/comments`, { signal })
+      if (!response.ok) throw new IssueReadError(response.status, "Shared comments are unavailable. Refresh to check your access.")
+      const parsed = z.array(commentSchema).safeParse(await response.json())
+      if (!parsed.success) throw new Error("Shared comments could not be confirmed. Refresh to try again.")
+      return parsed.data
+    },
+  })
+  const send = useMutation({ mutationFn: () => commentRequest.send(`${path}/comments`, "POST", { body: draft, project_id: audience?.id }), onSuccess: async () => { commentRequest.clear(); setDraft(""); setAudience(null); await comments.refetch() } })
+  const status = useMutation({ mutationFn: (next: string) => statusRequest.send(path, "PATCH", { status: next }), onSuccess: async () => { statusRequest.clear(); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) } })
+  return <article className="space-y-3 rounded-lg border bg-card p-4">
+    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{issue.project_name}</span><span className="font-mono">{issue.identifier}</span><StatusPill status={issue.status} label={STATUS_TEXT[issue.status] ?? issue.status} /></p>
+    <h2 className="font-medium">{!detail && issue.can_read ? <Link className="hover:underline" href={`/issues/${encodeURIComponent(issue.identifier)}`}>{issue.title}</Link> : issue.title}</h2>
+    {detail && <p className="whitespace-pre-wrap text-sm">{issue.description || "No description."}</p>}
+    {!detail && !issue.can_read && <p className="text-xs text-muted-foreground">Ask your administrator for project read access to open details.</p>}
+    {detail && issue.can_contribute && ["BACKLOG", "TODO"].includes(issue.status) && <div className="flex gap-2"><Button variant="outline" disabled={status.isPending || mutationsDisabled} onClick={() => status.mutate(issue.status === "BACKLOG" ? "TODO" : "BACKLOG")}>{issue.status === "BACKLOG" ? "Move to To do" : "Move to Backlog"}</Button>{status.isError && <p role="alert" className="text-sm">{status.error.message}</p>}</div>}
+    {detail && <section className="space-y-3 border-t pt-3" aria-label="Shared comments"><h3 className="text-sm font-medium">Shared comments</h3>
+      {comments.isPending && <p role="status">Loading shared comments…</p>}
+      {comments.isError && <div><p role="alert" className="text-sm">{comments.error.message}</p><Button variant="outline" onClick={() => void comments.refetch()}>Retry comments</Button></div>}
+      {(!comments.isError || !accessLost(comments.error)) && comments.data?.map(comment => <div key={comment.id} className="rounded border p-3"><p className="text-xs text-muted-foreground">{comment.author}</p><p className="whitespace-pre-wrap text-sm">{comment.body}</p></div>)}
+      {!comments.isError && comments.data?.length === 100 && <p className="text-xs text-muted-foreground">Showing the latest 100 shared comments.</p>}
+      {!comments.isError && comments.data?.length === 0 && <p className="text-sm text-muted-foreground">No comments have been shared with this project.</p>}
+      {issue.can_contribute && <form className="space-y-2" onSubmit={event => { event.preventDefault(); if (draft.trim() && !send.isPending && !audienceChanged && !mutationsDisabled && !comments.isError) send.mutate() }}><label htmlFor={commentId} className="text-sm">Comment shared with this project</label><Textarea id={commentId} value={draft} maxLength={32768} disabled={send.isPending} onChange={event => { if (!draft) setAudience({ id: issue.project_id, name: issue.project_name }); setDraft(event.target.value) }} required />{audienceChanged && <div role="alert" className="text-sm"><p>The project changed. Your draft was written for {audience?.name}. Review the new audience before posting.</p><Button type="button" variant="outline" onClick={() => setAudience({ id: issue.project_id, name: issue.project_name })}>Share this draft with {issue.project_name}</Button></div>}<Button type="submit" disabled={!draft.trim() || send.isPending || audienceChanged || mutationsDisabled || comments.isError}>{send.isPending ? "Posting…" : "Post comment"}</Button>{send.isError && <p role="alert" className="text-sm">{send.error.message}</p>}</form>}
+    </section>}
+    {detail && issue.can_delete_issues && <SharedIssueDelete path={path} issueId={issue.id} projectId={issue.project_id} userId={userId} disabled={mutationsDisabled} />}
+  </article>
+}

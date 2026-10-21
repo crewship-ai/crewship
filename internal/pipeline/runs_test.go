@@ -25,9 +25,13 @@ func openRunsTestDB(t *testing.T) (*RunStore, *sql.DB) {
 	if _, err := db.ExecContext(context.Background(), `
 CREATE TABLE workspaces (id TEXT PRIMARY KEY);
 INSERT INTO workspaces (id) VALUES ('ws_runs');
-CREATE TABLE pipelines (id TEXT PRIMARY KEY);
+CREATE TABLE pipelines (
+chat_origin_id TEXT,id TEXT PRIMARY KEY);
 INSERT INTO pipelines (id) VALUES ('pln_a'), ('pln_b');
 CREATE TABLE pipeline_runs (
+    start_phase TEXT,
+invocation_source_run_id TEXT,
+chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,

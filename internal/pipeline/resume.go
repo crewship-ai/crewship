@@ -249,6 +249,14 @@ func (e *Executor) ResumeAfterSignal(runID string, logger *slog.Logger) {
 // reason lands in the row's error_message so operators can see WHY a
 // run fell back to interrupted.
 func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resumePlan, string) {
+	phase, phaseErr := e.runStore.startPhase(ctx, rec.ID)
+	if phaseErr != nil {
+		return nil, "start phase unreadable: " + phaseErr.Error()
+	}
+	if phase == startPhasePreHooks {
+		return nil, "setup interrupted before body; external hook effects may have occurred"
+	}
+
 	if rec.Mode != ModeRun {
 		// dry_run never persists a row in production — nobody is
 		// waiting on a preview after a restart; re-running would only
@@ -347,17 +355,19 @@ func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan,
 	}
 	for {
 		res, err := e.Run(ctx, RunInput{
-			PipelineID:          rec.PipelineID,
-			WorkspaceID:         rec.WorkspaceID,
-			InvokingCrewID:      rec.InvokingCrewID,
-			InvokingAgentID:     rec.InvokingAgentID,
-			InvokingUserID:      rec.InvokingUserID,
-			InvocationAuthority: rec.InvocationAuthority,
-			Inputs:              plan.inputs,
-			Mode:                ModeRun,
-			RunIDOverride:       rec.ID,
-			TriggeredVia:        rec.TriggeredVia,
-			TriggeredByID:       rec.TriggeredByID,
+			PipelineID:            rec.PipelineID,
+			WorkspaceID:           rec.WorkspaceID,
+			InvokingCrewID:        rec.InvokingCrewID,
+			InvokingAgentID:       rec.InvokingAgentID,
+			InvokingUserID:        rec.InvokingUserID,
+			InvocationAuthority:   rec.InvocationAuthority,
+			ChatOriginID:          rec.ChatOriginID,
+			InvocationSourceRunID: rec.InvocationSourceRunID,
+			Inputs:                plan.inputs,
+			Mode:                  ModeRun,
+			RunIDOverride:         rec.ID,
+			TriggeredVia:          rec.TriggeredVia,
+			TriggeredByID:         rec.TriggeredByID,
 			// Re-pin: the run started on this immutable version, so the
 			// resume must execute it too. Run's own drift re-check then
 			// compares the stamped hash against the pinned definition.

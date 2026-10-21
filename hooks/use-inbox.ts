@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -217,15 +217,21 @@ export interface InboxItem {
   }
 }
 
-interface InboxListResponse {
+export interface InboxListResponse {
   rows: InboxItem[]
   count: number
   unread_count: number
   has_more?: boolean
+  /** Opaque keyset position for the next page (?cursor=); set exactly when has_more is. */
+  next_cursor?: string
   /** Exact per-kind counts of the caller's visible not-resolved items (#2187). */
   active_by_kind?: Record<string, number>
   decision_count?: number
 }
+
+/** First page is small so it paints fast; the background walk uses the server cap. */
+const INBOX_FIRST_PAGE_SIZE = 100
+const INBOX_PAGE_SIZE = 500
 
 // "active" = everything not archived (unread + read), resolved excluded
 // server-side — the Inbox tab's filter.
@@ -243,6 +249,81 @@ export const inboxKeys = {
   completeList: (ws: string, state: StateFilter) => ["inbox", ws, "complete-list", { state }] as const,
   detail: (ws: string, id: string) => ["inbox", ws, "detail", id] as const,
   count: (ws: string) => ["inbox", ws, "count"] as const,
+  counts: (ws: string, scope = "") => ["inbox", ws, "counts", scope] as const,
+}
+
+/** Items per Inbox space; the keys are the page's view ids. */
+export interface InboxSpaceCounts {
+  action: number
+  updates: number
+  history: number
+}
+
+/**
+ * GET /api/v1/inbox/counts: what the caller can see, per space and per kind,
+ * with the list's own visibility. Inbox items only — approvals-queue rows and
+ * issue tasks that the page merges in are not in it.
+ */
+export interface InboxCounts {
+  total: number
+  unread: number
+  spaces: InboxSpaceCounts
+  by_kind: Record<string, InboxSpaceCounts>
+  /** Active items per attention class. Present only on a server that also
+   *  searches and pages (q, cursor): its absence means "count and search the
+   *  loaded rows yourself". */
+  by_attention?: Record<string, number>
+  /** Items per deadline bucket (hour / today / soon / none; soon overlaps). */
+  by_deadline?: Record<string, number>
+}
+
+/** Narrows the counts to one space; `dayEnd` is the end of the caller's local day. */
+export interface InboxCountsParams {
+  space?: keyof InboxSpaceCounts
+  dayEnd?: string
+}
+
+function countsScope(params?: InboxCountsParams): string {
+  return params ? `${params.space ?? ""}|${params.dayEnd ?? ""}` : ""
+}
+
+function isSpaceCounts(v: unknown): v is InboxSpaceCounts {
+  const c = v as Partial<InboxSpaceCounts> | null
+  return typeof c?.action === "number" && typeof c.updates === "number" && typeof c.history === "number"
+}
+
+/**
+ * Server counts, or null when the server cannot give them (an older server
+ * without the route, or any failure). Null is the signal to keep counting
+ * from the rows the client walked itself — never to show zeros.
+ */
+export async function fetchInboxCounts(workspaceId: string, signal?: AbortSignal, params?: InboxCountsParams): Promise<InboxCounts | null> {
+  try {
+    const query = new URLSearchParams({ workspace_id: workspaceId })
+    if (params?.space) query.set("space", params.space)
+    if (params?.dayEnd) query.set("day_end", params.dayEnd)
+    const res = await apiFetch(`/api/v1/inbox/counts?${query.toString()}`, { signal })
+    if (!res.ok) return null
+    const body = (await res.json()) as Partial<InboxCounts> | null
+    if (!body || typeof body.total !== "number" || typeof body.unread !== "number" || !isSpaceCounts(body.spaces)) return null
+    const counts: InboxCounts = { total: body.total, unread: body.unread, spaces: body.spaces, by_kind: body.by_kind ?? {} }
+    if (body.by_attention) counts.by_attention = body.by_attention
+    if (body.by_deadline) counts.by_deadline = body.by_deadline
+    return counts
+  } catch (err) {
+    if (signal?.aborted) throw err
+    return null
+  }
+}
+
+/** Server-side inbox counts; `data` is null on a server without them. */
+export function useInboxCounts(workspaceId: string | null | undefined, params?: InboxCountsParams) {
+  return useQuery<InboxCounts | null>({
+    queryKey: inboxKeys.counts(workspaceId ?? "", countsScope(params)),
+    queryFn: ({ signal }) => fetchInboxCounts(workspaceId!, signal, params),
+    enabled: Boolean(workspaceId),
+    retry: false,
+  })
 }
 
 /** Shared WS → cache invalidation. Any inbox state change emits
@@ -281,36 +362,104 @@ export function useInbox(
     ? inboxKeys.completeList(workspaceId ?? "", stateParam)
     : inboxKeys.list(workspaceId ?? "", stateParam)
 
+  // loadAll walks the whole history, but never in front of first paint: the
+  // query resolves with the first page and the remaining pages are appended to
+  // the cache in the background. `backfill` owns that walk; a newer fetch (or
+  // unmount) aborts the previous one so two walks never write the same entry.
+  const backfill = useRef<AbortController | null>(null)
+  useEffect(() => () => backfill.current?.abort(), [listKey.join("|")]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [loadingMore, setLoadingMore] = useState(false)
+
   const query = useQuery<InboxListResponse>({
     queryKey: listKey,
     queryFn: async ({ signal }) => {
-      const pageSize = loadAll ? 500 : 100
-      const rows: InboxItem[] = []
-      let offset = 0
-      let unreadCount = 0
-      let activeByKind: Record<string, number> | undefined
-      let decisionCount: number | undefined
-      do {
-        const params = new URLSearchParams({
-          workspace_id: workspaceId!,
-        })
+      backfill.current?.abort()
+      const fetchPage = async (offset: number, limit: number, sig: AbortSignal, state: StateFilter = stateParam) => {
+        const params = new URLSearchParams({ workspace_id: workspaceId! })
         if (loadAll) {
-          params.set("limit", String(pageSize))
+          params.set("limit", String(limit))
           params.set("offset", String(offset))
         }
-        if (stateParam !== "all") params.set("state", stateParam)
-        const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal })
+        if (state !== "all") params.set("state", state)
+        const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal: sig })
         if (!res.ok) throw new Error(`inbox: ${res.status}`)
-        const page = (await res.json()) as InboxListResponse
-        rows.push(...(page.rows ?? []))
-        unreadCount = page.unread_count ?? unreadCount
-        // Page-independent aggregate — take it from whichever page answered.
-        activeByKind = page.active_by_kind ?? activeByKind
-        decisionCount = page.decision_count ?? decisionCount
-        if (!loadAll || !page.has_more) break
-        offset += page.rows.length
-      } while (true)
-      return { rows, count: rows.length, unread_count: unreadCount, has_more: false, active_by_kind: activeByKind, decision_count: decisionCount }
+        return (await res.json()) as InboxListResponse
+      }
+      const first = await fetchPage(0, loadAll ? INBOX_FIRST_PAGE_SIZE : 100, signal)
+      const firstRows = first.rows ?? []
+      const more = loadAll && Boolean(first.has_more)
+      if (more) {
+        const controller = new AbortController()
+        backfill.current = controller
+        void loadRemainingPages(controller.signal, firstRows, firstRows.length)
+      }
+      return {
+        rows: firstRows,
+        count: firstRows.length,
+        unread_count: first.unread_count ?? 0,
+        // has_more stays true until the background walk finishes or gives up.
+        has_more: more,
+        active_by_kind: first.active_by_kind,
+        decision_count: first.decision_count,
+      }
+
+      async function loadRemainingPages(sig: AbortSignal, seedRows: InboxItem[], startOffset: number) {
+        const seen = new Set(seedRows.map((row) => row.id))
+        let offset = startOffset
+        setLoadingMore(true)
+        try {
+          // The complete "all" list is mostly resolved history, which the page
+          // only needs as a number. When the server can count it, walk the
+          // active items alone (the to-handle and updates lists need every
+          // one) and leave older history to the count; a server without the
+          // route is walked in full, as before.
+          let walkState: StateFilter = stateParam
+          if (stateParam === "all") {
+            const counts = await qc
+              .fetchQuery({ queryKey: inboxKeys.counts(workspaceId!), queryFn: () => fetchInboxCounts(workspaceId!, sig), staleTime: 0 })
+              .catch(() => null)
+            if (sig.aborted) return
+            if (counts) {
+              walkState = "active"
+              offset = 0
+            }
+          }
+          while (!sig.aborted) {
+            const page = await fetchPage(offset, INBOX_PAGE_SIZE, sig, walkState)
+            if (sig.aborted) return
+            const rows = page.rows ?? []
+            const fresh = rows.filter((row) => !seen.has(row.id))
+            // The server says there is more, but the offset cannot advance or
+            // the page taught us nothing new: stop rather than loop forever.
+            // (The active walk starts over the rows the first page already
+            // holds, so a page of only-known rows is not a stall there.)
+            const stalled = Boolean(page.has_more) && (rows.length === 0 || (walkState === stateParam && fresh.length === 0))
+            for (const row of fresh) seen.add(row.id)
+            offset += rows.length
+            const done = !page.has_more || stalled
+            qc.setQueryData<InboxListResponse>(listKey, (prev) => {
+              if (!prev) return prev
+              const have = new Set((prev.rows ?? []).map((row) => row.id))
+              const merged = [...(prev.rows ?? []), ...fresh.filter((row) => !have.has(row.id))]
+              return {
+                ...prev,
+                rows: merged,
+                count: merged.length,
+                unread_count: page.unread_count ?? prev.unread_count,
+                active_by_kind: page.active_by_kind ?? prev.active_by_kind,
+                decision_count: page.decision_count ?? prev.decision_count,
+                has_more: !done,
+              }
+            })
+            if (done) return
+          }
+        } catch {
+          // First page is already on screen; a failed tail keeps what loaded.
+          // The next inbox.updated refetch restarts the walk.
+        } finally {
+          if (!sig.aborted) setLoadingMore(false)
+        }
+      }
     },
     enabled: Boolean(workspaceId),
     // Single-shot like the previous hand-rolled fetch — the error
@@ -503,6 +652,8 @@ export function useInbox(
     // isFetching (not isLoading) mirrors the old loading flag, which
     // was set on every refresh, not just the first one.
     loading: query.isFetching,
+    /** loadAll only: later pages are still arriving after the first paint. */
+    loadingMore,
     error: patchError ?? (query.error ? query.error.message : null),
     refresh,
     patch,

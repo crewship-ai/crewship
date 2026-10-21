@@ -38,7 +38,7 @@ async function mountDraft(){
  fireEvent.change(screen.getByLabelText("Local draft"),{target:{value:"typed local draft"}})
  rows=[B]
  await act(async()=>{await refreshWorkspaceSettings()})
- await screen.findByRole("dialog",{name:"Selected workspace is unavailable"})
+ await screen.findByRole("dialog",{name:"Acme is unavailable"})
  return {dialog,attributes}
 }
 it("occludes portals and blocks writes, then restores the same draft on recovery",async()=>{
@@ -53,11 +53,11 @@ it("occludes portals and blocks writes, then restores the same draft on recovery
  fireEvent.click(screen.getByText("Save draft"))
  await expect(apiFetch("/api/v1/pages?workspace_id=a",{method:"POST"})).rejects.toBeInstanceOf(WorkspaceUnavailableError)
  expect(network).toHaveBeenCalledTimes(priorCalls)
- fireEvent.keyDown(screen.getByRole("dialog",{name:"Selected workspace is unavailable"}),{key:"Escape"})
- expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeTruthy()
+ fireEvent.keyDown(screen.getByRole("dialog",{name:"Acme is unavailable"}),{key:"Escape"})
+ expect(screen.getByRole("dialog",{name:"Acme is unavailable"})).toBeTruthy()
  rows=[A,B]
- fireEvent.click(screen.getByRole("button",{name:"Retry workspace"}))
- await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Selected workspace is unavailable"})).toBeNull())
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Acme is unavailable"})).toBeNull())
  expect(screen.getByLabelText("Local draft")).toHaveValue("typed local draft")
  expect(dialog.getAttribute("aria-hidden")).toBe(attributes.aria)
  expect(dialog.getAttribute("inert")).toBe(attributes.inert)
@@ -67,11 +67,36 @@ it("occludes portals and blocks writes, then restores the same draft on recovery
 })
 it("requires the existing draft guard before an explicit context change",async()=>{
  await mountDraft()
- fireEvent.click(screen.getByRole("button",{name:"Choose Beta"}))
+ fireEvent.click(screen.getByRole("button",{name:/^Beta/}))
  expect(window.confirm).toHaveBeenCalled()
- expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeTruthy()
+ expect(screen.getByRole("dialog",{name:"Acme is unavailable"})).toBeTruthy()
  vi.mocked(window.confirm).mockReturnValue(true)
- fireEvent.click(screen.getByRole("button",{name:"Choose Beta"}))
- await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Selected workspace is unavailable"})).toBeNull())
+ fireEvent.click(screen.getByRole("button",{name:/^Beta/}))
+ await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Acme is unavailable"})).toBeNull())
  expect(screen.getByLabelText("Local draft")).toHaveValue("")
+})
+it("blocks without a close button, over an opaque ground, with the page hidden and inert",async()=>{
+ await mountDraft()
+ const dialog=screen.getByRole("dialog",{name:"Acme is unavailable"})
+ expect(dialog.querySelector('button[aria-label="Close"]')).toBeNull()
+ expect(dialog).toHaveAttribute("data-blocking")
+ const overlay=[...document.querySelectorAll('[data-slot="dialog-overlay"]')].at(-1)
+ expect(overlay?.className).toMatch(/\bbg-background\b/)
+ expect(overlay?.className).not.toMatch(/bg-black/)
+ expect(dialog.className).toMatch(/max-sm:h-dvh/)
+ const page=document.querySelector('div.hidden[inert][aria-hidden="true"]')
+ expect(page).not.toBeNull()
+ // Other workspaces are offered, so leaving without one is not.
+ expect(screen.queryByRole("button",{name:"Continue without a workspace"})).toBeNull()
+ expect(screen.getByRole("button",{name:/^Beta/})).toHaveTextContent("Owner")
+})
+it("offers Continue without a workspace only when no other workspace exists",async()=>{
+ render(<WorkspaceAvailabilityBoundary><span>page</span></WorkspaceAvailabilityBoundary>)
+ await waitFor(()=>expect(network).toHaveBeenCalled())
+ rows=[]
+ await act(async()=>{await refreshWorkspaceSettings()})
+ const dialog=await screen.findByRole("dialog",{name:"Acme is unavailable"})
+ expect(dialog).toHaveTextContent("Your membership may have changed. Your drafts are kept while you retry.")
+ expect(screen.getByRole("button",{name:"Continue without a workspace"})).toBeInTheDocument()
+ expect(screen.queryByText("Or switch to")).toBeNull()
 })

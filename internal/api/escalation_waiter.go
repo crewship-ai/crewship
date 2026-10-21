@@ -230,7 +230,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		var row escalationWaitRow
 		query := `SELECT status, type, resolution, action, redirect_to, deadline_at,
 			         workspace_id, crew_id, chat_id, from_agent_id, reason,
-			         COALESCE(answer_deadline_at, ''), COALESCE(credential_id, '')
+			         COALESCE(answer_deadline_at, ''), COALESCE(credential_id, ''), (type='TEXT' AND COALESCE(source_run_id,'')<>'')
 			  FROM escalations WHERE id = ?`
 		args := []interface{}{escalationID}
 		if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
@@ -243,7 +243,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		err := h.db.QueryRowContext(r.Context(), query, args...).
 			Scan(&row.status, &row.escalationType, &row.resolution, &row.action, &row.redir, &row.deadline,
 				&row.scope.workspaceID, &row.scope.crewID, &row.scope.chatID, &row.scope.fromAgentID, &row.scope.reason,
-				&row.scope.deadlineAt, &row.scope.credentialID)
+				&row.scope.deadlineAt, &row.scope.credentialID, &row.scope.verifiedText)
 		row.scope.id = escalationID
 		// row.deadline is the AGENT's window (what this poll waits on);
 		// row.scope.deadlineAt is the HUMAN's (what an expiry would describe).

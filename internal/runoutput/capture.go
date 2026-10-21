@@ -8,11 +8,14 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type Result struct {
-	ExitCode int    `json:"exit_code"`
-	Reason   string `json:"reason"`
+	ExitCode    int    `json:"exit_code"`
+	Reason      string `json:"reason"`
+	CompletedAt string `json:"completed_at,omitempty"`
 }
 
 // Command carries execution inputs captured at admission. Env must be the
@@ -104,7 +107,9 @@ func CaptureCommand(ctx context.Context, dir string, command Command, limit int6
 	case cmd.ProcessState != nil:
 		result.Reason = "exited"
 	}
-	finishErr := store.Finish(result.ExitCode, result.Reason)
+	completedAt := time.Now()
+	result.CompletedAt = tsformat.Format(completedAt)
+	finishErr := store.FinishAt(result.ExitCode, result.Reason, completedAt)
 	// A quota refusal is represented by its durable terminal event. A storage
 	// error is still an error even if a caller observed some output beforehand.
 	if errors.Is(writeErr, ErrLimit) {

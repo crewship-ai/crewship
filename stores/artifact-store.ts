@@ -16,6 +16,8 @@ export interface ArtifactTab {
 }
 
 interface ArtifactState {
+  ownerScope: string | null
+  setOwnerScope: (scope: string) => void
   open: boolean
   focus: boolean
   tabs: ArtifactTab[]
@@ -33,6 +35,8 @@ interface ArtifactState {
 }
 
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
+  ownerScope: null,
+  setOwnerScope: (scope) => { if (get().ownerScope !== scope) set({ ownerScope: scope, open: false, focus: false, tabs: [], activeId: null }) },
   open: false,
   focus: false,
   tabs: [],

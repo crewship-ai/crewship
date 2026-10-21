@@ -34,6 +34,25 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
 
+Artifact-era chat bundles must retain their source conversation classification.
+If an older bundle lacks it, restore refuses the ambiguous chats before changing
+data or fencing existing services; upgrade the source and create a fresh bundle.
+This also applies to dry-run validation. Instance recovery must complete the
+privacy backfill with the original vault key before discarding runtime consents.
+Retaining this classification never restores permission to execute a run.
+Workspace backup operations retain their OWNER requirement while classified
+private conversations remain, even after creation fails or a Document is deleted.
+Crew bundles without the classification also require source migration evidence
+that they predate Document creation; missing evidence is refused, not inferred
+from omitted tables. Protected bundles require a migrated target schema.
+
+A valid older bundle cannot remove newer private conversation classification
+from its target. Workspace `--replace` refuses a target with retained private
+artifact conversations. Offline `recover --force` checks the existing database
+before replacing it and refuses such a target too; recover into an empty data
+directory instead. These operations do not replace per-agent diagnostic logs,
+so the retained audience proof must remain available.
+
 ## Key concepts
 
 | Term | What it means here |
@@ -91,6 +110,16 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 - **Encryption:** AGE passphrase (default) or AGE X25519 recipient — every new bundle is encrypted, because agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins).
 - **Default location:** `$CREWSHIP_DATA_DIR/backups/` on the server (mode `0700`), or `~/.crewship/backups/` when `CREWSHIP_DATA_DIR` is unset — the same root every other piece of per-instance state resolves against, so isolated instances on one host never share a bundle directory. `--output`/`output_dir` overrides it explicitly.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
+
+Explicit resource-preset choice provenance is included as informational metadata
+alongside canonical resource grants. Workspace backups carry only the historical
+selecting users actually referenced by that workspace, including selectors no
+longer in its roster. Fork restores remap typed membership/resource IDs while
+preserving the immutable definition hash. Older bundles have no saved choices;
+restore does not infer one from matching grants. Custom category subsets omit
+choice labels whose resource or membership is not carried, leaving canonical
+grants unchanged. This foundation does not enable preset application or revive
+in-flight execution authority.
 
 Inside `payload.age`, bundles carry three distinct notions of "memory" — don't confuse them:
 
@@ -270,6 +299,8 @@ instance bundle, and each download is recorded in the instance audit log.
 
 ## Restore
 
+Restoring workspace memberships invalidates previously captured web execution approvals, including those used by recurring issue templates. At their next scheduled firing, affected templates pause and notify an eligible workspace member. Review each definition and save/re-enable it with a fresh full authenticated session to admit future work; a scoped token cannot reauthorize it. Restoring old data does not restore revoked execution authority. For an upgrade accompanying recovery, follow the [execution-authority rollout](../../RELEASING.md#execution-authority-rollout-3068): audit the exact target database before upgrading and recycle retained agent containers only in a coordinated idle window afterward.
+
 ```bash
 crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 # Passphrase: ********
@@ -277,6 +308,44 @@ crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 ```
 
 The server rejects the restore if a workspace (or crew) with the same slug already exists. Override with `--as-workspace <new-slug>` or `--as-crew <new-slug>` to land the payload under a fresh identity.
+
+### Agent chat transcripts
+
+Workspace and crew bundles include the complete structured JSONL transcripts
+for their included agent chats inside the encrypted payload. A fork remaps the
+chat and agent identities while retaining message IDs, additive fields and run
+IDs used by durable card anchors. Host transcripts are restored in the first
+step; they do not require a crew container or `--files-only`.
+
+The database dump is completed first. Collection then briefly fences transcript
+writers to pin the included files and their byte lengths. Validation and
+compression read those pinned lengths after releasing the fence; concurrent
+appends are not included in that file snapshot. Malformed, truncated or
+foreign-session lines are skipped without aborting the workspace backup. The
+completeness report lists `agent_chat_transcript_invalid_lines`, the chat ID and
+the number of skipped lines. Valid fields, including unknown fields, are retained.
+
+Restore validates and stages private files without pausing chat writers.
+Decryption, dry-run, image/container restoration and transcript-free restores do
+not acquire the conversation fence. The fence is taken only for comparison and
+publication of staged transcripts through the database commit or rollback,
+closing cached append handles before replacement. Normal partial restores keep
+existing chats' live history; only `--replace` deliberately replaces that history.
+The actual inserted chat rows must belong to the restored workspace before any
+transcript is published. JSON key order alone is not a history conflict.
+Returned transaction failures remove newly published transcripts and recover
+replaced originals. This does not guarantee atomic recovery from a hard process
+or power failure between filesystem publication and the database commit;
+interrupted replacements may leave private `.restore-original-*` recovery links
+in the conversations directory.
+
+Older bundles remain readable. If their chat metadata records messages without
+transcript files, the completeness report includes
+`agent_chat_transcript_missing`; the missing messages cannot be reconstructed
+from card references. The separate conversation search/feedback index is not
+rebuilt by this restore. An already pending best-effort search-mirror write may
+complete after replacement and require reconciliation; JSONL remains the source
+of truth.
 
 ### Restoring under a new identity takes three steps
 
@@ -1023,6 +1092,11 @@ its categories, and a restore with `--replace` from a custom bundle is
 refused, because replacing would delete everything the bundle does not hold.
 
 ### When plans run
+
+Queued manual runs and busy retries become eligible at their exact stored UTC
+deadline, including equality. Dispatch compares parsed instants after selecting
+candidates, so older variable-precision timestamps neither delay due work nor
+start a future retry early. Stored timestamp formats remain unchanged.
 
 - **Timezone.** `time_of_day` is a wall-clock time in the plan's IANA
   `timezone`, so 03:00 stays 03:00 across daylight-saving changes. Cadence is

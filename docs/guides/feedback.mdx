@@ -121,3 +121,24 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
 - [Online eval sampler](/guides/routines#online-eval-sampler) — consumes feedback rows by `trace_id` for drift detection.
 - [Tracing](/guides/tracing) — the `trace_id` source.
 - [Chat sessions](/guides/chat-sessions) — sibling reactions store for open emoji.
+
+## Remember an explicit preference
+
+A thumb immediately rates the response. The optional **What should change next
+time?** control offers clearly stated future preferences, such as “Next time,
+keep answers concise.” Selecting one asks this agent to remember it for your
+private chats. Watch the status: **Processing** means it is being checked;
+**Remembered** means it was saved. Memory-off, ineligible and failure states
+remain visible without claiming a saved preference.
+
+Open **Memory** in the chat side panel to inspect your preferences and their
+source conversations, change a preference, or forget it. **Manage my preferences**
+opens the same controls beside feedback, including on a phone. The personal
+memory switch applies throughout the selected workspace; turning it off also
+forgets existing personal preferences and profiles. Feedback itself remains.
+
+Another reader's feedback and group conversations do not create personal memory
+in this version. A bare thumb or ordinary criticism is never a long-term
+preference, and preferences never grant the agent additional permissions.
+
+Clearing all personal memory also works for agents without a crew. If your membership is switched to restricted access, stored preferences in that workspace are withdrawn. Restoring trusted access does not restore those withdrawn preferences; a new explicit preference is required. Restrictions in another workspace still suppress recall under the existing account-wide policy, but do not erase saved preferences elsewhere. Values already erased by an older release cannot be recovered automatically.

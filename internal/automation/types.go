@@ -319,6 +319,10 @@ type Resolved struct {
 // namespace. Exported because it is the contract an automation author writes
 // against; the field names here are the ones that appear in docs.
 func EventContext(e journal.Entry) map[string]any {
+	runID := e.TraceID
+	if strings.HasPrefix(runID, "issue-activity:") {
+		runID = ""
+	}
 	return map[string]any{
 		"mission_id": e.MissionID,
 		"agent_id":   e.AgentID,
@@ -326,7 +330,7 @@ func EventContext(e journal.Entry) map[string]any {
 		// A journal entry's trace_id IS the originating run id — see
 		// journal.prepareEntry, where WithRunID wins over OTel trace
 		// context precisely so run-scoped entries share trace_id == run.id.
-		"run_id":  e.TraceID,
+		"run_id":  runID,
 		"payload": e.Payload,
 	}
 }

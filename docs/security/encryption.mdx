@@ -162,7 +162,10 @@ to perform the backfill the skip deferred. Newly written secrets are protected b
 
 ## Rotating the Master Key
 
-`crewship admin reencrypt` re-encrypts every stored envelope to the current key version, so the old key can actually be retired instead of living in the environment forever.
+`crewship admin reencrypt` re-encrypts secret envelopes to the current version.
+It does not re-sign journal or instance-audit history. Keep the original
+`ENCRYPTION_KEY` (v1) string byte for byte even with no v1 envelopes: those
+audit MACs still depend on this independent root.
 
 Runbook (rotating from `v1` to `v2`):
 
@@ -181,17 +184,20 @@ export CREWSHIP_ENCRYPTION_KEY_VERSION=v2
 crewship admin reencrypt
 # Re-encrypted: N   Skipped: M   Failed: 0
 
-# 4. Once the run reports failed: 0, no row references the old key.
-#    Retire it: keep ENCRYPTION_KEY_V2 + CREWSHIP_ENCRYPTION_KEY_VERSION=v2,
-#    and remove/replace the old ENCRYPTION_KEY value.
+# 4. Keep the original ENCRYPTION_KEY alongside ENCRYPTION_KEY_V2.
+#    Failed: 0 confirms envelope conversion, not retirement of the audit root.
 ```
 
-The operation is idempotent — envelopes already at the current version are skipped — so an interrupted run can simply be repeated. Undecryptable values (no configured key opens them) are counted under `failed` and left untouched; the CLI exits non-zero in that case so a scripted rotation never retires the old key on a false success.
+The operation is idempotent — envelopes already at the current version are
+skipped, so an interrupted run can be repeated. Undecryptable values are
+counted under `failed` and left untouched. The CLI exits non-zero so failed
+conversion is not mistaken for completed conversion. Even `Failed: 0` does
+not authorize retiring the v1 journal/audit root.
 
 The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, and the two webhook-secret columns `agents.webhook_secret` and `pipeline_webhooks.signing_secret`.
 
 <Note>
-**Webhook secrets are encrypted at rest, fail-closed.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted whenever a usable key resolves; with no key the write is **rejected** rather than downgraded to plaintext (see [No key configured](#no-key-configured-fail-closed) below). Rows written in plaintext by older builds keep working — they are read back as-is. During master-key rotation such a bare (non-enveloped) webhook value is reported as **skipped**, not failed, so the `failed=0 ⇒ retire the old key` criterion stays honest. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
+**Webhook secrets are encrypted at rest, fail-closed.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted whenever a usable key resolves; with no key the write is **rejected** rather than downgraded to plaintext (see [No key configured](#no-key-configured-fail-closed) below). Rows written in plaintext by older builds keep working — they are read back as-is. During master-key rotation such a bare (non-enveloped) webhook value is reported as **skipped**, not failed, so envelope-conversion counts stay accurate; this does not authorize removing the v1 audit root. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
 </Note>
 
 <Note>
@@ -203,6 +209,13 @@ The walk covers every envelope-bearing column: `credentials.encrypted_value`, `c
 
   The CLI-side backup keyring (`~/.crewship/backup-keyring.enc`) is a separate rotation domain: it is encrypted with the **CLI host's** own `ENCRYPTION_KEY`, not the server's, so the server-side run never touches it. If you rotate the CLI host's key, re-store the affected passphrases (`crewship backup create --use-keyring` re-writes the entry) or keep that host's old key resolvable.
 </Warning>
+
+Instance recovery kits retain a configured v1 root even with no v1 envelopes.
+Use the kit's exact original key string. Workspace and crew backups exclude
+the instance audit trail; normal and fork restores retain the destination
+instance's own trail and key. A missing recovery key, DB-only copy or tampered
+tail is not repaired by automatically re-signing history. Recover the trusted
+original key before audit-protected administration can continue.
 
 ## Legacy Format Support
 

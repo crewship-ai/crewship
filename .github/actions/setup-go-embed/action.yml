@@ -31,7 +31,7 @@ runs:
     # in PR #4XX, the persistence assumption no longer holds and the
     # post-step cancel risk is the lesser evil compared to ~75s of
     # repeat downloads per job.
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream main 2026-09-28 (cache 6.3.0)
       with:
         go-version: ${{ inputs.go-version }}
         cache: true

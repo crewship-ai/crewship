@@ -13,7 +13,7 @@ import { CredentialFileInput } from "./credential-file-input"
 import * as React from "react"
 import {
   Check, ChevronLeft, ChevronsUpDown, CreditCard, FileText, KeyRound,
-  Plus, ShieldCheck, Tag, Terminal, User, Users, X,
+  Plus, ShieldCheck, Sparkles, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -38,9 +38,13 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useCredentialFolders } from "@/hooks/use-credential-folders"
+import { buildFolderTree, folderIsRestricted } from "@/lib/credentials/folders"
 import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
+import { detectPastedValue } from "@/lib/credentials/paste-detect"
 import { loginProvider } from "@/lib/credentials/login-providers"
+import { runnerFits } from "@/lib/credentials/provider-logins"
 import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
 import {
@@ -57,6 +61,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { BrandPicker } from "./brand-picker"
+import { ProviderKeyTest } from "./provider-key-test"
 import { CREDENTIAL_TIERS } from "./credential-form"
 
 /**
@@ -101,9 +106,25 @@ const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>
  */
 const FIELD = "h-10 sm:h-9"
 /** …and a field that opts down to 12px mono has to opt back up below sm. */
+/** Step 1's type cards as v67 words them (the item-type table keeps its shorter names for the lists). */
+const STEP1_COPY = {
+  TOKEN: { label: "API key or token", blurb: "One value: a key, token or PAT" },
+  LOGIN: { label: "Login", blurb: "Username and password" },
+  KEYPAIR: { label: "Key pair", blurb: "Access key id, secret and region (AWS style)" },
+  SSH_KEY: { label: "SSH key", blurb: "Private key, passphrase, public key" },
+  FILE: { label: "File", blurb: "A whole file: kubeconfig, service account JSON, .env" },
+  CERTIFICATE: { label: "Certificate", blurb: "PEM, private key and CA" },
+} as const
+
 const MONO_AREA = "font-mono text-xs coarse:text-base"
 
 interface Crew { id: string; name: string }
+
+/** GET /agents — the runner decides which provider an agent can pay with. */
+interface AgentOption { id: string; name: string; cli_adapter?: string | null }
+
+/** GET /provider-logins/pools — the groups a new account can join. */
+interface PoolOption { id: string; name: string; provider: string; mode: string }
 
 /** GET /workspaces/{id}/members — the people a seat can belong to. */
 interface Member { id: string; user: { id: string; email: string; full_name: string | null } }
@@ -125,6 +146,8 @@ export interface WizardInitial {
   signIn?: SignInMethod
   step?: Step
   name?: string
+  /** Vault folder to file the new secret in (the folder open in the panel). */
+  folderId?: string
 }
 
 export interface AddCredentialWizardProps {
@@ -146,15 +169,17 @@ export interface AddCredentialWizardProps {
    * the step lives here.
    */
   primaryRef?: React.MutableRefObject<(() => void) | null>
+  /** Switch this surface to "Add AI provider" — offered when a pasted value is a model provider's key. */
+  onAddProvider?: () => void
 }
 
 type Step = "type" | "values" | "scope"
 
 /** The three steps, in order, as the shell's step bar wants them. */
 const STEPS: { id: Step; label: string }[] = [
-  { id: "type", label: "Type" },
+  { id: "type", label: "What it is" },
   { id: "values", label: "Details" },
-  { id: "scope", label: "Use" },
+  { id: "scope", label: "Access" },
 ]
 
 const STEP_ORDER: Step[] = STEPS.map((s) => s.id)
@@ -173,7 +198,7 @@ function CardNote({ children }: { children: React.ReactNode }) {
 }
 
 export function AddCredentialWizard({
-  workspaceId, onSuccess, onCancel, knownTags, initial, devicePollMs, onDirtyChange, primaryRef,
+  workspaceId, onSuccess, onCancel, knownTags, initial, devicePollMs, onDirtyChange, primaryRef, onAddProvider,
 }: AddCredentialWizardProps) {
   const { abilities } = useAbilities()
   // POST /credentials/bindings is roleManage — OWNER/ADMIN — and the handler
@@ -182,12 +207,19 @@ export function AddCredentialWizard({
   const canBind = abilities.can("manage", "Credential")
   const session = useSessionSafe()
 
+  const { folders } = useCredentialFolders(workspaceId)
+  const [folderId, setFolderId] = React.useState(initial?.folderId ?? "")
+  // Filing into a folder with a reveal policy or tier floor is reserved for
+  // owners and admins (the server repeats the check), so the others are not offered it.
+  const fileableFolders = folders.filter((f) => canBind || !folderIsRestricted(f))
+  const chosenFolder = fileableFolders.find((f) => f.id === folderId)
+
   const originWorkspace = React.useRef(workspaceId)
   const [chosenType, setChosenType] = React.useState(Boolean(initial?.itemType))
   const [attempted, setAttempted] = React.useState(false)
   const [assignNow, setAssignNow] = React.useState(false)
   const [agentIds, setAgentIds] = React.useState<string[]>([])
-  const [agents, setAgents] = React.useState<Crew[]>([])
+  const [agents, setAgents] = React.useState<AgentOption[]>([])
   const [savedId, setSavedId] = React.useState<string | null>(null)
   const [uncertainSave, setUncertainSave] = React.useState(false)
   const completedWrites = React.useRef(new Set<string>())
@@ -212,6 +244,8 @@ export function AddCredentialWizard({
   const [ownerId, setOwnerId] = React.useState<string>("")
   const [members, setMembers] = React.useState<Member[]>([])
   const [primaryValue, setPrimaryValue] = React.useState("")
+  // VLT-01: whether the value now in the field passed Test (never the value itself).
+  const [keyTested, setKeyTested] = React.useState(false)
   const [extras, setExtras] = React.useState<Record<string, string>>({})
   const [custom, setCustom] = React.useState<CustomFieldDraft[]>([])
   const [name, setName] = React.useState(initial?.name ?? "")
@@ -237,6 +271,9 @@ export function AddCredentialWizard({
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [warning, setWarning] = React.useState<string | null>(null)
+  // Provider login only: the account group the new account joins, if any.
+  const [poolId, setPoolId] = React.useState("")
+  const [pools, setPools] = React.useState<PoolOption[]>([])
 
   const itemType = getItemType(itemTypeKey)
   const ItemIcon = TYPE_ICON[itemTypeKey]
@@ -250,6 +287,28 @@ export function AddCredentialWizard({
       .catch(() => { if (active) setError("Could not load agents. Try selecting Assign now again.") })
     return () => { active = false }
   }, [assignNow, workspaceId])
+
+  // Step 1's paste box. The value moves into the Details step's own field and
+  // the box is cleared, so there is never a second copy of it in the form.
+  const [pasteDraft, setPasteDraft] = React.useState("")
+  const pasteDetection = React.useMemo(() => detectPastedValue(pasteDraft), [pasteDraft])
+  function takePasted(value: string) {
+    const det = detectPastedValue(value)
+    setItemTypeKey("TOKEN")
+    setChosenType(true)
+    setPrimaryValue(value.trim())
+    setExtras({})
+    setCustom([])
+    if (det && !nameTouched.current) setName(det.suggestedName)
+    setPasteDraft("")
+    setAttempted(false)
+    setStep("values")
+  }
+  // v67: a recognised value is announced on this step and Continue takes it;
+  // the step does not move by itself.
+  function onPaste(value: string) {
+    setPasteDraft(value)
+  }
 
   function changeInput(action: () => void) {
     if (primaryValue || Object.values(extras).some(Boolean) || custom.some((f) => f.value)) {
@@ -333,6 +392,19 @@ export function AddCredentialWizard({
     setSignIn(key === "OPENAI" ? "device" : "paste")
   }
 
+  // The groups a new account could join — only on the last step, only for
+  // the roles that may manage groups (OWNER/ADMIN), once per workspace.
+  const poolsFetchedFor = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!login || !canBind || step !== "scope" || initial?.credentialId || poolsFetchedFor.current === workspaceId) return
+    poolsFetchedFor.current = workspaceId
+    apiFetch("/api/v1/provider-logins/pools", { headers: { "X-Workspace-ID": workspaceId } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { items?: PoolOption[] } | null) => setPools(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setPools([]))
+  }, [login, canBind, step, initial?.credentialId, workspaceId])
+  const matchingPools = pools.filter((p) => p.provider === provider.toUpperCase() && p.mode === loginMode)
+
   const missingRequired = React.useMemo(() => {
     // A provider login without a provider cannot be delivered anywhere — the
     // server routes and renders it by the provider column — and a brand with
@@ -370,6 +442,7 @@ export function AddCredentialWizard({
       description ||
       name ||
       expiresAt ||
+      pasteDraft ||
       tagDraft ||
       tags.length > 0 ||
       slotTouched ||
@@ -465,7 +538,8 @@ export function AddCredentialWizard({
         }
         // Provider accounts use server policy, like device-code-created accounts.
         // Ordinary secrets retain the explicitly selected Keeper tier.
-        if (!login) body.security_level = securityLevel
+        if (!login) body.security_level = chosenFolder ? Math.max(securityLevel, chosenFolder.min_security_level) : securityLevel
+        if (!login && chosenFolder) body.folder_id = chosenFolder.id
         if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
         if (accountLabel.trim()) body.account_label = accountLabel.trim()
         // Only when set — an absent key leaves the column NULL, which is what a
@@ -548,6 +622,30 @@ export function AddCredentialWizard({
         }
       }
 
+      // Joining an account group is a member list rewrite at the revision just
+      // read; a group that changed in between is reported, not overwritten.
+      if (credentialId && login && poolId && canBind && !completedWrites.current.has(`pool:${poolId}`)) {
+        try {
+          const path = `/api/v1/provider-logins/pools/${encodeURIComponent(poolId)}`
+          const gr = await apiFetch(path, { headers: { "X-Workspace-ID": workspaceId } })
+          if (!gr.ok) throw new Error(`HTTP ${gr.status}`)
+          const pool = (await gr.json()) as { name: string; revision: number; allow_cross_owner: boolean; members?: { credential_id: string; priority: number }[] }
+          const members = Array.isArray(pool.members) ? pool.members : []
+          if (!members.some((m) => m.credential_id === credentialId)) {
+            const next = members.length > 0 ? Math.max(...members.map((m) => m.priority)) + 1 : 0
+            const pr = await apiFetch(path, {
+              method: "PUT",
+              headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json", "If-Match": `"${pool.revision}"` },
+              body: JSON.stringify({ name: pool.name, allow_cross_owner: pool.allow_cross_owner, members: [...members, { credential_id: credentialId, priority: next }] }),
+            })
+            if (!pr.ok) throw new Error(pr.status === 412 ? "the group changed meanwhile" : `HTTP ${pr.status}`)
+          }
+          completedWrites.current.add(`pool:${poolId}`)
+        } catch (e) {
+          problems.push(`account group (${e instanceof Error ? e.message : "request failed"})`)
+        }
+      }
+
       if (problems.length > 0) {
         setWarning(
           `Saved “${name.trim()}”, but some parts did not land: ${problems.join("; ")}. ` +
@@ -572,7 +670,14 @@ export function AddCredentialWizard({
    */
   function primaryAction() {
     if (submitting) return
-    if (step === "type") return
+    if (step === "type") {
+      if (login) return
+      // v67 Continue: a pasted value starts a token with the name it suggests;
+      // otherwise the selected type opens its own details.
+      if (pasteDraft.trim()) { takePasted(pasteDraft); return }
+      setChosenType(true); setAttempted(false); setStep("values")
+      return
+    }
     if (step === "scope" || (step === "values" && initial?.credentialId && !blocker && !valueError)) {
       void submit()
       return
@@ -609,7 +714,7 @@ export function AddCredentialWizard({
           renders the nav itself now, so the wrapper was a nested landmark. */}
       <CreateSurfaceSteps
         ariaLabel="Add credential steps"
-        steps={login ? [{ id: "type", label: "Provider" }, { id: "values", label: "Connect" }, { id: "scope", label: "Use" }] : STEPS}
+        steps={login ? [{ id: "type", label: "Provider" }, { id: "values", label: "Connect" }, { id: "scope", label: "Pays for" }] : STEPS}
         current={stepIndex}
         onJump={(i) => { if (!initial?.credentialId && !savedId && !deviceBusy && !deviceCredentialId) setStep(STEP_ORDER[i]) }}
       />
@@ -629,18 +734,48 @@ export function AddCredentialWizard({
                 }} />
               </>
             ) : <>
-            <CreateSurfaceSection title="Choose a secret type" icon={KeyRound} accent="amber">
-              <p className="type-meta leading-relaxed text-muted-foreground">
-                Choose what you want to store. We will show only the fields it needs.
-              </p>
-            </CreateSurfaceSection>
+            <CreateSurfaceField
+              label="Paste the value, or pick the type"
+              htmlFor="cred-paste"
+              hint="Recognised in your browser; nothing is sent until you save."
+            >
+              <Textarea
+                id="cred-paste"
+                rows={2}
+                autoComplete="off"
+                spellCheck={false}
+                value={pasteDraft}
+                onChange={(e) => onPaste(e.target.value)}
+                placeholder="Paste a key or token"
+                className="font-mono [-webkit-text-security:disc]"
+              />
+            </CreateSurfaceField>
+            {pasteDetection?.aiProvider ? (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.06] px-3 py-2 type-meta">
+                <span className="min-w-0 flex-1">
+                  Looks like a <b>{pasteDetection.label}</b> key. That is an <b>AI provider</b>: add it there so agents can pay with it.
+                </span>
+                {onAddProvider && <Button size="sm" variant="outline" onClick={onAddProvider}>Add as AI provider</Button>}
+                <Button size="sm" variant="ghost" onClick={() => takePasted(pasteDraft)}>Store as a secret</Button>
+              </div>
+            ) : pasteDetection ? (
+              <div role="status" data-testid="paste-recognised" className="flex items-center gap-2.5 rounded-lg bg-chip-ok-bg px-3 py-2 text-chip-ok-fg">
+                <span className="grid min-w-0">
+                  <b className="type-row font-semibold">Looks like {/^[aeiou]/i.test(pasteDetection.suggestedName) ? "an" : "a"} {pasteDetection.suggestedName}</b>
+                  <small className="type-meta">Name, type and the variable {pasteDetection.envVar} are filled in for you</small>
+                </span>
+              </div>
+            ) : pasteDraft.trim().length >= 8 ? (
+              <p className="type-meta text-muted-foreground">Not recognised. Continue to store it as one value, or pick the type below.</p>
+            ) : null}
             {/* Two-up on a phone: six tiles in one column is four thumb-swipes
                 to reach Certificate, and three-up leaves 110px of tile for a
                 label plus a blurb. */}
             <div data-testid="shape-grid" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {CREDENTIAL_ITEM_TYPES.filter((t) => t.key !== "PROVIDER_LOGIN").map((t) => {
                 const Icon = TYPE_ICON[t.key]
-                const selected = chosenType && t.key === itemTypeKey
+                const selected = t.key === itemTypeKey
+                const copy = STEP1_COPY[t.key as keyof typeof STEP1_COPY]
                 const tone = SHAPE_ACCENT[t.key] ?? ACCENT.slate
                 return (
                   <button
@@ -648,11 +783,12 @@ export function AddCredentialWizard({
                     type="button"
                     aria-pressed={selected}
                     onClick={() => {
+                      // v67: a card selects, Continue goes on.
                       const select = () => {
-                        if (t.key !== itemTypeKey) { setPrimaryValue(""); setExtras({}); setCustom([]) }
-                        setItemTypeKey(t.key); setChosenType(true); setStep("values"); setAttempted(false)
+                        setPrimaryValue(""); setExtras({}); setCustom([])
+                        setItemTypeKey(t.key); setChosenType(true)
                       }
-                      if (t.key !== itemTypeKey) changeInput(select); else select()
+                      if (t.key !== itemTypeKey) changeInput(select)
                     }}
                     className={cn(
                       "flex min-h-20 flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors",
@@ -676,12 +812,22 @@ export function AddCredentialWizard({
                     >
                       <Icon className={cn("h-4 w-4", tone.fg)} />
                     </span>
-                    <span className="type-row font-medium leading-tight text-foreground">{t.label}</span>
-                    <span className="type-meta leading-snug text-muted-foreground">{t.blurb}</span>
+                    <span className="type-row font-medium leading-tight text-foreground">{copy?.label ?? t.label}</span>
+                    <span className="type-meta leading-snug text-muted-foreground">{copy?.blurb ?? t.blurb}</span>
                   </button>
                 )
               })}
             </div>
+            {!pasteDetection?.aiProvider && (
+              <div className="flex items-start gap-2 rounded-lg bg-primary/[0.07] px-3 py-2 type-meta text-foreground/85" data-testid="ai-provider-hint">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary-hover" aria-hidden />
+                <span className="min-w-0">
+                  Pasting <span className="font-mono">sk-ant-…</span>, <span className="font-mono">sk-proj-…</span> or a Gemini key? That is an <b>AI provider</b>; add it there so agents can pay with it.{" "}
+                  {onAddProvider && <button type="button" onClick={onAddProvider} className="text-primary-hover underline-offset-2 hover:underline">Add as AI provider</button>}
+                </span>
+              </div>
+            )}
+            <p className="type-meta text-muted-foreground">Connected apps (OAuth for Slack, Notion, Google Drive…) are added from Integrations and land in the folder “From integrations”.</p>
             </>}
 
           </>
@@ -729,6 +875,25 @@ export function AddCredentialWizard({
                 <details className="rounded-lg border border-border/60 p-3">
                   <summary className="cursor-pointer text-xs text-muted-foreground">Description, account label & tags <span className="ml-1">· optional</span></summary>
                   <div className="mt-3 space-y-3">
+                {fileableFolders.length > 0 && !login && (
+                  <CreateSurfaceField label="Folder" hint="optional" htmlFor="cred-folder">
+                    <select
+                      id="cred-folder"
+                      value={chosenFolder?.id ?? ""}
+                      onChange={(e) => {
+                        const f = fileableFolders.find((x) => x.id === e.target.value)
+                        setFolderId(e.target.value)
+                        if (f) setSecurityLevel((lvl) => Math.max(lvl, f.default_security_level ?? 1, f.min_security_level))
+                      }}
+                      className={cn(FIELD, "w-full")}
+                    >
+                      <option value="">No folder</option>
+                      {buildFolderTree(fileableFolders).map(({ folder, depth }) => (
+                        <option key={folder.id} value={folder.id}>{depth ? "\u00a0\u00a0" : ""}{folder.name}</option>
+                      ))}
+                    </select>
+                  </CreateSurfaceField>
+                )}
                 <CreateSurfaceField label="Description" hint="optional" htmlFor="cred-description"><Textarea id="cred-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this credential used for?" /></CreateSurfaceField>
                 <CreateSurfaceField label="Account label" hint="optional" htmlFor="cred-account-label">
                   <Input
@@ -744,7 +909,7 @@ export function AddCredentialWizard({
                     and a credential that can only be tagged after the fact tends
                     never to be. */}
                 <CreateSurfaceField label="Tags" hint="optional" htmlFor="cred-tags">
-                  <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9">
+                  <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9 coarse:min-h-[44px]">
                     {tags.map((t) => (
                       <Badge key={t} variant="outline" className={cn("gap-1 type-meta font-mono", credentialTagClassName(t))}>
                         {t}
@@ -811,13 +976,13 @@ export function AddCredentialWizard({
                             if (selected) return
                             changeInput(() => { setDeviceBusy(false); setLoginMode(method.mode); setSignIn(method.method); setPrimaryValue("") })
                           }}
-                          className={cn("min-h-10 rounded-lg border px-3 py-2 text-left text-sm transition-colors", selected ? "border-primary/60 bg-primary/10" : "border-border/60 bg-card hover:bg-surface-raised")}>{method.label}</button>
+                          className={cn("min-h-10 coarse:min-h-[44px] rounded-lg border px-3 py-2 text-left text-sm transition-colors", selected ? "border-primary/60 bg-primary/10" : "border-border/60 bg-card hover:bg-surface-raised")}>{method.label}</button>
                       })}
                     </div>}
                     {initial?.credentialId && provider === "OPENAI" && loginMode === "subscription" && <CardNote>Import a fresh Codex login to update this account and keep its assignments.</CardNote>}
                     {loginMode === "api_key" && connectionGuide ? <div className="space-y-2">
                       <p className="type-meta text-muted-foreground">{connectionGuide.instruction}</p>
-                      <a href={connectionGuide.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Get API key ↗</a>
+                      <a href={connectionGuide.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 coarse:min-h-[44px] items-center text-sm font-medium text-primary hover:underline">Get API key ↗</a>
                       {connectionGuide.note && <p className="type-meta text-muted-foreground">{connectionGuide.note}</p>}
                     </div> : login.hint && !usingDevice && <CardNote>{login.hint}</CardNote>}
                   </div>
@@ -872,6 +1037,15 @@ export function AddCredentialWizard({
                 )}
                 </div>
                 {attempted && valueError && <p role="alert" className="text-xs text-destructive">{valueError}</p>}
+                {login && !usingDevice && (loginMode === "api_key" || provider === "ANTHROPIC") && (
+                  <ProviderKeyTest
+                    provider={provider}
+                    providerLabel={loginProvider(provider)?.label ?? provider}
+                    mode={loginMode}
+                    value={primaryValue}
+                    onResult={setKeyTested}
+                  />
+                )}
                 {login && !usingDevice && (
                   <details className="space-y-1.5">
                     <summary className="cursor-pointer py-2 type-meta text-muted-foreground">Account owner · {members.find((m) => m.user.id === ownerId)?.user.email || sessionUserEmail || "you"}</summary>
@@ -984,15 +1158,31 @@ export function AddCredentialWizard({
           <>
             <div className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
               {login ? <BrandIcon className="size-5" /> : <ItemIcon className="size-5" />}
-              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : "Connection not tested · save does not verify access"}</p></div>
+              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : keyTested ? `Connection tested · the ${loginMode === "api_key" ? "key" : "token"} works` : "Connection not tested · save does not verify access"}</p></div>
             </div>
-            <CreateSurfaceSection title="How will you use it?" icon={Users} accent="teal">
+            <CreateSurfaceSection title={login ? "Pays for" : "How will you use it?"} icon={Users} accent="teal">
               <div className="grid grid-cols-2 gap-2">
-                <ChoiceButton selected={!assignNow} onClick={() => setAssignNow(false)}>Save for later</ChoiceButton>
-                {canBind && <ChoiceButton selected={assignNow} onClick={() => { setAssignNow(true); setScope("AGENT") }}>Assign now</ChoiceButton>}
+                <ChoiceButton selected={!assignNow} onClick={() => setAssignNow(false)}>{login ? "Nobody yet" : "Save for later"}</ChoiceButton>
+                {canBind && <ChoiceButton selected={assignNow} onClick={() => { setAssignNow(true); setScope("AGENT") }}>{login ? "Choose now" : "Assign now"}</ChoiceButton>}
               </div>
-              <CardNote>{assignNow ? "Choose who will receive this credential. Runtime access still follows workspace policy." : "Save in the workspace vault without creating delivery assignments. You can assign it later."}</CardNote>
+              <CardNote>{login
+                ? (assignNow ? `Only agents whose runner can use ${loginProvider(provider)?.label ?? "this provider"} are offered.` : "Save the account now and choose the agents it pays for later.")
+                : (assignNow ? "Choose who will receive this credential. Runtime access still follows workspace policy." : "Save in the workspace vault without creating delivery assignments. You can assign it later.")}</CardNote>
             </CreateSurfaceSection>
+            {login && canBind && matchingPools.length > 0 && (
+              <CreateSurfaceField label="Account group" htmlFor="cred-pool">
+                <select
+                  id="cred-pool"
+                  value={poolId}
+                  onChange={(e) => setPoolId(e.target.value)}
+                  className={cn(FIELD, "w-full rounded-md border border-border/60 bg-background px-2.5 text-sm text-foreground outline-none focus:border-primary")}
+                >
+                  <option value="">None</option>
+                  {matchingPools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <CardNote>Switching to the next account in a group at a limit is not available yet.</CardNote>
+              </CreateSurfaceField>
+            )}
             {assignNow && <>
             <CreateSurfaceSection title="Assign to" icon={Users} accent="teal">
               <div className="space-y-3">
@@ -1013,13 +1203,13 @@ export function AddCredentialWizard({
 
                 {scope === "AGENT" && <div className="max-h-48 space-y-1 overflow-y-auto">
                   {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents available.</p>}
-                  {agents.map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
+                  {agents.filter((agent) => !login || runnerFits(agent.cli_adapter, provider)).map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
                 </div>}
                 {scope === "CREW" && (
                   <CreateSurfaceField label="Crews">
                     <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" role="combobox" className="h-10 w-full justify-between font-normal text-sm sm:h-9">
+                        <Button variant="outline" role="combobox" className="h-[44px] w-full justify-between font-normal text-sm sm:h-9 coarse:h-[44px]">
                           {crewIds.length === 0 ? "Select crews…" : `${crewIds.length} selected`}
                           <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
                         </Button>
@@ -1176,7 +1366,7 @@ export function AddCredentialWizard({
               </CreateSurfaceSecondaryAction>
             )
           }
-          primaryLabel={initial?.credentialId ? "Update login" : step === "type" ? undefined : uncertainSave ? "Check credential list" : savedId ? "Retry missing parts" : step === "scope" ? (deviceCredentialId ? "Finish setup" : assignNow ? "Save & assign" : login ? "Save provider" : "Save secret") : "Continue"}
+          primaryLabel={initial?.credentialId ? "Update login" : step === "type" ? (login ? undefined : "Continue") : uncertainSave ? "Check credential list" : savedId ? "Retry missing parts" : step === "scope" ? (deviceCredentialId ? "Finish setup" : assignNow ? "Save & assign" : login ? "Save provider" : "Save secret") : "Continue"}
           onPrimary={uncertainSave ? () => onSuccess() : primaryAction}
           primaryDisabled={Boolean(pendingChange) || (step === "values" && deviceBusy)}
           busy={submitting}
@@ -1205,7 +1395,7 @@ function ChoiceButton({
       aria-pressed={selected}
       onClick={onClick}
       className={cn(
-        "flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-center type-meta font-medium transition-colors",
+        "flex min-h-10 coarse:min-h-[44px] items-center justify-center rounded-lg border px-3 py-2 text-center type-meta font-medium transition-colors",
         selected
           ? tone === "warn"
             ? "border-warn/50 bg-warn/10 text-warn"

@@ -108,6 +108,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
     "allow_privileged_credentials": false,
     "run_retention_days": null,
     "pages_theme": { "accent": "#0f766e" },
+    "appearance_default": { "style": "slate", "accent": "teal", "theme": "dark" },
     "_count": { "crews": 4, "agents": 12, "members": 7 },
     "_count_crews": 4,
     "_count_agents": 12,
@@ -132,6 +133,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `audit_log_retention_days` | integer? | Days of `audit_logs` history to keep. `null` **and** `0` both mean keep forever — that is the default, because `audit_logs` is the compliance trail. Present on Update responses. |
 | `approvals_retention_days` | integer? | Days of decided `approvals_queue` history to keep. `null` uses the 90-day default; `0` means keep forever, same as the audit pair above. Present on Update responses. |
 | `pages_theme` | object | The shared Page colours, `{ "accent": "#RRGGBB", … }` over the keys `accent`, `background`, `surface`, `text`, `muted`, `border`. `{}` when unset — the Page SDK then uses its defaults. Always present. |
+| `appearance_default` | object | The workspace default look, `{ "style", "knobs", "accent", "theme" }`, each optional. `{}` when unset. Members inherit each value they have not chosen themselves. Always present. |
 | `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
 | `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
 | `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
@@ -201,12 +203,13 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `name` | string | 2-100 chars |
 | `slug` | string | 2-50 chars; must remain unique across all workspaces |
 | `preferred_language` | string | Canonical name or ISO code; empty string clears the field |
-| `allow_privileged_credentials` | boolean | Explicitly allow credentials in privileged crew sidecars. |
+| `allow_privileged_credentials` | boolean | Allow privileged runtime configuration and credential delivery. Enabling requires an instance administrator in addition to workspace OWNER/ADMIN, and scoped CLI tokens need `instance:admin` as well as `workspace:admin`. Disabling requires workspace OWNER/ADMIN only. |
 | `run_retention_days` | integer | Positive retention override in days. |
 | `credential_audit_retention_days` | integer | Days to keep `credential_audit`. `0` is legal and means keep forever. Negative is rejected. |
 | `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
 | `approvals_retention_days` | integer | Days of decided `approvals_queue` history to keep. `0` is legal and means keep forever. Negative is rejected, and so is anything above `106751` (~292 years) — that is where `days * 24h` overflows an `int64`-nanosecond `time.Duration` and wraps negative, which would move the sweep's cutoff into the future and delete every terminal row regardless of age. |
 | `pages_theme` | object | The shared colours every custom Page application reads through its `--crewship-page-*` design tokens (the **Settings → General → Pages appearance** card; CLI: `crewship workspace update --pages-theme`). A JSON object whose keys are a subset of `accent`, `background`, `surface`, `text`, `muted`, `border` and whose values are `#RRGGBB`. It **replaces** the stored object; omitted keys inherit the SDK defaults and `{}` resets everything. Anything else — another key, a named colour, a string instead of an object, more than 1 KiB — is a 400 naming the rule. Appearance only: no CSS, URLs or execution settings travel here. A change reaches open Pages without rebuilding them. |
+| `appearance_default` | object | The default look for members who have not chosen their own (**Settings → Appearance → Workspace default**; CLI: `crewship workspace update --appearance-default`). A JSON object with optional keys `style` and `accent` (ids of lowercase letters, digits and dashes, up to 32), `theme` (`dark`, `light` or `system`) and `knobs` (up to 16 string values of up to 64 characters, keyed by id). The object **replaces** the stored one and `{}` resets it. Unknown keys, other shapes or more than 2 KiB are `400`. Style, accent and knob ids are not checked against a list: a client that does not know one shows the built-in look. `OWNER`/`ADMIN` only (`403` otherwise), and audited. |
 
 <Note>
 `0` behaves differently on `run_retention_days` than on the other three:
@@ -392,7 +395,16 @@ URL must be configured or discoverable by the server.
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 
 **Request body:** `email` (required), `role` (optional; defaults to `MEMBER`;
-one of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`), and `full_name` (optional).
+one of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`), `full_name` (optional),
+`create_only` (optional boolean, defaults to false), `access_mode` (optional,
+`trusted` by default or `restricted` for Guest), and `rights` (optional array of
+`{kind,id,operation}` initial resource grants; empty by default).
+
+Restricted provisioning and initial grants commit together. Restricted ADMIN
+is invalid. A claimed account must accept a Guest invitation instead (409).
+An account that is OWNER or ADMIN in any workspace is refused (409), even if
+unclaimed. Trusted mode requires empty rights. Routine run rights also require
+the appropriate agent grants; project list and read are independent.
 
 **Response:** `201 Created`
 
@@ -708,6 +720,17 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 |---|---|---|---|---|
 | `email` | string | yes | -- | Recipient email |
 | `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` |
+
+`access_mode` is optional: `trusted` (default) or `restricted` (Guest).
+`rights` is an optional array of `{kind,id,operation}` resource grants, empty
+by default. Supported kinds are agent, routine and project; a routine supports
+View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/manage/delete_issues/write/delete.
+Trusted invitations require empty rights; Guest invitations cannot grant ADMIN.
+The server revalidates resources and issuer authority during redemption and
+installs membership and grants atomically. Existing accounts must explicitly
+confirm the account-wide restriction. Accounts that own or administer any
+workspace cannot become Guests. A stale matching Guest invitation returns
+409 with `code: invitation_changed`; no partial account/membership is committed.
 
 **Response:** `201 Created` -- invitation object with the freshly minted `wi1_` plus 64 lowercase hex proof (returned only by creation or explicit reissue). New stored values are `sha256:v1:` plus the SHA256 hex digest of the entire proof.
 
@@ -1831,7 +1854,7 @@ POST /api/v1/workspaces/{workspaceId}/skills/import
 
 Imports a single `SKILL.md` either by URL (SSRF-validated, HTTPS-only, no loopback / private addresses) or by pasted content. Re-imports of the same slug update in place.
 
-**Auth:** `MANAGER`+ (`canRole "create"`).
+**Auth:** `MANAGER`+, or a trusted workspace member with explicit `skill.create`. Guest restrictions and scoped CLI `skills:write` still apply.
 
 **Request body:**
 
@@ -1857,7 +1880,8 @@ The import response carries only these four fields (`created` is `true` for a fr
 | Status | Condition |
 |---|---|
 | `400` | Missing/both of `url` + `content`, SSRF block (private/loopback/non-HTTPS), parse failure, license rejection |
-| `403` | Caller below `MANAGER` |
+| `403` | Neither creation role nor explicit `skill.create`, or insufficient CLI scope |
+| `500` | Capability lookup or import storage failure |
 
 ### Bulk import from git repo
 
@@ -2058,7 +2082,7 @@ query parameters are required.
 
 `rights` is an explicit array, including when empty. Agent operations are
 `discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
-`write`, `delete`. Grants do not open application routes whose restricted
+`contribute`, `manage`, `delete_issues`, `write`, `delete`; routine operations are `view`, `results`, `run` and `edit`. Grants do not open application routes whose restricted
 runtime integration is incomplete.
 
 | Status | Condition |
@@ -2115,3 +2139,584 @@ execution routes remain denied.
 | `404` | Unavailable member, operator denied, invalid/foreign/duplicate resource grant, or protected target |
 | `409` | Membership ID/revision changed; read the current policy and review the edit again |
 | `500` | Database error |
+
+## Effective member access
+
+```http
+GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective
+```
+
+**Auth:** Current trusted workspace OWNER/ADMIN; scoped CLI credentials require
+`workspace:admin`. The target is a membership row, not a user ID.
+
+**Request:** No body. Path parameters are `workspaceId` and `memberId`.
+
+**Response:** `200 OK`, `Cache-Control: no-store`, JSON:
+
+```json
+{"membership_id":"member_123","mode":"restricted","revision":3,"account_restricted":true,"restriction_scope":"account","explanation":"Guest restrictions apply across this account.","decisions":[{"kind":"routine","id":"routine_123","operation":"run","state":"denied","reason":"Requires current agent run/delegate grants, provider authority and a supported active definition."}]}
+```
+
+States are allowed, denied, conditional or unavailable. The explanation covers
+the saved policy, not unsaved editor changes. This response contains no private
+chat or run results.
+
+| Status | Condition |
+| --- | --- |
+| `200` | Current explanation |
+| `401` | Authentication required |
+| `403` | Workspace/token administration gate denied |
+| `404` | Member or operator unavailable |
+| `409` | Policy changed during evaluation; reload it |
+| `500` | Database error |
+
+## Guest project issue list
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-issues
+```
+
+**Auth:** Authenticated Guest membership of this workspace; exact project.list
+is required for every returned issue. Other workspace memberships do not bypass
+the account restriction.
+
+**Request:** No body. Query parameters: optional `project_id`, `limit` (default
+100, maximum 500), `offset` (default zero), and `q` (up to 256 Unicode characters,
+trimmed). `q` performs literal substring matching on issue title or identifier
+with SQLite ASCII case folding. `%` and `_` do not act as wildcards. Descriptions,
+comments and other resource metadata are never searched. The count and pages
+remain filtered by live project.list grants. An explicit ungranted project is 404.
+
+**Response:** `200 OK`, an array of JSON objects with `id`, `identifier`, `title`,
+`status`, `project_id`, `project_name` and booleans `can_read` and `can_contribute`. Description is not
+included. `X-Total-Count` counts the filtered total and `X-Next-Offset` pages results.
+
+```json
+[{"id":"issue_123","identifier":"CLIENT-1","title":"Shared task","status":"TODO","project_id":"project_123","project_name":"Client project","can_read":true,"can_contribute":false}]
+```
+
+| Status | Condition |
+| --- | --- |
+| `200` | Filtered list, possibly empty |
+| `400` | Invalid pagination, oversized search or invalid Unicode |
+| `401` | Authentication required |
+| `403` | Workspace authentication gate denied |
+| `404` | Unavailable Guest membership/project |
+| `429` | Temporary search budget/capacity refusal; honor `Retry-After` |
+| `500` | Database error |
+
+Collection searches and empty-query lists share an authenticated user/workspace
+budget across browser sessions and CLI tokens: default 20 requests/minute with
+burst 15, and 20/minute with burst 5 per authorized project or all-project
+selection. Query/offset changes do not reset the budget. A temporary refusal
+returns `429`, `Cache-Control: no-store` and integer `Retry-After` seconds, with
+a generic retry message and no workspace/audience counts. Scripts should wait
+at least that interval. Details and comments retain their separate behavior.
+The in-memory policy applies per server process, and finite capacity can also
+produce the same temporary refusal.
+
+## Guest project issue detail
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}
+```
+
+**Auth:** Authenticated Guest membership and project.read on the issue's current
+project in the selected workspace.
+
+**Request:** No body. `issueId` accepts the issue ID or its identifier.
+
+**Response:** `200 OK`, the same JSON object as the Guest list plus an optional
+string `description`. Crew/agent references, comments, activity, related issues
+and run history are excluded. No mutation endpoint is enabled by this read.
+
+```json
+{"id":"issue_123","identifier":"CLIENT-1","title":"Shared task","status":"TODO","project_id":"project_123","project_name":"Client project","can_read":true,"can_contribute":false,"description":"Current project brief"}
+```
+
+| Status | Condition |
+| --- | --- |
+| `200` | Current authorized detail |
+| `400` | Invalid pagination input or a collection-only `q` parameter on detail |
+| `401` | Authentication required |
+| `403` | Workspace authentication gate denied |
+| `404` | Foreign, missing or revoked issue/project |
+| `500` | Database error |
+
+## Explain my access
+
+```http
+GET /api/v1/workspaces/{workspaceId}/access/me
+```
+
+Returns the authenticated member's own effective access explanation, including
+`membership_id`, `mode`, `revision`, `account_restricted`, `restriction_scope`,
+`explanation` and saved-grant `decisions` (`kind`, `id`, optional `name`, `operation`, `state`,
+`reason`). Available to Guests without workspace administration. No target user
+parameter is accepted. An unavailable membership returns 404; a concurrent
+policy change returns 409. Responses use `Cache-Control: no-store`.
+
+Member policy responses also include read-only `grant_details` (`kind`, `id`,
+`operation`, `issuer_id`, `created_at`, `live`). Policy replacements preserve
+unchanged grants, including inactive ones. Optional `reissue` contains exact
+rights also present in `rights`, deliberately issued by the authenticated admin.
+Client-supplied grant metadata is ignored and recalculated in the response.
+
+
+## Guest issue projects
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects
+```
+
+Authenticated Guest only. Returns projects with a live `project.list` grant,
+including empty projects: `id`, `name`, `can_contribute`, `can_manage`, `intake_ready`.
+Contribution requires both live `project.read` and `project.contribute`. Management requires live `project.read` and `project.manage`; both mutation hints also reflect token scopes.
+Intake readiness discloses a boolean, never the receiving crew or agent.
+Statuses: 200 filtered array; 401 authentication; 403 workspace gate;
+404 unavailable membership; 500 database error. CLI: `crewship issue shared projects`.
+
+## Create a Guest issue
+
+```http
+POST /api/v1/workspaces/{workspaceId}/restricted-issues
+```
+
+**Auth:** Guest, live `project.read` plus `project.contribute`; CLI tokens also
+require the existing `workspace:admin` mutation scope. Scope does not replace
+the resource grants or confer a workspace administrator role.
+
+Body: `{ "project_id": "project_123", "title": "Client request", "description": "Brief" }`.
+Title is required, up to 4096 bytes; description up to 65536 bytes. Unknown
+fields are rejected. Crew, agent, author, assignee, routine and execution state
+are never accepted from the caller. The administrator-configured intake crew
+receives an unassigned BACKLOG issue; creation does not directly start an agent or routine. Existing workspace automations may process issue events.
+
+Returns 201 with the narrow Guest issue object, including `can_contribute`.
+The creation, authenticated creator, activity and durable journal intent commit atomically. Journal projection may be retried after commit. An explicit unavailable execution origin prevents the request being treated as autonomous agent authority.
+Statuses: 400 invalid input; 401 authentication; 403 workspace/token scope;
+404 absent/revoked/foreign project; 409 intake not configured or unavailable;
+500 database/audit failure (no issue committed). CLI: `crewship issue shared create`.
+
+## Arrange a Guest issue
+
+```http
+PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}
+```
+
+Same read/contribute and token checks as creation. Body contains only
+`{ "status": "TODO" }` or `BACKLOG`. Both the existing and requested state
+must be in that intake pair. Execution, review and terminal transitions retain
+the trusted workflow; this is not permission to bypass review or move an issue
+between projects. Returns 200 with the narrow current issue.
+Statuses: 400 invalid/unknown fields; 401 authentication; 403 scope/workspace;
+404 unavailable issue or grants; 409 work already entered the trusted workflow;
+500 database/audit failure. CLI: `crewship issue shared move`.
+
+## Read Guest-shared comments
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments
+```
+
+Guest with a live read grant on the issue's current project. Returns the latest
+100 comments explicitly shared with that project, in chronological order. Each object
+contains `id`, `body`, `author` (You or Workspace member) and `created_at`.
+No member identifiers, email addresses, agent references, private staff comments
+or mention roster are returned. Old comments remain private after upgrade.
+Moving an issue to another project does not publish the original project's
+shared comments to its new audience.
+Statuses: 200 array; 401 authentication; 403 workspace; 404 issue/read unavailable;
+500 database failure. CLI: `crewship issue shared comments`.
+
+## Post a Guest-shared comment
+
+```http
+POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments
+```
+
+Guest with live read and contribute grants, plus mutation token scope as above.
+Body: `{ "project_id": "project_123", "body": "Client question" }`, 1–32768 bytes, unknown fields rejected.
+The body requires `project_id` (the expected audience) in addition to `body`. It must match the current issue project; a move returns 409 without publishing the draft.
+
+Agent mention links are refused with 400; shared comments do not request agent work.
+Returns 201 with the shared-comment object. It records the authenticated author,
+current project audience and audit in one transaction. Private comments and
+agent mentions are not exposed or triggered by this route.
+Statuses: 400 invalid body; 401 authentication; 403 workspace/token scope;
+404 unavailable issue/grants; 409 changed audience or conflicting retry key;
+500 database/audit intent failure (no comment committed).
+CLI: `crewship issue shared comment`.
+
+## Read project Guest issue intake
+
+```http
+GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake
+```
+
+Trusted ADMIN/OWNER only. Returns `project_id`, `crew_id`, `crew_name`,
+`revision`; an unconfigured project has empty crew fields and revision zero.
+The administrative route is absent from the Guest allowlist.
+Statuses: 200 snapshot; 401 authentication; 403 workspace; 404 unavailable
+project/operator; 500 database failure. CLI: `crewship project guest-intake`.
+
+## Set project Guest issue intake
+
+```http
+PUT /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake
+```
+
+Trusted ADMIN/OWNER and the existing mutation token scope. Body:
+`{ "crew_id": "crew_123", "revision": 0 }`. The crew must be active in the
+project's workspace and have an active LEAD agent. The expected revision is
+mandatory; stale snapshots fail without retry. Configuration and its audit
+commit together. A crew/project workspace move invalidates the configuration.
+Returns 200 with the advanced snapshot. This routing configuration grants no
+agent or routine execution authority.
+Statuses: 400 invalid crew/body; 401 authentication; 403 workspace/token scope;
+404 unavailable project/operator; 409 stale revision; 500 database/audit failure.
+CLI: `crewship project guest-intake --crew CREW_ID`.
+
+Guest issue create, move and comment endpoints accept optional `Idempotency-Key`
+(1–200 nonblank bytes). Guest forms retain an operation key for an uncertain submission and clear it after success; changing content or audience creates a new operation. Reuse the same key and exact body when retrying a lost
+response. A completed replay returns the original result and `Operation-ID` with
+`Idempotency-Replayed: true`, after fresh project grants and audience checks.
+Changed payload or audience returns 409; revoked grants return 404. Activity and
+durable journal intent commit with the mutation; projection failure retains a
+retryable outbox record rather than losing the audit. Guest-authored content
+carries no agent execution authority.
+
+## Guest routine definition library
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}
+```
+
+Guest only. The directory returns current live routine View/Run shares as
+`id`, `slug`, `name`, `status`, `can_view`, `can_results`, `can_run`, `runtime_ready`, with
+`X-Total-Count` for the filtered directory. View is independent of graph
+execution and runtime installation. `can_run` is eligibility; invocation still
+checks current dependencies, definition, inputs, budget and runtime readiness.
+
+The detail accepts an ID or slug and additionally returns `definition`
+(JSON object), `definition_hash` and `version`. It requires an explicit live
+`routine.view` share. This includes authored prompts and defaults, so
+administrators must review the definition before sharing. Existing Run shares
+do not implicitly disclose definitions. The route does not resolve vault credentials, roster or issuer metadata, or
+add another person's private run history. Authored literal content is shared as
+stored; administrators must review it before granting View.
+
+Statuses: 200 authorized projection; 401 authentication; 403 workspace/token
+scope; 404 absent/foreign/deleted/revoked definition or non-Guest membership;
+500 unavailable data. No execution runtime is needed for View.
+CLI: `crewship routine shared [routine-id-or-slug]`.
+
+## Guest project details
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}`
+
+Requires the authenticated Guest's current project Read and Manage shares. Manage explicitly shares the project description; existing Read shares retain their prior issue/file projection. Returns only
+`id`, `name`, `description` (empty when unset), `version` and `can_manage`.
+`version` is an opaque content/updated-time snapshot used to prevent overwriting
+changes, including edits through the trusted project API. `can_manage` intersects
+live Manage authority with the credential's existing mutation scope. No lead,
+crew, credential, other-member identity or private activity is returned.
+
+**Response:** `200 OK`
+
+```json
+{"id":"project_123","name":"Client delivery","description":"Reviewed client scope","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true}
+```
+
+### `PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}`
+
+Requires Read and Manage, an active account and current trusted grant issuers,
+checked in the same transaction as the update and audit. Body contains exactly
+`name`, `description` and the reviewed `version`. Name must be nonblank and at most
+4096 UTF-8 bytes; description is a required string up to 65536 bytes, and empty
+clears it. Unknown fields are refused. Manage here supports basic project details;
+Milestones use dedicated routes; issue deletion additionally requires `delete_issues`. File writes and intake configuration remain separate.
+
+Both routes return 200 with the thin details projection; 400 invalid request,
+401 unauthenticated, 404 unavailable local project/grant,
+500 storage/audit failure. PUT additionally returns 403 for a limited mutation credential and 409 on changed details, with no update;
+reload, review and explicitly resubmit. Audit failure rolls back the update.
+CLI equivalents are `project shared` and `project shared update`.
+
+
+## Guest issue deletion
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion`
+
+Requires current Guest project Read, Manage and explicit `delete_issues` shares,
+including live issuers. Returns `id`, `identifier`, `title`, `project_id`, `status`,
+opaque `version` and `can_delete`. Eligibility also requires this credential's
+existing mutation scope, Backlog/Cancelled status and no active assignment, execution, pending task or sub-issue. Narrow credentials can inspect the preview with `can_delete=false`.
+The projection contains no private comments, agent identities or execution data.
+
+**Response:** `200 OK`
+
+```json
+{"id":"issue_123","identifier":"CLIENT-1","title":"Client request","project_id":"project_123","status":"BACKLOG","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_delete":true}
+```
+
+### `DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}`
+
+Requires the same three rights and current mutation scope, rechecked in the
+transaction which deletes the issue and journals its actual human actor. The
+body is exactly the reviewed project, version and explicit confirmation:
+
+```json
+{"project_id":"project_123","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","confirm":true}
+```
+
+Returns 204 with no body. Removes issue/comment attachment rows and reclaims only
+orphaned attachment digests after commit. Historical chat deletion receipts retain
+the existing trusted audience and disclose no deleted content. They do not open
+trusted chat/operation routes to a Guest. Audit or receipt failure rolls everything
+back. Existing Manage shares do not acquire deletion: administrators must issue
+`delete_issues` deliberately; source-file `delete` is a different operation.
+
+Both routes return 400 invalid input, 401 unauthenticated, 403 credential scope,
+404 absent/foreign/unshared issue or inactive authority, and 500 storage failure.
+DELETE additionally returns 409 on changed project/version, ineligible status or
+active work, without deletion. There is no automatic retry. CLI equivalents:
+`issue shared-delete-preview` and `issue shared-delete`.
+
+
+## Guest milestone management
+
+All routes require the authenticated Guest's live project Read and Manage shares,
+a current local membership and active account/issuers. Writes also require the
+existing mutation credential scope. Metadata writes and audit commit together;
+audit failure rolls back the write. Unknown fields and foreign resources are
+refused. No crew, agent, member identity or private issue data is exposed.
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones`
+
+`limit` defaults to100 (1–500), `offset` to0. `X-Total-Count` is the filtered project
+total; `X-Can-Manage` is the current credential's mutation eligibility, including
+for an empty list. Row `can_delete` is true only for a removable empty milestone.
+
+**Response:** `200 OK`
+
+```json
+[{"id":"milestone_1","project_id":"project_1","name":"Client release","description":"Reviewed scope","target_date":"2026-11-01","status":"active","position":1,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true,"can_delete":true}]
+```
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+**Response:** `200 OK`, the same single milestone object, scoped to this project.
+
+```json
+{"id":"milestone_1","project_id":"project_1","name":"Client release","description":"Reviewed scope","target_date":"","status":"active","position":1,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true,"can_delete":true}
+```
+
+### `POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones`
+
+Requires `name`, `description` and `target_date` strings. Name is nonblank and
+at most4096 UTF-8 bytes; description at most65536 bytes. Target date is empty or
+a valid YYYY-MM-DD. Status is active (default), completed or cancelled. The server
+chooses the ID and next position. Version/position overrides are refused.
+
+```json
+{"name":"Client release","description":"Reviewed scope","target_date":"2026-11-01","status":"active"}
+```
+
+**Response:** `201 Created`, the new milestone object above.
+
+### `PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+Requires the reviewed `version` and complete `name`, `description`, `target_date`,
+`status` and `position` (0–1000000). The unchanged legacy status may be preserved;
+new status values use active/completed/cancelled. A trusted edit also invalidates
+an old version. Conflicts return409 without changing content.
+
+```json
+{"name":"Client release","description":"Updated scope","target_date":"","status":"completed","position":2,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+**Response:** `200 OK`, the updated object with a new version.
+
+### `DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+The body contains only the reviewed version. Removal is empty-only: no issue is
+unlinked or changed, including stale references from another project.
+
+```json
+{"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+**Response:** `204 No Content`. Changed versions or linked work return409.
+All routes may return400 invalid input,401 authentication,403 credential access,
+404 unavailable local membership/project/milestone or grants,500 storage/audit
+failure. CLI equivalents are `project shared milestones` and its create/update/delete
+subcommands. The UI keeps failed drafts and requires explicit review after conflicts.
+
+
+## Guest collaborative routine drafts
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft
+PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft
+```
+
+Both require current local Guest membership and explicit live routine View and
+Edit shares. GET returns `draft_id`, `revision`, `base_revision`, `name`,
+`description`, `definition` and `can_edit`. PUT accepts the same snapshot/content
+fields except `can_edit`, and requires token scope `workspace:admin`. Unknown
+fields, non-object definitions and omitted content are rejected. An empty
+`draft_id` with revision zero creates the collaborative draft against the exact
+published baseline; subsequent saves require its current ID and revision.
+
+Draft authority, account status, revision/base checks and content-free audit
+commit atomically. The route does not publish, execute, mint test proofs or
+approve risk. Author identities, execution origin, trigger and approval controls
+remain server-owned and are excluded from the projection. View alone sees only
+the published definition. Granting Edit additionally shares unfinished work with
+all current editors of that routine.
+
+Statuses: 200 snapshot/saved draft; 400 malformed body; 401 authentication;
+403 workspace/token scope; 404 unavailable routine, View/Edit authority or local
+Guest membership; 409 changed draft or published base; 500 unavailable storage or
+audit. Conflicts are not retried. Trusted review/testing/publication remain
+required after a Guest saves changes.
+
+
+## Guest shared routine run history and outputs
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}
+```
+
+Require the authenticated Guest's live routine `view` **and** `results`
+shares. The routine accepts an ID or slug. Existing definition-only View and
+invocation-only Run shares do not acquire this audience automatically.
+No agent execution grant or installed runtime is needed for this read.
+
+The collection accepts `limit` (1–500, default 100) and `offset` (0–1000000,
+default 0). It returns an array of `run_id`, `routine_id`, `status`, `mode`,
+`started_at` and nullable `ended_at`; `X-Total-Count` is the visible total
+before pagination. The detail adds nullable `output` and a `step_outputs`
+string map. Inputs are not shown directly; outputs may contain them. Identities,
+errors, costs, transcripts and internal provenance are excluded. Detail rejects
+pagination parameters. Stored output content is limited to 256 KiB and the
+encoded response to 1 MiB; oversized detail returns 413. Credential-shaped
+content is scrubbed from final and step outputs, including historical reads.
+
+The explicit share covers this routine's past/future regular pipeline runs.
+A run's own, pinned-version and current-recipe private chat origins remain
+additional current read ceilings; absent or non-chat origins are unavailable
+through this projection. Both counts and rows apply these audiences before
+pagination. Issue-triggered runs and their replays are excluded. NULL-origin
+runs require valid start-journal evidence and the shared autonomous-run
+predicate; recorded human authority, missing authority, malformed payloads,
+missing evidence and unknown-origin replays are hidden.
+A foreign or hidden run returns the same 404. Private restricted
+runtime jobs retain actor/attempt/proof checks on their existing own-result
+endpoint and are not exposed by reading raw job output columns.
+
+Statuses: 200 authorized projection; 400 invalid pagination; 401 authentication;
+403 workspace/token boundary; 404 absent/foreign/deleted routine or run, missing
+View/Results, inactive issuer, private origin or non-Guest; 413 oversized detail;
+500 unavailable data.
+Responses are `Cache-Control: no-store`.
+CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.
+
+### Resource access preset catalog
+
+`GET /api/v1/workspaces/{workspaceId}/access/presets` returns `{presets: [{definition, definition_hash}]}`. Each definition includes its immutable `preset_id`, `version`, resource `kind`, managed operations, and explicit level bundles. The read requires the same live trusted workspace OWNER/ADMIN authority and `workspace:admin` credential scope as member-policy GET. Responses are `Cache-Control: no-store`. Listing does not change grants, membership revisions or saved selections.
+
+Catalog responses: `200` returns the definitions; `400` rejects invalid workspace context; `401` requires authentication; `403` rejects insufficient credential scope or route authority; `404` hides unavailable workspaces or live administrative authority; `500` reports an internal database failure.
+
+### Informational preset selections
+
+Administrative member access GET/PUT responses include `preset_selections: []` or saved selection entries (`id`, `kind`, `resource_id`, `preset_id`, `version`, `level`, `definition_hash`, `selected_at`, optional `selected_by`, and `state`). Entries describe saved intent, not effective authority. A manual PUT may round-trip this read-only field but cannot create or rewrite a selection through it; the response is computed from stored canonical state. Own-access responses omit the administrative metadata.
+
+
+## Preview member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` is read-only. It requires current active trusted OWNER/ADMIN authority, the existing administrative GET credential boundary (`workspace:admin` for scoped credentials) and an existing restricted member. Responses use `Cache-Control: no-store`. Submit:
+
+```json
+{"membership_id":"current-member-row","revision":9,"resource":{"kind":"project","id":"project-id"},"preset_id":"project-levels","preset_version":1,"level":"manage","reissue":[]}
+```
+
+Only this resource's managed operations change in the proposed policy. Unrelated and orthogonal rights remain intact. Explicit reissue names a retained managed right, never an unrelated or newly added right. Bounded strict JSON rejects unknown and trailing input.
+
+The response includes `selection`, `definition_hash`, nullable `current_selection`, complete `before` provenance, `changes`, `after_rights`, `orthogonal_rights`, `warnings` and `confirmation_digest`. One snapshot binds membership incarnation/revision, caller/issuer authority, role floors, resource state and exact consequences. Display names and future application timestamps are not authority; the digest never authorizes a write.
+
+Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. Application uses the separate confirmed endpoint described below.
+
+Malformed/version/reissue/trusted-target input returns400; stale membership revision returns409 requiring a fresh preview; hidden/foreign targets return404 without their identities; administrative credential denial returns403. Database errors return500.
+
+## Apply a confirmed member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply` requires the same current trusted workspace administrator and `workspace:admin` credential scope as policy replacement. Submit only `{selection: <normalized preview selection>, confirmation_digest: <exact preview checksum>}`. Bounded strict JSON rejects unknown and trailing fields. The existing restricted membership and immutable version/level must still match.
+
+The server recomputes the whole preview in the writer transaction and compares its digest before replacing canonical managed grants. Unrelated rights and unchanged grant IDs/issuers/timestamps remain intact; only deliberately named retained managed rights are reissued as the authenticated actor. It never changes mode, role or future publication authority. Canonical replacement, complete provenance/preset audit and final informational selection commit once. Any audit/selection failure rolls back all grants, revisions and metadata. The no-store response is the current complete administrative member policy with server-computed selections.
+
+Malformed consent returns400; changed membership/authority/resource/consequences returns409 and requires a new reviewed preview; foreign/hidden targets return404; credential denial returns403; transactional failures return500 without partial writes. The server never substitutes a refreshed revision or automatic reissue. On an uncertain network outcome, read current policy before producing new consent.
+
+## Human-owned content custody
+
+`GET /api/v1/workspaces/{workspaceId}/page-ownership` lists human-owned
+content that requires explicit succession. Workspace owners and administrators
+can review its current owner and eligible successors. The endpoint returns
+metadata and current readers, without document, HTML, or drawing source.
+Use `owner_user_id`, `limit` (1–100, default 25), and the returned `next_cursor`
+to review one owner's content across pages. Keep the owner filter unchanged
+when following the cursor. Responses use `Cache-Control: no-store`.
+
+`POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
+`expected_owner_user_id` and `successor_user_id`. The successor must already
+have current read access and be an active trusted human workspace member.
+The server rechecks the actor, original owner and successor inside the transfer
+transaction. An owner changed since review returns 409. The operation preserves
+content and grant records; each existing grant still requires its issuer's
+current authority. Transferring ownership does not reveal linked source content.
+
+Documents, Slides, Boards and static Artifacts retain human custody when their
+storage is present. Ordinary Pages retain their existing succession behavior.
+An owner departure that would remove private content custody returns a conflict
+until the affected content has been transferred. Instance administration alone
+does not expose workspace-private names or successor contacts.
+
+CLI: `crewship workspace page-ownership list` and
+`crewship workspace page-ownership transfer <page-id>`.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.
+
+## Artifact creation policy
+
+Workspace administrators can configure which crews may participate in agent
+artifact creation. The policy starts disabled with an empty crew allowlist and
+version `0`. This administrative ceiling does not itself authorize an agent run;
+creation also requires the run's human consent and content permissions.
+
+`GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` returns
+`enabled`, sorted `crew_ids`, and `version`.
+`PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
+body of at most 64 KiB and requires all
+three request fields: `enabled`, the complete `crew_ids` allowlist, and
+`base_version` from the last read. A stale version returns `409` with
+`code: "stale_policy"`; read the latest policy before deciding on a replacement.
+Only active crews from the selected workspace are accepted. Responses use
+`Cache-Control: no-store`. CLI access requires `workspace:admin`.
+
+Use `crewship workspace artifact-policy show`, then explicitly replace the
+policy with `crewship workspace artifact-policy set --base-version <version>
+--enabled=true --crew-id <crew-id>`. To disable creation and empty the allowlist,
+use `--enabled=false --clear-crews` with the reviewed `--base-version`.
+Workspace backups preserve this configuration and remap the allowed crews when
+restoring into a new workspace; live run principals require fresh admission.
+
+Authentication: a current trusted workspace OWNER or ADMIN session, or a CLI
+credential carrying `workspace:admin`. Statuses: 200 saved/read policy; 400 invalid
+request or crews; 401 invalid human credential; 403 insufficient current role or
+scope; 404 wrong workspace; 409 stale policy version; 413 body exceeds 64 KiB;
+500 unavailable storage.

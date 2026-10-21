@@ -39,6 +39,11 @@ func TestInvitationBrowser(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO users(id,email,full_name,hashed_password,onboarding_completed) VALUES('browser-existing','existing@example.test','Existing invited reader',?,1)`, string(hash))
 	seedInvitation(t, db, "browser-new", workspace, inviter, "new-reader@example.test", "MEMBER", time.Now().Add(time.Hour), nil)
 	seedInvitation(t, db, "browser-existing", workspace, inviter, "existing@example.test", "VIEWER", time.Now().Add(time.Hour), nil)
+	execOrFatal(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('invitation-browser-crew',?,'Shared crew','invitation-browser-crew')`, workspace)
+	seedAgentRow(t, db, "invitation-browser-agent", workspace, "invitation-browser-crew", "Shared agent", "invitation-browser-agent", "AGENT")
+	execOrFatal(t, db, `UPDATE workspace_invitations SET access_mode='restricted',rights_json='[{"kind":"agent","id":"invitation-browser-agent","operation":"discover"}]' WHERE id IN ('browser-new','browser-existing')`)
+	execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('existing-own-workspace','Existing own','existing-own-workspace')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('existing-own-membership','existing-own-workspace','browser-existing','MEMBER')`)
 	router, err := NewRouter(db, "synthetic-invitation-browser-secret", newTestLogger(), WithAllowSignup(true))
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +75,11 @@ func TestInvitationBrowser(t *testing.T) {
 	if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=? AND u.email IN ('new-reader@example.test','existing@example.test')`, workspace).Scan(&members); err != nil {
 		t.Fatal(err)
 	}
-	if accepted != 2 || members != 2 {
+	var restricted int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE workspace_id=? AND access_mode='restricted'`, workspace).Scan(&restricted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted != 2 || members != 2 || restricted != 2 {
 		t.Fatal("browser handoff DB effect", accepted, members)
 	}
 }

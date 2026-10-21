@@ -11,6 +11,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,6 +45,16 @@ func (s *pagesJournalSpy) Emit(_ context.Context, e journal.Entry) (string, erro
 }
 
 func (s *pagesJournalSpy) Flush(_ context.Context) error { return nil }
+
+// Transactional consumers must persist the real chain before publishing to the
+// spy. A rolled-back mutation must not appear as an observed event.
+func (s *pagesJournalSpy) AppendTx(ctx context.Context, tx *sql.Tx, e journal.Entry) (func(), error) {
+	notify, err := journal.AppendTx(ctx, tx, e)
+	if err != nil {
+		return nil, err
+	}
+	return func() { notify(); s.entries = append(s.entries, e) }, nil
+}
 
 func (s *pagesJournalSpy) firstOfType(t journal.EntryType) *journal.Entry {
 	for i := range s.entries {

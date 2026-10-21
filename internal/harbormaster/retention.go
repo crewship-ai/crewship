@@ -108,6 +108,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
@@ -240,6 +241,7 @@ func SweepApprovalsRetention(
 	db *sql.DB,
 	workspaceID string,
 	retentionDays int,
+	writers ...journal.Emitter,
 ) (deleted int, capped bool, err error) {
 	if db == nil {
 		return 0, false, errors.New("harbormaster: sweep approvals retention: db is nil")
@@ -270,7 +272,7 @@ func SweepApprovalsRetention(
 	where, args := approvalsRetentionWhere(workspaceID, cutoff)
 	args = append(args, approvalsRetentionBatchRows)
 
-	stmt := `DELETE FROM approvals_queue WHERE id IN (
+	stmt := `aq.id IN (
 		SELECT id FROM approvals_queue
 		WHERE ` + where + `
 		LIMIT ?
@@ -284,11 +286,14 @@ func SweepApprovalsRetention(
 		if yieldErr := quiesce.Yield(ctx); yieldErr != nil {
 			return deleted, false, yieldErr
 		}
-		res, execErr := db.ExecContext(ctx, stmt, args...)
+		var writer journal.Emitter
+		if len(writers) > 0 {
+			writer = writers[0]
+		}
+		n, execErr := DeleteSources(ctx, db, writer, workspaceID, stmt, args...)
 		if execErr != nil {
 			return deleted, false, fmt.Errorf("harbormaster: sweep approvals retention: %w", execErr)
 		}
-		n, _ := res.RowsAffected()
 		deleted += int(n)
 		if n < approvalsRetentionBatchRows {
 			return deleted, false, nil
@@ -303,7 +308,7 @@ func SweepApprovalsRetention(
 // nothing), and n > 0 means n days. Errors are accumulated rather than
 // returned on the first failure, so one bad workspace does not stop the
 // sweep for the rest — same as SweepAllWorkspacesAuditRetention.
-func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logger *slog.Logger, writers ...journal.Emitter) error {
 	// Never delete under an instance backup's consistent copy: the whole sweep
 	// is a writer in the quiet window's barrier, and it yields between
 	// batches so a backup's drain never waits on it.
@@ -358,7 +363,7 @@ func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logge
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		n, capped, sweepErr := SweepApprovalsRetention(ctx, db, e.id, e.days)
+		n, capped, sweepErr := SweepApprovalsRetention(ctx, db, e.id, e.days, writers...)
 		if sweepErr != nil {
 			errs = append(errs, fmt.Errorf("workspace %s: %w", e.id, sweepErr))
 			continue
@@ -382,14 +387,14 @@ func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logge
 // Not leader-gated, matching StartAuditRetentionSweeper and pipeline's
 // StartRunRetentionSweeper — see their doc comments for why a multi-replica
 // deployment sweeping redundantly is wasteful but not incorrect.
-func StartApprovalsRetentionSweeper(ctx context.Context, db *sql.DB, logger *slog.Logger, interval time.Duration) {
+func StartApprovalsRetentionSweeper(ctx context.Context, db *sql.DB, logger *slog.Logger, interval time.Duration, writers ...journal.Emitter) {
 	if interval <= 0 {
 		interval = 24 * time.Hour
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if err := SweepAllWorkspacesApprovalsRetention(ctx, db, logger); err != nil {
+	if err := SweepAllWorkspacesApprovalsRetention(ctx, db, logger, writers...); err != nil {
 		logger.Warn("approvals retention sweeper: initial sweep failed", "error", err)
 	}
 	t := time.NewTicker(interval)
@@ -399,7 +404,7 @@ func StartApprovalsRetentionSweeper(ctx context.Context, db *sql.DB, logger *slo
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := SweepAllWorkspacesApprovalsRetention(ctx, db, logger); err != nil {
+			if err := SweepAllWorkspacesApprovalsRetention(ctx, db, logger, writers...); err != nil {
 				logger.Warn("approvals retention sweeper: tick failed", "error", err)
 			}
 		}

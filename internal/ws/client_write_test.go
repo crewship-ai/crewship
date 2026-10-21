@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,7 +92,7 @@ func TestWriteFrameHonoursPastDeadline(t *testing.T) {
 	// 1ns deadline is already in the past by the time the write syscall
 	// runs, so the socket write must time out. On the pre-fix code path
 	// (no SetWriteDeadline) the write would proceed and this fails.
-	c := &Client{conn: conn, writeWait: time.Nanosecond}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: time.Nanosecond}
 
 	if c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame returned true with an expired write deadline; expected timeout/false")
@@ -103,7 +104,7 @@ func TestWriteFrameHonoursPastDeadline(t *testing.T) {
 func TestWriteFrameDeliversWithinDeadline(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, writeWait: 5 * time.Second}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: 5 * time.Second}
 
 	if !c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame returned false for a healthy write within the deadline")
@@ -116,9 +117,107 @@ func TestWriteFrameDeliversWithinDeadline(t *testing.T) {
 func TestWriteFrameZeroUsesDefault(t *testing.T) {
 	t.Parallel()
 	conn := dialClientConn(t)
-	c := &Client{conn: conn, writeWait: 0}
+	c := &Client{ctx: context.Background(), conn: conn, writeWait: 0}
 
 	if !c.writeFrame([]byte(`{"type":"ev"}`)) {
 		t.Fatal("writeFrame with zero writeWait should use defaultWriteWait and succeed")
 	}
+}
+
+func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
+	for _, tc := range []struct{ name, revoke string }{
+		{"suspended", `UPDATE users SET suspended_at='now' WHERE id='u-good'`},
+		{"workspace deleted", `UPDATE workspaces SET deleted_at='now' WHERE id='ws-1'`},
+		{"agent deleted", `UPDATE agents SET deleted_at='now' WHERE id='agent-live'`},
+		{"membership removed", `DELETE FROM workspace_members WHERE user_id='u-good'`},
+		{"restricted elsewhere", `INSERT INTO workspaces(id,name,slug) VALUES('ws-2','Other','other'); INSERT INTO workspace_members(id,user_id,workspace_id,access_mode) VALUES('restricted','u-good','ws-2','restricted')`},
+		{"participant removed", `UPDATE chats SET created_by='other-user',visibility='group' WHERE id='chat-1'; DELETE FROM chat_participants WHERE user_id='u-good'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := seededDB(t)
+			if _, err := db.Exec(`INSERT INTO users(id,email) VALUES('other-user','other@invalid.test')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO chat_participants(chat_id,user_id) VALUES('chat-1','u-good')`); err != nil {
+				t.Fatal(err)
+			}
+			auth := NewDBChannelAuthorizer(db)
+			for _, channel := range []string{"session:chat-1", "chat-hints:chat-1"} {
+				if allowed, err := auth.CanSubscribe(t.Context(), "u-good", channel); err != nil || !allowed {
+					t.Fatalf("authorized subscription %s: %v %v", channel, allowed, err)
+				}
+			}
+			hub := newRunningHub(t)
+			hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+			client := &Client{hub: hub, conn: dialClientConn(t), userID: "u-good", ctx: context.Background()}
+			for _, event := range []string{"chat.entity_refs_changed", "issue.revision_changed"} {
+				frame := []byte(fmt.Sprintf(`{"type":%q,"channel":"session:chat-1","payload":{"contract_version":1}}`, event))
+				if !client.writeFrame(frame) {
+					t.Fatal("legitimate trusted frame denied")
+				}
+			}
+			if _, err := db.Exec(tc.revoke); err != nil {
+				t.Fatal(err)
+			}
+			for _, channel := range []string{"session:chat-1", "chat-hints:chat-1"} {
+				subscribe, e1 := auth.CanSubscribe(t.Context(), "u-good", channel)
+				deliver, e2 := auth.CanDeliver(t.Context(), "u-good", channel)
+				if e1 != nil || e2 != nil || subscribe || deliver {
+					t.Fatalf("revoked %s: subscribe=%v deliver=%v errors=%v/%v", channel, subscribe, deliver, e1, e2)
+				}
+			}
+			for _, event := range []string{"chat.entity_refs_changed", "issue.revision_changed"} {
+				frame := []byte(fmt.Sprintf(`{"type":%q,"channel":"session:chat-1","payload":{"contract_version":1}}`, event))
+				if client.writeFrame(frame) {
+					t.Fatal("queued hint delivered after authority revoked")
+				}
+			}
+		})
+	}
+}
+
+func TestWriteFrameRechecksSuspendedAccountOnBroadChannels(t *testing.T) {
+	db := seededDB(t)
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+	client := &Client{hub: hub, conn: dialDeliverySink(t), userID: "u-good", ctx: context.Background()}
+	frames := [][]byte{
+		[]byte(`{"type":"update","channel":"workspace:ws-1","payload":{}}`),
+		[]byte(`{"type":"update","channel":"providers:global","payload":{}}`),
+		[]byte(`{"type":"pong"}`),
+	}
+	for _, frame := range frames {
+		if !client.writeFrame(frame) {
+			t.Fatal("active account denied")
+		}
+	}
+	if _, err := db.Exec(`UPDATE users SET suspended_at='' WHERE id='u-good'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range frames {
+		if client.writeFrame(frame) {
+			t.Fatal("queued update delivered after account suspension")
+		}
+	}
+}
+
+// Multiple valid frames need a peer that keeps reading instead of treating the
+// first frame as an upgrade-authentication message.
+func dialDeliverySink(t *testing.T) *websocket.Conn {
+	t.Helper()
+	server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		defer connection.Close()
+		_, _ = io.Copy(io.Discard, connection)
+	}))
+	t.Cleanup(server.Close)
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.Dial("ws://"+endpoint.Host+"/", "", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	return connection
 }

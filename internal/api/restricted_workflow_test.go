@@ -50,7 +50,7 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "agent", ID: "wf-agent", Operation: "run"}}); err != nil {
+		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "routine", ID: "wf-routine", Operation: "run"}, {Kind: "agent", ID: "wf-agent", Operation: "run"}}); err != nil {
 			t.Fatal(err)
 		}
 		session, err := sessions.NewDBStore(db).Create(t.Context(), user, "test", "127.0.0.1", auth.RefreshTokenTTL)
@@ -154,9 +154,9 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 			t.Fatalf("caller authority fields accepted %d", rec.Code)
 		}
 	}
-	execOrFatal(t, db, `UPDATE workspace_members SET capabilities='[]' WHERE user_id='wf-h2'`)
+	execOrFatal(t, db, `DELETE FROM access_grants WHERE member_id=(SELECT id FROM workspace_members WHERE user_id='wf-h2' AND workspace_id=?) AND resource_kind='routine'`, workspace)
 	if rec := request("wf-h2", http.MethodPost, manualPath, `{"inputs":{"task":"run grant alone"}}`); rec.Code != 404 {
-		t.Fatalf("run grant bypassed routine capability %d", rec.Code)
+		t.Fatalf("agent run grant bypassed exact routine grant %d", rec.Code)
 	}
 	// A declared Page action retains its own manager/visible-panel floor.
 	execOrFatal(t, db, `UPDATE workspace_members SET role='MANAGER' WHERE user_id='wf-h1'`)
@@ -283,7 +283,7 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Replace(t.Context(), owner, "wf-h1", workspace, "restricted", membership, []access.Right{{Kind: "agent", ID: "wf-agent", Operation: "run"}}); err != nil {
+	if _, err = store.Replace(t.Context(), owner, "wf-h1", workspace, "restricted", membership, []access.Right{{Kind: "routine", ID: "wf-routine", Operation: "run"}, {Kind: "agent", ID: "wf-agent", Operation: "run"}}); err != nil {
 		t.Fatal(err)
 	}
 	digest := strings.Repeat("a", 64)

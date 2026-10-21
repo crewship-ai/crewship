@@ -26,7 +26,7 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	triageRule := obj(map[string]any{"id": str(), "name": str(), "pattern": str(), "match_type": str(), "crew_id": nullable(str()), "assignee_id": nullable(str()), "priority": nullable(str()), "project_id": nullable(str()), "labels_json": nullable(str()), "position": integer(), "enabled": boolean(), "match_count": integer(), "created_at": str()})
 	milestone := obj(map[string]any{"id": str(), "project_id": str(), "name": str(), "description": nullable(str()), "target_date": nullable(str()), "status": str(), "position": integer(), "issue_count": integer(), "done_count": integer(), "created_at": str(), "updated_at": str()})
 	relation := obj(map[string]any{"id": str(), "source_id": str(), "target_id": str(), "relation_type": str(), "target_identifier": nullable(str()), "target_title": str(), "target_status": str(), "created_at": str()})
-	comment := obj(map[string]any{"id": str(), "mission_id": str(), "author_type": str(), "author_id": str(), "author_name": str(), "body": str(), "created_at": str(), "updated_at": str()})
+	comment := obj(map[string]any{"id": str(), "mission_id": str(), "author_type": str(), "author_id": str(), "author_name": str(), "body": str(), "created_at": str(), "updated_at": str(), "guest_visible": boolean()})
 	activity := obj(map[string]any{"id": str(), "mission_id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()), "action": str(), "details": nullable(str()), "created_at": str()})
 	// B11 (§14.1, #2368): the ordered event log, read by seq (not
 	// created_at) so a client can cursor exactly what it has already

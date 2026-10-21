@@ -24,16 +24,30 @@ public contract here. Superseded a spec? Move it to
 
 ## Runtime, authority and budgets
 
+- [Routine version authority identity](routine-version-authority.md): immutable content/authority storage with preserved history and integer pins; no publication activation.
+
+- [Publication grant provenance](routine-publication-grant-bindings.md): host-only exact selected-grant and issuer membership bindings; no publication or execution activation.
+
 - [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
   files, profiles and content-free attempt records.
 - [Member resource policy](member-resource-policy.md): the administration API/CLI
   for restricted member authority; does not itself enable model execution.
+- [Shared Issues management](issues-manage.md): bounded project and milestone
+  administration, separate destructive rights, live authority and conflicts.
 - [Credentials vault](credentials-vault.md): credential types, storage and
   mounting conventions, with implementation provenance.
 - [Trusted provider budgets](trusted-llm-hard-budgets.md): reservations before
   provider calls and admission rules for legacy sidecar traffic.
 
 ## Work and dispatch
+
+- [Routine authority bindings](routine-origin-binding.md): chat origin inheritance,
+  schedule binding policy and audited operator recovery.
+
+- [Chat entity references](chat-entity-references.md): authorized, bounded Issue
+  reference snapshots, operation projections, revision reads and API/CLI fixtures.
+- [E2 card projections](chat-e2-card-contract.md): A1 typed proposal/decision
+  transport and handler fixtures; source storage and public route integration follow separately.
 
 - [Restricted workflows](restricted-workflows.md): private routine admission,
   filtered catalogs, receipts, Page polling and bounded delegated execution.

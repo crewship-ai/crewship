@@ -1,17 +1,21 @@
 "use client"
 
 import { RoutineRunEffects, routineRunFacts } from "./routine-run-effects"
-import { useRef, useState, type ReactNode } from "react"
-import { Clock, DollarSign, Hand, Layers, Play, Users } from "lucide-react"
+import { useId, useRef, useState, type ReactNode } from "react"
+import { Clock, DollarSign, Eye, Hand, Layers, Play, Users } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CREATE_SURFACE_INPUT,
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceNotice,
+} from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Segmented } from "@/components/ui/segmented"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
   RoutineInputError,
@@ -42,9 +46,39 @@ import { cn } from "@/lib/utils"
  * the chip row says who decides and what it costs; one sentence at the
  * bottom says what the run will do (operator console proposal, screen 3).
  */
+/** v67 D-RTRUN: one dialog for the three ways to start a routine. */
+export type RunMode = "run" | "test" | "later"
+
+/** What the person chose besides the inputs (only with `modes`). */
+export interface RunStartOptions {
+  mode: RunMode
+  /** Later: when it starts (RFC 3339) — POST …/run `fire_at`. */
+  fireAt?: string
+  /** Later: the version it runs, or null to follow the live one — `pinned_version`. */
+  pinnedVersion?: number | null
+}
+
+const MODE_LABEL: Record<RunMode, string> = { run: "Run now", test: "Test run", later: "Later" }
+
+/** The footer's limits, from the definition: "Max $2.00 · 1 at a time". */
+export function routineLimitsLine(definition: Record<string, unknown> | null | undefined): string | null {
+  if (!definition) return null
+  const parts: string[] = []
+  const cap = definition.max_cost_usd
+  if (typeof cap === "number" && cap > 0) parts.push(`Max $${cap.toFixed(2)}`)
+  const max = definition.max_concurrent
+  if (typeof max === "number" && max > 1) parts.push(`Up to ${max} at a time`)
+  else if ((typeof definition.concurrency_key === "string" && definition.concurrency_key) || max === 1) parts.push("1 at a time")
+  return parts.length ? parts.join(" · ") : null
+}
+
 export interface RoutineRunInputsDialogProps {
   definition?: Record<string, unknown> | null
-  submitLabel?: "Run" | "Schedule"
+  submitLabel?: "Run" | "Schedule" | "Test"
+  /** Run now · Test run · Later as one segment. Without it the dialog is the
+   *  single-purpose form `submitLabel` names (Run again, Schedule once). */
+  modes?: RunMode[]
+  initialMode?: RunMode
   /** Open when non-null; the specs are the routine's declared inputs. */
   versionChoices?: { value: string; label: string }[]
   selectedVersion?: string
@@ -64,11 +98,18 @@ export interface RoutineRunInputsDialogProps {
   error?: string | null
   onReload?: () => void
   onCancel: () => void
-  /** Receives the typed `inputs` map, ready to post. */
-  onRun: (inputs: Record<string, unknown>) => void
+  /** Receives the typed `inputs` map, ready to post — and, with `modes`, the
+   *  chosen way to start it. */
+  onRun: (inputs: Record<string, unknown>, options?: RunStartOptions) => void
 }
 
-export function RoutineRunInputsDialog({
+export function RoutineRunInputsDialog(props: RoutineRunInputsDialogProps) {
+  // Mounted per opening, so the mode, the time and the version start fresh.
+  if (props.inputs === null) return null
+  return <OpenRunInputsDialog {...props} inputs={props.inputs} />
+}
+
+function OpenRunInputsDialog({
   definition,
   initialInputs,
   inputs,
@@ -85,8 +126,34 @@ export function RoutineRunInputsDialog({
   onReload,
   onCancel,
   onRun,
-}: RoutineRunInputsDialogProps) {
-  if (inputs === null) return null
+  modes,
+  initialMode,
+}: RoutineRunInputsDialogProps & { inputs: RoutineInputSpec[] }) {
+  const formId = useId()
+  const [mode, setMode] = useState<RunMode>(initialMode ?? modes?.[0] ?? "run")
+  const [startAt, setStartAt] = useState("")
+  const [pin, setPin] = useState("follow")
+  const [laterError, setLaterError] = useState<string | null>(null)
+  const segmented = !!modes && modes.length > 0
+  const current: RunMode = segmented ? (modes!.includes(mode) ? mode : modes![0]) : "run"
+  const verb = segmented ? (current === "test" ? "Test" : "Run") : submitLabel
+  const limits = routineLimitsLine(definition)
+  const submit = (values: Record<string, unknown>) => {
+    if (!segmented) return onRun(values)
+    if (current !== "later") return onRun(values, { mode: current })
+    const at = startAt ? new Date(startAt) : null
+    if (!at || Number.isNaN(at.getTime())) return setLaterError("Pick when it starts.")
+    if (at.getTime() <= Date.now()) return setLaterError("Pick a time in the future.")
+    setLaterError(null)
+    onRun(values, { mode: "later", fireAt: at.toISOString(), pinnedVersion: pin === "follow" ? null : Number(pin) })
+  }
+  const primaryText = !segmented
+    ? inputsSubmitContent(submitLabel, submitting)
+    : current === "test"
+      ? submitting ? "Starting…" : "Start test run"
+      : current === "later"
+        ? submitting ? "Planning…" : "Plan run"
+        : inputsSubmitContent("Run", submitting)
   // The version the run uses: a chosen historical version, else the head.
   const usedVersion =
     selectedVersion && selectedVersion !== "current"
@@ -99,14 +166,22 @@ export function RoutineRunInputsDialog({
   if (facts.decides) chips.push({ icon: Hand, text: facts.decides })
   if (facts.cost) chips.push({ icon: DollarSign, text: facts.cost })
   if (facts.duration) chips.push({ icon: Clock, text: facts.duration })
+  const dismiss = () => {
+    if (!submitting) onCancel()
+  }
   return (
-    <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {submitLabel} {routineName}
-          </DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && dismiss()}
+      size="sm"
+      onSubmit={() => submitInputsForm(formId)}
+    >
+      <CreateSurfaceHeader
+        concept="routines"
+        icon={segmented ? (current === "later" ? Clock : current === "test" ? Eye : Play) : submitLabel === "Run" ? Play : Clock}
+        title={`${verb} ${routineName}`}
+        description={
+          <>
             {usedVersion ? (
               <>
                 Uses <span className="font-medium text-foreground">v{usedVersion}</span>
@@ -116,11 +191,16 @@ export function RoutineRunInputsDialog({
             ) : draft ? (
               <>The unpublished draft r{draft.revision} is not used · </>
             ) : null}
-            {submitLabel === "Schedule"
+            {(segmented ? current === "later" : submitLabel === "Schedule")
               ? "the routine will start at the selected date and time."
-              : "a new run is added to History."}
-          </DialogDescription>
-        </DialogHeader>
+              : (segmented ? current === "test" : submitLabel === "Test")
+                ? "a test without side effects: nothing is sent, written or published."
+                : "a new run is added to History."}
+          </>
+        }
+        onClose={dismiss}
+      />
+      <CreateSurfaceBody className="space-y-4">
         {error && <p role="alert" className="text-sm text-destructive">{error}{onReload && <Button type="button" variant="outline" size="sm" className="ml-2" onClick={onReload}>Reload recipe</Button>}</p>}
         {chips.length > 0 && (
           <ul aria-label="Run facts" className="flex flex-wrap gap-1.5">
@@ -140,24 +220,72 @@ export function RoutineRunInputsDialog({
             ))}
           </ul>
         )}
+        {segmented && modes!.length > 1 && (
+          <Segmented<RunMode>
+            ariaLabel="How to run"
+            fill
+            value={current}
+            onChange={(m) => {
+              setMode(m)
+              setLaterError(null)
+            }}
+            options={modes!.map((m) => ({ value: m, label: MODE_LABEL[m] }))}
+          />
+        )}
+        {segmented && current === "test" && (
+          <CreateSurfaceNotice>
+            <b className="font-medium">No side effects</b> — messages, publishing and writes to other systems are simulated. Agents still run and cost money.
+            {headVersion ? ` Tests the live version v${headVersion}.` : ""}
+          </CreateSurfaceNotice>
+        )}
+        {segmented && current === "later" && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <CreateSurfaceField label="Start at" htmlFor={`${formId}-start`} hint="Creates a one-time run you can cancel in Triggers">
+              <Input
+                id={`${formId}-start`}
+                type="datetime-local"
+                value={startAt}
+                onChange={(e) => {
+                  setStartAt(e.target.value)
+                  setLaterError(null)
+                }}
+                aria-invalid={!!laterError}
+                className={CREATE_SURFACE_INPUT}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Version" hint={pin === "follow" ? "Runs whatever is live when it starts" : "Runs this version even if a newer one is published"}>
+              <Select value={pin} onValueChange={setPin} disabled={submitting}>
+                <SelectTrigger aria-label="Version" size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="follow">Follow the live version</SelectItem>
+                  {headVersion ? <SelectItem value={String(headVersion)}>{`Pin v${headVersion}`}</SelectItem> : null}
+                </SelectContent>
+              </Select>
+            </CreateSurfaceField>
+            {laterError && (
+              <p role="alert" className="text-xs text-destructive sm:col-span-2">
+                {laterError}
+              </p>
+            )}
+          </div>
+        )}
         {versionChoices && (
           <div className="space-y-1">
-            <label htmlFor="routine-run-version" className="text-sm font-medium">
-              Recipe version
-            </label>
-            <select
-              id="routine-run-version"
-              className="w-full rounded-md border bg-card p-2 text-sm"
-              value={selectedVersion}
-              onChange={(e) => onVersionChange?.(e.target.value)}
-              disabled={submitting}
-            >
-              {versionChoices.map((v) => (
-                <option key={v.value} value={v.value}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
+            <span className="text-sm font-medium">Recipe version</span>
+            <Select value={selectedVersion} onValueChange={(v) => onVersionChange?.(v)} disabled={submitting}>
+              <SelectTrigger aria-label="Recipe version" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {versionChoices.map((v) => (
+                  <SelectItem key={v.value} value={v.value}>
+                    {v.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-muted-foreground">
               Values below are copied from the earlier run where names match. A new run
               repeats the work; it does not resume the earlier one or undo its actions.
@@ -170,22 +298,50 @@ export function RoutineRunInputsDialog({
             carrying the previous one's answers across. */}
         <InputsForm
           key={`${routineName}:${selectedVersion ?? "current"}`}
+          formId={formId}
           inputs={inputs}
           initialInputs={initialInputs}
           submitLabel={submitLabel}
           submitting={submitting}
-          onCancel={onCancel}
-          onRun={onRun}
+          onRun={submit}
           footer={<RoutineRunEffects definition={definition} />}
-          hint={
-            submitLabel === "Schedule"
+        />
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        hint={
+          segmented && limits
+            ? limits
+            : (segmented ? current === "later" : submitLabel === "Schedule")
               ? "Esc closes · nothing is scheduled yet"
               : "Esc closes · nothing has started"
-          }
-        />
-      </DialogContent>
-    </Dialog>
+        }
+        onCancel={onCancel}
+        guardCancel={false}
+        primaryLabel={primaryText}
+        primaryIcon={(segmented ? current !== "later" : submitLabel === "Run") && !submitting ? Play : undefined}
+        onPrimary={() => submitInputsForm(formId)}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
+}
+
+/** Submit an `InputsForm` rendered with `formId` from a control outside it —
+ *  a CreateSurface footer, or the shell's ⌘↵. Goes through the form's own
+ *  submit handler, so validation runs exactly as it does on Enter. */
+export function submitInputsForm(formId: string) {
+  const form = document.getElementById(formId)
+  if (form instanceof HTMLFormElement) form.requestSubmit()
+}
+
+/** The submit button's text, shared by the inline actions and a surface footer. */
+export function inputsSubmitContent(submitLabel: string, submitting?: boolean): string {
+  const isRun = submitLabel === "Run"
+  if (submitting) {
+    if (isRun) return "Running…"
+    return submitLabel.toLowerCase().includes("schedule") ? "Scheduling…" : "Working…"
+  }
+  return isRun ? "Run now" : submitLabel
 }
 
 export function InputsForm({
@@ -197,6 +353,7 @@ export function InputsForm({
   submitLabel = "Run",
   footer,
   hint,
+  formId,
 }: {
   inputs: RoutineInputSpec[]
   initialInputs?: Record<string, unknown>
@@ -208,6 +365,12 @@ export function InputsForm({
   footer?: ReactNode
   /** Muted text at the left of the buttons. */
   hint?: string
+  /**
+   * Render inside a CreateSurface: the form takes this id and leaves its
+   * actions to the surface footer (which submits it with `submitInputsForm`).
+   * Enter in a field still submits through a visually hidden default button.
+   */
+  formId?: string
 }) {
   const fields = slashFieldsFromRoutineInputs(inputs)
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -289,7 +452,7 @@ export function InputsForm({
   const isRun = submitLabel === "Run"
 
   return (
-    <form ref={formRef} noValidate onSubmit={handleSubmit} className="space-y-4">
+    <form id={formId} ref={formRef} noValidate onSubmit={handleSubmit} className="space-y-4">
       {summary > 0 && (
         <p
           role="alert"
@@ -341,7 +504,7 @@ export function InputsForm({
                 <button
                   type="button"
                   disabled={submitting}
-                  className="min-h-8 coarse:min-h-12 text-primary underline"
+                  className="min-h-8 coarse:min-h-[44px] text-primary underline"
                   onClick={() => {
                     const next = { ...values, [f.name]: f.default ?? "" }
                     setValues(next)
@@ -370,37 +533,29 @@ export function InputsForm({
         </div>
       ))}
       {footer}
-      <DialogFooter className="sm:items-center">
-        {hint && <span className="text-xs text-muted-foreground sm:mr-auto">{hint}</span>}
-        {onCancel && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onCancel}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-        )}
-        <Button type="submit" disabled={submitting}>
-          {submitting ? (
-            isRun ? (
-              "Running…"
-            ) : submitLabel.toLowerCase().includes("schedule") ? (
-              "Scheduling…"
-            ) : (
-              "Working…"
-            )
-          ) : isRun ? (
-            <>
-              <Play className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Run now
-            </>
-          ) : (
-            submitLabel
+      {formId ? (
+        // The implicit-submission target: without a submit button a form
+        // with several fields does not submit on Enter.
+        <button type="submit" tabIndex={-1} aria-hidden className="sr-only" disabled={submitting} />
+      ) : (
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {hint && <span className="text-xs text-muted-foreground sm:mr-auto">{hint}</span>}
+          {onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
           )}
-        </Button>
-      </DialogFooter>
+          <Button type="submit" disabled={submitting}>
+            {isRun && !submitting && <Play className="mr-1 h-3.5 w-3.5" aria-hidden />}
+            {inputsSubmitContent(submitLabel, submitting)}
+          </Button>
+        </div>
+      )}
     </form>
   )
 }

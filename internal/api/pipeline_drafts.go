@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,7 +22,27 @@ func (h *PipelineHandler) GetDraft(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "Could not load routine draft")
 		return
 	}
+	h.attachDraftTestResult(r.Context(), d)
 	writeJSON(w, 200, d)
+}
+
+// attachDraftTestResult sets d.TestResult to the latest Test run of the exact
+// definition the draft holds (ODCH-RT-13). A draft nobody tested, or whose
+// definition changed since, has none.
+func (h *PipelineHandler) attachDraftTestResult(ctx context.Context, d *pipeline.Draft) {
+	var doc struct {
+		Definition json.RawMessage `json:"definition"`
+	}
+	if d == nil || json.Unmarshal(d.Document, &doc) != nil || len(doc.Definition) == 0 {
+		return
+	}
+	hash := definitionHashHex(doc.Definition)
+	results, err := h.store.TestResults(ctx, d.WorkspaceID, []string{hash})
+	if err != nil {
+		h.logger.Warn("draft test result", "error", err)
+		return
+	}
+	d.TestResult = results[hash]
 }
 
 type routineDraftListEntry struct {
@@ -86,9 +107,7 @@ func (h *PipelineHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	// Saving incomplete work is not validation or an approval. Never retain a
 	// short-lived validation token or legacy gate overrides in a durable draft.
-	for _, key := range []string{"save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed"} {
-		delete(doc, key)
-	}
+	stripRoutineJSONFields(doc, "save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed", "source_run_id", "source_agent_id", "chat_origin_id")
 	encoded, err := encodeDraftDocument(doc)
 	if err != nil {
 		replyError(w, 500, "Could not prepare routine draft")
@@ -107,6 +126,7 @@ func (h *PipelineHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "Could not save routine draft")
 		return
 	}
+	h.attachDraftTestResult(r.Context(), saved)
 	writeJSON(w, 200, saved)
 }
 

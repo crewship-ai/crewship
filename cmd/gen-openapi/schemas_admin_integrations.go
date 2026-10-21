@@ -5,7 +5,9 @@ package main
 // evolve their wire types without making the route scanner grow a second,
 // domain-specific parser.
 type DomainSchema struct {
-	Request map[string]any
+	// NoRequest marks audited operations whose handler never consumes a body.
+	NoRequest bool
+	Request   map[string]any
 	// RequestRequired opts an operation into a mandatory body without changing
 	// the legacy optional-body contract of other operations.
 	RequestRequired bool
@@ -23,6 +25,8 @@ type DomainSchema struct {
 	// success path is deliberately no-content (for example DELETE → 204).
 	// A non-nil slice is significant; an empty slice means no success status.
 	SuccessStatuses []string
+	// ErrorStatuses adds helper-produced errors that source inference cannot see.
+	ErrorStatuses []string
 	// ErrorMedia and ErrorResponse describe the non-2xx bodies of an
 	// operation whose errors do NOT go through writeJSON. The generator
 	// otherwise declares application/json with the {"error"} or RFC 7807

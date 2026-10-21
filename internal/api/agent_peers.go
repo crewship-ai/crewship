@@ -3,14 +3,17 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 )
 
 // PR-E F6 — Peer card API surface.
@@ -117,13 +120,9 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 	// Verify the agent belongs to the caller's workspace before
 	// listing — otherwise an attacker with a guessed agent_id could
 	// enumerate cards across tenants.
-	if _, _, err := h.resolveAgent(r, agentID); err != nil {
+	if _, _, err := h.resolveAgent(r, agentID); err != nil && !errors.Is(err, errAgentHasNoCrew) {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
-			return
-		}
-		if errors.Is(err, errAgentHasNoCrew) {
-			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		replyError(w, http.StatusInternalServerError, err.Error())
@@ -157,7 +156,17 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 		}
 		out = append(out, e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"peers": out, "agent_id": agentID})
+	if err := rows.Err(); err != nil {
+		replyError(w, http.StatusInternalServerError, "list peers")
+		return
+	}
+	rows.Close()
+	preferences, err := usermodel.ListFeedbackPreferences(r.Context(), h.db, wsID, agentID, u.ID)
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "list preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"peers": out, "preferences": preferences, "agent_id": agentID})
 }
 
 // GetAgentPeer returns one card's full content, derived by the
@@ -238,29 +247,41 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusForbidden, "personal cards are available only to their subject")
 		return
 	}
-	if !h.requireStorage(w) {
+	if r.URL.Query().Get("entry_id") != "" {
+		h.mutatePreference(w, r, true)
 		return
 	}
+
 	agentID := r.PathValue("agentId")
 	targetUser := r.PathValue("userId")
 	wsID := WorkspaceIDFromContext(r.Context())
 	crewID, slug, err := h.resolveAgent(r, agentID)
-	if err != nil {
+	if err != nil && !errors.Is(err, errAgentHasNoCrew) {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
-			return
-		}
-		if errors.Is(err, errAgentHasNoCrew) {
-			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		replyError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	paths := h.agentPeerDir(crewID, slug)
-	if err := memory.DeletePeerCard(paths, targetUser, wsID); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+	crewless := errors.Is(err, errAgentHasNoCrew)
+	if !crewless && !h.requireStorage(w) {
 		return
+	}
+	if _, err := h.db.ExecContext(r.Context(), `UPDATE agent_user_preferences SET status='withdrawn',value='',reason='',revision=revision+1 WHERE workspace_id=? AND agent_id=? AND user_id=? AND status!='withdrawn'
+ AND EXISTS(SELECT 1 FROM agents a WHERE a.id=agent_user_preferences.agent_id AND a.workspace_id=? AND a.deleted_at IS NULL)
+ AND EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.workspace_id=agent_user_preferences.workspace_id AND wm.user_id=agent_user_preferences.user_id AND wm.access_mode='trusted')`, WorkspaceIDFromContext(r.Context()), r.PathValue("agentId"), r.PathValue("userId"), WorkspaceIDFromContext(r.Context())); err != nil {
+		replyError(w, http.StatusInternalServerError, "delete preferences")
+		return
+	}
+
+	// Solo agents have structured memory but no safe Markdown storage path.
+	if !crewless {
+		paths := h.agentPeerDir(crewID, slug)
+		if err := memory.DeletePeerCard(paths, targetUser, wsID); err != nil {
+			replyError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if _, err := h.db.ExecContext(r.Context(), `
 		DELETE FROM peer_cards WHERE agent_id = ? AND user_slug = ?
@@ -329,4 +350,81 @@ func insertPeerAudit(_ context.Context, db *sql.DB, logger *slog.Logger, row pee
 		logger.Warn("peer_card_audit insert failed",
 			"action", row.Action, "target", row.TargetUserID, "err", err)
 	}
+}
+
+const ownPreferenceSQL = ` FROM agent_user_preferences p JOIN agents a ON a.id=p.agent_id AND a.workspace_id=p.workspace_id AND a.deleted_at IS NULL
+ JOIN users u ON u.id=p.user_id AND u.suspended_at IS NULL
+ JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL
+ JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.user_id AND wm.access_mode='trusted'
+ JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.created_by=p.user_id AND c.visibility='private'
+ JOIN conversation_messages m ON m.id=p.message_id AND m.session_id=c.id AND m.role='assistant'
+ WHERE p.id=? AND p.workspace_id=? AND p.agent_id=? AND p.user_id=?
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=p.user_id AND restricted.access_mode='restricted')`
+
+// PatchAgentPeer corrects a single explicit preference with optimistic concurrency.
+// PATCH /api/v1/agents/{agentId}/peers/{userId}
+func (h *PeerCardHandler) PatchAgentPeer(w http.ResponseWriter, r *http.Request) {
+	h.mutatePreference(w, r, false)
+}
+
+func (h *PeerCardHandler) mutatePreference(w http.ResponseWriter, r *http.Request, remove bool) {
+	u := UserFromContext(r.Context())
+	if u == nil || u.ID != r.PathValue("userId") {
+		replyError(w, http.StatusForbidden, "personal cards are available only to their subject")
+		return
+	}
+	var body struct {
+		EntryID  string `json:"entry_id"`
+		Revision int    `json:"revision"`
+		Reason   string `json:"reason"`
+	}
+	if remove {
+		body.EntryID = r.URL.Query().Get("entry_id")
+		body.Revision, _ = strconv.Atoi(r.URL.Query().Get("revision"))
+	} else {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFeedbackBodyBytes)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			replyError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if _, ok := usermodel.FeedbackPreferenceOptionsV1[body.Reason]; !ok {
+			replyError(w, http.StatusBadRequest, "reason must be an explicit preference from catalogue v1")
+			return
+		}
+	}
+	if body.EntryID == "" || body.Revision < 1 {
+		replyError(w, http.StatusBadRequest, "entry_id and revision required")
+		return
+	}
+	var revision int
+	scopeArgs := []any{body.EntryID, WorkspaceIDFromContext(r.Context()), r.PathValue("agentId"), u.ID}
+	err := h.db.QueryRowContext(r.Context(), `SELECT p.revision`+ownPreferenceSQL, scopeArgs...).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "preference not found")
+		return
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "read preference")
+		return
+	}
+	if revision != body.Revision {
+		replyError(w, http.StatusConflict, "preference revision changed")
+		return
+	}
+	var result sql.Result
+	if remove {
+		result, err = h.db.ExecContext(r.Context(), `UPDATE agent_user_preferences SET status='withdrawn',value='',reason='',revision=revision+1 WHERE id IN (SELECT p.id`+ownPreferenceSQL+` AND p.revision=?)`, append(scopeArgs, body.Revision)...)
+	} else {
+		result, err = h.db.ExecContext(r.Context(), `UPDATE message_feedback SET reason=?,revision=revision+1 WHERE id IN (SELECT p.feedback_id`+ownPreferenceSQL+` AND p.revision=? AND p.status!='withdrawn')`, append([]any{body.Reason}, append(scopeArgs, body.Revision)...)...)
+	}
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "update preference")
+		return
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		replyError(w, http.StatusConflict, "preference revision changed or withdrawn")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

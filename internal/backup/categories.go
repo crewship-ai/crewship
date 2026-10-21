@@ -183,6 +183,14 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"workspace_artifact_creation_policy": CategoryAgents,
+	"workspace_artifact_creation_crews":  CategoryAgents,
+
+	"slides_heads": CategoryPages, "slides_revisions": CategoryPages,
+	"slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
+	"document_creations": CategoryPages, "documents": CategoryPages, "document_updates": CategoryPages,
+	"document_receipts": CategoryPages, "document_checkpoints": CategoryPages,
+
 	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
 	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
 
@@ -191,7 +199,8 @@ var TableCategory = map[string]string{
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
 	"crew_templates": CategoryAgents, "workspace_members": CategoryAgents, "access_grants": CategoryAgents,
-	"workspace_invitations": CategoryAgents, "workspace_mcp_servers": CategoryAgents,
+	"access_preset_selections": CategoryAgents,
+	"workspace_invitations":    CategoryAgents, "workspace_mcp_servers": CategoryAgents,
 	"feature_flag_overrides": CategoryAgents, "budget_limits": CategoryAgents, "hooks_config": CategoryAgents,
 	"automations": CategoryAgents, "keeper_governance_settings": CategoryAgents, "retention_settings": CategoryAgents,
 	"notification_channels": CategoryAgents, "user_notification_prefs": CategoryAgents,
@@ -201,10 +210,12 @@ var TableCategory = map[string]string{
 	// Memory and its version history.
 	"memory_relations": CategoryMemory, "memory_proposals": CategoryMemory, "memory_versions": CategoryMemory,
 	"memory_health_snapshots": CategoryMemory, "peer_cards": CategoryMemory, "user_peer_consent": CategoryMemory,
-	"user_models": CategoryMemory, "user_model_provenance": CategoryMemory,
+	"user_models": CategoryMemory, "user_model_provenance": CategoryMemory, "agent_user_preferences": CategoryMemory,
 
 	// Chats.
+	"chat_issue_proposals": CategoryChats, "chat_proposal_operations": CategoryChats,
 	"chats": CategoryChats, "chat_branches": CategoryChats, "message_reactions": CategoryChats,
+	"agent_operations": CategoryChats, "chat_entity_refs": CategoryChats, // durable card history and its receipt parents
 	"message_feedback": CategoryChats, "chat_participants": CategoryChats, "chat_read_cursors": CategoryChats,
 	"captain_chats": CategoryChats, "workspace_conversations": CategoryChats,
 	"workspace_conversation_direct_pairs": CategoryChats, "workspace_conversation_members": CategoryChats,
@@ -216,7 +227,8 @@ var TableCategory = map[string]string{
 	"attachments": CategoryAtt,
 
 	// Routines, schedules and run history.
-	"pipelines": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
+	"execution_origins": categoryAnchor, // required admission fences; never omit a referenced origin or imply autonomous work
+	"pipelines":         CategoryRoutines, "routine_folders": CategoryRoutines, "routine_folder_members": CategoryRoutines, "routine_templates": CategoryRoutines, "routine_test_results": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
 	"pipeline_schedules": CategoryRoutines, "pipeline_webhooks": CategoryRoutines, "pipeline_runs": CategoryRoutines,
 	"pipeline_step_executions": CategoryRoutines, "pipeline_run_artifacts": CategoryRoutines,
 	"pipeline_run_step_outputs": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,
@@ -232,7 +244,7 @@ var TableCategory = map[string]string{
 	"cost_ledger": CategoryJournal, "gdpr_actions": CategoryJournal,
 
 	// Credentials and integrations.
-	"credentials": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
+	"credentials": CategoryCreds, "credential_folders": CategoryCreds, "credential_crews": CategoryCreds, "credential_bindings": CategoryCreds,
 	"credential_fields": CategoryCreds, "provider_login_pools": CategoryCreds,
 	"provider_login_pool_members": CategoryCreds, "agent_credentials": CategoryCreds,
 	"credential_audit": CategoryCreds, "credential_rotations": CategoryCreds, "composio_settings": CategoryCreds,
@@ -258,9 +270,11 @@ var TableCategory = map[string]string{
 	"issue_counters": categoryWorkOnly, "issue_agent_sessions": categoryWorkOnly, "assignments": categoryWorkOnly,
 	"approvals_queue": categoryWorkOnly, "mission_tasks": categoryWorkOnly, "mission_activity": categoryWorkOnly,
 	"mission_comments": categoryWorkOnly, "mission_comment_mentions": categoryWorkOnly,
-	"mission_labels": categoryWorkOnly, "mission_proposals": categoryWorkOnly, "mission_relations": categoryWorkOnly,
+	"issue_mutation_outbox": categoryWorkOnly,
+	"mission_labels":        categoryWorkOnly, "mission_proposals": categoryWorkOnly, "mission_relations": categoryWorkOnly,
 	"mission_code_links": categoryWorkOnly, "labels": categoryWorkOnly, "milestones": categoryWorkOnly,
-	"projects": categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
+	"project_guest_issue_intake": categoryWorkOnly,
+	"projects":                   categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
 	"inbox_item_reads": categoryWorkOnly, "triage_rules": categoryWorkOnly, "saved_views": categoryWorkOnly,
 }
 
@@ -336,6 +350,7 @@ func (f categoryFilter) filterDump(d *DBDump) []string {
 			dropped = append(dropped, name)
 		}
 	}
+	dropDanglingPresetSelections(d)
 	sort.Strings(dropped)
 	return dropped
 }

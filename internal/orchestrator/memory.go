@@ -204,6 +204,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		if pc := o.buildPeerCardBlock(ctx, req); pc != "" {
 			early.WriteString(pc)
 		}
+		early.WriteString(o.buildFeedbackPreferenceBlock(ctx, req))
 		early.WriteString(budgetBlock)
 		early.WriteString(buildMemoryInstructions(today))
 		return early.String()
@@ -251,6 +252,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	if peerBlock := o.buildPeerCardBlock(ctx, req); peerBlock != "" {
 		b.WriteString(peerBlock)
 	}
+	b.WriteString(o.buildFeedbackPreferenceBlock(ctx, req))
 	b.WriteString(budgetBlock)
 	b.WriteString(buildMemoryInstructions(today))
 	// PR-Z Z.1: the curl-based [MEMORY TOOLS] block that used to be

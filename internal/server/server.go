@@ -45,6 +45,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -52,7 +53,8 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
-	containerCleanup *resourcelifecycle.Controller
+	documentsStartupErr error
+	containerCleanup    *resourcelifecycle.Controller
 
 	recoveredStopsMu        sync.Mutex
 	recoveredStopsCursor    string
@@ -491,7 +493,7 @@ func (s *Server) mountAPIRouter(
 	// and a drain goroutine so the journal WRITE path never blocks on a
 	// slow/full hub (best-effort: it drops under sustained backpressure;
 	// subscribers reconcile via the SSE replay / a /api/v1/journal refetch).
-	journalBridge := newJournalWSBridge(wsHub, logger)
+	journalBridge := newJournalWSBridgeForSources(deps.DB, wsHub, logger)
 	// The live feed is read-only: audit-only recovered stops must remain
 	// visible without reaching automation or external notification observers.
 	s.journalWriter.AddReadObserver(journalBridge.observe)
@@ -541,6 +543,9 @@ func (s *Server) mountAPIRouter(
 	orch.SetMemoryMetrics(newMemoryMetricsAdapter(deps.DB))
 	orch.SetPersonalizationAllowed(func(ctx context.Context, workspaceID, userID string) (bool, error) {
 		return memory.PersonalizationAllowed(ctx, deps.DB, workspaceID, userID)
+	})
+	orch.SetFeedbackPreferenceReader(func(ctx context.Context, workspaceID, agentID, userID string) (string, error) {
+		return usermodel.ReadFeedbackPreferences(ctx, deps.DB, workspaceID, agentID, userID)
 	})
 	orch.SetUserModelReader(func(ctx context.Context, workspaceID, userID string) (string, error) {
 		return memory.ReadIndexedUserModel(ctx, deps.DB, cfg.Storage.BasePath, workspaceID, userID)
@@ -903,7 +908,7 @@ func (s *Server) mountAPIRouter(
 	// Wire conversation history so Keeper can verify agent intent against actual chat
 	if convStore != nil {
 		convAdapter := &convStoreAdapter{store: convStore}
-		opts = append(opts, goapi.WithKeeperConversations(convAdapter))
+		opts = append(opts, goapi.WithKeeperConversations(convAdapter), goapi.WithTranscriptLock(convStore.LockTranscripts), goapi.WithTranscriptSnapshotLock(convStore.SnapshotTranscripts))
 		// Same adapter backs cross-session search; the searchable
 		// mirror is only populated when convStore was built WithDB.
 		opts = append(opts, goapi.WithConversationSearch(convAdapter))
@@ -1041,11 +1046,18 @@ func (s *Server) mountAPIRouter(
 	ratelimitcfg.SetGlobal(rateLimitStore)
 	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
+	if cfg.Documents.Enabled {
+		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
+	}
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)
+		if cfg.Documents.Enabled {
+			s.documentsStartupErr = err
+		}
 	} else {
 		s.apiRouter = apiRouter
+		apiRouter.RegisterSlidesHuman(cfg.Slides.Enabled)
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
 		// credential monitor's tick when there is one, and runs on its own
 		// ticker otherwise — a ChatGPT login must be renewed whether or not

@@ -37,6 +37,11 @@ crewship login
 
 The interactive flow uses NextAuth's credentials provider under the hood (CSRF → `/api/auth/callback/credentials` → session cookie → `POST /api/v1/auth/cli-token` to mint a permanent CLI token; falls back to the session token if the CLI-token endpoint isn't available on an older server).
 
+Guest accounts use the same password login or browser token flow. Their CLI
+token retains current Guest grants. Creating another token requires an
+interactive session; a Guest bearer cannot remint a wider successor.
+
+
 ### Token
 
 ```bash

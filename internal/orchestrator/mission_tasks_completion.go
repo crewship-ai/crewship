@@ -20,11 +20,11 @@ import (
 )
 
 func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID, status, resultSummary, errorMessage string) error {
-	var taskID, missionID string
+	var taskID, missionID, workspaceID string
 	var assignedAgentID sql.NullString
 	err := e.db.QueryRowContext(ctx,
-		`SELECT id, mission_id, assigned_agent_id FROM mission_tasks WHERE assignment_id = ?`,
-		assignmentID).Scan(&taskID, &missionID, &assignedAgentID)
+		`SELECT t.id,t.mission_id,t.assigned_agent_id,m.workspace_id FROM mission_tasks t JOIN missions m ON m.id=t.mission_id WHERE t.assignment_id=?`,
+		assignmentID).Scan(&taskID, &missionID, &assignedAgentID, &workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // assignment not linked to a mission task
@@ -162,34 +162,37 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		}
 		if commentBody != "" {
 			commentID := generateID()
-			_, _ = e.db.ExecContext(ctx,
-				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				commentID, missionID, assignedAgentID.String, commentBody, now, now)
-			// Activity log — through missionactivity.Emit, the one
-			// seq-allocating helper every mission_activity writer now goes
-			// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, #2332/B1), rather
-			// than a bare INSERT. This package cannot call the internal/api
-			// emitter directly (internal/api already imports
-			// internal/orchestrator, so the reverse import would cycle), so
-			// — unlike assignments_run.go's two sites, which moved onto that
-			// emitter — this one keeps writing the row itself and does not
-			// gain a journal entry or hub nudge; it only gains a race-free
-			// seq.
-			action := "task_completed"
-			if taskStatus == "FAILED" {
-				action = "task_failed"
-			} else if taskStatus == "AWAITING_APPROVAL" {
-				action = "commented"
+			written, commentErr := WriteAssignmentResultComment(ctx, e.db, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
+			if commentErr != nil {
+				e.logger.Warn("mission result comment withheld", "assignment_id", assignmentID, "error", commentErr)
 			}
-			if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
-				ID:        generateID(),
-				MissionID: missionID,
-				ActorType: "agent",
-				ActorID:   assignedAgentID.String,
-				Action:    action,
-				Details:   commentBody,
-			}); err != nil {
-				e.logger.Error("emit mission activity", "error", err, "mission_id", missionID)
+			if written {
+				// Activity log — through missionactivity.Emit, the one
+				// seq-allocating helper every mission_activity writer now goes
+				// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, #2332/B1), rather
+				// than a bare INSERT. This package cannot call the internal/api
+				// emitter directly (internal/api already imports
+				// internal/orchestrator, so the reverse import would cycle), so
+				// — unlike assignments_run.go's two sites, which moved onto that
+				// emitter — this one keeps writing the row itself and does not
+				// gain a journal entry or hub nudge; it only gains a race-free
+				// seq.
+				action := "task_completed"
+				if taskStatus == "FAILED" {
+					action = "task_failed"
+				} else if taskStatus == "AWAITING_APPROVAL" {
+					action = "commented"
+				}
+				if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
+					ID:        generateID(),
+					MissionID: missionID,
+					ActorType: "agent",
+					ActorID:   assignedAgentID.String,
+					Action:    action,
+					Details:   commentBody,
+				}); err != nil {
+					e.logger.Error("emit mission activity", "error", err, "mission_id", missionID)
+				}
 			}
 		}
 	}

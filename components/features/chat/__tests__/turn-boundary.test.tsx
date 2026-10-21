@@ -122,7 +122,7 @@ function ChatHarness({ turns }: { turns: ChatTurn[] }) {
     <div>
       <div data-testid="turn-list">
         {turns.map((turn) => (
-          <TurnRenderer key={turn.id} turn={turn} onCopy={noop} onFileClick={noop} />
+          <TurnRenderer key={turn.id} turn={turn} onCopy={async () => true} onFileClick={noop} />
         ))}
       </div>
       <input

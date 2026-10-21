@@ -8,13 +8,13 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api-fetch"
 import { invalidate, readThrough } from "@/lib/stale-cache"
 
@@ -80,6 +80,11 @@ export interface ComposioStatus {
   /** Agents + their bindings, so a detail can answer "who can act through it". */
   agents: AgentLite[]
   bindings: AgentBindingsMap
+  /** The catalog page for the current search, and Composio's total. */
+  catalog?: ToolkitInfo[]
+  catalogLoading?: boolean
+  /** Inventory failed to load (the host shows its own error state). */
+  error?: string | null
 }
 
 export interface ComposioIntegrationsProps {
@@ -101,6 +106,17 @@ export interface ComposioIntegrationsProps {
   search?: string
   /** Reports counts + configured state upward. Must be a stable callback. */
   onStatus?: (status: ComposioStatus) => void
+  /**
+   * Harbor 2: the host draws every list and page itself from the status above;
+   * this component only loads, reports and hosts its dialogs (API key,
+   * Connect with its sign-in popup).
+   */
+  headless?: boolean
+  /** Opens Connect — for one app, or the open "Connect an app" form. */
+  connectRequest?: { toolkit?: { slug: string; name: string } } | null
+  onConnectRequestHandled?: () => void
+  /** Bump to reload everything (after the host changed a binding or an account). */
+  refreshKey?: number
 }
 
 export function ComposioIntegrations({
@@ -110,6 +126,10 @@ export function ComposioIntegrations({
   onApiKeyOpenChange,
   search: searchProp,
   onStatus,
+  headless = false,
+  connectRequest,
+  onConnectRequestHandled,
+  refreshKey = 0,
 }: ComposioIntegrationsProps = {}) {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
@@ -359,6 +379,19 @@ export function ComposioIntegrations({
     [load, loadToolkits, search, loadSettings, loadAgents],
   )
 
+  React.useEffect(() => {
+    if (!connectRequest) return
+    setConnect({ toolkit: connectRequest.toolkit })
+    onConnectRequestHandled?.()
+  }, [connectRequest, onConnectRequestHandled])
+
+  const lastRefreshKey = React.useRef(refreshKey)
+  React.useEffect(() => {
+    if (lastRefreshKey.current === refreshKey) return
+    lastRefreshKey.current = refreshKey
+    if (workspaceId) refreshAll(workspaceId)
+  }, [refreshKey, workspaceId, refreshAll])
+
   const [tabState, setTab] = React.useState<TabKey>("catalog")
   const tab = section ?? tabState
 
@@ -440,8 +473,14 @@ export function ComposioIntegrations({
       accounts: allAccounts,
       agents,
       bindings,
+      catalog: toolkits,
+      catalogLoading: tkLoading,
+      error,
     })
   }, [
+    toolkits,
+    tkLoading,
+    error,
     onStatus,
     busy,
     configured,
@@ -464,9 +503,10 @@ export function ComposioIntegrations({
         "space-y-5 bg-background",
         // The host page already supplies page padding when it embeds us.
         embedded ? "p-0" : "p-4 md:p-6 pb-6",
+        headless && "contents",
       )}
     >
-      {!embedded && (
+      {!embedded && !headless && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <Plug className="h-4 w-4 text-foreground/60" />
@@ -526,18 +566,18 @@ export function ComposioIntegrations({
         />
       )}
 
-      {busy && <InventorySkeleton />}
+      {!headless && busy && <InventorySkeleton />}
 
-      {!busy && error && (
+      {!headless && !busy && error && (
         <div className="rounded-card border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
           Couldn&apos;t load Composio inventory: {error}
         </div>
       )}
 
-      {!busy && !error && !configured && <NotConfigured onAddKey={() => setKeyOpen(true)} />}
+      {!headless && !busy && !error && !configured && <NotConfigured onAddKey={() => setKeyOpen(true)} />}
 
 
-      {!busy && !error && configured && workspaceId && data && (
+      {!headless && !busy && !error && configured && workspaceId && data && (
         <>
           {/* KPI row. Suppressed when embedded: the host renders the same
               four figures from the status it already receives. */}
@@ -648,7 +688,7 @@ function KpiCard({
 }) {
   return (
     <div className="rounded-xl border border-foreground/10 bg-card p-4">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className="mt-1.5 text-2xl font-semibold text-foreground">{value}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div>
     </div>
@@ -710,76 +750,97 @@ function ApiKeyModal({
     }
   }
 
+  const [confirmRemove, setConfirmRemove] = React.useState(false)
+  // Asked first (ConfirmDialog), and the dialog stays open if the server refuses.
   const remove = async () => {
-    setSaving(true)
     setErr(null)
+    let r: Response
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
+      r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "DELETE",
       })
-      if (!r.ok) throw new Error(`Failed (${r.status})`)
-      onChanged()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to remove")
-    } finally {
-      setSaving(false)
+      setErr("Failed to remove")
+      throw e
     }
+    if (!r.ok) {
+      setErr(`Failed (${r.status})`)
+      throw new Error(`Failed (${r.status})`)
+    }
+    onChanged()
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">Composio API key</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!saving && apiKey.trim()) void save()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={KeyRound}
+        title="Composio API key"
+        description={
+          <>
             Stored encrypted for this workspace. We validate it against Composio before saving.
             From app.composio.dev → your project → Settings → API keys.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="mt-4 space-y-3">
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">Project API key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="ak_…"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">Label (optional)</label>
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Crewship_dev_1"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
-            />
-          </div>
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody className="space-y-3">
+        <div>
+          <label htmlFor="composio-api-key" className="mb-1 block text-xs text-muted-foreground">Project API key</label>
+          <input
+            id="composio-api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="ak_…"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
+          />
         </div>
-
-        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex items-center justify-between gap-2">
-          <div>
-            {current?.source === "workspace" && (
-              <Button variant="ghost" size="sm" onClick={remove} disabled={saving}>
-                Remove key
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving || !apiKey.trim()}>
-              {saving ? "Validating…" : "Validate & save"}
-            </Button>
-          </div>
+        <div>
+          <label htmlFor="composio-api-key-label" className="mb-1 block text-xs text-muted-foreground">Label (optional)</label>
+          <input
+            id="composio-api-key-label"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Crewship_dev_1"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
+          />
         </div>
-      </DialogContent>
-    </Dialog>
+        {err && <div className="text-xs text-destructive">{err}</div>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        lead={
+          current?.source === "workspace" ? (
+            <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)} disabled={saving} className="h-8 text-xs">
+              Remove key
+            </Button>
+          ) : undefined
+        }
+        onCancel={onClose}
+        primaryLabel={saving ? "Validating…" : "Validate & save"}
+        onPrimary={save}
+        primaryDisabled={!apiKey.trim()}
+        busy={saving}
+      />
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title="Remove the Composio key?"
+        consequences={[
+          { tone: "lost", text: "Connected apps stop working for every agent" },
+          { tone: "kept", text: "Connected accounts stay at Composio; adding a key again brings them back" },
+        ]}
+        confirmLabel="Remove key"
+        destructive
+        onConfirm={remove}
+      />
+    </CreateSurface>
   )
 }
 
@@ -806,6 +867,7 @@ function ConnectModal({
   const [err, setErr] = React.useState<string | null>(null)
 
   const title = toolkit ? `Connect ${toolkit.name}` : "Connect an app"
+  const connectDisabled = busy || !userId.trim() || (!toolkit && !toolkitSlug.trim())
 
   const connect = async () => {
     const uid = userId.trim()
@@ -850,72 +912,76 @@ function ConnectModal({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">{title}</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!connectDisabled) void connect()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={Plug}
+        title={title}
+        description={
+          <>
             Authorize the app via OAuth. Pick the Composio user (the person/mailbox) this account
             belongs to — agents bound to that user will be able to use it.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="mt-4 space-y-3">
-          {!toolkit && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">App (toolkit slug)</label>
-              <input
-                value={toolkitSlug}
-                onChange={(e) => setToolkitSlug(e.target.value)}
-                placeholder="e.g. gmail, github, slack"
-                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
-              />
-            </div>
-          )}
-          {users.length > 0 && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Existing user</label>
-              <select
-                value={users.includes(userId) ? userId : ""}
-                onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
-              >
-                <option value="">— new user —</option>
-                {users.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody className="space-y-3">
+        {!toolkit && (
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">User id</label>
+            <label htmlFor="composio-connect-toolkit" className="mb-1 block text-xs text-muted-foreground">App (toolkit slug)</label>
             <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="e.g. alice@acme.com or a stable user id"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+              id="composio-connect-toolkit"
+              value={toolkitSlug}
+              onChange={(e) => setToolkitSlug(e.target.value)}
+              placeholder="e.g. gmail, github, slack"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
+        )}
+        {users.length > 0 && (
+          <div>
+            <label htmlFor="composio-connect-existing" className="mb-1 block text-xs text-muted-foreground">Existing user</label>
+            <select
+              id="composio-connect-existing"
+              value={users.includes(userId) ? userId : ""}
+              onChange={(e) => setUserId(e.target.value)}
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+            >
+              <option value="">— new user —</option>
+              {users.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="composio-connect-user" className="mb-1 block text-xs text-muted-foreground">User id</label>
+          <input
+            id="composio-connect-user"
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            placeholder="e.g. alice@acme.com or a stable user id"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+          />
         </div>
-
-        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={connect}
-            disabled={busy || !userId.trim() || (!toolkit && !toolkitSlug.trim())}
-          >
-            {busy ? "Starting…" : "Connect with OAuth"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        {err && <div className="text-xs text-destructive">{err}</div>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel={busy ? "Starting…" : "Connect with OAuth"}
+        onPrimary={connect}
+        primaryDisabled={connectDisabled}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }
 

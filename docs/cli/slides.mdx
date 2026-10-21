@@ -1,0 +1,40 @@
+---
+title: "Slides Commands"
+description: "Initialize and read a saved native presentation with a human credential."
+stability: experimental
+tag: Experimental
+---
+
+# crewship slides
+
+Read or initialize a schema-1 presentation on an existing empty private Page.
+The server must enable `CREWSHIP_SLIDES_ENABLED`. The singular `slide` alias
+accepts the same commands. These human commands refuse agent credentials.
+
+## `crewship slides read <page-slug|@ID>`
+
+Read the confirmed head using a current human credential with `pages:read`.
+The result contains `schema_version`, `revision`, `order_version`, `content_hash`
+and the complete native `deck`. Another workspace OWNER needs audited private
+access; ADMIN and other unrelated users receive 404.
+
+## `crewship slides at-rev <page-slug|@ID> <revision>`
+
+Read one positive immutable revision. A missing revision returns 404; the
+command never substitutes the latest head.
+
+## `crewship slides initialize <page-slug|@ID> --file <request.json>`
+
+The Page's current human custodian can initialize its populated deck using
+`pages:write`. The required `--file` accepts a JSON file or `-` for stdin. Supply
+`page_id`, `schema_version: 1`, `base_rev: 0`, a stable `mutation_id` and a complete
+`deck` with the same immutable `deck_id`. See the
+[native Slides guide](/guides/slides-native) for the bounded schema fixture.
+
+Keep the exact request file when confirmation is uncertain. Retrying it with
+the same current actor returns the original receipt, marked `duplicate: true`.
+Changed content under the same mutation ID conflicts. The receipt contains
+`mutation_id`, `revision`, `order_version`, `content_hash` and `duplicate`.
+
+Initialization creates no Page or sharing grant. Patch, reorder, restore,
+agent creation, presentation mode and export are separate capabilities.

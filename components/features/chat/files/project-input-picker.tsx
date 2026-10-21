@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 
 export type ProjectInputOption = {
   version_id: string
@@ -36,7 +37,7 @@ export function ProjectInputPicker({ chatId, workspaceId, userId, selected, onCh
     const controller = new AbortController()
     setLoading(true)
     const query = new URLSearchParams({ workspace_id: workspaceId, search })
-    void apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/project-input-options?${query}`, { signal: controller.signal }).then(async response => {
+    void Promise.resolve().then(() => apiFetch(`/api/v1/chats/${requireApiPathSegment(chatId)}/project-input-options?${query}`, { signal: controller.signal })).then(async response => {
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) {
           if (!controller.signal.aborted) { setSnapshot({ scope, files: [], available: false, more: false }); onChange([]); setError("") }
@@ -58,17 +59,17 @@ export function ProjectInputPicker({ chatId, workspaceId, userId, selected, onCh
   if (!current?.available && !error) return null
   const files = current?.files ?? []
   return <details className="shrink-0 border-t px-4 py-2 text-sm">
-    <summary className="cursor-pointer coarse:min-h-12">Project inputs{selected.length ? ` (${selected.length} selected)` : ""}</summary>
+    <summary className="cursor-pointer coarse:min-h-[44px]">Project inputs{selected.length ? ` (${selected.length} selected)` : ""}</summary>
     <p className="py-2 text-muted-foreground">Choose up to 16 files for your next message. The agent can read these copies but cannot change them.</p>
     <div className="flex gap-2">
-      <input aria-label="Search project files" value={search} onChange={event => setSearch(event.target.value.slice(0, 128))} className="min-w-0 flex-1 rounded border px-2 py-1 coarse:min-h-12" />
-      <button type="button" disabled={loading} onClick={() => { onChange([]); setRefresh(value => value + 1) }} className="rounded border px-3 py-1 coarse:min-h-12">Refresh</button>
-      {selected.length > 0 && <button type="button" disabled={disabled} onClick={() => onChange([])} className="rounded border px-3 py-1 coarse:min-h-12">Clear selection</button>}
+      <input aria-label="Search project files" value={search} onChange={event => setSearch(event.target.value.slice(0, 128))} className="min-w-0 flex-1 rounded border px-2 py-1 coarse:min-h-[44px]" />
+      <button type="button" disabled={loading} onClick={() => { onChange([]); setRefresh(value => value + 1) }} className="rounded border px-3 py-1 coarse:min-h-[44px]">Refresh</button>
+      {selected.length > 0 && <button type="button" disabled={disabled} onClick={() => onChange([])} className="rounded border px-3 py-1 coarse:min-h-[44px]">Clear selection</button>}
     </div>
     {error && <p role="alert" className="py-2 text-destructive">{error}</p>}
     {!error && files.length === 0 && <p className="py-2 text-muted-foreground">No authorized project files match.</p>}
     <ul className="max-h-40 overflow-auto">{files.map(file => <li key={file.version_id}>
-      <label className="flex cursor-pointer items-center gap-2 py-2 coarse:min-h-12">
+      <label className="flex cursor-pointer items-center gap-2 py-2 coarse:min-h-[44px]">
         <input type="checkbox" checked={selected.includes(file.version_id)} disabled={disabled || loading || selected.length >= 16 && !selected.includes(file.version_id)} onChange={event => onChange(event.target.checked ? [...selected, file.version_id] : selected.filter(id => id !== file.version_id))} />
         <span className="min-w-0 flex-1"><span className="block truncate" title={file.name}>{file.name}</span><span className="text-xs text-muted-foreground">{file.project_name} · {file.size_bytes} bytes</span></span>
       </label>

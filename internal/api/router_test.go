@@ -688,11 +688,12 @@ func TestWorkspaceUpdate_AllowPrivilegedCredentials(t *testing.T) {
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `UPDATE users SET instance_role='ADMIN' WHERE id=?`, userID)
 	handler := NewWorkspaceHandler(db, logger)
 
 	patch := func(bodyJSON string) workspaceResponse {
 		req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, bytes.NewBufferString(bodyJSON))
-		req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
 		rr := httptest.NewRecorder()
 		handler.Update(rr, req)
 		if rr.Code != http.StatusOK {

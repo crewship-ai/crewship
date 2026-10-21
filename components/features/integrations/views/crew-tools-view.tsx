@@ -2,16 +2,18 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Bot, KeyRound, Plug, RefreshCw, Wrench } from "lucide-react"
-import { toast } from "sonner"
+import { Bot, KeyRound, Plug, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
+import { toast } from "@/lib/toast"
 
 import { OAuthAutoConnect } from "@/components/features/integrations/oauth-auto-connect"
+import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
 import { apiFetch } from "@/lib/api-fetch"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
+import { CrewToolSwitches } from "../crew-tool-switches"
 import {
   bindCredentialToCrewTool,
   fetchCrewTools,
@@ -65,6 +67,7 @@ export function CrewToolsView({
   const [tools, setTools] = React.useState<CrewTool[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [openId, setOpenId] = React.useState<string | null>(initialServerId)
+  const [toolsId, setToolsId] = React.useState<string | null>(null)
   React.useEffect(() => {
     if (initialServerId) onServerConsumed?.()
     // Consume once, on mount.
@@ -106,10 +109,13 @@ export function CrewToolsView({
       </div>
 
       {error ? (
-        <div role="alert" className="flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
-        </div>
+        <PageBanner
+          tone="bad"
+          icon={TriangleAlert}
+          action={<Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>}
+        >
+          {error}
+        </PageBanner>
       ) : tools === null ? (
         <div className="h-24 animate-pulse rounded-xl border border-border/60 bg-card" aria-busy="true" />
       ) : tools.length === 0 ? (
@@ -146,12 +152,16 @@ export function CrewToolsView({
                     {tool.agent_binding_count}
                   </span>
                   <StatusPill status={pill.status} label={pill.label} tone={pill.tone} />
+                  <Button variant="ghost" size="sm" className="coarse:h-[44px]" aria-expanded={toolsId === tool.id} onClick={() => setToolsId(toolsId === tool.id ? null : tool.id)}>
+                    {toolsId === tool.id ? "Hide tools" : "Choose tools…"}
+                  </Button>
                   {gap && canManage && (
                     <Button variant={open ? "outline" : "soft"} size="sm" onClick={() => setOpenId(open ? null : tool.id)}>
                       {open ? "Close" : tool.auth_status === "expired" ? "Reconnect" : "Connect"}
                     </Button>
                   )}
                 </div>
+                {toolsId === tool.id && <CrewToolSwitches workspaceId={workspaceId} tool={tool} canManage={canManage} />}
                 {open && gap && canManage && (
                   <ConnectPanel
                     workspaceId={workspaceId}
@@ -208,7 +218,7 @@ function ConnectPanel({ workspaceId, tool, onDone }: { workspaceId: string; tool
   return (
     <div className="grid gap-4 border-t border-border/50 px-4 py-4 md:grid-cols-2" data-testid="crew-tool-connect">
       <div className="space-y-2">
-        <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+        <div className="inline-flex items-center gap-1.5 text-label font-semibold text-foreground/70">
           <KeyRound className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /> Use a credential from the vault
         </div>
         <p className="text-label text-muted-foreground">
@@ -241,7 +251,7 @@ function ConnectPanel({ workspaceId, tool, onDone }: { workspaceId: string; tool
         )}
       </div>
       <div className="space-y-2">
-        <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+        <div className="inline-flex items-center gap-1.5 text-label font-semibold text-foreground/70">
           <Plug className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /> Or sign in with OAuth
         </div>
         {oauthPossible ? (

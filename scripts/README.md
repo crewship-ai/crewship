@@ -18,9 +18,10 @@ it is safe against a shared development instance.
 | CLI subprocess coverage | Set `TEST_CREWSHIP_CLI_COVERAGE_DIR` to an existing absolute output directory when running `go test ./cmd/crewship` | Instruments the shared acceptance-test binary for `cmd/crewship`. Export its counters with `go tool covdata textfmt -i="$TEST_CREWSHIP_CLI_COVERAGE_DIR" -o=cli-subprocess.out`; combine matching statement blocks with the ordinary test profile. The subprocess report alone does not include in-process unit tests. |
 | Inspect trusted CI control inventory | `python3 -m unittest discover -s scripts/ci -p test_inventory_guard.py` | Tests the main-owned, metadata-only guard; administrator exceptions require a separate exact-head dispatch. See [trust limits and rollout](../docs/runbooks/ci-inventory-guard.md) |
 | PR throughput evidence | `python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --output /tmp/throughput.json --raw-output /tmp/throughput-raw.json` | Read-only bounded GitHub queries for merged PR latency, workflow attempts, failures and queue/execution; see [metric definitions and limitations](ci/pr-throughput.md) |
-| Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Explicit `--apply --plan ... --documentation-commit ...` changes live rules only after review; see [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Every `--apply --plan ...` requires `--analysis-commit ...` for reviewed source already on main and actual PR canary review; queue activation also requires `--documentation-commit ...`. See [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
+| Built chat XLSX worker | `pnpm test:chat-xlsx-worker` after `pnpm build` | Exercises the shipped local XLSX worker in Chromium with synthetic saved formulas, coordinates, corruption, macros and resource bounds |
+| Built chat table worker | `pnpm test:chat-worker` after `pnpm build` | Exercises the actual bundled worker in Chromium with synthetic quoted Unicode data, malformed input and resource bounds; requires the Playwright browser |
 | Browser tests | See [e2e/README.md](../e2e/README.md) | Selects the appropriate suite and target instance |
 
 The verification script's current Go timeout is 25 minutes. Some full local
@@ -35,6 +36,8 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | --- | --- |
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
+| [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
+| [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
@@ -62,6 +65,8 @@ commands. They may publish or remove release/package artifacts.
 | [agents-invariants/](agents-invariants/) | The machine-checkable repository rules in AGENTS.md |
 | [host-paths/](host-paths/) | AST check for independent host filesystem roots; existing exceptions must remain present, and CI prevents allowlist expansion against the PR base |
 | [docs-inventory/](docs-inventory/), [docs-surface-check/](docs-surface-check/) | API/CLI documentation and documentation surface/link checks |
+| [golangci-shards/](golangci-shards/) | CI lint partitions with canonical settings and unchanged deadlines |
+| [ci/document-create-acceptance.py](ci/document-create-acceptance.py) | Require the managed Document creation scenario to execute through the real CLI |
 | [lint-migrations/](lint-migrations/) | Migration ordering and immutability |
 | [lint-tsformat/](lint-tsformat/) | Timestamp formatting conventions |
 | [deps-drift/](deps-drift/) | Dependency drift checks |
@@ -157,6 +162,13 @@ cache path explicitly when the Go test isolates HOME:
 ```bash
 PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_MEMBER_NAV_BROWSER=1 go test -tags member_navigation_browser ./internal/api -run '^TestMemberNavigationBrowser$' -count=1 -timeout 6m
 ```
+
+Set `CREWSHIP_ISSUES_MANAGE_BROWSER=1` with the same tagged harness to run
+`acceptance-known-project-manage-browser.mjs` instead of the broad navigation
+journey. It verifies known-ID metadata/milestone UI with real Router/DB sessions,
+two independent clients, Read+Manage without List, reviewed conflicts and access
+revocation. It records and rejects catalog, issue collection/count, trusted and
+execution requests. No API responses are mocked.
 
 `CREWSHIP_MEMBER_NAV_OUTPUT` optionally selects the report/screenshot directory;
 the default is an OS temporary path. The fixture JSON is created with mode 0600

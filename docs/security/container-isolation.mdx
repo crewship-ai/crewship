@@ -77,7 +77,11 @@ Because of that, Crewship **fails closed** (#1032): credentials are **not**
 loaded into a privileged crew's sidecar unless the workspace explicitly opts
 in via `allow_privileged_credentials` (default **off**).
 
-The toggle is workspace-scoped and admin-gated (OWNER/ADMIN):
+The toggle is workspace-scoped. Enabling it requires an instance administrator
+who is also a workspace OWNER/ADMIN; scoped CLI tokens must include both
+`workspace:admin` and `instance:admin`. Workspace OWNER/ADMIN users may disable
+it without instance authority. Existing containers retain their privileges
+until recreated:
 
 - **UI:** **Settings → General → Privileged credentials → "Load credentials
   into privileged crews."** (It is workspace-wide, not per-crew — a crew's own

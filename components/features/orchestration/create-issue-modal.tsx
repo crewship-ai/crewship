@@ -26,6 +26,7 @@ import {
   CreateSurfacePill,
   CreateSurfacePills,
   CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
   CreateSurfaceTitleInput,
 } from "@/components/layout/create-surface"
 import {
@@ -50,12 +51,14 @@ import { LabelBadge } from "@/components/features/issues/label-badge"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { StatusIcon } from "@/components/features/issues/status-icon"
+import { isCreatableStatus } from "@/components/features/issues/issue-constants"
+import { STATUS_TEXT } from "@/components/features/issues/issues-view-model"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { apiFetch } from "@/lib/api-fetch"
 import { useIssuePeople } from "@/hooks/use-issue-people"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel, IssuePriority, Milestone, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
@@ -126,6 +129,11 @@ interface CreateIssueModalProps {
   /** Refetch the workspace label list after one is created here. Optional —
    *  without it the Create action is hidden rather than silently useless. */
   onLabelsChanged?: () => void
+  /** The status the issue starts in — a list group's or board column's +.
+   *  Only BACKLOG, TODO and IN_PROGRESS are honoured; anything else is Backlog. */
+  initialStatus?: string | null
+  /** The project the issue is filed under — New issue opened from a project's page. */
+  initialProjectId?: string | null
 }
 
 export function CreateIssueModal({
@@ -138,13 +146,18 @@ export function CreateIssueModal({
   workspaceId,
   onCreated,
   onLabelsChanged,
+  initialStatus,
+  initialProjectId = null,
 }: CreateIssueModalProps) {
+  const startStatus = isCreatableStatus(initialStatus) ? initialStatus : "BACKLOG"
   const [crewId, setCrewId] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState<IssuePriority>("none")
-  const [assigneeType, setAssigneeType] = useState<"user" | "agent" | null>(null)
-  const [assigneeId, setAssigneeId] = useState<string | null>(null)
+  // Owner (the accountable person) and delegate (the agent doing the work)
+  // are separate fields; either, both or neither may be set.
+  const [ownerId, setOwnerId] = useState<string | null>(null)
+  const [delegateId, setDelegateId] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
@@ -167,6 +180,9 @@ export function CreateIssueModal({
   const [milestoneLoad, setMilestoneLoad] = useState<PickerLoad>("idle")
   const [milestoneReload, setMilestoneReload] = useState(0)
   const [createMore, setCreateMore] = useState(false)
+  // "Require my acceptance after the Lead review" (client_review_required):
+  // applied to the new issue right after it is created.
+  const [needsAcceptance, setNeedsAcceptance] = useState(false)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. The toast stays — this is the copy
   // that is still on screen when you look back up.
@@ -175,7 +191,8 @@ export function CreateIssueModal({
   // Popover states
   const [crewOpen, setCrewOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
-  const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [ownerOpen, setOwnerOpen] = useState(false)
+  const [delegateOpen, setDelegateOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [labelQuery, setLabelQuery] = useState("")
@@ -285,6 +302,12 @@ export function CreateIssueModal({
     setCrewId((staffed ?? crews[0]).id)
   }, [open, crewId, crews])
 
+  // Opened from a project's page: start filed under it. Re-applied on every
+  // open, so a dialog closed elsewhere does not keep the last project.
+  useEffect(() => {
+    if (open) setProjectId(initialProjectId)
+  }, [open, initialProjectId])
+
   // Focus title on open
   useEffect(() => {
     if (open) {
@@ -299,8 +322,7 @@ export function CreateIssueModal({
   // picker showing the same empty list a genuinely empty crew shows. A refused
   // or dropped request now says so.
   useEffect(() => {
-    setAssigneeType(null)
-    setAssigneeId(null)
+    setDelegateId(null)
     if (!crewId) { setAgents([]); setAgentLoad("idle"); return }
     let cancelled = false
     setAgents([])
@@ -400,15 +422,16 @@ export function CreateIssueModal({
     setTitle("")
     setDescription("")
     setPriority("none")
-    setAssigneeType(null)
-    setAssigneeId(null)
-    setProjectId(null)
+    setOwnerId(null)
+    setDelegateId(null)
+    setProjectId(initialProjectId)
     setSelectedLabels([])
     setRoutineId(null)
     setDueDate("")
     setEstimate(null)
     setParentIssueId(null)
     setMilestoneId(null)
+    setNeedsAcceptance(false)
     setRefusal(null)
   }
 
@@ -418,8 +441,9 @@ export function CreateIssueModal({
     title.trim() !== "" ||
     description.trim() !== "" ||
     priority !== "none" ||
-    assigneeId !== null ||
-    projectId !== null ||
+    ownerId !== null ||
+    delegateId !== null ||
+    projectId !== initialProjectId ||
     dueDate !== "" ||
     estimate !== null ||
     parentIssueId !== null ||
@@ -431,12 +455,12 @@ export function CreateIssueModal({
   const crewPrefix = selectedCrew?.slug?.toUpperCase().slice(0, 3) ?? "CRE"
   const selectedProject = projects.find((p) => p.id === projectId)
   const selectedRoutine = routines.find((r) => r.id === routineId)
-  const selectedAgent = assigneeId ? agents.find((a) => a.id === assigneeId) ?? null : null
-  const assigneeName = assigneeType === "user" ? people.find((person) => person.id === assigneeId)?.name : selectedAgent?.name ?? null
+  const selectedAgent = delegateId ? agents.find((a) => a.id === delegateId) ?? null : null
+  const ownerName = ownerId ? people.find((person) => person.id === ownerId)?.name ?? null : null
   const selectedMilestone = milestoneId ? milestones.find((m) => m.id === milestoneId) ?? null : null
   const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
-  const handleSubmit = useCallback(async () => {
+  const submit = useCallback(async (startNow: boolean) => {
     if (submittingRef.current) return
     if (!crewId) { toast.error("Please select a crew"); return }
     if (!title.trim()) { toast.error("Title is required"); return }
@@ -454,9 +478,11 @@ export function CreateIssueModal({
             title: title.trim(),
             description: description.trim() || undefined,
             priority,
+            // Absent = BACKLOG on the server, so the default stays off the wire.
+            status: startStatus !== "BACKLOG" ? startStatus : undefined,
             labels: selectedLabels.length > 0 ? selectedLabels : undefined,
-            assignee_type: assigneeType ?? undefined,
-            assignee_id: assigneeId ?? undefined,
+            owner_user_id: ownerId ?? undefined,
+            delegate_agent_id: delegateId ?? undefined,
             project_id: projectId ?? undefined,
             routine_id: routineId ?? undefined,
             // Where a value is optional, absent must stay absent on the wire —
@@ -478,7 +504,45 @@ export function CreateIssueModal({
         return
       }
 
-      toast.success("Issue created")
+      // The follow-ups need the issue that now exists. Each is its own call,
+      // so a refusal here leaves a created issue and says exactly what is
+      // missing, instead of reporting the whole create as failed.
+      const created = (await res.json().catch(() => null)) as { identifier?: string | null } | null
+      const identifier = created && !Array.isArray(created) ? created.identifier : null
+      const issuePath = identifier
+        ? `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}`
+        : null
+      const query = `workspace_id=${encodeURIComponent(workspaceId)}`
+      let followUp: string | null = null
+      if (issuePath && needsAcceptance) {
+        try {
+          const detail = await apiFetch(`${issuePath}?${query}`)
+          const revision = detail.ok ? ((await detail.json().catch(() => null)) as { work_revision?: number } | null)?.work_revision : undefined
+          if (typeof revision !== "number") throw new Error("detail")
+          const put = await apiFetch(`${issuePath}/review-policy?${query}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ revision, client_review_required: true }),
+          })
+          if (!put.ok) throw new Error("policy")
+        } catch {
+          followUp = "its acceptance setting was not saved"
+        }
+      }
+      if (issuePath && startNow && !followUp) {
+        try {
+          const started = await apiFetch(`${issuePath}/start?${query}`, { method: "POST" })
+          if (!started.ok) {
+            const body = await started.json().catch(() => null)
+            followUp = body?.detail ?? "it could not be started"
+          }
+        } catch {
+          followUp = "it could not be started"
+        }
+      }
+
+      if (followUp) toast.error(`Issue created, but ${followUp}`, { description: "Open it to finish." })
+      else toast.success(startNow ? "Issue created and started" : "Issue created")
       onCreated()
 
       if (createMore) {
@@ -495,7 +559,9 @@ export function CreateIssueModal({
       setSaving(false)
       submittingRef.current = false
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange])
+  }, [crewId, title, description, priority, selectedLabels, ownerId, delegateId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange, startStatus, needsAcceptance])
+
+  const handleSubmit = useCallback(() => submit(false), [submit])
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((prev) =>
@@ -517,16 +583,17 @@ export function CreateIssueModal({
         concept="issues"
         title="New issue"
         onClose={() => onOpenChange(false)}
-        // The crew is the breadcrumb: it says where the issue lands before
-        // anything is typed. It is also the only place the crew can be
-        // changed, which is why it is a control and not a label.
-        context={
+        // v67: one plain title, and under it the crew chip: where the issue
+        // lands before anything is typed. The chip is also the only place the
+        // crew can be changed, which is why it is a control and not a label.
+        description={
+          <>
           <Popover open={crewOpen} onOpenChange={setCrewOpen} modal>
             <PopoverTrigger asChild>
               <button
                 type="button"
                 aria-label="Select crew"
-                className="font-medium transition-colors hover:text-foreground"
+                className="rounded-md border border-hairline bg-foreground/[0.04] px-1.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.08]"
               >
                 {crewPrefix}
               </button>
@@ -561,6 +628,8 @@ export function CreateIssueModal({
               </Command>
             </PopoverContent>
           </Popover>
+          {" "}creates {crewPrefix}- issues
+          </>
         }
       />
 
@@ -585,8 +654,8 @@ export function CreateIssueModal({
       <CreateSurfacePills>
         {/* Status (read-only) */}
         <CreateSurfacePill readOnly>
-          <StatusIcon status="BACKLOG" className="h-3.5 w-3.5" />
-          <span>Backlog</span>
+          <StatusIcon status={startStatus} className="h-3.5 w-3.5" />
+          <span>{STATUS_TEXT[startStatus]}</span>
         </CreateSurfacePill>
 
         {/* Priority */}
@@ -615,12 +684,48 @@ export function CreateIssueModal({
           </PopoverContent>
         </Popover>
 
-        {/* Assignee */}
+        {/* Owner: the person who is accountable for the result */}
+        <Popover open={ownerOpen} onOpenChange={setOwnerOpen} modal>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={User} accent="purple" set={ownerId !== null}>
+              <span>{ownerName ?? "Owner"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search people..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setOwnerId(null); setOwnerOpen(false) }}>
+                    <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs">No owner</span>
+                    {!ownerId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {peopleError && <p role="alert" className="px-3 py-2 text-xs text-destructive">People could not be loaded.</p>}
+                {people.length > 0 && (
+                  <CommandGroup heading="People">
+                    {people.map((person) => (
+                      <CommandItem key={person.id} value={`person ${person.name}`} onSelect={() => { setOwnerId(person.id); setOwnerOpen(false) }}>
+                        <User className="mr-2 h-3.5 w-3.5" />
+                        <span className="text-xs">{person.name}</span>
+                        {ownerId === person.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* Delegate: the agent that does the work */}
         {crewId && (
-          <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen} modal>
+          <Popover open={delegateOpen} onOpenChange={setDelegateOpen} modal>
             <PopoverTrigger asChild>
               <CreateSurfacePill
-                icon={assigneeType === "agent" ? Bot : User}
+                icon={Bot}
                 // The pill is the picker's face when it is shut, so it wears
                 // the agent's, not a generic robot.
                 leading={
@@ -634,21 +739,21 @@ export function CreateIssueModal({
                   ) : undefined
                 }
                 accent="purple"
-                set={assigneeId !== null}
+                set={delegateId !== null}
               >
-                <span>{assigneeName ?? "Assignee"}</span>
+                <span>{selectedAgent?.name ?? "Delegate"}</span>
               </CreateSurfacePill>
             </PopoverTrigger>
             <PopoverContent className="w-[220px] p-0" align="start">
               <Command>
-                <CommandInput placeholder="Search assignee..." className="h-8 text-xs" />
+                <CommandInput placeholder="Search agents..." className="h-8 text-xs" />
                 <CommandList>
                   <CommandEmpty>No results found.</CommandEmpty>
                   <CommandGroup>
-                    <CommandItem onSelect={() => { setAssigneeType(null); setAssigneeId(null); setAssigneeOpen(false) }}>
+                    <CommandItem onSelect={() => { setDelegateId(null); setDelegateOpen(false) }}>
                       <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-xs">Unassigned</span>
-                      {!assigneeId && <Check className="ml-auto h-3.5 w-3.5" />}
+                      <span className="text-xs">No delegate</span>
+                      {!delegateId && <Check className="ml-auto h-3.5 w-3.5" />}
                     </CommandItem>
                   </CommandGroup>
                   {/* Three ways to have no agents to list, and they are not the
@@ -683,17 +788,15 @@ export function CreateIssueModal({
                   {agentLoad === "ready" && agents.length === 0 && (
                     <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
                       No agents in {selectedCrew?.name ?? "this crew"} — pick another crew in the
-                      header to assign someone.
+                      header to delegate to someone.
                     </p>
                   )}
-                  {peopleError && <p role="alert" className="px-3 py-2 text-xs text-destructive">People could not be loaded.</p>}
-                  {people.length > 0 && <CommandGroup heading="People">{people.map((person) => <CommandItem key={person.id} value={`person ${person.name}`} onSelect={() => { setAssigneeType("user"); setAssigneeId(person.id); setAssigneeOpen(false) }}><User className="mr-2 h-3.5 w-3.5" /><span className="text-xs">{person.name}</span>{assigneeId === person.id && <Check className="ml-auto h-3.5 w-3.5" />}</CommandItem>)}</CommandGroup>}
                   {agents.length > 0 && (
                     <CommandGroup heading="Agents">
                       {agents.map((agent) => (
                         <CommandItem
                           key={agent.id}
-                          onSelect={() => { setAssigneeType("agent"); setAssigneeId(agent.id); setAssigneeOpen(false) }}
+                          onSelect={() => { setDelegateId(agent.id); setDelegateOpen(false) }}
                         >
                           {/* Exactly what crews-explorer.tsx and agent-canvas.tsx
                               pass. Every agent in this database has a NULL
@@ -706,7 +809,7 @@ export function CreateIssueModal({
                             className="mr-2 h-4 w-4 shrink-0"
                           />
                           <span className="text-xs">{agent.name}</span>
-                          {assigneeId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                          {delegateId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -1115,6 +1218,12 @@ export function CreateIssueModal({
         </Popover>
       </CreateSurfacePills>
 
+      {/* ── Acceptance ── */}
+      <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-hairline px-4 py-2.5 text-xs text-foreground sm:px-5 coarse:min-h-[44px]">
+        <Checkbox checked={needsAcceptance} onCheckedChange={(v) => setNeedsAcceptance(v === true)} className="h-3.5 w-3.5" />
+        Require my acceptance after the Lead review
+      </label>
+
       {/* ── Refusal ── */}
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
@@ -1141,10 +1250,15 @@ export function CreateIssueModal({
           </>
         }
         onCancel={() => onOpenChange(false)}
-        primaryLabel="Create issue"
+        secondary={
+          <CreateSurfaceSecondaryAction disabled={!title.trim() || !crewId || saving} onClick={() => void submit(false)}>
+            Create
+          </CreateSurfaceSecondaryAction>
+        }
+        primaryLabel="Create and start"
         primaryDisabled={!title.trim() || !crewId}
         busy={saving}
-        onPrimary={handleSubmit}
+        onPrimary={() => void submit(true)}
       />
     </CreateSurface>
   )

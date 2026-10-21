@@ -70,7 +70,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.27.2"
+  GO_VERSION: "1.27.3"
 
 # ── ⚠ THE STEP-BOUND INVARIANT, AND WHY IT IS STATED HERE TOO ──
 #
@@ -774,7 +774,7 @@ jobs:
           bash scripts/api-contract/run.sh positive
       - name: Upload API contract evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: api-contract-${{ github.run_id }}
           path: api-contract-artifacts/
@@ -907,9 +907,20 @@ jobs:
       - name: Verify real compiler, MCP and browser boundaries
         timeout-minutes: 30
         run: bash scripts/test-pages-apps.sh
+      - name: Select the Document acceptance runtime
+        timeout-minutes: 3
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+      - name: Install the pinned Document engine for CLI acceptance
+        timeout-minutes: 3
+        run: pnpm --dir tools/docs-service install --frozen-lockfile
+      - name: Require actual managed Document creation through the CLI
+        timeout-minutes: 6
+        run: python3 scripts/ci/document-create-acceptance.py
       - name: Preserve Pages test evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pages-apps-evidence
           path: /tmp/crewship-pages-ci
@@ -937,11 +948,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - name: Download the shared embedded server
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: ci-server-${{ github.sha }}
       - name: Download the shared export for isolated credential UI fixtures
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: nextjs-static-export
           path: out
@@ -1026,6 +1037,11 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Verify local chat table workers
+        timeout-minutes: 3
+        run: |
+          pnpm test:chat-worker
+          pnpm test:chat-xlsx-worker
       - name: Verify control contrast and reduced motion
         timeout-minutes: 3
         run: pnpm exec tsx scripts/check-control-accessibility.tsx
@@ -1044,7 +1060,7 @@ jobs:
         run: pnpm exec playwright test --config=playwright.restricted.config.ts --output=restricted-test-results
       - name: Upload Playwright PR evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-pr-${{ github.run_id }}
           path: |
@@ -1128,7 +1144,7 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Download the shared embedded server
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: ci-server-${{ github.sha }}
       - run: chmod +x crewship
@@ -1218,7 +1234,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report-onboarding-${{ github.run_id }}
           path: |
@@ -1374,14 +1390,79 @@ jobs:
           echo "✓ out/chat.html and out/chat/_.html are in the export"
 
       - name: Upload static export
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nextjs-static-export
           include-hidden-files: true
           path: out/
           retention-days: 1
 
+      - name: Set up Node 24 for Document engine verification
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Verify the pinned Document engine
+        timeout-minutes: 3
+        run: |
+          pnpm --dir tools/docs-service install --frozen-lockfile
+          pnpm --dir tools/docs-service test
+
   # ── Frontend tests: four complete partitions, one global coverage gate ──
+      - name: Verify the Document service image and lifecycle
+        id: docs-image
+        timeout-minutes: 8
+        env:
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --depth=1 origin "$REVIEWED_SHA"
+          context_tree="$(git rev-parse HEAD:tools/docs-service)"
+          reviewed_tree="$(git rev-parse "$REVIEWED_SHA:tools/docs-service")"
+          test "$context_tree" = "$reviewed_tree"
+          git diff --exit-code -- tools/docs-service
+          image="crewship-docs-ci:${REVIEWED_SHA}"
+          docker build --tag "$image" tools/docs-service
+          DOCS_IMAGE="$image" node tools/docs-service/image-smoke.mjs
+          artifact="$RUNNER_TEMP/docs-service-image"
+          mkdir -p "$artifact"
+          image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          # Save by immutable ID so loading the artifact cannot replace tags.
+          docker save --output "$artifact/image.tar" "$image_id"
+          SOURCE_SHA="$REVIEWED_SHA" CONTEXT_TREE="$context_tree" IMAGE_ID="$image_id" \
+            ARTIFACT_DIR="$artifact" TESTED_CHECKOUT_SHA="$(git rev-parse HEAD)" python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          directory = Path(os.environ['ARTIFACT_DIR'])
+          digest = hashlib.sha256()
+          with (directory / 'image.tar').open('rb') as archive:
+              for chunk in iter(lambda: archive.read(1024 * 1024), b''):
+                  digest.update(chunk)
+          receipt = {
+              'source_sha': os.environ['SOURCE_SHA'],
+              'tested_checkout_sha': os.environ['TESTED_CHECKOUT_SHA'],
+              'context_tree': os.environ['CONTEXT_TREE'],
+              'image_id': os.environ['IMAGE_ID'],
+              'archive_sha256': digest.hexdigest(),
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+          }
+          (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          echo "source_sha=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Retain the qualified Document image without publication
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: docs-service-image-${{ steps.docs-image.outputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/docs-service-image/image.tar
+            ${{ runner.temp }}/docs-service-image/receipt.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   frontend-test-types:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.code == 'true'
@@ -1431,7 +1512,7 @@ jobs:
         run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py run "$SHARD_INDEX" 4
       - name: Preserve partition reports and identity
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: vitest-shard-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/vitest/
@@ -1460,7 +1541,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Download every partition from this run
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: vitest-shard-*-${{ github.sha }}
           path: .ci-results/vitest-downloads/
@@ -1469,7 +1550,7 @@ jobs:
         run: timeout --kill-after=30s 8m python3 scripts/ci/vitest-shard.py merge .ci-results/vitest-downloads 4
       - name: Upload merged coverage and inventory evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: frontend-coverage-lcov
           path: |
@@ -1945,7 +2026,7 @@ jobs:
         run: python3 scripts/ci/cli-subprocess-race.py
       - name: Preserve executed subprocess race evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: cli-subprocess-race-${{ github.sha }}
           path: .ci-results/cli-subprocess-race*
@@ -1999,7 +2080,7 @@ jobs:
           python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s"
       - name: Upload test timings and partition evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: timings-go-race-cli-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
@@ -2021,7 +2102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: timings-go-race-cli-*-${{ github.sha }}
           path: .ci-cli-shards/
@@ -2075,7 +2156,7 @@ jobs:
 
       - name: Upload test timings and event stream
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: timings-${{ github.job }}-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
@@ -2142,7 +2223,7 @@ jobs:
           python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s"
       - name: Upload test timings and partition evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: timings-go-race-api-${{ matrix.shard }}-${{ github.sha }}
           path: .ci-results/
@@ -2164,7 +2245,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: timings-go-race-api-*-${{ github.sha }}
           path: .ci-api-shards/
@@ -2307,7 +2388,9 @@ jobs:
       # inner deadline is the one that names the linter that hung.
       - name: Run golangci-lint
         timeout-minutes: 8
-        run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
+        run: |
+          lint_package=scripts/golangci-shards
+          go run "./$lint_package" "${{ steps.gopath.outputs.bin }}/golangci-lint"
 
       # tsformat proximity lint (#990, #1073c): flags any RFC3339Nano
       # token added within `window` lines of an ExecContext/QueryContext
@@ -2422,7 +2505,7 @@ jobs:
         run: rm -rf web/out
 
       - name: Download static export
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: nextjs-static-export
           path: web/out
@@ -2440,7 +2523,7 @@ jobs:
         run: ./crewship version
 
       - name: Share the tested server
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ci-server-${{ github.sha }}
           path: crewship
@@ -2485,7 +2568,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: nextjs-static-export
           path: web/out
@@ -2493,17 +2576,17 @@ jobs:
       # The snapshot must carry the same locked dependency license texts as
       # release/nightly. The frontend export artifact alone has no node_modules.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: make licenses
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
           version: v2.6.1
           args: check
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
           version: v2.6.1
           args: release --parallelism 2 --snapshot --clean --skip=publish,sign,sbom,homebrew

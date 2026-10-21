@@ -50,6 +50,9 @@ func TestNativeCatalogRefusesUntrustedOwnerStorage(t *testing.T) {
 				}
 			case "public owner":
 				must(os.WriteFile(owner, []byte(strings.Repeat("a", 32)), 0644))
+				// Creation honors the host umask. Make this refusal fixture
+				// genuinely world-readable even under a restrictive mask.
+				must(os.Chmod(owner, 0644))
 			case "oversize owner":
 				must(os.WriteFile(owner, []byte(strings.Repeat("a", 8193)), 0600))
 			case "invalid owner":

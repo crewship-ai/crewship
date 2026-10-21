@@ -13,7 +13,7 @@ import (
 // Exercises the actual common dispatcher and typed proof runner. The controlled
 // session provider counts external starts; it does not prove container isolation.
 func TestRestrictedWorkflowAccountLifecycleAtDispatch(t *testing.T) {
-	for _, scenario := range []string{"active-null", "active-empty", "suspended-queued", "suspended-recovered", "suspended-between-leaves", "deleted-account"} {
+	for _, scenario := range []string{"active-null", "suspended-empty", "suspended-queued", "suspended-recovered", "suspended-between-leaves", "deleted-account"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, runner := fixture(t)
 			receipt := admitFixtureJob(t, s)
@@ -40,7 +40,7 @@ func TestRestrictedWorkflowAccountLifecycleAtDispatch(t *testing.T) {
 				}
 			}
 			switch scenario {
-			case "active-empty":
+			case "suspended-empty":
 				if _, err := s.db.Exec(`UPDATE users SET suspended_at='' WHERE id='h1'`); err != nil {
 					t.Fatal(err)
 				}
@@ -54,7 +54,7 @@ func TestRestrictedWorkflowAccountLifecycleAtDispatch(t *testing.T) {
 				}
 			}
 			worked, err := s.DispatchNext(t.Context())
-			if scenario == "active-null" || scenario == "active-empty" {
+			if scenario == "active-null" {
 				if !worked || err != nil || starts != 2 {
 					t.Fatalf("positive dispatch worked=%t err=%v starts=%d", worked, err, starts)
 				}

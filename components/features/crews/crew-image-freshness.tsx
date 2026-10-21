@@ -10,11 +10,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { RefreshCw, Layers } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { DetailCard, Pill, TickRow } from "@/components/ui/detail"
+import { DetailCard, TickRow } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/status-tone"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewImageStatus {
@@ -57,12 +59,12 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   unavailable: "Unavailable",
 }
 
-const VERDICT_TONE: Record<Verdict, "default" | "success" | "warn"> = {
-  loading: "default",
+const VERDICT_TONE: Record<Verdict, StatusTone> = {
+  loading: "muted",
   behind: "warn",
   current: "success",
-  unknown: "default",
-  unavailable: "default",
+  unknown: "muted",
+  unavailable: "muted",
 }
 
 /** shortDigest renders "sha256:abcdef012345" — enough to compare two by eye. */
@@ -148,9 +150,13 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
     >
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Pill tone={VERDICT_TONE[verdict]} data-testid="crew-image-freshness-verdict">
-            {VERDICT_LABEL[verdict]}
-          </Pill>
+          <StatusPill
+            className="font-sans"
+            size="md"
+            tone={VERDICT_TONE[verdict]}
+            label={VERDICT_LABEL[verdict]}
+            data-testid="crew-image-freshness-verdict"
+          />
           {status?.image ? (
             <span className="type-meta truncate font-mono text-muted-foreground-soft">{status.image}</span>
           ) : null}
@@ -160,6 +166,12 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
           <p className="type-meta text-muted-foreground">
             This crew&rsquo;s container was created from an older build than its tag now points at.
             Nothing is broken — it is simply not the current image.
+          </p>
+        ) : null}
+
+        {verdict === "current" ? (
+          <p className="type-meta text-muted-foreground" data-testid="crew-image-freshness-current">
+            The container runs the same build the tag points at now.
           </p>
         ) : null}
 
@@ -182,14 +194,14 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
           <div className="border-t border-hairline pt-2">
             {status.running_digest ? (
               <TickRow
-                label="Running"
+                label="Container runs"
                 meta={shortDigest(status.running_digest)}
                 status={status.behind ? "pending" : "ok"}
               />
             ) : null}
             {status.resolved_digest ? (
               <TickRow
-                label="Tag resolves to"
+                label="Tag points at"
                 meta={shortDigest(status.resolved_digest)}
                 status="ok"
               />

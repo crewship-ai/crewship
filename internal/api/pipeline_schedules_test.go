@@ -16,7 +16,7 @@ import (
 
 // scheduleHandlerRig wires a PipelineHandler against the full-migrated
 // test DB (setupTestDB) so the production pipeline_schedules schema
-// runs, not the truncated one openSmokeDB uses. Also wires
+// runs, like the smoke fixtures. Also wires
 // SetScheduleStore so endpoints don't bail with 503.
 func scheduleHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string) {
 	t.Helper()

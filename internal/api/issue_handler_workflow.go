@@ -10,6 +10,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/missionactivity"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // Named so Start's 400 body is grep-able and a test can assert exactly
@@ -233,6 +234,10 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 // ── 15. Start — POST /api/v1/crews/{crewId}/issues/{identifier}/start ──────
 
 func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
+	if limitedChatToken(r.Context()) {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
 	if !requireRole(w, r, "create") {
 		return
 	}
@@ -286,6 +291,19 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "Issue must be in BACKLOG or TODO to start (current: "+status+")")
 		return
 	}
+
+	originID, originErr := captureHumanIssueOrigin(r.Context(), tx, r, missionID)
+	if originErr != nil {
+		writeChatIssueError(w, originErr)
+		return
+	}
+	// A fresh authenticated start authorizes future work; already-created
+	// assignment rows retain their own immutable admissions.
+	if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, originID, missionID, wsID); err != nil {
+		internalError(w, r, h.logger, "start: persist requester authority", err)
+		return
+	}
+	r = r.WithContext(runauthority.WithOriginID(r.Context(), originID))
 
 	var routineID string
 	if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(routine_id,'') FROM missions WHERE id=?`, missionID).Scan(&routineID); err != nil {

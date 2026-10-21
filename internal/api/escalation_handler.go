@@ -8,10 +8,13 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // maxJournalEscalationFieldLen bounds each agent-supplied text field
@@ -39,11 +42,15 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 	// transition, so the row still flips exactly once.
 	h.sweepExpiredEscalationsBestEffort(r.Context(), workspaceID)
 	var count int
+	viewerID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewerID = user.ID
+	}
+	countArgs := append([]any{workspaceID}, chataudience.VerifiedTextReadArgs(viewerID)...)
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM escalations e
-		 JOIN crews c ON c.id = e.crew_id
-		 WHERE c.workspace_id = ? AND e.status = 'PENDING' AND c.deleted_at IS NULL`,
-		workspaceID).Scan(&count)
+		`SELECT COUNT(*) FROM escalations e JOIN crews c ON c.id=e.crew_id
+ WHERE c.workspace_id=? AND e.status='PENDING' AND c.deleted_at IS NULL
+ AND (NOT (`+chataudience.VerifiedTextSourceSQL+`) OR (`+chataudience.VerifiedTextReadSQL+`))`, countArgs...).Scan(&count)
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -55,18 +62,72 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 // Auth: protected by internalAuth middleware (X-Internal-Token) in router.go.
 func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		FromSlug    string `json:"from_slug"`
-		Reason      string `json:"reason"`
-		Context     string `json:"context"`
-		Type        string `json:"type"`
-		Metadata    string `json:"metadata"`
-		CrewID      string `json:"crew_id"`
-		WorkspaceID string `json:"workspace_id"`
-		ChatID      string `json:"chat_id"`
+		FromSlug     string `json:"from_slug"`
+		Reason       string `json:"reason"`
+		Context      string `json:"context"`
+		Type         string `json:"type"`
+		Metadata     string `json:"metadata"`
+		CrewID       string `json:"crew_id"`
+		WorkspaceID  string `json:"workspace_id"`
+		SourceRunID  string `json:"source_run_id"`
+		ActorAgentID string `json:"actor_agent_id"`
+		ChatID       string `json:"chat_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
+	}
+	if body.WorkspaceID == "" || body.CrewID == "" || body.Reason == "" {
+		replyError(w, 400, "reason, crew_id and workspace_id required")
+		return
+	}
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) || !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
+	if body.SourceRunID == "" && r.Header.Get("X-Crewship-Run-Token") != "" {
+		writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+		return
+	}
+	if body.SourceRunID != "" {
+		key := internaltoken.DeriveAgentRunKey(h.internalToken, body.WorkspaceID, body.CrewID)
+		ws, agent, run, valid := internaltoken.ValidateAgentRunToken(key, r.Header.Get("X-Crewship-Run-Token"))
+		if !valid || ws != body.WorkspaceID || agent != body.ActorAgentID || run != body.SourceRunID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		chat, err := escalationExecutionChat(r.Context(), h.db, run, agent, ws)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if body.ChatID != "" && body.ChatID != chat {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.ChatID = chat
+		var slug string
+		if err = h.db.QueryRowContext(r.Context(), `SELECT slug FROM agents WHERE id=? AND workspace_id=? AND crew_id=? AND deleted_at IS NULL`, agent, ws, body.CrewID).Scan(&slug); err != nil {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		if body.FromSlug != "" && body.FromSlug != slug {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.FromSlug = slug
+		if body.Type == "" || body.Type == "TEXT" {
+			// Autonomous runs keep their legacy question path. A claimed USER
+			// source with malformed original proof must not downgrade to it.
+			eligible, sourceErr := escalationHasHumanSource(r.Context(), h.db, body.SourceRunID, agent, ws, chat)
+			if sourceErr != nil {
+				writeChatIssueError(w, sourceErr)
+				return
+			}
+			if !eligible {
+				body.SourceRunID = ""
+			}
+		}
+
 	}
 	if body.FromSlug == "" || body.Reason == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -74,19 +135,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	// PR-F24 F-4: a bound token may only raise escalations in its own
-	// workspace (body workspace_id is the insert scope; the auth
-	// middleware can't inspect bodies).
-	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
-		return
-	}
-	// PR-F24 foreign-ID closure: crew_id and chat_id are independent of the
-	// workspace_id checked above — prove they belong to the bound workspace
-	// before inserting the escalation so a ws-A token can't raise one
-	// attributed to a ws-B crew/chat.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
-		return
-	}
+	// Legacy IPC calls without run identity remain trusted sidecar-service
+	// traffic. Agents cannot obtain the sidecar's crew IPC credential; v2
+	// configuration is enforced at the agent-facing sidecar boundary.
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
 		return
 	}
@@ -270,19 +321,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		metadataVal = body.Metadata
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt)
+	err = h.insertEscalationSource(r.Context(), body.WorkspaceID, escalationID, escalationType == "TEXT" && body.SourceRunID != "", `
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at, source_run_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, NULLIF(?, ''))
+	`, []any{escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt, body.SourceRunID})
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
 		// to approve it through — roll it back. (createPendingCredential commits
-		// before this insert; this is the compensating delete.)
+		// before this insert; retire its orphan without erasing audit.)
 		if cid, ok := credentialID.(string); ok && cid != "" {
 			if _, delErr := h.db.ExecContext(r.Context(),
-				`DELETE FROM credentials WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL'`,
-				cid, body.WorkspaceID); delErr != nil {
+				`UPDATE credentials SET deleted_at = ?, updated_at = ?, status = 'REJECTED' WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL`,
+				now, now, cid, body.WorkspaceID); delErr != nil {
 				h.logger.Error("rollback orphaned pending credential", "error", delErr, "credential_id", cid)
 			}
 		}
@@ -428,13 +479,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			"from":   body.FromSlug,
 			"reason": broadcastReason,
 		})
-	broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "escalation.created",
-		map[string]string{
-			"id":        escalationID,
-			"crew_id":   body.CrewID,
-			"from_slug": body.FromSlug,
-			"reason":    broadcastReason,
-		})
+	if escalationType == "TEXT" && body.SourceRunID != "" {
+		broadcastChatEntityRefsInvalidation(r.Context(), h.hub, body.ChatID)
+	}
+	if escalationType != "TEXT" || body.SourceRunID == "" {
+		broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "escalation.created",
+			map[string]string{
+				"id":        escalationID,
+				"crew_id":   body.CrewID,
+				"from_slug": body.FromSlug,
+				"reason":    broadcastReason,
+			})
+	}
 
 	h.logger.Info("escalation created",
 		"escalation_id", escalationID,
@@ -480,11 +536,20 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		resolverUserID = u.ID
 	}
 	// Require at least MANAGER to resolve escalations (data-modifying operation)
-	if !canRole(role, "create") {
+	if !canRole(role, "create") && r.Context().Value(decisionOperationKey{}) == nil {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
+	readable, readErr := chataudience.CanReadVerifiedEscalation(r.Context(), h.db, workspaceID, escalationID, resolverUserID)
+	if readErr != nil {
+		replyInternalError(w, h.logger, "escalation audience", readErr)
+		return
+	}
+	if !readable {
+		replyError(w, 404, "escalation not found")
+		return
+	}
 	var body struct {
 		Resolution string `json:"resolution"`
 		Action     string `json:"action"`
@@ -522,15 +587,15 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// fromAgentID/fromAgentName: the agent that raised the escalation. Needed by
 	// the #1373 lease mint below — approving an agent-proposed credential is an
 	// approval, and an approval is what issues a lease.
-	var fromAgentID, fromAgentName string
+	var fromAgentID, fromAgentName, sourceRunID string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id, a.created_by_user_id,
-		       e.from_agent_id, COALESCE(a.name, ''), e.agent_gave_up_at
+		       e.from_agent_id, COALESCE(a.name, ''), e.agent_gave_up_at,COALESCE(e.source_run_id,'')
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
 	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID, &initiatorUserID,
-		&fromAgentID, &fromAgentName, &agentGaveUpAt)
+		&fromAgentID, &fromAgentName, &agentGaveUpAt, &sourceRunID)
 
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
@@ -560,7 +625,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// Terminal is terminal. The message names which terminal state, because
 	// "already resolved" told an operator whose escalation had EXPIRED that
 	// somebody had decided it — the opposite of what happened.
-	if status != escalationStatusPending {
+	if status != escalationStatusPending && r.Context().Value(decisionOperationKey{}) == nil {
 		replyError(w, http.StatusConflict, escalationTerminalError(status))
 		return
 	}
@@ -639,24 +704,44 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		redirectToVal = body.RedirectTo
 	}
 
-	result, err := h.db.ExecContext(r.Context(), `
+	if escalationType != "CREDENTIAL" {
+		replayed, resolveErr := h.resolveTextDecision(r, escalationID, workspaceID, resolverUserID, body.Resolution, body.Action, body.RedirectTo)
+		if resolveErr != nil {
+			switch {
+			case errors.Is(resolveErr, errTextDecisionDenied):
+				replyError(w, http.StatusForbidden, "Forbidden")
+			case errors.Is(resolveErr, errDecisionVersion), errors.Is(resolveErr, errDecisionKeyCollision):
+				replyError(w, http.StatusConflict, resolveErr.Error())
+			default:
+				replyInternalError(w, h.logger, "resolve escalation transaction", resolveErr)
+			}
+			return
+		}
+		if replayed {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "RESOLVED", "replayed": true})
+			return
+		}
+	} else {
+		result, err := h.db.ExecContext(r.Context(), `
 		UPDATE escalations SET status = 'RESOLVED', resolution = ?, action = ?, redirect_to = ?, resolved_at = ?, resolved_by = 'user'
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
 	`, storedResolution, body.Action, redirectToVal, now, escalationID, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve escalation update", err)
-		return
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve escalation rows affected", err)
-		return
-	}
-	if n == 0 {
-		// Lost the compare-and-swap: a cancel, an expiry or another resolve
-		// landed between the read above and this UPDATE.
-		replyError(w, http.StatusConflict, "escalation is no longer pending")
-		return
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve escalation update", err)
+			return
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve escalation rows affected", err)
+			return
+		}
+		if n == 0 {
+			// Lost the compare-and-swap: a cancel, an expiry or another resolve
+			// landed between the read above and this UPDATE.
+			replyError(w, http.StatusConflict, "escalation is no longer pending")
+			return
+		}
+
 	}
 
 	// Agent-proposed credential: a CREDENTIAL escalation may link a credential
@@ -788,6 +873,9 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	h.notifyEscalationWaiter(escalationID, waiterResult)
 
 	broadcastResolution := body.Resolution
+	if escalationType == "TEXT" && sourceRunID != "" {
+		broadcastResolution = inbox.RedactSecrets(broadcastResolution)
+	}
 	if escalationType == "CREDENTIAL" {
 		broadcastResolution = "[credential " + body.Action + "d]"
 		if body.Action == "redirect" {
@@ -800,13 +888,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			"resolution": broadcastResolution,
 			"action":     body.Action,
 		})
-	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.resolved",
-		map[string]string{
-			"id":        escalationID,
-			"crew_id":   crewID,
-			"from_slug": fromSlug,
-			"action":    body.Action,
-		})
+	if escalationType == "TEXT" && sourceRunID != "" {
+		broadcastChatEntityRefsInvalidation(r.Context(), h.hub, chatID)
+	}
+	if escalationType != "TEXT" || sourceRunID == "" {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.resolved",
+			map[string]string{
+				"id":        escalationID,
+				"crew_id":   crewID,
+				"from_slug": fromSlug,
+				"action":    body.Action,
+			})
+	}
 
 	h.logger.Info("escalation resolved",
 		"escalation_id", escalationID,
@@ -950,8 +1043,15 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
-		WHERE e.crew_id = ? AND e.workspace_id = ?`
+		WHERE e.crew_id = ? AND e.workspace_id = ? AND e.deleted_at IS NULL`
+	query += ` AND (NOT (` + chataudience.VerifiedTextSourceSQL + `) OR (` + chataudience.VerifiedTextReadSQL + `))`
 	args := []interface{}{crewID, workspaceID}
+	user := UserFromContext(r.Context())
+	viewerID := ""
+	if user != nil {
+		viewerID = user.ID
+	}
+	args = append(args, chataudience.VerifiedTextReadArgs(viewerID)...)
 	if statusFilter != "" {
 		query += ` AND e.status = ?`
 		args = append(args, statusFilter)
@@ -1035,7 +1135,9 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 }
 
 // PurgeEscalations handles DELETE /api/v1/crews/{crewId}/escalations —
-// HARD-delete every escalation row for one crew in the context workspace. A
+// Purge every escalation for one crew in the context workspace. Verified TEXT
+// sources retain a content-free source tombstone so durable projections cannot
+// become public after source removal; other sources are hard-deleted. A
 // teardown/reset primitive for seed --nuke: the escalations table carries a
 // workspace_id but NO foreign key, so a crew delete never cascades to it and
 // the rows survive a nuke as orphans (and keep surfacing in the inbox as
@@ -1059,16 +1161,15 @@ func (h *QueryHandler) PurgeEscalations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Scope by BOTH crew_id and workspace_id: crewId comes from the path and a
-	// caller must not reach another workspace's rows by guessing a crew id.
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM escalations WHERE crew_id = ? AND workspace_id = ?`, crewID, workspaceID)
+	deleted, err := h.purgeEscalationSources(r, workspaceID, crewID)
 	if err != nil {
+		if replyPurgeSourceError(w, err) {
+			return
+		}
 		h.logger.Error("purge escalations", "error", err)
-		replyError(w, http.StatusInternalServerError, "purge failed")
+		replyError(w, 500, "purge failed")
 		return
 	}
-	deleted, _ := res.RowsAffected()
 	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
 }
 
@@ -1116,7 +1217,7 @@ func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *ht
 		if in.credentialID.Valid && in.credentialID.String != "" {
 			var lvl int
 			if err := h.db.QueryRowContext(r.Context(),
-				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				`SELECT `+credentialEffectiveLevelSQL("c")+` FROM credentials c WHERE c.id = ? AND c.workspace_id = ?`,
 				in.credentialID.String, in.workspaceID).Scan(&lvl); err == nil {
 				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
 			} else if !errors.Is(err, sql.ErrNoRows) {

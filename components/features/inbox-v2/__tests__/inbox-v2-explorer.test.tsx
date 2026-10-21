@@ -36,21 +36,67 @@ function renderExplorer(over: Partial<React.ComponentProps<typeof InboxV2Explore
     onFilters,
     selectedKey: null,
     onOpen: vi.fn(),
-    collapsed: false,
-    onToggleCollapse: vi.fn(),
     ...over,
   }
   render(<InboxV2Explorer {...props} />)
   return { onFilters, props }
 }
 
+/** The kit's facets (COM-01) fold: unfold one by its header to reach its values. */
+function unfold(label: string) {
+  fireEvent.click(within(screen.getByRole("group", { name: "Filter inbox" })).getByRole("button", { name: new RegExp(`^${label}`), expanded: false }))
+}
+
 describe("inbox v2 explorer", () => {
-  it("offers the three views with their counts, like the routines rail", () => {
-    renderExplorer()
-    for (const [label, count] of [["To handle", "3"], ["Updates", "2"], ["History", "7"]]) {
-      const row = screen.getByRole("button", { name: new RegExp(label, "i") })
-      expect(within(row).getByText(count)).toBeTruthy()
+  it("offers the three spaces with their counts, and the Overview row", () => {
+    const onOverview = vi.fn()
+    const { props } = renderExplorer({ onOverview })
+    const spaces = screen.getByRole("tablist", { name: "Inbox spaces" })
+    for (const [label, count] of [["To handle", "3"], ["Updates", "2"]]) {
+      const tab = within(spaces).getByRole("tab", { name: new RegExp(label, "i") })
+      expect(within(tab).getByText(count)).toBeTruthy()
     }
+    // History is the record, not a queue: no count to work down.
+    expect(within(spaces).getByRole("tab", { name: /History/ })).not.toHaveTextContent(/\d/)
+    expect(within(spaces).getByRole("tab", { name: /To handle/ })).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(within(spaces).getByRole("tab", { name: /Updates/ }))
+    expect(props.onView).toHaveBeenCalledWith("updates")
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }))
+    expect(onOverview).toHaveBeenCalledOnce()
+  })
+
+  it("says how much of a server-counted history is loaded, in History only", () => {
+    const { unmount } = render(
+      <InboxV2Explorer
+        view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+        historyNote="Showing the latest 3 of 40 in history"
+        entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+        selectedKey={null} onOpen={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("inbox-history-note")).toHaveTextContent("Showing the latest 3 of 40 in history")
+    unmount()
+    renderExplorer({ view: "updates", historyNote: "Showing the latest 3 of 40 in history" })
+    expect(screen.queryByTestId("inbox-history-note")).toBeNull()
+  })
+
+  it("keeps the current space selected while the Overview is in the pane", () => {
+    renderExplorer({ view: "updates", onOverview: vi.fn(), overviewSelected: true })
+    const spaces = screen.getByRole("tablist", { name: "Inbox spaces" })
+    // The list below is still that space's list; the Overview row is selected beside it.
+    expect(within(spaces).getByRole("tab", { name: /Updates/ })).toHaveAttribute("aria-selected", "true")
+    expect(within(spaces).getByRole("tab", { name: /To handle/ })).toHaveAttribute("aria-selected", "false")
+  })
+
+  it("renders in the v67 row anatomy: unread dot, crew · kind, expiry or age, merged count", () => {
+    const soon = new Date(Date.now() + 3 * 3_600_000).toISOString()
+    const lookup = { crewById: new Map([["c-r", { id: "c-r", name: "Research", slug: "research", color: "teal" }]]), agentBySlug: new Map(), agentById: new Map(), ready: true }
+    const expiring = inboxEntry(item({ id: "x", kind: "waitpoint", title: "Publish report?", payload: { timeout_at: soon, crew_id: "c-r" } }))
+    renderExplorer({ entries: [expiring], visible: [expiring], lookup })
+    const row = screen.getByTestId("inbox-row")
+    expect(row).toHaveTextContent("Research · Approval")
+    expect(row).toHaveTextContent("in 3h")
+    expect(within(row).getByText("Unread")).toBeInTheDocument()
   })
 
   it("separates human decisions from actionable schedule alerts", () => {
@@ -66,7 +112,7 @@ describe("inbox v2 explorer", () => {
   it("counts each type facet over the whole feed, not over what is on screen", () => {
     renderExplorer({ visible: [FEED[0]] })
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
-    fireEvent.click(screen.getByText("Advanced · source type"))
+    unfold("Source type")
     const waitpoint = screen.getByRole("button", { name: /Approval step/i })
     expect(within(waitpoint).getByText("2")).toBeTruthy()
   })
@@ -74,9 +120,42 @@ describe("inbox v2 explorer", () => {
   it("asks the parent to narrow when a facet is chosen", () => {
     const { onFilters } = renderExplorer()
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
-    fireEvent.click(screen.getByText("Advanced · source type"))
+    unfold("Source type")
     fireEvent.click(screen.getByRole("button", { name: /Agent request or notice/i }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ type: "escalation" }))
+  })
+
+  it("opens the facets in the panel, Attention among them, and keeps them open across picks", () => {
+    const { onFilters } = renderExplorer()
+    fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    const facets = screen.getByRole("group", { name: "Filter inbox" })
+    for (const label of ["State", "Attention", "Source type"]) expect(within(facets).getByText(label)).toBeInTheDocument()
+    unfold("Attention")
+    fireEvent.click(within(facets).getByRole("button", { name: /^Decision/ }))
+    expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ attention: "decision" }))
+    expect(screen.getByRole("group", { name: "Filter inbox" })).toBeInTheDocument()
+  })
+
+  it("names a chip by its facet: State: Unread only", () => {
+    renderExplorer({ filters: { ...EMPTY_INBOX_V2_FILTERS, unreadOnly: true, attention: "repair" } })
+    expect(screen.getByText("State: Unread only")).toBeInTheDocument()
+    expect(screen.getByText("Attention: Repair")).toBeInTheDocument()
+  })
+
+  it("offers the crews that have items as a Crew facet", () => {
+    const lookup = { crewById: new Map([["c-ops", { id: "c-ops", name: "Ops", slug: "ops", color: "green" }]]), agentBySlug: new Map(), agentById: new Map(), ready: true }
+    const row = inboxEntry(item({ id: "c1", kind: "waitpoint", payload: { crew_id: "c-ops" } }))
+    const { onFilters } = renderExplorer({ entries: [row], visible: [row], lookup })
+    fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    unfold("Crew")
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter inbox" })).getByRole("button", { name: /^Ops/ }))
+    expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ crew: "c-ops" }))
+  })
+
+  it("shows skeleton rows while the first load is in flight, not an empty state", () => {
+    renderExplorer({ entries: [], visible: [], loading: true })
+    expect(screen.getByRole("status", { name: "Loading inbox" })).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing waits for you/)).toBeNull()
   })
 
   it("shows an active facet as a removable chip", () => {
@@ -91,7 +170,7 @@ describe("inbox v2 explorer", () => {
 
   it("explains an empty crew selection as a filter result", () => {
     renderExplorer({ visible: [], filters: { ...EMPTY_INBOX_V2_FILTERS, crew: "empty-crew" } })
-    expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument()
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument()
   })
 
   it("never offers a filter the server cannot answer", () => {
@@ -136,5 +215,49 @@ describe("history keeps archived noise out of the decision list", () => {
     renderExplorer({ view: "history", entries: six, visible: six })
     expect(screen.queryByText("Decisions")).toBeNull()
     expect(screen.getAllByText("Archived").length).toBeGreaterThan(0)
+  })
+
+  describe("Load more and server facet counts", () => {
+    it("ends the list with a quiet Load more that asks for the next page, and says so while it loads", () => {
+      const onLoadMore = vi.fn()
+      const { unmount } = render(
+        <InboxV2Explorer
+          view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+          entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+          selectedKey={null} onOpen={vi.fn()} canLoadMore onLoadMore={onLoadMore}
+        />,
+      )
+      const button = screen.getByRole("button", { name: "Load more" })
+      fireEvent.click(button)
+      expect(onLoadMore).toHaveBeenCalledOnce()
+      unmount()
+      render(
+        <InboxV2Explorer
+          view="history" onView={vi.fn()} viewCounts={{ action: 0, updates: 0, history: 40 }}
+          entries={FEED} visible={FEED} filters={EMPTY_INBOX_V2_FILTERS} onFilters={vi.fn()}
+          selectedKey={null} onOpen={vi.fn()} canLoadMore loadingMore onLoadMore={onLoadMore}
+        />,
+      )
+      expect(screen.getByRole("button", { name: "Loading…" })).toBeDisabled()
+    })
+
+    it("has no Load more when there is nothing more to load", () => {
+      renderExplorer({ view: "history" })
+      expect(screen.queryByRole("button", { name: /Load more/ })).toBeNull()
+    })
+
+    it("shows the server's facet counts instead of counting the loaded rows", () => {
+      const server = {
+        type: { waitpoint: 41, escalation: 0 } as Record<string, number>,
+        attention: { decision: 41, input: 0, review: 0, repair: 0 },
+        deadline: { hour: 0, today: 0, none: 41, soon: 6 },
+        unread: 33, total: 41,
+      }
+      renderExplorer({ facetCounts: server as never })
+      fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+      unfold("Source type")
+      const waitpoint = screen.getByRole("button", { name: /Approval step/i })
+      expect(within(waitpoint).getByText("41")).toBeTruthy()
+    })
   })
 })

@@ -13,7 +13,8 @@ export type EntityRef =
   | { kind: "agent"; slug: string; tab?: string }
   | { kind: "chat"; agentSlug: string; sessionId?: string }
   | { kind: "issue"; identifier: string }
-  | { kind: "issues"; crewSlug?: string; assigneeSlug?: string; status?: string }
+  /** Ids, not slugs: /issues and GET /issues match crew_id / assignee_id against ids. */
+  | { kind: "issues"; crewId?: string; assigneeId?: string; status?: string }
   | { kind: "routine"; slug: string; tab?: string }
   | { kind: "routines"; crewSlug?: string }
   | { kind: "run"; runId: string; pipelineSlug?: string }
@@ -46,7 +47,9 @@ export function entityHref(ref: EntityRef): string {
     case "issue":
       return `/issues/${enc(ref.identifier)}`
     case "issues":
-      return withQuery("/issues", { crew: ref.crewSlug, assignee: ref.assigneeSlug, status: ref.status })
+      // The keys the Issues page owns (hooks/use-issue-filters.ts) — a
+      // `?crew=` / `?assignee=` link used to land on the unfiltered list.
+      return withQuery("/issues", { crew_id: ref.crewId, assignee_id: ref.assigneeId, status: ref.status })
     case "routine":
       return withQuery("/routines", { slug: ref.slug, tab: ref.tab })
     case "routines":
@@ -54,10 +57,10 @@ export function entityHref(ref: EntityRef): string {
     case "run":
       return withQuery("/activity", { run: ref.runId, pipeline: ref.pipelineSlug })
     case "journal":
-      // /journal reads crew_id / agent_id (the server resolves a slug as
-      // readily as an id — resolveJournalRefs), so these are the keys the
-      // page owns rather than aliases it has to learn.
-      return withQuery("/journal", { crew_id: ref.crewSlug, agent_id: ref.agentSlug, mission_id: ref.missionId, trace_id: ref.traceId })
+      // The Journal is Activity now (F-02): straight to the list, in its own
+      // keys. Activity reads a slug or an issue identifier as readily as an
+      // id (it resolves them through the workspace lookup).
+      return withQuery("/activity", { crew: ref.crewSlug, agent: ref.agentSlug, mission: ref.missionId, run: ref.traceId })
     case "page":
       return `/pages/${enc(ref.slug)}`
     case "credential":
@@ -67,7 +70,8 @@ export function entityHref(ref: EntityRef): string {
     case "inbox":
       return withQuery("/inbox", { item: ref.itemId, kind: ref.itemKind, agent: ref.agentSlug, attention: ref.attention })
     case "spend":
-      return withQuery("/paymaster", { crew: ref.crewId })
+      // Spend is one view for the whole workspace; it has no crew filter.
+      return "/activity?mode=spend"
     case "integrations":
       return withQuery("/integrations", { tab: ref.tab, section: ref.section, server: ref.server })
     case "skill":

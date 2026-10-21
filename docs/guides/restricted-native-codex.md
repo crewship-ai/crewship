@@ -26,7 +26,7 @@ policy hash and Docker security options at admission, renewal, and delivery. A
 missing, changed, unsupported, or unenforced policy denies execution. Installation
 does not alter global sysctls, Docker configuration, proc masks, or capabilities.
 
-The Debian base digest and bubblewrap 0.8.0 package are pinned in the Dockerfile.
+The final Debian 13 base digest and Debian-patched bubblewrap 0.8.0 package are pinned in the Dockerfile. A separate Debian 12 stage downloads the authenticated bubblewrap package; the final image installs it with its package metadata and the same verified executable hash. Security upgrades and minimum glibc/Perl versions avoid the critical findings that blocked the original Debian 12 candidate.
 Bubblewrap 0.12 changes the proc-error path and prevents the pinned CLI's supported
 private-PID proc fallback in this Docker environment. Sandbox policy must not be
 weakened to compensate. The production image is selected by its immutable SHA.
@@ -81,3 +81,5 @@ remains a separate infrastructure action through the supported Ansible process.
 Adding this producer does not establish that an approved image or qualified host
 exists. Publication must be dispatched separately by an authorized operator,
 and the released-image acceptance receipt is still required for #2952.
+
+`Native Worker Candidate Check` builds affected pull-request recipes and scans the final image without registry publication, signing permissions, secrets or host policy installation. Its receipt binds the tested PR head to the local image identity. Successful PR verification supplements, and does not replace, the main-only publisher and released-image live acceptance.

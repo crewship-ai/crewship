@@ -264,8 +264,8 @@ func (h *QueryHandler) grantLeasedCredentialOnApprove(
 	var credName string
 	var secLevel int
 	if err := h.db.QueryRowContext(ctx, `
-		SELECT name, COALESCE(security_level, 1) FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		SELECT c.name, `+credentialEffectiveLevelSQL("c")+` FROM credentials c
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
 		credentialID, workspaceID).Scan(&credName, &secLevel); err != nil {
 		h.logger.Warn("credential lease on approve: credential lookup failed",
 			"error", err, "credential_id", credentialID)

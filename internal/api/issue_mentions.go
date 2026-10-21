@@ -59,8 +59,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/inbox"
-	"github.com/crewship-ai/crewship/internal/mentions"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
@@ -180,13 +180,17 @@ type mentionDispatcher interface {
 // mentionContext is everything the trigger needs about the comment that was
 // just written. Built by the two comment handlers from what they already hold.
 type mentionContext struct {
-	WorkspaceID string
-	MissionID   string
-	Identifier  string
-	IssueTitle  string
-	IssueCrewID string
-	CommentID   string
-	CommentBody string
+	AutonomousPipelineCrewID string // Original host-authorized crew snapshot.
+	AutonomousPipeline       bool   // Set only by host-authenticated pipeline mutation admission.
+	SourceRunID              string // Host-verified source execution, persisted for autonomous recovery.
+	DeliveryID               string // Host-owned durable admission identity, never an agent argument.
+	WorkspaceID              string
+	MissionID                string
+	Identifier               string
+	IssueTitle               string
+	IssueCrewID              string
+	CommentID                string
+	CommentBody              string
 	// AuthorType is the mission_comments vocabulary: "user" or "agent".
 	// It is what decides whether this dispatch inherits a position in the
 	// delegation tree (an agent has one) or is a root (a human has none).
@@ -212,101 +216,7 @@ type mentionRecorder struct {
 	dispatcher mentionDispatcher
 }
 
-// record resolves, persists, audits and dispatches the mentions in one
-// comment.
-//
-// Every step is best-effort in the same sense issueEvents.log is: the comment
-// itself has already been committed and answered, and a mention that could not
-// be recorded must not retroactively fail a comment the author has already
-// seen posted. Failures are logged with the comment id, which is what makes
-// "why did nothing happen?" answerable.
-//
-// Per-mention order is deliberately event-then-delivery-then-dispatch, not
-// the reverse — this is B2's "the ack event before any model call"
-// (PRD-ISSUES-AND-ROUTINES-2026 §9.3/§15, #2337). Before this PR, dispatchOne
-// (which starts the run) ran FIRST and the activity/delivery bookkeeping ran
-// after; a human watching the issue learned nothing until the run itself
-// produced a comment. Now: the `mentioned` event lands, the pending delivery
-// row lands, issue.delivery.acked broadcasts — all before dispatchOne is
-// ever called.
-func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
-	ids := mentions.ExtractAgentIDs(mc.CommentBody)
-	if len(ids) == 0 {
-		return
-	}
-
-	// The per-comment bound, applied to the IDS rather than to the resolved set:
-	// the unbounded IN list is the sharpest edge (see mentionMaxPerComment), and
-	// it is built before anything is resolved. First-seen order, so which
-	// mentions survive is the order the author wrote them in, not the order
-	// SQLite would have returned.
-	if over := len(ids) - mentionMaxPerComment; over > 0 {
-		ids = ids[:mentionMaxPerComment]
-		// Reported BEFORE the resolve, deliberately: the author is owed this
-		// whether or not the surviving ids resolve, and an early return below
-		// must not swallow it.
-		m.notifyMentionOverflow(ctx, mc, over)
-	}
-
-	resolved, err := m.resolveMentionedAgents(ctx, mc.WorkspaceID, ids)
-	if err != nil {
-		m.logf("resolve comment mentions", mc, err)
-		return
-	}
-	if len(resolved) == 0 {
-		// Every id was a claim about an agent this workspace does not have.
-		// Nothing is written and nothing is logged at info level: the
-		// interesting event is a mention, and this was not one.
-		return
-	}
-
-	deliveriesEnabled, ffErr := featureflags.IsEnabled(ctx, m.db, mc.WorkspaceID, issueDeliveriesFlagKey)
-	if ffErr != nil {
-		m.logf("check issue_deliveries flag", mc, ffErr)
-	}
-
-	// One delivery per agent per comment. mentions.ExtractAgentIDs already
-	// dedupes ids, and UNIQUE(comment_id, agent_id) used to be the backstop
-	// below it; since B2 the unique key is (event_id, agent_id) and every
-	// iteration mints its own event, so the backstop moved here.
-	seenAgents := make(map[string]struct{}, len(resolved))
-	for _, mention := range resolved {
-		if _, dup := seenAgents[mention.AgentID]; dup {
-			continue
-		}
-		seenAgents[mention.AgentID] = struct{}{}
-		// The audit row FIRST — details is the BARE agent id:
-		// lib/mentions.ts's mentionTargetFromActivityDetails accepts that
-		// shape, and it is the only one of the three it accepts that cannot
-		// smuggle a label into the timeline. The frontend was written before
-		// the producer; this is the producer meeting it rather than the
-		// reverse. logEvent (not log) because the delivery row below needs
-		// the id it allocates.
-		eventID, written := m.events.logEvent(ctx, issueEvent{
-			MissionID: mc.MissionID,
-			ActorType: mc.AuthorType,
-			ActorID:   mc.AuthorID,
-			Action:    actionMentioned,
-			Details:   mention.AgentID,
-		})
-
-		state, assignmentID, detail := m.deliverAndDispatch(ctx, mc, mention, eventID, written.Seq, deliveriesEnabled)
-
-		// The row lands regardless of the dispatch outcome — "R was mentioned
-		// and the cap refused the run" is precisely the fact an operator needs,
-		// and it is unrecoverable if only successful dispatches are recorded.
-		if err := m.persist(ctx, mc, mention, eventID, state, assignmentID, detail); err != nil {
-			m.logf("persist comment mention", mc, err)
-		}
-
-		// A mention that did not wake anybody is told to somebody. See
-		// notifyMentionUndelivered — a 201 with a rendered mention and no run
-		// is the failure mode this closes.
-		m.notifyMentionUndelivered(ctx, mc, mention, state, detail)
-	}
-}
-
-// deliverAndDispatch is the delivery half of record: create the pending
+// deliverAndDispatch handles a session follow-up: create the pending
 // delivery, ack it, claim it, and — only if this call wins the claim —
 // dispatch.
 //
@@ -572,6 +482,7 @@ func (m mentionRecorder) dispatchOne(ctx context.Context, mc mentionContext, men
 	}
 
 	id, err := m.dispatcher.DispatchMention(ctx, mentionDispatchRequest{
+		DeliveryID:    mc.DeliveryID,
 		WorkspaceID:   mc.WorkspaceID,
 		MissionID:     mc.MissionID,
 		Identifier:    mc.Identifier,
@@ -776,7 +687,7 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 //
 // Best-effort, like every other write in this file: the comment is already
 // committed and answered, and inbox.Insert logs its own failures.
-func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentionContext, mention resolvedMention, state, detail string) {
+func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentionContext, mention resolvedMention, state, detail string, txs ...*sql.Tx) error {
 	// mentionDispatchQueued (B3, §9.4/§17, #2339) added here on review: with
 	// the issue_deliveries flag OFF (issueAgentSessionsFlagKey still on),
 	// deliverAndDispatch skips createDelivery/the issue.delivery.acked
@@ -789,10 +700,10 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 	// a failure, and the refused/failed copy ("did not start a run") would
 	// misreport it as one.
 	if state != mentionDispatchRefused && state != mentionDispatchFailed && state != mentionDispatchQueued {
-		return
+		return nil
 	}
 	if m.db == nil || mc.WorkspaceID == "" {
-		return
+		return nil
 	}
 	targetUser, ok := mentionNoticeTarget(mc)
 	if !ok {
@@ -804,7 +715,7 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 				"comment_id", mc.CommentID, "mission_id", mc.MissionID,
 				"agent_id", mention.AgentID, "dispatch_state", state, "detail", detail)
 		}
-		return
+		return nil
 	}
 
 	issue := mc.Identifier
@@ -848,7 +759,7 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 			"No action needed — it will run automatically."
 	}
 
-	_ = inbox.Insert(ctx, m.db, m.logger, inbox.Item{
+	item := inbox.Item{
 		WorkspaceID: mc.WorkspaceID,
 		Kind:        inbox.KindMessage,
 		// One event, one row: comment + agent is exactly the join row's
@@ -868,7 +779,11 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 			"identifier":     mc.Identifier,
 			"dispatch_state": state,
 		},
-	})
+	}
+	if len(txs) > 0 {
+		return inbox.InsertTx(ctx, txs[0], m.logger, item)
+	}
+	return inbox.Insert(ctx, m.db, m.logger, item)
 }
 
 // notifyMentionOverflow tells the author that their comment named more agents
@@ -889,9 +804,9 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 // they were never resolved, and a notice that distinguished "12 ignored" from
 // "12 ignored, 3 of which exist" would be the read side channel
 // resolveMentionedAgents' workspace predicate exists to deny.
-func (m mentionRecorder) notifyMentionOverflow(ctx context.Context, mc mentionContext, dropped int) {
+func (m mentionRecorder) notifyMentionOverflow(ctx context.Context, mc mentionContext, dropped int) error {
 	if dropped <= 0 || m.db == nil || mc.WorkspaceID == "" {
-		return
+		return nil
 	}
 	if m.logger != nil {
 		m.logger.Warn("mentions over the per-comment bound were ignored",
@@ -900,7 +815,7 @@ func (m mentionRecorder) notifyMentionOverflow(ctx context.Context, mc mentionCo
 	}
 	targetUser, ok := mentionNoticeTarget(mc)
 	if !ok {
-		return
+		return nil
 	}
 
 	issue := mc.Identifier
@@ -909,7 +824,7 @@ func (m mentionRecorder) notifyMentionOverflow(ctx context.Context, mc mentionCo
 	}
 	issueLabel := mentionNoticeValue(issue, mentionNoticeMaxField)
 
-	_ = inbox.Insert(ctx, m.db, m.logger, inbox.Item{
+	return inbox.Insert(ctx, m.db, m.logger, inbox.Item{
 		WorkspaceID:  mc.WorkspaceID,
 		Kind:         inbox.KindMessage,
 		SourceID:     "mention_overflow_" + mc.CommentID,
@@ -1046,6 +961,7 @@ func (m mentionRecorder) logf(msg string, mc mentionContext, err error) {
 
 // mentionDispatchRequest is one mention asking one agent to work.
 type mentionDispatchRequest struct {
+	DeliveryID    string
 	WorkspaceID   string
 	MissionID     string
 	Identifier    string
@@ -1083,6 +999,19 @@ type mentionDispatchRequest struct {
 func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDispatchRequest) (string, error) {
 	if req.WorkspaceID == "" || req.MissionID == "" || req.TargetAgentID == "" {
 		return "", fmt.Errorf("dispatch mention: workspace_id, mission_id and target agent are required")
+	}
+
+	// Delayed deliveries recover the authority frozen with the original comment,
+	// rather than interpreting the later dispatch as autonomous work.
+	if req.CommentID != "" {
+		var originID string
+		err := h.db.QueryRowContext(ctx, `SELECT COALESCE(mc.chat_origin_id,'') FROM mission_comments mc JOIN missions m ON m.id=mc.mission_id WHERE mc.id=? AND mc.mission_id=? AND m.workspace_id=?`, req.CommentID, req.MissionID, req.WorkspaceID).Scan(&originID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("dispatch mention: comment origin: %w", err)
+		}
+		// The comment is the authority source even when it says NULL. In
+		// particular, never inherit a finishing assignment's unrelated receipt.
+		ctx = runauthority.WithOriginID(ctx, originID)
 	}
 
 	// The target, re-resolved in the comment's workspace. This repeats
@@ -1278,6 +1207,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	assignmentID, attached, sessionID, err := resolveSessionAndInsertAssignment(
 		ctx, h.db, h.logger, req.WorkspaceID, req.MissionID, target.ID,
 		scope, lim, caller, cappedAssignment{
+			ID:                    durableMentionAssignmentID(req.DeliveryID),
 			WorkspaceID:           req.WorkspaceID,
 			ChatID:                req.MissionID,
 			TargetID:              target.ID,
@@ -1291,6 +1221,10 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 			ContextPackTokens:     pack.TokensEstimate,
 		})
 	if err != nil {
+		var admitted *assignmentAlreadyAdmittedError
+		if errors.As(err, &admitted) {
+			return admitted.ID, nil
+		}
 		return "", err
 	}
 

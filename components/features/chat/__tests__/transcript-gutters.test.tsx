@@ -62,6 +62,7 @@ function part(p: Partial<TurnPart> = {}): TurnPart {
     type: p.type ?? "text",
     content: p.content ?? "",
     metadata: p.metadata,
+    thinking: p.thinking,
     isStreaming: p.isStreaming,
     timestamp: p.timestamp ?? new Date("2026-08-26T12:00:00Z"),
   }
@@ -71,7 +72,7 @@ function thinkingTurn(streaming: boolean): ChatTurn {
   return {
     id: "a1",
     role: "assistant",
-    parts: [part({ id: "th", type: "thinking", content: "weighing options", isStreaming: streaming })],
+    parts: [part({ id: "th", type: "thinking", content: "Authorized progress summary", isStreaming: streaming, thinking: { visibility: "summary", state: streaming ? "running" : "completed", summary: "Authorized progress summary" } })],
     isStreaming: streaming,
     timestamp: new Date("2026-08-26T12:00:00Z"),
   }
@@ -97,13 +98,10 @@ const noop = () => {}
 
 describe("reasoning is never auto-opened", () => {
   it("leaves the block closed while it streams", () => {
-    // The defect the whole transcript rewrite starts from: a streaming
-    // reasoning block dumped the model's private deliberation into the middle
-    // of the conversation and then took it away a second later. The chevron
-    // still opens it on request — a wrong answer is exactly when you want to
-    // read the reasoning.
+    // An authorized progress summary remains collapsed until the user opens it.
+    // Stream state comes from the explicit safe projection, never raw legacy text.
     reasoningCalls.length = 0
-    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={async () => true} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: true, defaultOpen: false })
     expect(screen.getByTestId("reasoning")).toHaveAttribute("data-default-open", "false")
     cleanup()
@@ -111,13 +109,23 @@ describe("reasoning is never auto-opened", () => {
 
   it("keeps it closed once the stream has ended too", () => {
     reasoningCalls.length = 0
-    renderWithAgent(<AssistantTurn turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(false)} onCopy={async () => true} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: false, defaultOpen: false })
     cleanup()
   })
 
+  it("keeps legacy private thinking unavailable even when its old part streams", () => {
+    const turn = thinkingTurn(true)
+    turn.parts[0] = { ...turn.parts[0], content: "Private legacy reasoning", thinking: undefined }
+    reasoningCalls.length = 0
+    renderWithAgent(<AssistantTurn turn={turn} onCopy={async () => true} onFileClick={noop} />)
+    expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: false, defaultOpen: false })
+    expect(screen.queryByText("Private legacy reasoning")).toBeNull()
+    cleanup()
+  })
+
   it("names the agent in the header", () => {
-    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={async () => true} onFileClick={noop} />)
     expect(screen.getByTestId("reasoning-trigger").textContent).toContain("Morgan is thinking")
     // The default brain-glyph trigger must NOT render: the turn already has a
     // face in the gutter, and two animated marks on one turn is one more than
@@ -130,7 +138,7 @@ describe("reasoning is never auto-opened", () => {
     // ChatPanel is mounted in tests and in embedded surfaces with no agent in
     // context. The header degrades to a generic label; it does not throw.
     reasoningCalls.length = 0
-    render(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
+    render(<AssistantTurn turn={thinkingTurn(true)} onCopy={async () => true} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ defaultOpen: false })
     expect(screen.getByTestId("reasoning-trigger").textContent).toContain("is thinking")
     cleanup()
@@ -139,7 +147,7 @@ describe("reasoning is never auto-opened", () => {
 
 describe("the transcript gutters", () => {
   it("gives an assistant turn a face and drives it from isStreaming", () => {
-    renderWithAgent(<TurnRenderer turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<TurnRenderer turn={thinkingTurn(true)} onCopy={async () => true} onFileClick={noop} />)
     expect(screen.getByTestId("thinking-avatar")).toHaveAttribute("data-active", "true")
     cleanup()
   })
@@ -147,13 +155,13 @@ describe("the transcript gutters", () => {
   it("stops the animation the moment the turn settles", () => {
     // Same flag the Regenerate affordance waits on, so the ring cannot still
     // be turning on a turn the reader is already allowed to act on.
-    renderWithAgent(<TurnRenderer turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<TurnRenderer turn={thinkingTurn(false)} onCopy={async () => true} onFileClick={noop} />)
     expect(screen.getByTestId("thinking-avatar")).toHaveAttribute("data-active", "false")
     cleanup()
   })
 
   it("gives a user turn a face in the opposite gutter", () => {
-    renderWithAgent(<TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />)
+    renderWithAgent(<TurnRenderer turn={userTurn()} onCopy={async () => true} onFileClick={noop} />)
     expect(screen.getByTestId("user-avatar")).toBeTruthy()
     expect(screen.queryByTestId("thinking-avatar")).toBeNull()
     cleanup()
@@ -163,7 +171,7 @@ describe("the transcript gutters", () => {
     // Only one of the two ever carries a face, and the empty one is why every
     // bubble sits on the same two text edges instead of zigzagging.
     const { container } = renderWithAgent(
-      <TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />,
+      <TurnRenderer turn={userTurn()} onCopy={async () => true} onFileClick={noop} />,
     )
     const grid = container.querySelector('[data-turn-id="u1"]')
     expect(grid?.className).toContain("grid-cols-[32px_minmax(0,1fr)_32px]")

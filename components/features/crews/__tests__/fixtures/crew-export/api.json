@@ -1,0 +1,558 @@
+{
+ "/api/v1/crews": [
+  {
+   "id": "cmuxw95fy001d1a876ac9",
+   "name": "Operations",
+   "slug": "ops",
+   "description": "Inspect real crew resources and run the live container monitor.",
+   "color": "cyan",
+   "icon": "server",
+   "container_memory_mb": 4096,
+   "container_cpus": 2,
+   "container_ttl_hours": null,
+   "network_mode": "restricted",
+   "allowed_domains": [],
+   "runtime_image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+   "devcontainer_config": "{\"image\":\"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm\",\"containerEnv\":{\"PATH\":\"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"},\"features\":{\"ghcr.io/devcontainers/features/common-utils:2\":{\"username\":\"agent\",\"userUid\":\"1001\",\"userGid\":\"1001\",\"installZsh\":false,\"upgradePackages\":false},\"ghcr.io/devcontainers-extra/features/claude-code:2\":{}},\"postCreateCommand\":\"sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3 ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm install -g @openai/codex\"}"
+  },
+  {
+   "id": "cmuxw95ao001be0cb768c",
+   "name": "Finance & Marketing",
+   "slug": "quality",
+   "description": "Reconcile invoices and find gaps in the contact-form delivery journey.",
+   "color": "violet",
+   "icon": "briefcase",
+   "container_memory_mb": 4096,
+   "container_cpus": 2,
+   "container_ttl_hours": null,
+   "network_mode": "restricted",
+   "allowed_domains": [],
+   "runtime_image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+   "devcontainer_config": "{\"image\":\"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm\",\"containerEnv\":{\"PATH\":\"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"},\"features\":{\"ghcr.io/devcontainers/features/common-utils:2\":{\"username\":\"agent\",\"userUid\":\"1001\",\"userGid\":\"1001\",\"installZsh\":false,\"upgradePackages\":false},\"ghcr.io/devcontainers-extra/features/claude-code:2\":{}},\"postCreateCommand\":\"sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3 ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm install -g @openai/codex\"}"
+  },
+  {
+   "id": "cmuxw95380019d30f3e4b",
+   "name": "Sales & Shipping",
+   "slug": "engineering",
+   "description": "Follow up on customer inquiries and prepare evidence for late-delivery claims.",
+   "color": "blue",
+   "icon": "handshake",
+   "container_memory_mb": 4096,
+   "container_cpus": 2,
+   "container_ttl_hours": null,
+   "network_mode": "restricted",
+   "allowed_domains": [],
+   "runtime_image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+   "devcontainer_config": "{\"image\":\"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm\",\"containerEnv\":{\"PATH\":\"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"},\"features\":{\"ghcr.io/devcontainers/features/common-utils:2\":{\"username\":\"agent\",\"userUid\":\"1001\",\"userGid\":\"1001\",\"installZsh\":false,\"upgradePackages\":false},\"ghcr.io/devcontainers-extra/features/claude-code:2\":{}},\"postCreateCommand\":\"sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3 ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm install -g @openai/codex\"}"
+  }
+ ],
+ "/api/v1/credentials": [
+  {
+   "name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "type": "AI_CLI_TOKEN",
+   "provider": "ANTHROPIC"
+  },
+  {
+   "name": "webhook-signing-secret",
+   "type": "GENERIC_SECRET",
+   "provider": "NONE"
+  },
+  {
+   "name": "smtp-relay",
+   "type": "USERPASS",
+   "provider": "MAILGUN"
+  }
+ ],
+ "/api/v1/skills": [
+  {
+   "id": "sk_5302576f32c049028bfe2d6e",
+   "slug": "routine-author"
+  },
+  {
+   "id": "sk_1cf5f1155e5ca2adc540790d",
+   "slug": "demo-business-workflow"
+  },
+  {
+   "id": "sk_facc49abea466ff8599c1927",
+   "slug": "file-crafter"
+  },
+  {
+   "id": "sk_4717741fb0a6733047f6ba7e",
+   "slug": "script-runner"
+  },
+  {
+   "id": "sk_c3b2eb58cc84bf22e0fce4a1",
+   "slug": "system-inspector"
+  }
+ ],
+ "/api/v1/agents?crew_id=cmuxw95fy001d1a876ac9": [
+  {
+   "id": "cmuxw95jw002539b5cdb1",
+   "slug": "riley",
+   "name": "Riley",
+   "role_title": "Container Monitor",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Riley, the Container Monitor for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the container monitor does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95fy001d1a876ac9"
+  },
+  {
+   "id": "cmuxw95jr0024c8a60432",
+   "slug": "morgan",
+   "name": "Morgan",
+   "role_title": "Operations Lead",
+   "agent_role": "LEAD",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-sonnet-5",
+   "system_prompt": "You are Morgan, the Operations Lead for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the operations lead does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95fy001d1a876ac9"
+  }
+ ],
+ "/api/v1/crews/cmuxw95fy001d1a876ac9/integrations": [
+  {
+   "agent_binding_count": 2,
+   "args_json": "[\"/crew/shared/demo/business/connector.py\"]",
+   "auth_status": "none",
+   "command": "python3",
+   "config_json": null,
+   "created_at": "2026-10-07T09:17:19Z",
+   "crew_id": "cmuxw95fy001d1a876ac9",
+   "default_access": "all",
+   "display_name": "Harbor Goods · local demo records",
+   "enabled": true,
+   "endpoint": null,
+   "env_json": null,
+   "icon": null,
+   "id": "cmuxw9679004dba9ecfe9",
+   "name": "harbor-goods",
+   "transport": "stdio",
+   "updated_at": "2026-10-07T09:17:19Z",
+   "workspace_mcp_server_id": null
+  }
+ ],
+ "/api/v1/agents/cmuxw95jw002539b5cdb1/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_4717741fb0a6733047f6ba7e",
+   "skill": {
+    "id": "sk_4717741fb0a6733047f6ba7e",
+    "slug": "script-runner"
+   }
+  },
+  {
+   "skill_id": "sk_c3b2eb58cc84bf22e0fce4a1",
+   "skill": {
+    "id": "sk_c3b2eb58cc84bf22e0fce4a1",
+    "slug": "system-inspector"
+   }
+  }
+ ],
+ "/api/v1/skills/sk_1cf5f1155e5ca2adc540790d": {
+  "content": "Read the Harbor Goods records through read_demo_records or /crew/shared/demo/business/catalogue.json. Preserve record identifiers, amounts and time intervals exactly. Checks are deterministic scripts; use AI only for explanation and draft text. Never infer that a sample message was sent externally. Reuse the existing project Issue and routine. A human chooses the final action in Inbox. Evidence is written to /crew/shared/demo/business/outbox/. Do not expose credentials or read another project's private files."
+ },
+ "/api/v1/skills/sk_4717741fb0a6733047f6ba7e": {
+  "content": "# Script Runner\n\n## When to Activate\n- Task involves writing and executing Python or Bash scripts\n- Keywords: \"script\", \"Python\", \"Bash\", \"run\", \"execute\", \"generate\", \"calculate\"\n\n## Instructions\n1. Write scripts to /tmp/ with descriptive names (not script.sh, test.py)\n2. Add a shebang line: #!/usr/bin/env python3 or #!/bin/bash\n3. Always run scripts through the interpreter: bash /tmp/name.sh or python3 /tmp/name.py — /tmp is a noexec tmpfs, so chmod +x and ./name.sh fail with Permission denied\n4. For Python: use only stdlib modules (no pip install needed)\n5. For Bash: use set -euo pipefail at the top for error safety\n6. Capture output to both stdout and a file with: bash /tmp/name.sh | tee /tmp/output.txt\n7. Include comments explaining what each section does\n\n## Output Format\n- Show the script content before running it\n- Run the script and show its output\n- Save output to /tmp/{script-name}-output.txt\n- Report: script location, exit code, output file location\n\n## Guardrails\n- Scripts must be idempotent — safe to run multiple times\n- No infinite loops — always have exit conditions\n- Don't install packages or modify system configuration\n- Keep scripts under 100 lines — simple and readable\n- If a script fails, show the error and explain what went wrong"
+ },
+ "/api/v1/skills/sk_c3b2eb58cc84bf22e0fce4a1": {
+  "content": "# System Inspector\n\n## When to Activate\n- Task involves checking container environment, installed tools, or system resources\n- Keywords: \"inventory\", \"container\", \"system info\", \"resource\", \"environment\", \"inspect\"\n\n## Instructions\n1. Check tool availability with: command -v <tool> or which <tool>\n2. Get versions with: <tool> --version 2>/dev/null || echo \"version unknown\"\n3. Read system info from /proc/ when available (meminfo, cpuinfo)\n4. Use standard tools: uname, df, free, nproc, id, hostname, ip/ifconfig\n5. Handle missing tools gracefully — report as MISSING, don't fail\n\n## Output Format\n- Use aligned columns for readability:\n  curl          /usr/bin/curl      7.88.1    AVAILABLE\n  wget          -                  -         MISSING\n- Group results by category (Network tools, Dev tools, System tools)\n- Include a summary count: \"Found N/M tools available\"\n- Save to /tmp/ with clear filename\n\n## Guardrails\n- Read-only inspection — never modify system configuration\n- Don't access /etc/shadow or other sensitive files\n- Stick to standard Linux inspection commands\n- If /proc is not available, use alternative commands and note the limitation"
+ },
+ "/api/v1/agents/cmuxw95jw002539b5cdb1/credentials": [
+  {
+   "id": "cmuxw966y0046a225df9c",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95jr0024c8a60432/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_5302576f32c049028bfe2d6e",
+   "skill": {
+    "id": "sk_5302576f32c049028bfe2d6e",
+    "slug": "routine-author"
+   }
+  },
+  {
+   "skill_id": "sk_c3b2eb58cc84bf22e0fce4a1",
+   "skill": {
+    "id": "sk_c3b2eb58cc84bf22e0fce4a1",
+    "slug": "system-inspector"
+   }
+  }
+ ],
+ "/api/v1/skills/sk_5302576f32c049028bfe2d6e": {
+  "content": "# Routine Author\n\nA playbook for turning \"make a routine that does X\" into a valid, saved Crewship\ndraft — grounded in what this crew actually has, reviewed and published by the user.\n\n## When to Activate\n\n- The user asks you to **build / create / automate a repeatable workflow**:\n  \"make a routine that…\", \"automate X\", \"set up a recurring job\", \"every morning do Y\".\n- Distinguish from a one-off task: a routine is worth authoring when the work\n  repeats or needs a trigger (schedule / webhook / event). For a single ad-hoc\n  job, just do the work — don't author a routine.\n\n## Procedure\n\n> **Author from what you already know — do NOT probe or verify.** Everything you\n> need is already in your prompt: `[CONNECTED INTEGRATIONS]`, `[AVAILABLE ROUTINES]`,\n> and the DSL reference below. Writing a routine is a **paper exercise** — you\n> *describe* steps, you don't *perform* them now. So:\n> - **Do NOT** run a command to \"check\" / \"list\" integrations, routines, or\n>   endpoints — you already have them in your prompt.\n> - **Do NOT** fetch the source URL to \"see what it returns.\" The routine's own\n>   `agent_run` step extracts the data at RUN time; put \"extract the top 5 …\" in\n>   that step's prompt and move on.\n> - **Do NOT** test a webhook, ping a host, or re-fetch the routine after saving\n>   to \"verify.\" None of that is authoring.\n> - First call `get_routine_draft` for the intended slug. This loads the same\n>   saved draft the user edits, or a revision-zero baseline for a new recipe.\n>   Preserve that envelope, edit its `document`, then call `save_routine_draft`.\n> - Return the saved `editor_url`. Do not publish through `save_routine` during\n>   this authoring flow: that legacy tool still changes the live recipe.\n> - A conflict means somebody edited the draft or its published base. Keep\n>   your proposed changes and explain the conflict; never reload and blindly\n>   overwrite the other editor's work.\n\n1. **Clarify only the genuinely ambiguous essentials.** Ask at most 2–3 questions,\n   then default the rest. The three that usually matter:\n   - **Trigger cadence** — manual, or on a schedule (when, and in what timezone?).\n     A routine you save with NO trigger and no explicit \"manual\" reads as an\n     oversight, not a decision — see step 5.\n   - **Where the output goes** — a Slack channel, an issue, a file, a return value.\n   - **What to do on failure** — retry, alert someone, or just stop.\n   Do not interrogate. If the goal is clear, proceed with sensible defaults\n   (manual trigger, return the result, stop on failure).\n\n2. **Ground in what this crew actually has.** Read the `[CONNECTED INTEGRATIONS]`\n   block in your prompt. Use ONLY integrations listed there, and declare each one\n   the routine needs in `integrations_required` (lowercase connector slugs like\n   `\"github\"`, `\"slack\"`). Read `[AVAILABLE ROUTINES]` and **reuse/compose**\n   existing routines with a `call_pipeline` step where one already fits — don't\n   re-build what's there. Also read the `[CONTAINER RESOURCES]` block: it lists\n   the datastores (e.g. Postgres at a host/port) and installed CLIs your crew's\n   container already has. If the routine uses any of them — typically from an\n   `agent_run` step that opens a DB connection or shells out to a CLI — **declare\n   them in the top-level `resources` block** (`resources.datastores[]` /\n   `resources.tools[]`). These can't be inferred from the step graph, so without\n   the declaration the manifest is incomplete and the run-time resource\n   precondition gate has nothing to check against.\n\n   **Raw URL or webhook given (e.g. a Discord/Slack webhook link)?** Don't hunt\n   for an integration and don't test it — just use a plain `http` step with that\n   URL and add its host to `egress_targets` (e.g. `[\"discord.com\"]`). No\n   `credential_ref` is needed for a webhook whose secret is in the URL itself.\n\n3. **Prefer linear steps.** A short, top-to-bottom sequence is easier to read,\n   test, and approve. Avoid branching (`if:`), DAG `needs:`, and loops unless the\n   goal genuinely requires them. Keep it to the fewest steps that do the job.\n\n4. **Write valid DSL.** The `definition` is a JSON object:\n\n   - Top level: `dsl_version` (always `\"1.0\"`), `name`, `description`,\n     `inputs[]`, `outputs[]`, `integrations_required[]`, `egress_targets[]`,\n     `credentials_required[]`, `resources`, `steps[]`.\n   - `resources` (only when the routine touches container datastores/CLIs):\n     `{ \"datastores\": [{ \"type\":\"postgres\", \"name\":\"app-db\", \"note\":\"writes table runs\" }],\n        \"tools\": [{ \"type\":\"ansible\", \"name\":\"deploy.yml\" }] }`.\n     `type` is the engine/tool family (`postgres|redis|mysql|mongodb|other` for\n     datastores; `ansible|terraform|kubectl|bash|python|other` for tools).\n   - Step types (the `type` field selects the shape):\n     - `agent_run` — `{ \"id\", \"type\":\"agent_run\", \"agent_slug\", \"prompt\", \"complexity\":\"fast|moderate|smart\" }`\n     - `http` — `{ \"id\", \"type\":\"http\", \"http\": { \"method\", \"url\", \"headers\", \"body\", \"credential_ref\": {\"type\":\"slack\"} } }`\n     - `transform` — `{ \"id\", \"type\":\"transform\", \"transform\": { \"input\":\"{{ steps.x.output }}\", \"expression\":\".field\" } }` (pure-Go jq subset, no LLM)\n     - `wait` — `{ \"id\", \"type\":\"wait\", \"wait\": { \"kind\":\"approval\", \"approval_prompt\":\"…\" } }` (also `datetime` / `event`)\n     - `call_pipeline` — `{ \"id\", \"type\":\"call_pipeline\", \"pipeline_slug\":\"other-routine\", \"inputs\": {…} }`\n   - **Templating**: reference inputs as `{{ inputs.name }}` and a prior step's\n     result as `{{ steps.<step-id>.output }}`. Steps run in order by default.\n\n   Minimal example:\n\n   ```json\n   {\n     \"dsl_version\": \"1.0\",\n     \"name\": \"daily-standup-digest\",\n     \"description\": \"Summarize yesterday's commits and post to Slack.\",\n     \"inputs\": [{ \"name\": \"repo\", \"type\": \"string\", \"required\": true }],\n     \"integrations_required\": [\"github\", \"slack\"],\n     \"steps\": [\n       { \"id\": \"summarize\", \"type\": \"agent_run\", \"agent_slug\": \"alex\",\n         \"complexity\": \"fast\",\n         \"prompt\": \"Summarize commits in {{ inputs.repo }} since yesterday.\" },\n       { \"id\": \"post\", \"type\": \"http\",\n         \"http\": { \"method\": \"POST\", \"url\": \"https://slack.com/api/chat.postMessage\",\n                   \"credential_ref\": { \"type\": \"slack\" },\n                   \"body\": \"{{ steps.summarize.output }}\" } }\n     ]\n   }\n   ```\n\n5. **Save a draft with its proposed start.** Use `get_routine_draft` with\n   `{ \"slug\": \"my-routine\" }` (and `crew` only when authorized to author for\n   another crew). Keep `id`, `slug`, `revision`, `base_pipeline_id` and\n   `base_revision` from the returned `draft` unchanged. Fill `draft.document`:\n\n   ```json\n   {\n     \"slug\": \"my-routine\",\n     \"name\": \"My routine\",\n     \"description\": \"A short purpose\",\n     \"definition\": {\"dsl_version\": \"1.0\", \"name\": \"my-routine\", \"steps\": []},\n     \"trigger\": {\"kind\": \"schedule\", \"cron\": \"0 9 * * 1-5\", \"timezone\": \"Europe/Prague\"}\n   }\n   ```\n\n   The empty steps above are only the envelope example; supply the actual DSL\n   you authored. Use `{\"kind\":\"manual\"}` for an on-demand start, or a proposed\n   one-time `{\"kind\":\"once\",\"fire_at\":\"...RFC3339...\"}` when requested.\n   Call `save_routine_draft` with `{slug, draft}`. Crew and acting-agent identity\n   are injected by the sidecar; do not copy identity fields from another crew.\n   Saving a draft does not validate or execute steps, create a live routine,\n   activate a schedule, or raise a schedule-approval request. Never claim it did.\n   The legacy `save_routine` tool remains available for existing direct-publish\n   integrations; its `activation:\"draft\"` means a disabled trigger, NOT an\n   unpublished recipe. Do not use it as a substitute for `save_routine_draft`.\n\n6. **Hand the SAME draft to the user.** Return the `editor_url` from the saved\n   response, with a short summary and the saved revision. Explain that it is\n   unpublished and its proposed schedule is inactive. The user opens Recipe /\n   Test / Publish to review, validate without execution, and explicitly publish.\n   Publication checks capability changes and existing recurring presets. The\n   legacy `proposed` governance state is not the same as an unpublished draft.\n   Do not invent a first-fire time or say work ran merely because saving passed.\n\n7. **Present a short readable summary.** Describe the trigger and each step in\n   plain language (\"On a manual run: 1) Alex summarizes the repo's commits,\n   2) the summary is posted to Slack\"). Never dump raw JSON at the user.\n\n8. **Run a saved routine when asked.** To invoke an existing routine, call the\n   **`run_routine`** tool with `{ slug, inputs }` — do NOT shell out to curl or\n   re-improvise the work by hand. The run executes synchronously and returns the\n   run result/status; report the real outcome to the user. Use `list_routines`\n   to find the slug first if you don't have it.\n\n## Pitfalls\n\n- **Never use an integration the crew hasn't connected.** If it's not in\n  `[CONNECTED INTEGRATIONS]`, you can't use it — propose connecting it, or pick\n  another approach.\n- **Never invent or hardcode a credential.** Reference credentials by type via\n  `credential_ref` (e.g. `{\"type\":\"slack\"}`); the runtime resolves them. If a\n  needed credential is missing, raise a **CREDENTIAL escalation** per the\n  credential instructions in your prompt — don't paste a token into the DSL.\n- **Don't propose branching/DAG for v1.** Ship the linear version first.\n- **Don't claim a routine is live when it's proposed.** Check the save response.\n\n## Verification\n\n- The save response contains a nonempty draft ID, its saved revision, `published:false`, and an `editor_url`. Validation and publication still belong to the user review flow.\n- The plain-language summary you give the user matches the saved DSL — same\n  trigger, same steps, same destination.\n"
+ },
+ "/api/v1/agents/cmuxw95jr0024c8a60432/credentials": [
+  {
+   "id": "cmuxw966r0040f851d0cc",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents?crew_id=cmuxw95380019d30f3e4b": [
+  {
+   "id": "cmuxw95k60027db59c6f2",
+   "slug": "jamie",
+   "name": "Jamie",
+   "role_title": "Workflow Tester",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Jamie, the Workflow Tester for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the workflow tester does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95380019d30f3e4b"
+  },
+  {
+   "id": "cmuxw95k1002620bcfabd",
+   "slug": "taylor",
+   "name": "Taylor",
+   "role_title": "Customer Data Analyst",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Taylor, the Customer Data Analyst for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the customer data analyst does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95380019d30f3e4b"
+  },
+  {
+   "id": "cmuxw95jd00213b437795",
+   "slug": "robin",
+   "name": "Robin",
+   "role_title": "Shipping Assistant",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Robin, the Shipping Assistant for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the shipping assistant does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95380019d30f3e4b"
+  },
+  {
+   "id": "cmuxw95j900205b67abff",
+   "slug": "sam",
+   "name": "Sam",
+   "role_title": "Sales Assistant",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Sam, the Sales Assistant for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the sales assistant does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95380019d30f3e4b"
+  },
+  {
+   "id": "cmuxw95j5001f75ecd942",
+   "slug": "alex",
+   "name": "Alex",
+   "role_title": "Sales & Shipping Lead",
+   "agent_role": "LEAD",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-sonnet-5",
+   "system_prompt": "You are Alex, the Sales & Shipping Lead for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the customer team lead does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95380019d30f3e4b"
+  }
+ ],
+ "/api/v1/crews/cmuxw95380019d30f3e4b/integrations": [
+  {
+   "agent_binding_count": 5,
+   "args_json": "[\"/crew/shared/demo/business/connector.py\"]",
+   "auth_status": "none",
+   "command": "python3",
+   "config_json": null,
+   "created_at": "2026-10-07T09:17:19Z",
+   "crew_id": "cmuxw95380019d30f3e4b",
+   "default_access": "all",
+   "display_name": "Harbor Goods · local demo records",
+   "enabled": true,
+   "endpoint": null,
+   "env_json": null,
+   "icon": null,
+   "id": "cmuxw9677004bd2bc54ce",
+   "name": "harbor-goods",
+   "transport": "stdio",
+   "updated_at": "2026-10-07T09:17:19Z",
+   "workspace_mcp_server_id": null
+  }
+ ],
+ "/api/v1/agents/cmuxw95k60027db59c6f2/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_4717741fb0a6733047f6ba7e",
+   "skill": {
+    "id": "sk_4717741fb0a6733047f6ba7e",
+    "slug": "script-runner"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95k60027db59c6f2/credentials": [
+  {
+   "id": "cmuxw966t004262fad8ec",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95k1002620bcfabd/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_facc49abea466ff8599c1927",
+   "skill": {
+    "id": "sk_facc49abea466ff8599c1927",
+    "slug": "file-crafter"
+   }
+  }
+ ],
+ "/api/v1/skills/sk_facc49abea466ff8599c1927": {
+  "content": "# File Crafter\n\n## When to Activate\n- Task involves creating files, directories, or structured data\n- Keywords: \"create\", \"file\", \"directory\", \"CSV\", \"JSON\", \"tree\", \"generate\"\n\n## Instructions\n1. Create parent directories with mkdir -p before writing files\n2. Use heredoc (cat << 'EOF') for multi-line file content\n3. For CSV files: always include a header row with column names\n4. For JSON files: ensure valid JSON (use python3 -m json.tool to validate)\n5. After creating files, verify they exist with ls -la and show first few lines\n6. Use chmod appropriately (755 for scripts, 644 for data files)\n\n## Output Format\n- Always show the created file tree with: find <dir> -type f | sort\n- For generated data, show a preview: head -5 <file>\n- Report file sizes and line counts: wc -l <file>\n\n## Guardrails\n- Write only to /tmp/ — never to system directories\n- Don't create files larger than 10MB\n- Always use descriptive filenames (not temp1.txt, file.dat)\n- Clean up any temporary intermediate files"
+ },
+ "/api/v1/agents/cmuxw95k1002620bcfabd/credentials": [
+  {
+   "id": "cmuxw966s0041cbad90cd",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95jd00213b437795/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_facc49abea466ff8599c1927",
+   "skill": {
+    "id": "sk_facc49abea466ff8599c1927",
+    "slug": "file-crafter"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95jd00213b437795/credentials": [
+  {
+   "id": "cmuxw966o003ed1f8c928",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95j900205b67abff/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_facc49abea466ff8599c1927",
+   "skill": {
+    "id": "sk_facc49abea466ff8599c1927",
+    "slug": "file-crafter"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95j900205b67abff/credentials": [
+  {
+   "id": "cmuxw966v0044356e5259",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95j5001f75ecd942/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_5302576f32c049028bfe2d6e",
+   "skill": {
+    "id": "sk_5302576f32c049028bfe2d6e",
+    "slug": "routine-author"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95j5001f75ecd942/credentials": [
+  {
+   "id": "cmuxw966u004385d24b91",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents?crew_id=cmuxw95ao001be0cb768c": [
+  {
+   "id": "cmuxw95jn00238bd8b077",
+   "slug": "casey",
+   "name": "Casey",
+   "role_title": "Marketing Assistant",
+   "agent_role": "AGENT",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-haiku-4-5",
+   "system_prompt": "You are Casey, the Marketing Assistant for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the marketing assistant does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": "[\n  {\n    \"id\": \"check-form\",\n    \"label\": \"Investigate a missing inquiry\",\n    \"template\": \"Investigate this demo form delivery.\\nRecord: {{record}}\\nExpected destination: {{destination}}\\nObserved problem: {{problem}}\\nUse the local marketing fixture. Explain the evidence and propose the smallest repair; do not contact external systems.\\nOptional screenshot: {{screenshot}}\",\n    \"attachment\": \"optional\",\n    \"fields\": [\n      {\n        \"name\": \"record\",\n        \"label\": \"Submission ID\",\n        \"type\": \"text\",\n        \"required\": true,\n        \"default\": \"FORM-103\"\n      },\n      {\n        \"name\": \"destination\",\n        \"label\": \"Expected destination\",\n        \"type\": \"text\",\n        \"required\": true,\n        \"default\": \"Demo sales inbox\"\n      },\n      {\n        \"name\": \"problem\",\n        \"label\": \"What happened?\",\n        \"type\": \"textarea\",\n        \"required\": true,\n        \"default\": \"The form was accepted but the inquiry never arrived.\"\n      },\n      {\n        \"name\": \"screenshot\",\n        \"label\": \"Screenshot\",\n        \"type\": \"photo\",\n        \"max\": 1\n      }\n    ]\n  }\n]",
+   "crew_id": "cmuxw95ao001be0cb768c"
+  },
+  {
+   "id": "cmuxw95jh0022c7d1f600",
+   "slug": "jordan",
+   "name": "Jordan",
+   "role_title": "Finance Assistant",
+   "agent_role": "LEAD",
+   "cli_adapter": "CLAUDE_CODE",
+   "tool_profile": "FULL",
+   "timeout_seconds": 180,
+   "memory_enabled": true,
+   "llm_provider": "ANTHROPIC",
+   "llm_model": "claude-sonnet-5",
+   "system_prompt": "You are Jordan, the Finance Assistant for Harbor Goods, a fictional company used to demonstrate Crewship.\n\nWork only from evidence in this workspace. The local demo catalogue and scripts live in /crew/shared/demo/business/. The read_demo_records integration reads that catalogue without accessing an external account. Follow the demo-business skill.\n\nSales and Shipping are owned by Sales & Shipping. Finance and Marketing are owned by Finance & Marketing. Operations owns Crewship Lab and the live container monitor. Each project has a prepared TODO Issue, a Page and separate check, draft and resolution routines.\n\nWhen asked to run an example, use the existing routine or explain its Page action. Never create duplicate Issues or approvals. A proposal is not an action: a saved demo outbox file does not mean real email was sent or a real claim was filed. Do not contact external customers. Label sample data and missing credentials honestly. Keep answers short and in the user's language. For routine drafting, return only the requested draft.\n",
+   "suggested_prompts": "Explain what the finance assistant does in this demo.\nShow me the sample records and explain the next action.\nWhat happened in the latest routine run?",
+   "ask_forms": null,
+   "crew_id": "cmuxw95ao001be0cb768c"
+  }
+ ],
+ "/api/v1/crews/cmuxw95ao001be0cb768c/integrations": [
+  {
+   "agent_binding_count": 2,
+   "args_json": "[\"/crew/shared/demo/business/connector.py\"]",
+   "auth_status": "none",
+   "command": "python3",
+   "config_json": null,
+   "created_at": "2026-10-07T09:17:19Z",
+   "crew_id": "cmuxw95ao001be0cb768c",
+   "default_access": "all",
+   "display_name": "Harbor Goods · local demo records",
+   "enabled": true,
+   "endpoint": null,
+   "env_json": null,
+   "icon": null,
+   "id": "cmuxw9678004ce21964d0",
+   "name": "harbor-goods",
+   "transport": "stdio",
+   "updated_at": "2026-10-07T09:17:19Z",
+   "workspace_mcp_server_id": null
+  }
+ ],
+ "/api/v1/agents/cmuxw95jn00238bd8b077/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_4717741fb0a6733047f6ba7e",
+   "skill": {
+    "id": "sk_4717741fb0a6733047f6ba7e",
+    "slug": "script-runner"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95jn00238bd8b077/credentials": [
+  {
+   "id": "cmuxw966x00451c19792f",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ],
+ "/api/v1/agents/cmuxw95jh0022c7d1f600/skills": [
+  {
+   "skill_id": "sk_1cf5f1155e5ca2adc540790d",
+   "skill": {
+    "id": "sk_1cf5f1155e5ca2adc540790d",
+    "slug": "demo-business-workflow"
+   }
+  },
+  {
+   "skill_id": "sk_5302576f32c049028bfe2d6e",
+   "skill": {
+    "id": "sk_5302576f32c049028bfe2d6e",
+    "slug": "routine-author"
+   }
+  }
+ ],
+ "/api/v1/agents/cmuxw95jh0022c7d1f600/credentials": [
+  {
+   "id": "cmuxw966q003f6d906222",
+   "credential_id": "cmuxw966m003c84592150",
+   "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+   "env_var_name": "CLAUDE_CODE_OAUTH_TOKEN"
+  }
+ ]
+}

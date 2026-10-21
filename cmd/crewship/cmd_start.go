@@ -482,8 +482,9 @@ var startCmd = &cobra.Command{
 			srv.LogWriter(),
 			resolver,
 			chatbridge.BridgeConfig{
-				DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
-				DefaultCPUs:     cfg.Container.DefaultCPUs,
+				DocumentCreationEnabled: cfg.Documents.Enabled,
+				DefaultMemoryMB:         cfg.Container.DefaultMemoryMB,
+				DefaultCPUs:             cfg.Container.DefaultCPUs,
 			},
 			logger,
 		)
@@ -1135,6 +1136,11 @@ var startCmd = &cobra.Command{
 			// at-or-after it was started by this process and must not
 			// be double-entered by the scan.
 			pipelineBootCutoff := time.Now()
+			if deps.DB != nil {
+				if err := pipeline.RecoverPendingStartsAtBoot(ctx, deps.DB); err != nil {
+					return fmt.Errorf("recover durable routine starts before dispatch: %w", err)
+				}
+			}
 
 			// Webhook store — event-driven triggers. Dispatch is
 			// public (no auth middleware); auth comes from the token
@@ -1267,7 +1273,7 @@ var startCmd = &cobra.Command{
 				// terminal HITL approval rows that were kept forever before
 				// this. Defaults to 90 days; see
 				// internal/harbormaster/retention.go.
-				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour, srv.JournalWriter())
 
 				// Inbox, chats and Keeper decisions — the windows an instance
 				// admin sets in Admin › Data retention. Forever until set, so
@@ -1481,6 +1487,7 @@ var startCmd = &cobra.Command{
 		if deps.DB != nil {
 			peerStop := make(chan struct{})
 			var peerWg sync.WaitGroup
+			usermodel.StartFeedbackPreferenceWorker(deps.DB, logger, peerStop, &peerWg)
 			consolidate.StartPeerCardSyncWorker(
 				deps.DB, logger,
 				consolidate.PeerCardWorkerConfig{BasePath: cfg.Storage.BasePath},

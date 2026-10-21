@@ -302,6 +302,7 @@ the high-entropy token in the URL plus its HMAC signature are the credentials.
 |---|---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook metadata; never returns the signing secret |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook; returns the secret once |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test` | create | Dry run: what a sample call would hand the routine; starts nothing |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | delete | Soft-delete; returns `204` |
 | POST | `/api/v1/webhooks/{token}` | token + HMAC | Fire the target routine asynchronously |
 
@@ -327,6 +328,24 @@ rate-limit and last-fire telemetry. A zero or negative configured rate uses the
 server floor of 600 fires/minute. Creation requires encrypted credential storage;
 misconfiguration is `500`. Invalid target/body is `400`, and insufficient role
 is `403`.
+
+### Rotating the signing secret
+
+`PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` with `{"rotate_secret": true}` mints a new signing secret and shows it once; the old one stops working at once. Add `"rotate_grace_seconds"` (`0`, `3600`, `86400` or `604800`; only together with `rotate_secret`, anything else is `400`) to keep the replaced secret valid for that long. While the window is open the response carries `previous_secret_expires_at`; the old secret itself is never returned. Both the body-only and the timestamped signature, and the GitHub profile, accept either secret inside the window. A second rotation replaces the remembered secret, so only the one just replaced survives.
+
+### Test a mapping
+
+`POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}/test` with `{"sample": <the JSON a sender would POST>, "headers": {"Name": "value"}}` builds the inputs the routine would receive, with the same builder and input check as a real delivery, and answers:
+
+```json
+{
+  "inputs": {"event": {"action": "opened"}, "raw": "{\"action\":\"opened\"}", "headers": {}, "source": "github"},
+  "ignored_template_keys": [],
+  "valid": true
+}
+```
+
+`valid: false` carries `problem` (a missing required input, an inactive routine, a deleted pinned version). `ignored_template_keys` lists template keys dropped because they collide with `event`, `raw` or `headers`. Nothing runs, no idempotency key is reserved and the fire count does not move. Needs the `create` role; another workspace's webhook is `404`.
 
 ### Pipeline dispatch
 

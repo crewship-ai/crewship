@@ -365,12 +365,23 @@ func TestCovMRTRecurringUpdate_ForeignCrewNameNotLeaked(t *testing.T) {
 	uReq = withWorkspaceUser(uReq, userID, wsID, "OWNER")
 	uRR := httptest.NewRecorder()
 	h.Update(uRR, uReq)
-	if uRR.Code != http.StatusOK {
-		t.Fatalf("update: %d body=%s", uRR.Code, uRR.Body.String())
+	if uRR.Code != http.StatusForbidden {
+		t.Fatalf("foreign-scope authority must be refused: %d body=%s", uRR.Code, uRR.Body.String())
 	}
 	if strings.Contains(uRR.Body.String(), "SecretCrewName") {
 		t.Errorf("foreign crew name leaked in Update response: %s", uRR.Body.String())
 	}
+	// An authenticated owner can repair the actual crew and explicitly readmit
+	// future work; a title-only update cannot grant a foreign crew authority.
+	repair := httptest.NewRequest("PATCH", "/", jsonBody(map[string]any{"crew_id": crewID, "title": "repaired"}))
+	repair.SetPathValue("recurringId", resp.ID)
+	repair = withWorkspaceUser(repair, userID, wsID, "OWNER")
+	repaired := httptest.NewRecorder()
+	h.Update(repaired, repair)
+	if repaired.Code != http.StatusOK || strings.Contains(repaired.Body.String(), "SecretCrewName") {
+		t.Fatalf("safe authenticated repair: %d %s", repaired.Code, repaired.Body.String())
+	}
+
 }
 
 func TestCovMRTRecurringUpdateNullableFields(t *testing.T) {

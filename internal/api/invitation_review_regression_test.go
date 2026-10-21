@@ -54,7 +54,7 @@ func TestInvitationReviewRevokedInviterCannotGrantAtSignup(t *testing.T) {
 func TestInvitationReviewInviterSessionCeiling(t *testing.T) {
 	for _, mode := range []string{"trusted", "restricted-here", "restricted-other"} {
 		t.Run(mode, func(t *testing.T) {
-			db := setupTestDB(t)
+			db, completeUpgrade := setupGuestAdministratorUpgradeDB(t)
 			inviter, ws := seedInviter(t, db)
 			seedInvitation(t, db, "review-ceiling", ws, inviter, "ceiling-review@example.test", "MEMBER", time.Now().Add(time.Hour), nil)
 			if mode == "restricted-here" {
@@ -64,6 +64,7 @@ func TestInvitationReviewInviterSessionCeiling(t *testing.T) {
 				execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('other-ceiling-ws','Other','other-ceiling-ws')`)
 				execOrFatal(t, db, `INSERT INTO workspace_members(id,user_id,workspace_id,role,access_mode) VALUES('other-ceiling-m',?,'other-ceiling-ws','VIEWER','restricted')`, inviter)
 			}
+			completeUpgrade()
 			h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), sessions.NewDBStore(db), true)
 			rr := signupWithInvitationProof(t, h, "ceiling-review@example.test", "tok-review-ceiling")
 			if rr.Code != 202 {

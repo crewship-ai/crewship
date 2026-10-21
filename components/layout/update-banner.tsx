@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { ArrowUpCircle, X } from "lucide-react"
+import { ArrowUpCircle } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
+import { Button } from "@/components/ui/button"
+import { AppBanner, useAppBannerSlot } from "@/components/layout/app-banners"
 
 type VersionInfo = {
   current: string
@@ -14,8 +16,13 @@ type VersionInfo = {
 // Local-storage key for the "dismissed" flag. Scoping by version means a
 // user who clicks Dismiss on v0.1.5 still sees the banner when v0.1.6 lands;
 // otherwise they'd silently miss future updates.
-const DISMISS_KEY_PREFIX = "crewship.update-banner.dismissed:"
+export const DISMISS_KEY_PREFIX = "crewship.update-banner.dismissed:"
 
+/**
+ * The update notice (Harbor 2 info banner): "Crewship 0.9 is available. You
+ * have 0.8." with Release notes and ×. Lowest priority of the app's one
+ * banner slot: it waits while the connection or the runtime needs attention.
+ */
 export function UpdateBanner() {
   const [info, setInfo] = useState<VersionInfo | null>(null)
   const [dismissed, setDismissed] = useState(false)
@@ -58,41 +65,36 @@ export function UpdateBanner() {
     }
   }, [check])
 
-  if (!info?.newer || dismissed) return null
+  const slot = useAppBannerSlot("update", Boolean(info?.newer) && !dismissed)
+  if (!slot || !info) return null
 
   return (
-    <div className="flex items-center gap-2 bg-info/10 border-b border-info/20 px-4 py-2 text-xs">
-      <ArrowUpCircle className="h-3.5 w-3.5 text-info shrink-0" />
-      <span className="text-info">
-        Crewship <span className="font-mono">{info.latest}</span> is available
-        (you have <span className="font-mono">{info.current}</span>).{" "}
-        {info.url && (
-          <a
-            href={info.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline font-medium"
-          >
-            Release notes
-          </a>
-        )}
-      </span>
-      <button
-        onClick={() => {
-          if (dismissKey) {
-            try {
-              localStorage.setItem(dismissKey, "1")
-            } catch {
-              // ignore
-            }
+    <AppBanner
+      tone="info"
+      icon={ArrowUpCircle}
+      data-state="update"
+      onDismiss={() => {
+        if (dismissKey) {
+          try {
+            localStorage.setItem(dismissKey, "1")
+          } catch {
+            // ignore
           }
-          setDismissed(true)
-        }}
-        className="ml-auto text-info hover:text-info"
-        aria-label="Dismiss"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
-    </div>
+        }
+        setDismissed(true)
+      }}
+      action={
+        info.url ? (
+          <Button asChild size="sm" variant="outline" className="page-banner-action">
+            <a href={info.url} target="_blank" rel="noopener noreferrer">Release notes</a>
+          </Button>
+        ) : undefined
+      }
+    >
+      <b>
+        Crewship <span className="font-mono">{info.latest}</span> is available.
+      </b>{" "}
+      You have <span className="font-mono">{info.current}</span>.
+    </AppBanner>
   )
 }

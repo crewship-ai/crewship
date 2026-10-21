@@ -54,3 +54,20 @@ func TestMemberAccessSetRejectsAmbiguousOrForgedPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestMemberAccessExplainUsesCurrentServerDecision(t *testing.T) {
+	stub := covStub(t)
+	stub.OnGet("/api/v1/workspaces/"+covWSCli3+"/members", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(memberIDRoster), "application/json"
+	})
+	path := "/api/v1/workspaces/" + covWSCli3 + "/members/m-viewer/access/effective"
+	stub.OnGet(path, func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"membership_id":"m-viewer","revision":7,"mode":"restricted","account_restricted":true,"restriction_scope":"account","explanation":"Guest restrictions","decisions":[{"kind":"routine","id":"r1","operation":"run","state":"denied","reason":"missing agent run grant"}]}`), "application/json"
+	})
+	if err := workspaceMemberAccessExplainCmd.RunE(newFlagCmd(nil, nil), []string{"u-viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.CallsFor("GET", path)) != 1 {
+		t.Fatal("effective access was not read from server")
+	}
+}

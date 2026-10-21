@@ -162,6 +162,13 @@ func TestSkillsImport_ErrorCases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Capability lookup reads the actual membership, so the stored
+			// fixture role must agree with the authenticated request context.
+			if _, err := db.Exec(`UPDATE workspace_members SET role=?, capabilities=NULL WHERE workspace_id=? AND user_id=?`, tt.role, wsID, userID); err != nil {
+				t.Fatal(err)
+			}
+			InvalidateCapabilityCache(wsID, userID)
+
 			body := bytes.NewBufferString(tt.body)
 			req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
 			req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))

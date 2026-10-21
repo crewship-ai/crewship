@@ -5,6 +5,6 @@ import { defineConfig } from "@playwright/test"
 export default defineConfig({
   testDir: "./e2e", testMatch: "provider-pools.spec.ts", workers: 1,
   reporter: "list", timeout: 60000,
-  use: { baseURL: "http://127.0.0.1:3913", headless: true },
+  use: { baseURL: "http://127.0.0.1:3913", headless: true, trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: { command: "node e2e/serve-pool-ui.mjs", url: "http://127.0.0.1:3913/credentials", reuseExistingServer: false },
 })

@@ -24,6 +24,7 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}`](#get-crew) | Get a single crew |
 | PATCH / PUT | [`/api/v1/crews/{crewId}`](#update-crew) | Update a crew |
 | DELETE | [`/api/v1/crews/{crewId}`](#delete-crew) | Soft-delete a crew |
+| GET / PUT / DELETE | [`/api/v1/crews/{crewId}/budget`](#budget) | Read, set or clear the crew's monthly spend limit |
 | GET | [`/api/v1/crews/{crewId}/members`](#list-members) | List crew members |
 | POST | [`/api/v1/crews/{crewId}/members`](#add-member) | Add a crew member |
 | PATCH | [`/api/v1/crews/{crewId}/members/{memberId}`](#update-member-role) | Update a member's per-crew role |
@@ -140,7 +141,7 @@ context where supported, or `X-Workspace-ID` as described above.
 | `description` | string? | Crew description |
 | `color` | string? | Palette color ID |
 | `icon` | string? | Lucide icon name |
-| `avatar_style` | string? | Avatar style for agents (e.g., `"bottts"`) |
+| `avatar_style` | string? | Avatar style for agents that have none of their own (e.g., `"voxel-bot"`); `null` means the default, Voxel Bot. See [Avatar styles](/api-reference/agents#avatar-styles). |
 | `container_memory_mb` | integer | Container memory limit in MB |
 | `container_cpus` | number | Container CPU limit |
 | `container_ttl_hours` | integer? | Container idle TTL in hours. `null` = never configured, so the server default (4 hours) applies; `0` = never stop |
@@ -601,6 +602,7 @@ get/set`](/cli/policy).
 |-------|--------|---------|
 | `autonomy_level` | `strict` / `guided` / `trusted` / `full` | How much an agent can do without operator approval. `strict` queues everything; `full` auto-applies most decisions. |
 | `behavior_mode` | `warn` / `block` | What the behavior monitor does on a flagged action — `warn` lets it through with a journal entry, `block` rejects. |
+| `whole_run_approval` | boolean, default `false` | Explicitly match the existing whole-run `agent_run` approval rule. Strict/guided block, trusted reviews asynchronously, full bypasses it. Omitted/null in PUT preserves the saved setting. |
 
 ### Get Crew Policy
 
@@ -615,6 +617,7 @@ GET /api/v1/crews/{crewId}/policy
   "crew_id": "crew-uuid",
   "autonomy_level": "guided",
   "behavior_mode": "warn",
+  "whole_run_approval": false,
   "set_by_user_id": "user-uuid",
   "set_at": "2026-05-26T14:22:10Z",
   "reason": "Default for newly-onboarded crews"
@@ -637,7 +640,7 @@ Replaces the policy. Records the audit triple (`set_by_user_id`, `set_at`,
 `reason`) atomically with the value change and invalidates the resolver cache
 so the next decision sees the new state.
 
-**Auth:** Session or CLI token + workspace membership (no additional role gate)
+**Auth:** Session or CLI token + workspace membership, MANAGER or higher. Scoped CLI tokens also need `crews:write`.
 
 **Request:**
 
@@ -665,6 +668,51 @@ state and the freshly-recorded audit triple.
 
 ---
 
+## Budget
+
+```
+GET    /api/v1/crews/{crewId}/budget
+PUT    /api/v1/crews/{crewId}/budget
+DELETE /api/v1/crews/{crewId}/budget
+```
+
+The crew's monthly spend limit: a cap on what its agents may spend in a calendar month (UTC). It is the crew-scope, month-window row of `budget_limits`, the table admission and run preflight already read, so a limit set here is enforced there. A workspace or agent limit is a different row and is not shown here.
+
+**Auth:** Session or CLI token + workspace membership, ADMIN or higher, for reads and writes. Scoped CLI tokens also need `crews:write` for `PUT` and `DELETE`.
+
+**`PUT` request:**
+
+```json
+{ "limit_usd": 80, "mode": "tiered" }
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `limit_usd` | yes | Greater than 0. |
+| `mode` | no | `tiered` (default: warn from 80 %, stop new runs at 100 %), `soft` (warn only) or `hard` (stop at 100 %). |
+
+**Response:** `200 OK` for all three calls.
+
+```json
+{ "crew_id": "crew_1", "window": "month", "limit_usd": 80, "mode": "tiered", "spent_usd": 12.4, "state": "ok" }
+```
+
+`limit_usd` is `null` and `state` is `none` when no limit is set. `state` is otherwise `ok`, `warn` or `exceeded`. `DELETE` on a crew without a limit succeeds.
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `limit_usd` missing, zero or negative, or an unknown `mode` |
+| `403` | Caller below ADMIN |
+| `404` | Crew not found |
+
+<Note>
+  A `hard` or `tiered` limit makes admission refuse legacy proxy traffic that cannot be metered per request; those calls need the restricted broker.
+</Note>
+
+CLI: `crewship crew budget get|set|clear`.
+
+---
+
 ## Avatar
 
 Bulk-apply an avatar style across a crew's agents, or clear per-agent overrides.
@@ -687,7 +735,7 @@ This also clears any [stored avatar renders](/api-reference/agents#agent-avatars
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `avatar_style` | string | Conditional | Style to apply (required unless `reset_overrides` is `true`) |
+| `avatar_style` | string | Conditional | Style slug to apply (required unless `reset_overrides` is `true`); one of the [avatar styles](/api-reference/agents#avatar-styles), else `400` |
 | `reset_overrides` | boolean | No | When `true`, clears `avatar_style` on every agent (ignores `avatar_style`) |
 
 **Response:** `200 OK`

@@ -32,12 +32,23 @@ func fillWAL(t *testing.T, db *DB, rows int) {
 	for i := range pad {
 		pad[i] = 'x'
 	}
+	// These fixtures need real committed WAL frames, not one durable fsync per
+	// padding row. A single transaction preserves the physical checkpoint
+	// assertions while keeping shared-host runs bounded by useful work.
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("begin WAL fixture: %v", err)
+	}
+	defer tx.Rollback()
 	for i := 0; i < rows; i++ {
-		if _, err := db.Exec(`INSERT INTO t (id, blob) VALUES (?, ?)`,
-			fmt.Sprintf("row-%06d", i), string(pad)); err != nil {
+		if _, err = tx.Exec(`INSERT INTO t (id, blob) VALUES (?, ?)`, fmt.Sprintf("row-%06d", i), string(pad)); err != nil {
 			t.Fatalf("insert %d: %v", i, err)
 		}
 	}
+	if err = tx.Commit(); err != nil {
+		t.Fatalf("commit WAL fixture: %v", err)
+	}
+
 }
 
 // TestCheckpointModeShrinksWALFile pins the single fact the whole design

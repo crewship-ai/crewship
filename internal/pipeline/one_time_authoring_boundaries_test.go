@@ -12,6 +12,7 @@ func oneTimeAuthoringStore(t *testing.T) (*Store, *sql.DB) {
 	db := openVersioningTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	_, err := db.Exec(`CREATE TABLE pending_runs (
+chat_origin_id TEXT,reason_code TEXT,
  id TEXT PRIMARY KEY,workspace_id TEXT,pipeline_id TEXT,pipeline_slug TEXT,
  inputs_json TEXT,tags_json TEXT,metadata_json TEXT,priority INTEGER,
  fire_at TEXT,invoking_user_id TEXT,triggered_via TEXT,triggered_by_id TEXT,
@@ -33,12 +34,12 @@ func TestOneTimeAuthoringPinsAndUpdatesOneDurableStart(t *testing.T) {
 	if err != nil || schedule != nil {
 		t.Fatalf("one-time save = %+v, %v", schedule, err)
 	}
-	var id, status, inputs string
+	var id, status, inputs, reason string
 	var pin int
-	if err := db.QueryRow(`SELECT id,status,inputs_json,pinned_version FROM pending_runs`).Scan(&id, &status, &inputs, &pin); err != nil {
+	if err := db.QueryRow(`SELECT id,status,inputs_json,pinned_version,reason_code FROM pending_runs`).Scan(&id, &status, &inputs, &pin, &reason); err != nil {
 		t.Fatal(err)
 	}
-	if id != "pnd_once_"+p.ID || status != "pending" || inputs != "{}" || pin != 1 {
+	if id != "pnd_once_"+p.ID || status != "pending" || inputs != "{}" || pin != 1 || reason != "scheduled" {
 		t.Fatalf("invalid one-time receipt: %s %s %s %d", id, status, inputs, pin)
 	}
 	in.DefinitionJSON = `{"name":"one-time","steps":[{"id":"updated","type":"transform","transform":{"input":"new","expression":"."}}]}`

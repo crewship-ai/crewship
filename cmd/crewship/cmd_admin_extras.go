@@ -513,8 +513,9 @@ mission task was recorded in the window.
 
 Examples:
   crewship metrics                       # mission summary
-  crewship metrics --series active_runs  # timeseries
-  crewship metrics --series active_runs --range 24h
+  crewship metrics --series runs_count   # timeseries
+  crewship metrics --series success_rate --window 7d --bucket 1d
+  crewship metrics --series p95_duration_ms --window 30d --bucket 1d
   crewship metrics --format json | jq
   crewship cost                          # workspace-wide spend instead`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -523,11 +524,17 @@ Examples:
 			return err
 		}
 		series, _ := cmd.Flags().GetString("series")
-		rng, _ := cmd.Flags().GetString("range")
+		window, _ := cmd.Flags().GetString("window")
+		bucket, _ := cmd.Flags().GetString("bucket")
+		// --range was this flag's first name and the API never read it; it now
+		// sets the window so old scripts get what they asked for.
+		if rng, _ := cmd.Flags().GetString("range"); rng != "" && !cmd.Flags().Changed("window") {
+			window = rng
+		}
 
 		var path string
 		if series != "" {
-			path = "/api/v1/metrics/timeseries" + queryString("metric", series, "range", rng)
+			path = "/api/v1/metrics/timeseries" + queryString("metric", series, "window", window, "bucket", bucket)
 		} else {
 			path = "/api/v1/mission-metrics"
 		}
@@ -710,7 +717,10 @@ func init() {
 
 	// metrics
 	metricsCmd.Flags().String("series", "", "Fetch timeseries for this metric instead of mission summary")
-	metricsCmd.Flags().String("range", "24h", "Window for --series (1h, 24h, 7d)")
+	metricsCmd.Flags().String("window", "24h", "Window for --series (24h, 7d, 30d)")
+	metricsCmd.Flags().String("bucket", "", "Bucket for --series (15m, 1h, 1d); the server default is 1h")
+	metricsCmd.Flags().String("range", "", "Deprecated name of --window")
+	_ = metricsCmd.Flags().MarkDeprecated("range", "use --window")
 	jqExprFlag(metricsCmd)
 
 	_ = time.Now // keep import for potential future timestamp formatting

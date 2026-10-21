@@ -62,6 +62,7 @@ Start with [restricted context](../specs/restricted-context.md), [member policy]
 | [PRD-SLASH-CAPABILITIES-2026.md](PRD-SLASH-CAPABILITIES-2026.md) | Slash-command and per-user capability model referenced by source/tests. |
 | [keeper-configuration.md](keeper-configuration.md) | Keeper configuration proposal and rationale referenced by implementation. |
 | [model-scoped-credentials.md](model-scoped-credentials.md) | Design for limiting credential use by model; read its proposal status. |
+| [resource-access-phase-two.md](resource-access-phase-two.md) | Review draft for #3273: crew/credential operations and human audiences; no new permissions or runtime enabled. |
 | [provider-logins.md](provider-logins.md) | Provider-account lifecycle, access and refresh context used by source/tests. |
 | [opencode-go-zen-integration-2026-09-16.md](opencode-go-zen-integration-2026-09-16.md) | Provider integration contract and dated source revision. |
 

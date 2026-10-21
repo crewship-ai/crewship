@@ -30,6 +30,7 @@ func (s *Server) routineDraft(ctx context.Context, args routineDraftArguments, a
 			return http.StatusBadRequest, mustJSON(map[string]string{"error": "draft revision envelope required"})
 		}
 		body["draft"] = args.Draft
+		body["source_run_id"] = routineSourceRun(ctx)
 	}
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)

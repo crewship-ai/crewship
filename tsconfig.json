@@ -43,6 +43,7 @@
     "internal",
     "**/__tests__/**/*",
     "**/*.test.ts",
-    "**/*.test.tsx"
+    "**/*.test.tsx",
+    "e2e/**/*.fixture.tsx"
   ]
 }

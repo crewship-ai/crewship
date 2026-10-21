@@ -3,6 +3,8 @@ package chatbridge
 import (
 	"context"
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"io"
 	"log/slog"
 	"net/http"
@@ -646,5 +648,27 @@ func TestRecordCostNetworkError(t *testing.T) {
 	err := r.RecordCost(context.Background(), RunCostUsage{WorkspaceID: "ws-1", Provider: "anthropic", Model: "claude-haiku-4-5"})
 	if err == nil {
 		t.Fatal("expected network error")
+	}
+}
+
+func TestCreateRunCarriesOnlyHostContextAuthority(t *testing.T) {
+	rec := &recorder{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { rec.capture(r); w.WriteHeader(http.StatusCreated) }))
+	defer ts.Close()
+	resolver := NewIPCResolver(ts.URL, "host", slog.Default())
+	receipt := &chataudience.Receipt{UserID: "human", ChatID: "chat", AgentID: "agent", WorkspaceID: "workspace", MemberRevision: 2}
+	ctx := runauthority.WithTriggerMessage(chataudience.WithReceipt(t.Context(), receipt), "trigger")
+	if err := resolver.CreateRun(ctx, "run", "agent", "chat", "workspace", "USER", map[string]interface{}{"human_authority": "untrusted metadata"}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		HumanAuthority   *chataudience.Receipt `json:"human_authority"`
+		TriggerMessageID string                `json:"trigger_message_id"`
+	}
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.HumanAuthority == nil || *payload.HumanAuthority != *receipt || payload.TriggerMessageID != "trigger" {
+		t.Fatalf("host provenance lost: %+v", payload)
 	}
 }

@@ -249,7 +249,7 @@ func (h *PageHandler) resolvePanelForCaller(ctx context.Context, wsID, userID, s
 // "resolve the click against the stored spec" has one implementation.
 func (h *PageHandler) storedPanelSpec(ctx context.Context, pageID, panelID string) (*pages.PanelSpec, error) {
 	var specJSON string
-	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, pageID).Scan(&specJSON); err != nil {
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, pageID).Scan(&specJSON); err != nil {
 		return nil, err
 	}
 	var doc pages.Document

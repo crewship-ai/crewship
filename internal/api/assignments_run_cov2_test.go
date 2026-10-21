@@ -439,6 +439,11 @@ func TestAsgCov2_FinishAssignment_MissionComment_Handoff(t *testing.T) {
 	}
 	asgID := "asg2-fin-handoff"
 	covAsg2InsertAssignment(t, h, asgID, wsID, missionID, leadID, workerID)
+	// The result writer requires the persisted issue target, not merely a
+	// matching chat/group ID: a plain chat assignment cannot publish to an issue.
+	if _, err := h.db.Exec(`UPDATE assignments SET mission_id = ? WHERE id = ? AND workspace_id = ?`, missionID, asgID, wsID); err != nil {
+		t.Fatalf("bind assignment mission: %v", err)
+	}
 
 	result := "preamble\n---HANDOFF---\nsummary: shipped the feature\noutcome: SUCCEEDED\nconfidence: high\nartifacts: pr#42\n---END HANDOFF---"
 	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, result, "", nil)
@@ -479,6 +484,11 @@ func TestAsgCov2_FinishAssignment_MissionComment_LongPlainResult(t *testing.T) {
 	}
 	asgID := "asg2-fin-long"
 	covAsg2InsertAssignment(t, h, asgID, wsID, missionID, leadID, workerID)
+	// The result writer requires the persisted issue target, not merely a
+	// matching chat/group ID: a plain chat assignment cannot publish to an issue.
+	if _, err := h.db.Exec(`UPDATE assignments SET mission_id = ? WHERE id = ? AND workspace_id = ?`, missionID, asgID, wsID); err != nil {
+		t.Fatalf("bind assignment mission: %v", err)
+	}
 
 	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, strings.Repeat("r", 600), "", nil)
 

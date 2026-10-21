@@ -21,7 +21,7 @@
  *     and never by a list or a log.
  */
 
-import { useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -185,6 +185,48 @@ export function useWebhookDeliveries(
     error: query.error as DeliveryRequestError | null,
     refetch: query.refetch,
   }
+}
+
+/** One endpoint's calls over the window, counted by the server. */
+export interface WebhookDeliverySummary {
+  endpoint_id: string
+  endpoint_kind: string
+  calls: number
+  accepted: number
+  ignored: number
+  last_received_at: string
+}
+
+/**
+ * Calls per endpoint (agent triggers today): the number the Triggers table
+ * shows. Plain state rather than a query so the Integrations layout, which does
+ * not need a query client, keeps working without one.
+ */
+export function useWebhookDeliverySummary(workspaceId: string | null | undefined) {
+  const [items, setItems] = useState<WebhookDeliverySummary[] | undefined>(undefined)
+  const [error, setError] = useState<DeliveryRequestError | null>(null)
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!workspaceId) return
+      try {
+        const body = await fetchDeliveries<{ items: WebhookDeliverySummary[] }>(`${base(workspaceId)}/summary`, signal, "Could not count the calls")
+        setItems(body.items)
+        setError(null)
+      } catch (e) {
+        if (signal?.aborted) return
+        setError(e as DeliveryRequestError)
+      }
+    },
+    [workspaceId],
+  )
+  useEffect(() => {
+    const ctl = new AbortController()
+    void load(ctl.signal)
+    return () => ctl.abort()
+  }, [load])
+  useRealtimeEventSafe("realtime.reconnected", () => void load())
+  useRealtimeEventSafe("run.completed", () => void load())
+  return { items, error }
 }
 
 /** The Webhook deliveries view's read (#3017): every delivery since `since`. */

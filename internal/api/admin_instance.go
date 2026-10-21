@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -34,6 +35,7 @@ type InstanceAdminHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
+	streams  *auth.StreamCredentials
 	journal  journal.Emitter
 	hub      *wshub.Hub
 }
@@ -266,6 +268,11 @@ type suspendRequest struct {
 // exactly what the person had.
 // POST /api/v1/admin/instance/people/{userId}/suspend
 func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
+	actor := UserFromContext(r.Context())
+	if actor == nil || actor.ID == "" {
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
 	id, email, ok := h.person(w, r)
 	if !ok {
 		return
@@ -277,7 +284,7 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if actor := UserFromContext(r.Context()); actor != nil && actor.ID == id {
+	if actor.ID == id {
 		replyError(w, http.StatusConflict, "you cannot suspend your own account")
 		return
 	}
@@ -333,22 +340,29 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
-	res, err := tx.ExecContext(ctx,
-		`UPDATE cli_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, id)
+	ids, err := revokeCLITokensAuditedTx(ctx, tx, actor.ID, id, now)
 	if err != nil {
-		replyInternalError(w, h.logger, "suspend: revoke CLI tokens", err)
+		replyInternalError(w, h.logger, "suspend: revoke CLI tokens and audit", err)
 		return
 	}
-	tokens, _ := res.RowsAffected()
+	tokens := int64(len(ids))
 	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	}); err != nil {
 		replyInternalError(w, h.logger, "suspend: audit", err)
 		return
 	}
+	if err := ackCLITokenRevocationsTx(ctx, tx, ids, id, now); err != nil {
+		replyInternalError(w, h.logger, "suspend: acknowledge CLI tokens", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "suspend: commit", err)
 		return
+	}
+	if h.streams != nil {
+		h.streams.NotifyAccountRevoked(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user_id": id, "suspended_at": now, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
@@ -468,7 +482,7 @@ func (h *InstanceAdminHandler) GrantAdmin(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "grant admin: lookup", err)
 		return
 	}
-	if suspended.Valid && suspended.String != "" {
+	if suspended.Valid {
 		replyError(w, http.StatusConflict, "reactivate this account before making it an instance admin")
 		return
 	}
@@ -572,11 +586,19 @@ func (h *InstanceAdminHandler) SetMembership(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	var current string
+	if err := administratorAccountEligible(ctx, tx, userID, role); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "administrator eligibility", err)
+		}
+		return
+	}
+	var current, mode string
 	now := time.Now().UTC().Format(time.RFC3339)
 	created := false
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, userID).Scan(&current); {
+		`SELECT role,access_mode FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, userID).Scan(&current, &mode); {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -589,6 +611,10 @@ func (h *InstanceAdminHandler) SetMembership(w http.ResponseWriter, r *http.Requ
 		replyInternalError(w, h.logger, "set membership: lookup", err)
 		return
 	default:
+		if mode == "restricted" && (role == "ADMIN" || role == "OWNER") {
+			replyError(w, 409, "Restore trusted access explicitly before promoting a Guest to administrator")
+			return
+		}
 		if current == "OWNER" && role != "OWNER" {
 			if last, err := lastOwnerTx(ctx, tx, wsID, userID); err != nil {
 				replyInternalError(w, h.logger, "set membership: owner count", err)
@@ -669,7 +695,11 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID, audit); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
-			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
+			if !isInstanceAdmin(r, h.db) {
+				replyError(w, http.StatusForbidden, "active instance administrator required")
+				return
+			}
+			replyInstancePageOwnershipConflict(w, needsManual)
 			return
 		}
 		replyInternalError(w, h.logger, "remove membership", err)
@@ -723,7 +753,7 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 	case err != nil:
 		replyInternalError(w, h.logger, "create workspace: owner", err)
 		return
-	case suspended.Valid && suspended.String != "":
+	case suspended.Valid:
 		replyError(w, http.StatusConflict, "the chosen owner is suspended")
 		return
 	}
@@ -733,6 +763,14 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := administratorAccountEligible(ctx, tx, req.OwnerUserID, "OWNER"); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "owner eligibility", err)
+		}
+		return
+	}
 	var taken string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE slug = ?`, req.Slug).Scan(&taken); err == nil {
 		replyError(w, http.StatusConflict, "Workspace slug already taken")
@@ -807,9 +845,17 @@ func (h *InstanceAdminHandler) TransferOwnership(w http.ResponseWriter, r *http.
 		replyError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	var role string
+	if err := administratorAccountEligible(ctx, tx, req.UserID, "OWNER"); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "owner eligibility", err)
+		}
+		return
+	}
+	var role, mode string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, req.UserID).Scan(&role); {
+		`SELECT role,access_mode FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, req.UserID).Scan(&role, &mode); {
 	case errors.Is(err, sql.ErrNoRows):
 		replyError(w, http.StatusConflict, "the new owner must already be a member of the workspace")
 		return
@@ -817,6 +863,11 @@ func (h *InstanceAdminHandler) TransferOwnership(w http.ResponseWriter, r *http.
 		replyInternalError(w, h.logger, "transfer: member", err)
 		return
 	}
+	if mode == "restricted" {
+		replyError(w, 409, "Restore trusted access explicitly before transferring ownership to a Guest")
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	var previous []string
 	rows, err := tx.QueryContext(ctx,
@@ -1009,6 +1060,7 @@ type instanceAuditRow struct {
 	TargetWorkspaceID *string `json:"target_workspace_id"`
 	Metadata          string  `json:"metadata"`
 	CreatedAt         string  `json:"created_at"`
+	Integrity         string  `json:"integrity"`
 }
 
 // AuditLog lists instance-level actions, newest first. ?limit= (default 100,
@@ -1019,8 +1071,7 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
 		limit = min(v, 500)
 	}
-	q := `SELECT a.id, a.user_id, u.email, a.action, a.entity_type, a.entity_id, a.target_workspace_id, COALESCE(a.metadata, '{}'), a.created_at
-		FROM instance_audit_logs a LEFT JOIN users u ON u.id = a.user_id`
+	q := `SELECT ` + instanceAuditColumns + `,` + instanceAuditChainColumns + `,u.email FROM instance_audit_logs a` + instanceAuditPredecessor + ` LEFT JOIN users u ON u.id = a.user_id`
 	var args []any
 	if e := strings.TrimSpace(r.URL.Query().Get("entity_id")); e != "" {
 		q += ` WHERE a.entity_id = ? OR a.target_workspace_id = ?`
@@ -1037,10 +1088,31 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	out := []instanceAuditRow{}
 	for rows.Next() {
 		var a instanceAuditRow
-		if err := rows.Scan(&a.ID, &a.UserID, &a.UserEmail, &a.Action, &a.EntityType, &a.EntityID, &a.TargetWorkspaceID, &a.Metadata, &a.CreatedAt); err != nil {
+		var fields journal.InstanceAuditFields
+		var proof instanceAuditProof
+		args := append(proof.scanArgs(&fields), &a.UserEmail)
+		if err := rows.Scan(args...); err != nil {
 			replyInternalError(w, h.logger, "instance audit: scan", err)
 			return
 		}
+		a.ID = fields.ID
+		a.Action = fields.Action
+		a.EntityType = fields.EntityType
+		a.CreatedAt = fields.CreatedAt
+		ptr := func(v sql.NullString) *string {
+			if !v.Valid {
+				return nil
+			}
+			return &v.String
+		}
+		a.UserID = ptr(fields.UserID)
+		a.EntityID = ptr(fields.EntityID)
+		a.TargetWorkspaceID = ptr(fields.TargetWorkspaceID)
+		a.Metadata = "{}"
+		if fields.Metadata.Valid {
+			a.Metadata = fields.Metadata.String
+		}
+		a.Integrity = proof.integrity(fields)
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {

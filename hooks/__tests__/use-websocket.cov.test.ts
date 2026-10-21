@@ -93,7 +93,9 @@ describe("useWebSocket — coverage extensions", () => {
     expect(mockInstances[0].sent[0]).toBe(JSON.stringify({ type: "auth", token: "t" }))
   })
 
-  it("socket error event flips status to 'error'", async () => {
+  it("a socket error event alone does not flip the status (the close decides)", async () => {
+    // #3783: "error" before a close that will be retried made every drop
+    // flicker through the terminal state.
     const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
     )
@@ -101,7 +103,7 @@ describe("useWebSocket — coverage extensions", () => {
     act(() => { mockInstances[0].simulateOpen() })
     expect(result.current.status).toBe("connected")
     act(() => { mockInstances[0].simulateError() })
-    expect(result.current.status).toBe("error")
+    expect(result.current.status).toBe("connected")
   })
 
   it("schema-invalid frames are dropped before reaching onMessage", async () => {
@@ -207,7 +209,7 @@ describe("useWebSocket — coverage extensions", () => {
     expect(getToken).toHaveBeenCalledTimes(2)
   })
 
-  it("persistently throwing getToken hits the retry cap → transport error, no logout", async () => {
+  it("persistently throwing getToken spends the fast budget → offline, still retrying, no logout", async () => {
     const handler = vi.fn()
     addAuthHandler(handler)
     const getToken = vi.fn(async () => {
@@ -216,18 +218,17 @@ describe("useWebSocket — coverage extensions", () => {
     const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken }),
     )
-    // Drain the full backoff schedule (8 retries then terminate).
-    await act(async () => { await vi.runAllTimersAsync() })
+    // Drain the fast backoff schedule (initial + 8 retries, ≤ ~129 s).
+    await act(async () => { await vi.advanceTimersByTimeAsync(130_000) })
 
-    expect(result.current.status).toBe("error")
+    expect(result.current.status).toBe("offline")
     expect(handler).not.toHaveBeenCalled()
     expect(mockInstances).toHaveLength(0)
-    // initial + 8 backoff retries; the 9th call hits the cap and terminates.
     expect(getToken).toHaveBeenCalledTimes(9)
 
-    // Terminated: no further attempts even after more time passes.
-    await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
-    expect(getToken).toHaveBeenCalledTimes(9)
+    // Not terminated (#3783): one more attempt every 30 s.
+    await act(async () => { await vi.advanceTimersByTimeAsync(124_000) })
+    expect(getToken).toHaveBeenCalledTimes(13)
   })
 
   it("disconnect() while getToken is in flight and rejecting → no retry scheduled", async () => {

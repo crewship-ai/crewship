@@ -180,3 +180,13 @@ crewship-heavy env PYTHONDONTWRITEBYTECODE=1 python3 e2e/routines_live_contracts
 Cleanup attempts all fixture resources even when cancellation, logout or a
 workspace deletion fails. Temporary credential removal runs in `finally`;
 the scenario reports cleanup failures after all attempts.
+
+## Proposal component acceptance
+
+`crewship-heavy node e2e/proposal-card.browser.mjs` bundles the real proposal
+component against A1 handler fixtures into a temporary directory and serves it
+on an OS-selected loopback port. Chromium checks desktop and phone keyboard
+controls, independent drafts, reload, identical-key retry and access loss.
+It uses no authentication, shared application or live data; install the locked
+Playwright Chromium browser first. This is component evidence, not real A2 API
+or agent integration acceptance.

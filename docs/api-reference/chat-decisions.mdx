@@ -1,0 +1,114 @@
+---
+title: Chat decisions
+description: Source-backed information, workflow and run decisions in chat
+stability: experimental
+tag: Experimental
+---
+
+Chat decision cards are projections of existing escalation records. They do not
+create another approval queue or grant authority to agents. This integration
+supports run-authenticated TEXT escalations, bounded scalar workflow waitpoints,
+and actual synchronous whole-run agent approvals with persisted chat, agent-run
+and trigger correlation. Credential escalations and sources without verified origin
+remain available on their existing Inbox surfaces.
+
+- `GET /api/v1/chats/{chatId}/decisions` returns a replacement `ChatCardPage`.
+- `GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}` returns a `ChatCardResponse`.
+- `POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer` answers the existing source.
+
+`sourceType` is `escalation`, `waitpoint`, or `run_approval`. Each source retains
+its existing scope: information answers supply data; workflow answers select a
+stored `action_id` and preserve its declared approved/denied effect; whole-run
+approvals apply only to the exact referenced synchronous agent run. Async run
+reviews are not blocking decisions and stay on the existing approval surface.
+Unsupported historical forms (arrays/objects, defaults, custom choices or more
+than20 fields) remain on the existing Inbox surface. Reads require current trusted chat access;
+Guests and restricted memberships receive no source information. The response
+contains only current viewer-authorized source snapshots. Pages contain at most 100 visible cards. Follow `next_cursor` until
+`snapshot_complete` is true, replacing accumulated cards whenever `reset` is true.
+Cursors are purpose-separated opaque tokens bound to the current viewer, chat,
+workspace and access revision; hidden sources never affect page boundaries.
+
+An answer requires the `Idempotency-Key` header and this JSON body:
+
+```json
+{"source_id":"source-id","expected_version":"opaque-reviewed-version","action":"answer","values":{"answer":"The requested information"}}
+```
+
+The human's current workspace role, chat audience and source deadline are checked
+inside the existing source's write transaction. Scoped CLI tokens additionally
+require `workspace:admin`, matching the canonical Inbox resolver. Source reads
+with a narrower token remain view-only and do not advertise answer actions. Inbox and chat compete on the
+same pending-source CAS; only the winner notifies the agent. A successful retry
+with the same key and body returns the terminal source without another delivery.
+Reusing the key with another body returns 409 without an unrelated receipt.
+A stale version returns 409 with `ChatCardVersionConflict.current`, after fresh
+read authorization. Revoked access returns a generic 404/403 without a snapshot.
+
+Terminal cards are read-only and use the authoritative outcome, human actor and
+time. Old terminal records without an attributable actor are not fabricated into
+new chat receipts. Each source keeps its own declared decision scope.
+
+
+For a workflow waitpoint, send `action: "answer"`, the exact stored `action_id`,
+and typed `values`. A denial may omit required fields, while supplied fields
+must retain their declared types. For a whole-run source, send `action: "approve"`
+or `"reject"` with `values: {}` and no `action_id`. Neither request can change a
+source ID into a different scope or approve an unrelated run. A changed source
+version returns409 with the fresh authorized source snapshot; review it before
+starting a new operation key.
+
+Canonical mutations require the existing `workspace:admin` CLI scope. Source
+roles remain source specific: TEXT answers use the existing create capability,
+workflow waitpoints require update capability, whole-run gates require OWNER or
+ADMIN. A same-key completed receipt may be reread after role demotion while
+current trusted chat read access remains valid; scope checks still apply.
+
+Ordinary restarts preserve exact retries with an unchanged chat generation.
+A true workspace restore or same-ID chat recreation rotates that generation;
+old invocation-backed sources fail closed with 404 in E2 even for current
+readers, while source aliases, outcomes and receipts remain persisted. Canonical
+Inbox behavior is preserved. Forks without verified original invocation are
+also omitted; history is not rebound to new authority.
+
+Form-less boolean workflow waitpoints accept `--action approve` or `--action
+reject`, with no `--action-id`, `--values-json` or `--text`. The API equivalent
+uses that action, an empty `values` object and no `action_id`. Typed workflow
+forms continue to require their declared action ID and typed field values.
+
+Purging a verified TEXT question removes it from all card, source, Inbox and
+journal read surfaces. The source retains a minimal tombstone (workspace, crew,
+chat, agent and run linkage plus deletion time) so durable projections cannot
+lose their private classification. Question, context, metadata, answer, actor
+and retry payload are cleared. Existing journal hash-chain entries remain
+immutable and withheld; this is source lifecycle deletion, not physical GDPR
+erasure. Source-less service and credential escalation purges retain their
+existing hard-delete behavior.
+
+A classified verified TEXT source also becomes unreadable through canonical
+source projections if its original host proof is removed by retention or GDPR
+processing. Missing proof never converts it into a legacy public source. This
+can omit old verified history; source-less legacy and valid autonomous questions
+retain their existing Inbox behavior and receive no E2 correlation.
+
+Verified direct-human TEXT creation atomically appends a host-only, content-free
+`escalation.source_classified` journal marker containing only workspace and source
+identity. The ephemeral escalation table remains outside backups. When a restore
+or fork omits that source, the marker withholds retained Inbox/journal/chain
+projections; it creates no read grant or answer state and never expires through
+compaction. Source creation rolls back if the marker cannot commit.
+
+Rollout requires the complete source/privacy stack before deployment. Released
+databases gain nullable source correlation with existing rows unchanged; they
+have no previously classified sources. Databases that ran unmerged prototypes
+may have unmarked source rows and require explicit audit before rollout. There
+is no retrospective privacy guarantee or guessed provenance backfill for those
+unmarked prototypes.
+
+Supported synchronous whole-run approval journal events follow the same current
+chat audience before HTTP pagination/counts, SSE resume and chain expansion.
+The workspace WebSocket feed withholds those source events; current authorized
+chat readers receive the existing content-free entity-ref hint. Source retirement
+keeps a host-only journal marker so retained approval events stay hidden after
+canonical hard deletion. Legacy, per-tool and asynchronous approval history
+retains its existing policy.

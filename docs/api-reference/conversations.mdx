@@ -16,6 +16,10 @@ mid-turn steering, file attachments uploaded for an agent, and the
 that live on `/api/v1/conversations`. See the
 [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
 
+<Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
 Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
 
 <Note>
@@ -447,7 +451,7 @@ Two families of frame share the `type` field:
 | `stream.reset` | The stream has a gap it cannot fill — `reason` is `replay_truncated` (the server's buffer overflowed during the run) or `slow_consumer` (this reader fell too far behind). On a **first attach** (no `last_seq`) a `replay_truncated` reset is informational: earlier output is unavailable, but the stream continues live. |
 | `stream.end` | Always last. `reason` is one of `run_complete`, `no_active_run`, `idle_timeout`, `replay_truncated` (resuming callers only), `slow_consumer`, `stream_closed`, `access_revoked`; `last_seq` is the resume watermark. Without `follow`, a chat with nothing generating gets `no_active_run` immediately — use `follow=1` (bounded by `idle`) to wait for a run to start. |
 
-**Authorization is continuous.** The caller is re-checked against the chat's workspace membership on the hub's periodic sweep (about every 30 s), not only at request time. A caller removed from the workspace mid-stream is detached and the response ends with `reason: access_revoked` — the same enforcement a WebSocket subscriber on that channel gets.
+**Authorization is continuous.** Delivery rechecks current account and chat/workspace access before each frame; the periodic hub sweep remains a backstop. The stream also retains its originating session or CLI-token identity and expiry. A committed credential revoke invalidates its in-memory lease and closes the stream, including an idle connection, without waiting for the sweep. Clients must treat EOF as loss of the connection and reconnect only with valid credentials. Revocation prevents the next frame admission; already authorized or in-flight bytes cannot be recalled. Closing the client stream does not itself cancel a running routine.
 
 **Which runs emit frames.** Every run that has a chat publishes here: chat messages, `crewship run` / `crewship ask`, routine `agent_run` steps, webhook triggers, scheduled (cron'd) agents and the internal agent-start IPC. Two cases do not, by design: a run executed with **no chat row** (there is no `session:` channel to publish on), and a **delegated or peer sub-agent**, whose events belong to the delegating agent's turn rather than to a turn of its own.
 
@@ -803,3 +807,134 @@ until expiry or revocation. A missing transcript file is an empty array.
 source transcript over 16 MiB or 1,000 physical JSONL rows (including hidden rows),
 or encoded IPC response over 32 MiB; 502 IPC/read/decode failure; 503 unavailable
 store/service. Oversized or unreadable history is never silently truncated.
+
+
+## Durable issue references
+
+`GET /api/v1/chats/{chatId}/entity-refs`
+
+Requires authentication, the selected workspace and current chat access. Only
+ordinary trusted sessions are supported. Each issue is checked against current
+workspace access; unreadable objects are omitted. The response is not a count
+of actions hidden from the viewer. Responses set `Cache-Control: no-store`.
+
+| Query | Meaning |
+| --- | --- |
+| `limit` | 1–100 references, default 100. |
+| `cursor` | Opaque cursor returned by the previous response; omit for a fresh snapshot. |
+
+```json
+{"reset":true,"next_cursor":"opaque","snapshot_id":"snapshot","snapshot_complete":true,"has_more":false,"refs":[]}
+```
+
+A reset replaces the displayed list. Continuation pages share a snapshot ID.
+A completed cursor starts another replacement snapshot. Discard invalid cursors
+and restart without one. `400` means invalid cursor or limit; inaccessible
+chats return `404`; unavailable synchronization returns `503`. Never label a
+failed synchronization as live. See the [full contract](../specs/chat-entity-references.md)
+for entity, provenance, anchor and deletion-reference fields.
+
+## Read a chat operation
+
+`GET /api/v1/operations/{operationId}`
+
+Requires authentication, the selected workspace, current issue access and at
+least one readable source chat. The response includes `id`, `status`, `kind`,
+`verb`, `entity`, `provenance` and `revision_at_action`. It excludes stored
+mutation results, retry keys, request hashes and human authority receipts.
+
+```json
+{"id":"operation","status":"completed","kind":"issue","verb":"created","entity":{"id":"issue","identifier":"ENG-1","workspace_id":"workspace"},"provenance":{"actor":{"type":"agent","id":"agent"},"at":"2026-10-13T12:00:00Z"},"revision_at_action":{"revision":1,"aggregate_revision":1}}
+```
+
+Missing and inaccessible operations both return `404`. Backend failures return
+`503`. This endpoint only reads metadata and never executes or retries work.
+Responses set `Cache-Control: no-store`.
+
+## Issue proposals
+
+| Method | Endpoint | CLI |
+| --- | --- | --- |
+| GET | `/api/v1/chats/{chatId}/proposals` | `crewship chat proposal list` |
+| GET | `/api/v1/chats/{chatId}/proposals/{sourceId}` | `crewship chat proposal show` |
+| PATCH | `/api/v1/chats/{chatId}/proposals/{sourceId}` | `crewship chat proposal edit` |
+| POST | `/api/v1/chats/{chatId}/proposals/{sourceId}/confirm` | `crewship chat proposal confirm` |
+| POST | `/api/v1/chats/{chatId}/proposals/{sourceId}/discard` | `crewship chat proposal discard` |
+
+These endpoints implement the [E2 typed card contract](/specs/chat-e2-card-contract).
+Reads return a `ChatCardResponse`; list returns a `ChatCardPage` replacement
+snapshot with up to 100 cards and an opaque continuation cursor. HTTP reads are
+authoritative and use `Cache-Control: no-store`. Inaccessible source objects,
+including a proposal with any inaccessible item, return generic 404 and are
+omitted from lists without exposing their existence/count.
+
+PATCH accepts `expected_version`, `title` and a complete bounded `items` array.
+Discard accepts `expected_version`; confirm accepts `proposal_id` matching the
+path and `reviewed_version`. Scoped CLI tokens also require `crews:write`, matching canonical issue creation
+at `/api/v1/crews/{crewId}/issues`, for these mutations; ordinary
+chat ownership routes retain their existing scope policy. Every mutation requires `Idempotency-Key` (1–200
+bytes). Keys are scoped to the authenticated actor and workspace. Same-key
+retries recheck current read access and never execute effects again. Confirmation
+retries preserve the original created Issue IDs and accepted outcome. A late edit
+retry after a later revision or acceptance/discard/expiry returns the current
+authorized source snapshot,
+while retaining the immutable original operation receipt; it cannot revive a draft.
+Changed intent returns 409 without an unrelated result. A stale version returns
+409 `ChatCardVersionConflict` with a current authorized snapshot.
+
+Proposals expire 24 hours after creation. They hold 1–20 stable-ID items, titles
+of 1–240 Unicode code points and descriptions of at most 10,000 code points.
+Priorities are `none`, `urgent`, `high`, `medium`, `low`. `assignee_id` is resolved
+inside the mutation transaction against current workspace users and agents;
+exactly one matching active actor is required. Unknown or ambiguous IDs fail the
+whole operation. Optional projects and every crew must belong to the workspace.
+
+Confirmation rechecks current trusted membership, chat audience, issue creation
+role/capability, every crew/project and each assignee inside its write transaction.
+Guests/restricted viewers have no E2 surface. Selected issues, human attribution,
+accepted outcome, Issue card receipts and existing durable audit outbox entries
+commit together. Any failure rolls all of them back. Concurrency has one winner;
+other reviewed versions get 409. The proposing run may already have finished.
+Confirmation does not directly dispatch work: proposals contain no dispatch
+intent. Existing workspace automations still apply to created issues.
+
+Workspace bundle restores preserve source and operation receipts, so a same-key
+confirmation retry returns its original accepted outcome without repeating effects.
+A workspace fork remaps proposal/chat/agent/workspace and typed item/outcome
+references while retaining historical run/trigger IDs. Imported receipts grant
+no execution authority. Because fork IDs change request intent, an original
+source key may return 409; terminal sources remain terminal and never create
+issues again.
+## Source-backed decision cards
+
+The [Chat decisions API](/api-reference/chat-decisions) projects verified TEXT
+escalations into a chat and resolves the same source as Inbox, with current
+human authorization, source versions and stable operation keys.
+
+## Configured chat run preflight
+
+### `GET /api/v1/chats/{chatId}/run-preflight`
+
+**Auth:** An authenticated current trusted member who can read the chat and its
+agent. Guests and restricted profiles have no E2 projection. Existing workspace
+selection applies; the response contains no credential secrets.
+
+**Request:** Supply the chat ID in the path and select the current workspace
+with the usual workspace context or `workspace_id` query parameter. No request
+body is accepted. CLI: `crewship chat run-preflight <chat-id>`.
+
+**Response:** `200 OK` returns `ChatRunPreflight`, with scope
+`configured_chat_agent`, agent/model identity, a visibility-filtered payer label,
+applicable budget balances, configured/predicted gate mode, and constraints.
+`estimate_state` is `unknown` and `estimate_usd` is null without a complete-run
+Paymaster estimate. Reads use `Cache-Control: no-store`.
+
+**Statuses:** `404` hides a missing or inaccessible chat, including access
+withdrawn during the read; `503` means current payer, policy, budget or chat facts
+could not be verified. A temporary failure is not proof of access withdrawal.
+
+This is a snapshot, not a reservation or approval. Model/provider overrides need
+a fresh launch-specific check; paid-provider admission still checks the current
+budget after a human wait. The default evaluator does not match ordinary
+`agent_run` calls, so configured sync mode alone does not promise a blocking gate.
+See [the run gate](/guides/harbormaster#where-the-run-level-mode-comes-from).

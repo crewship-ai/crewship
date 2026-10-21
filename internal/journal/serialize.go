@@ -13,6 +13,8 @@ import "time"
 // it directly. Empty optional ids/maps are omitted rather than sent as ""
 // / {} to keep frames small and match the zod schema's optional fields.
 func SerializeEntry(e Entry) map[string]any {
+	e = PublicFolderMembership(e)
+	e = PublicAuthorizationAudit(e)
 	row := map[string]any{
 		"id":           e.ID,
 		"workspace_id": e.WorkspaceID,
@@ -39,7 +41,23 @@ func SerializeEntry(e Entry) map[string]any {
 		row["trace_id"] = e.TraceID
 	}
 	if len(e.Payload) > 0 {
-		row["payload"] = e.Payload
+		// Run authority is durable host state, not workspace-wide feed data.
+		// Never mutate the original payload: replay and the journal hash chain
+		// must continue to see the exact persisted admission receipt.
+		payload := e.Payload
+		_, receiptOrigin := payload["human_authority"]
+		_, delegatedOrigin := payload["chat_origin_id"]
+		if receiptOrigin || delegatedOrigin {
+			delete(payload, "chat_id")
+			delete(payload, "assigned_by_chat")
+		}
+		delete(payload, "human_authority")
+		delete(payload, "chat_origin_id")
+		delete(payload, "trigger_message_id")
+		delete(payload, "host_admitted")
+		if len(payload) > 0 {
+			row["payload"] = payload
+		}
 	}
 	if len(e.Refs) > 0 {
 		row["refs"] = e.Refs

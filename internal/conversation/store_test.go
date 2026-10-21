@@ -167,3 +167,18 @@ func TestStoreCancelledContext(t *testing.T) {
 		t.Error("expected error for cancelled context on read")
 	}
 }
+
+func TestRunIdentitySurvivesJSONLReopenWithoutSearchMirror(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, logging.New("error", "json", nil))
+	if err := store.Append(t.Context(), "chat", Message{ID: "response", RunID: "run-42", Role: RoleAssistant, Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	reopened := NewStore(dir, logging.New("error", "json", nil))
+	defer reopened.Close()
+	messages, err := reopened.Read(t.Context(), "chat", 0, 0)
+	if err != nil || len(messages) != 1 || messages[0].RunID != "run-42" {
+		t.Fatalf("run identity lost: %+v %v", messages, err)
+	}
+}

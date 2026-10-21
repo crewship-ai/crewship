@@ -62,3 +62,14 @@ func TestRenderInputsEmpty(t *testing.T) {
 		t.Errorf("RenderInputs(nil) = %#v, want an empty map", got)
 	}
 }
+
+func TestEventContextAuditDeliveryTraceIsNotAnAgentRun(t *testing.T) {
+	e := journal.Entry{TraceID: "issue-activity:receipt", MissionID: "issue"}
+	got := EventContext(e)
+	if got["run_id"] != "" || got["mission_id"] != "issue" {
+		t.Fatalf("unexpected context: %#v", got)
+	}
+	if got := RenderInputs(map[string]any{"run": "{{ event.run_id }}"}, e); got["run"] != "" {
+		t.Fatalf("audit ID leaked into routine input: %#v", got)
+	}
+}

@@ -80,6 +80,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
   peer: [
     "peer.conversation",
     "peer.escalation",
+    "escalation.source_classified",
     "message.broadcast",
     "agent.mentioned",
     "notification.delivered",
@@ -101,6 +102,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "approval.denied",
     "approval.timeout",
     "approval.cancelled",
+    "approval.source_retired",
     "approval.trust_granted",
     "approval.trust_revoked",
     "approval.auto_tuning_reset",
@@ -118,6 +120,8 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "skill.unassigned",
     "skill.imported",
     "skill.deleted",
+    "skill.archived",
+    "skill.restored",
     "skill.invoked",
   ],
   memory: [
@@ -165,6 +169,13 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "invitation.reissued",
     "invitation.revoked",
     "invitation.accepted",
+    "member.access_changed",
+    "member.owner_created",
+    "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
+    "member.removed",
   ],
   provisioning: [
     "provisioning.queued",

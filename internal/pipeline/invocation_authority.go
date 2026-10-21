@@ -32,11 +32,42 @@ func HumanInvocationAuthority(userID, authority string) string {
 // Empty means a legacy or not-yet-classified source: membership still applies.
 func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) error {
 	return func(ctx context.Context, in RunInput) error {
+		// Unattended triggers retain the live human author's account ceiling.
+		// Crew/agent-authored routines (no human author) keep their own policy.
+		if in.InvokingUserID == "" && unattendedAccountTrigger(in.TriggeredVia) {
+			if db == nil {
+				return ErrInvocationAuthorityRevoked
+			}
+			var author sql.NullString
+			err := db.QueryRowContext(ctx, `SELECT author_user_id FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, in.PipelineID, in.WorkspaceID).Scan(&author)
+			if err != nil {
+				return fmt.Errorf("routine trigger owner authority: %w", err)
+			}
+			if author.Valid && author.String != "" {
+				var active bool
+				err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, author.String).Scan(&active)
+				if err != nil {
+					return fmt.Errorf("routine trigger account authority: %w", err)
+				}
+				if !active {
+					return ErrInvocationAuthorityRevoked
+				}
+				var member bool
+				err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND workspace_id=? AND access_mode='trusted')`, author.String, in.WorkspaceID).Scan(&member)
+				if err != nil {
+					return fmt.Errorf("routine trigger author membership: %w", err)
+				}
+				if !member {
+					return ErrInvocationAuthorityRevoked
+				}
+			}
+		}
+
 		if in.InvokingUserID != "" && db != nil {
 			// Persisted human work must retain a live account, including after
 			// waits or restarts. Autonomous triggers have no human identity.
 			var active bool
-			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND (suspended_at IS NULL OR suspended_at=''))`, in.InvokingUserID).Scan(&active); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, in.InvokingUserID).Scan(&active); err != nil {
 				return fmt.Errorf("routine account authority: %w", err)
 			}
 			if !active {
@@ -90,4 +121,8 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 		}
 		return ErrInvocationAuthorityRevoked
 	}
+}
+
+func unattendedAccountTrigger(source TriggeredVia) bool {
+	return source == TriggeredViaAutomation || source == TriggeredViaSchedule || source == TriggeredViaWebhook || source == TriggeredViaWakeCheck || source == TriggeredViaCallPipeline
 }

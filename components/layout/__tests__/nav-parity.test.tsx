@@ -36,6 +36,7 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER", workspace: { name: "Example workspace" } }),
 }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 3 }))
+vi.mock("@/hooks/use-live-run-count", () => ({ useLiveRunCount: () => 0 }))
 // The sheet only renders when the toolbar believes it is on a phone.
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => true }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
@@ -76,9 +77,6 @@ describe("the phone navigation sheet offers the whole product", () => {
       screen.getAllByRole("link").map((a) => a.getAttribute("href")),
     )
     const missing = flatten()
-      // FUTURE rows are announced, not built — they render as a disabled row
-      // pointing at "#", so their href is deliberately not their destination.
-      .filter((item) => item.badge !== "FUTURE")
       .map((item) => item.href)
       .filter((href) => !rendered.has(href))
 
@@ -104,23 +102,12 @@ describe("the phone navigation sheet offers the whole product", () => {
     expect(inbox!.textContent).toContain("3")
   })
 
-  it("does not offer a FUTURE row to the keyboard or a screen reader", () => {
-    // `pointer-events-none` blocks a mouse and nothing else: the row stayed
-    // focusable, Enter followed href="#", and assistive technology announced
-    // a link to a destination that does not exist.
+  it("offers no announced-but-unbuilt rows (Harbor 2 removed them)", () => {
+    // Marketplace used to be a disabled FUTURE row; a destination that does
+    // not exist is not navigation. Every row the sheet shows is a real link.
     openMobileNav()
-    const future = flatten().filter((i) => i.badge === "FUTURE")
-    expect(future.length, "no FUTURE row to check").toBeGreaterThan(0)
-    for (const item of future) {
-      const row = screen.getByText(item.title).closest("[aria-disabled], a")
-      expect(row, `no row for ${item.title}`).toBeTruthy()
-      expect(row!.tagName, `${item.title} is still a link`).not.toBe("A")
-      expect(row!.getAttribute("aria-disabled")).toBe("true")
-    }
-    expect(
-      screen.getAllByRole("link").map((a) => a.getAttribute("href")),
-      "a FUTURE row is still reachable as a link",
-    ).not.toContain("#")
+    expect(document.querySelectorAll("[aria-disabled='true']").length).toBe(0)
+    expect(screen.getAllByRole("link").map((a) => a.getAttribute("href"))).not.toContain("#")
   })
 
   it("does not link at the per-agent chat route, which needs a slug nobody has yet", () => {
@@ -144,4 +131,10 @@ describe("the navigation is defined once", () => {
     const hrefs = flatten().map((i) => i.href)
     expect(new Set(hrefs).size, `duplicate rows: ${hrefs.join(", ")}`).toBe(hrefs.length)
   })
+})
+
+
+it("names the shared destination Artifacts while preserving existing Page links",()=>{
+  expect(flatten().find(item=>item.href==="/pages")?.title).toBe("Artifacts")
+  expect(flatten().filter(item=>item.href==="/pages")).toHaveLength(1)
 })

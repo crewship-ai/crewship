@@ -167,14 +167,18 @@ Two consequences an operator should expect on the receipt:
   delivery addressed to them, their personal notification channel: rows that
   are not attribution on somebody else's record but the subject's own data.
   Deleted, counted in `rows_deleted`, reported under `…_removed`.
-- **Re-attributed is the one exception.** A credential the subject created
-  keeps working for every agent bound to it — deleting it would take a secret
-  the workspace still relies on — but its `created_by` cannot be blank. The
+- **Live credentials are re-attributed.** A live credential the subject
+  created keeps working for every agent bound to it — deleting it would take
+  a secret the workspace still relies on — and still needs a user custodian. The
   admin running the erasure becomes its custodian (the oldest other OWNER if
   the admin is erasing themself), the credential's own audit timeline gets a
   `REATTRIBUTED` event naming the custodian and the action id, and the count
   is reported as `credentials_reattributed`. If nobody can take custody, the
-  whole #2308 step refuses and the response is `207` with the reason.
+  whole #2308 step refuses and the response is `207` with the reason. Retired
+  credentials instead clear `created_by` and nullable actor/approver attribution;
+  their IDs and audit history stay. Retired-only erasure needs no custodian,
+  cannot reactivate a creatorless credential, and uses the existing
+  `credentials_reattributed` receipt count without a false hand-over event.
 
 ### What the cascade touches
 
@@ -198,7 +202,7 @@ Two consequences an operator should expect on the receipt:
 | `saved_views`, `user_notification_prefs`, `notification_deliveries`, `notification_channels` (`scope='user'`), `onboarding_proposals` | rows WHERE `user_id` / `owner_user_id` / `created_by` `= $USER_ID` in this workspace | **Removed** (#2308). The subject's own records — a personal channel carries their own address, an onboarding proposal is the draft the Guide wrote in their session. Reported as `saved_views_removed`, `user_notification_prefs_removed`, `notification_deliveries_removed`, `notification_channels_removed`, `onboarding_proposals_removed`. |
 | `waitpoint_trust_grants` | rows WHERE `granted_by_user_id = $USER_ID` | **Revoked by removal** (#2308). A standing approval on a routine gate is `page_grants`' twin — a human delegating authority, with a `NOT NULL` issuer. The gate starts asking again; each live grant that went is journalled as `approval.trust_revoked` exactly as the ordinary revoke path does it. Grants the subject merely *withdrew* stay, with `revoked_by_user_id` cleared. Reported as `trust_grants_revoked` and `trust_grants_anonymised`. |
 | `workspace_invitations` | rows WHERE `invited_by = $USER_ID` | **Revoked by removal** (#2308). A pending invitation is a live capability to join the workspace in the subject's name; `invited_by` is `NOT NULL`. Reported as `workspace_invitations_revoked`. |
-| `credentials` | rows WHERE `created_by`, `created_by_actor_id` or `approved_by_user_id` `= $USER_ID` | **Re-attributed** (#2308) — see the bullet above. `created_by` goes to the custodian, the two nullable columns are cleared, the credential and every binding on it keep working. Reported as `credentials_reattributed`. |
+| `credentials` | rows WHERE `created_by`, `created_by_actor_id` or `approved_by_user_id` `= $USER_ID` | **Live re-attributed; retired anonymised** (#2308) — see the bullet above. Live `created_by` goes to the custodian; retired `created_by` becomes NULL. Actor/approver attribution is cleared. Live credentials and their bindings keep working. Reported as `credentials_reattributed`. |
 | `credential_bindings`, `credential_rotations` | rows WHERE `created_by` / `rotated_by` `= $USER_ID`, on credentials in this workspace | **Anonymised** (#2308). A binding is what makes the credential reach an agent; removing it would revoke the credential by the back door. Reported as `credential_bindings_anonymised`, `credential_rotations_anonymised`. |
 | `notification_channels` (`scope='workspace'`), `notification_channel_agents`, `hooks_config`, `automations`, `recurring_issues`, `composio_settings` | rows WHERE `created_by` / `owner_user_id` / `granted_by` / `default_user_id` `= $USER_ID` | **Anonymised** (#2308). Workspace configuration the subject happened to set up. Every one of these columns is nullable with no foreign key — the schema's own statement that the row is valid without its creator — so the team's Slack channel, hooks and cron issues keep running and stop naming a person. (`composio_settings.default_user_id` is a Composio-side identity and is cleared only when it literally equals the subject's id.) Reported as `<table>_anonymised`. |
 | `agents`, `crews`, `pipelines`, `pipeline_versions`, `pipeline_runs`, `pending_runs`, `pipeline_waitpoints`, `agent_runs_archive`, `missions` (`created_by_user_id` only), `mission_proposals`, `mission_tasks`, `mission_comments`, `mission_code_links`, `checkpoints`, `backup_catalog`, `backup_restore_origins`, `eval_runs`, `workspace_files`, `attachments`, `escalations`, `gate_reward_history`, `keeper_governance_settings` | the attribution column(s) `= $USER_ID`, in this workspace | **Anonymised** (#2308). History worth keeping without the name: who created the agent, ran the routine, approved the task, uploaded the file. `pipeline_versions.author_id` and `mission_comments.author_id` are `NOT NULL` beside an `author_type`; for `author_type='user'` the id becomes empty and the row keeps saying a human wrote it. Clearing `keeper_governance_settings.security_contact_user_id` leaves the workspace with no security contact — Keeper findings become visible to every admin instead of one, and the server logs a warning so you appoint a new one. Reported as `<table>_anonymised`. |
@@ -226,6 +230,12 @@ them so a green sweep cannot be mistaken for coverage:
 | `workspace_members`, and the instance-scoped tables (`users`, `accounts`, `sessions`, `cli_tokens`, `skills`, `skill_reviews`, `rate_limit_overrides`, `keeper_runtime_settings`, `keeper_aux_settings`, …) | Membership is a separate operation; instance-scoped rows belong to an account-deletion path that does not exist yet. A workspace erasure cannot speak for a person's other workspaces. |
 
 <Note>
+For verified private synchronous whole-run sources, hard deletion also appends
+an atomic, content-free `approval.source_retired` journal marker (workspace and
+approval ID only). It retains no request, answer, user or chat/run metadata;
+its purpose is to keep existing immutable source history private after erasure.
+A failed marker append prevents deletion of that source.
+
 `approvals_queue` is erased on Article 17 but is **not** part of the Article
 15 export bundle above — it lacks a `data_subject_id` column, so it doesn't
 fit the export's "every table keyed by data_subject_id" shape, and adding a

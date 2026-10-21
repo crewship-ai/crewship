@@ -57,6 +57,27 @@ var issueCreateCmd = &cobra.Command{
 		if flags.Changed("assignee-type") && !flags.Changed("assignee") {
 			return fmt.Errorf("--assignee-type requires --assignee")
 		}
+		// --owner (a person) and --delegate (an agent) are set together in
+		// one create; they replace --assignee, which can hold only one.
+		ownerRef, _ := flags.GetString("owner")
+		delegateRef, _ := flags.GetString("delegate")
+		if (ownerRef != "" || delegateRef != "") && flags.Changed("assignee") {
+			return fmt.Errorf("--owner/--delegate cannot be combined with --assignee")
+		}
+		if ownerRef != "" {
+			id, err := resolveIssueOwnerUserID(client, ownerRef)
+			if err != nil {
+				return err
+			}
+			body["owner_user_id"] = id
+		}
+		if delegateRef != "" {
+			id, err := resolveAgentID(client, delegateRef)
+			if err != nil {
+				return fmt.Errorf("cannot resolve delegate %q: %w", delegateRef, err)
+			}
+			body["delegate_agent_id"] = id
+		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			atype, _ := flags.GetString("assignee-type")
 			assigneeID, atype, err := resolveIssueAssignee(client, atype, v)
@@ -232,6 +253,20 @@ var issueUpdateCmd = &cobra.Command{
 			// the server's 409 says "Retry with ?force=true", and this is that
 			// door — the override is recorded as a receipt naming the caller.
 			path += "?force=true"
+		}
+		if flags.Changed("expected-revision") {
+			v, _ := flags.GetInt64("expected-revision")
+			if v < 1 {
+				return fmt.Errorf("--expected-revision must be positive")
+			}
+			body["expected_revision"] = v
+		}
+		if flags.Changed("idempotency-key") {
+			key, _ := flags.GetString("idempotency-key")
+			if strings.TrimSpace(key) == "" || len(key) > 200 {
+				return fmt.Errorf("--idempotency-key must contain 1–200 bytes")
+			}
+			client = client.WithHeader("Idempotency-Key", key)
 		}
 		resp, err := client.Patch(path, body)
 		if err != nil {

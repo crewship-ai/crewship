@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { RefreshCw } from "lucide-react"
 import {
   CreateSurface,
@@ -8,7 +8,21 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
-import { AVATAR_STYLES, getAgentAvatarUrl, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import {
+  AVATAR_STYLES,
+  getAgentAvatarUrl,
+  DEFAULT_AVATAR_STYLE,
+  isAnimatableAvatarStyle,
+  shouldAnimateAvatar,
+} from "@/lib/agent-avatar"
+import {
+  DEFAULT_AVATAR_ANIMATION,
+  DEFAULT_MOTION,
+  readAvatarAnimation,
+  readMotion,
+  subscribeAppearance,
+} from "@/lib/theme/appearance"
+import { prefersReducedMotion, subscribeReducedMotion } from "@/lib/motion"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +34,19 @@ import { cn } from "@/lib/utils"
 const STYLE_OPTIONS = Object.entries(AVATAR_STYLES).map(([value, meta]) => ({
   value,
   label: meta.label,
+  isNew: Boolean(meta.isNew),
 }))
+
+// Rendered sizes of the picker's faces, for the animation size rule (#3789):
+// the preview (h-14) and the 32 px tiles and quick picks move; the 24 px
+// follow-the-crew face does not.
+const PREVIEW_PX = 56
+const TILE_PX = 32
+const FOLLOW_PX = 24
+
+const serverMotion = () => DEFAULT_MOTION
+const serverAvatarAnimation = () => DEFAULT_AVATAR_ANIMATION
+const serverReduced = () => false
 
 export interface AvatarPickerDialogProps {
   open: boolean
@@ -97,7 +123,12 @@ export function AvatarPickerBody({
   const setDraftStyle = (next: string | null) => onChange({ seed: draftSeed, style: next })
 
   const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
-  const previewUrl = getAgentAvatarUrl(draftSeed, effectiveStyle)
+  const motion = useSyncExternalStore(subscribeAppearance, readMotion, serverMotion)
+  const avatarAnimation = useSyncExternalStore(subscribeAppearance, readAvatarAnimation, serverAvatarAnimation)
+  const osReducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, serverReduced)
+  const face = (faceSeed: string, faceStyle: string, sizePx: number) =>
+    getAgentAvatarUrl(faceSeed, faceStyle, { animated: shouldAnimateAvatar({ style: faceStyle, sizePx, motion, avatarAnimation, osReducedMotion }) })
+  const previewUrl = face(draftSeed, effectiveStyle, PREVIEW_PX)
 
   return (
     <>
@@ -153,7 +184,7 @@ export function AvatarPickerBody({
                     draftSeed === qs ? "border-primary" : "border-foreground/10 hover:border-foreground/25",
                   )}
                 >
-                  <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="h-full w-full" />
+                  <img src={face(qs, effectiveStyle, TILE_PX)} alt="" className="h-full w-full" />
                 </button>
               ))}
             </div>
@@ -164,6 +195,14 @@ export function AvatarPickerBody({
           The same seed always produces the same face — leave the agent&apos;s name for a
           deterministic default.
         </p>
+        {/* One line, and only for a style that can move (#3789). It says
+            what the motion is and how to stop it; the motion itself never
+            stands for anything. */}
+        {isAnimatableAvatarStyle(effectiveStyle) && (
+          <p data-testid="avatar-motion-hint" className="type-meta -mt-1 text-muted-foreground">
+            Moves gently; still when Reduce motion is on
+          </p>
+        )}
 
         {/* Inherit is not a style, so it does not sit in the grid of styles.
             It used to, as a twelfth tile whose preview renders
@@ -185,7 +224,7 @@ export function AvatarPickerBody({
           )}
         >
           <img
-            src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
+            src={face(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE, FOLLOW_PX)}
             alt=""
             className="h-6 w-6 shrink-0 rounded"
           />
@@ -232,11 +271,18 @@ export function AvatarPickerBody({
                     : "border-foreground/10 hover:bg-foreground/5",
                 )}
               >
-                <img
-                  src={getAgentAvatarUrl(draftSeed, s.value)}
-                  alt=""
-                  className="h-8 w-8 rounded"
-                />
+                <span className="relative">
+                  <img
+                    src={face(draftSeed, s.value, TILE_PX)}
+                    alt=""
+                    className="h-8 w-8 rounded"
+                  />
+                  {s.isNew && (
+                    <span className="absolute -right-2 -top-1.5 rounded-sm bg-primary px-0.5 text-micro font-semibold leading-none text-primary-foreground">
+                      New
+                    </span>
+                  )}
+                </span>
                 <span
                   className={cn(
                     "w-full truncate text-center text-[9.5px] leading-tight",

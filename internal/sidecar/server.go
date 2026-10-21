@@ -592,6 +592,15 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/documents/draft":
+				s.handleDocumentDraft(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/draft":
+				s.handleDocumentDraft(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/documents/create":
+				s.handleDocumentCreate(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/"):
 				s.handlePageWebhook(w, r)
 				return
@@ -647,6 +656,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// (which weak models probe before committing). Reuses the
 				// same savePipeline test_run→save flow as POST /pipelines/save.
 				s.handleRoutinesMCP(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/issues":
+				s.handleIssuesMCP(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mcp/notify":
 				// In-container MCP server exposing the notification tools
@@ -735,6 +747,10 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// guardNone rows, because an unauthenticated route that LOOKS like
 			// it grants credential assignment is a standing invitation for
 			// someone to "fix" it by adding the backend half without the gate.
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/chat/proposal/") && strings.HasSuffix(r.URL.Path, "/edit"):
+				s.handleProposalEdit(w, r)
+			case r.Method == http.MethodPost && r.URL.Path == "/chat/proposal/create":
+				s.handleProposalCreate(w, r)
 			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
 				s.handleIssueCreate(w, r)
 				return
@@ -745,6 +761,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// sibling must not fall back to the boot identity.
 			case r.Method == http.MethodGet && r.URL.Path == "/issues":
 				s.handleIssuesList(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/show"):
+				s.handleIssueShow(w, r)
 				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/work"):
 				s.handleIssueWork(w, r)

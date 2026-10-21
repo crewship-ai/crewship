@@ -38,7 +38,7 @@ describe("bounded reveal lifetime", () => {
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+      fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     })
     await screen.findByTestId("revealed-value")
     const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true)
@@ -54,7 +54,7 @@ describe("bounded reveal lifetime", () => {
       fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
       // Flush the resolved request and React effects before measuring lifetime.
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+        fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
       })
       expect(screen.getByTestId("revealed-value")).toBeInTheDocument()
       act(() => { vi.advanceTimersByTime(REVEAL_VISIBLE_MS - 1) })
@@ -62,7 +62,7 @@ describe("bounded reveal lifetime", () => {
       act(() => { vi.advanceTimersByTime(1) })
       expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
       expect(screen.getByLabelText(/reason/i)).toHaveValue("")
-      expect(screen.getByRole("button", { name: /reveal the existing value/i })).toBeDisabled()
+      expect(screen.getByRole("button", { name: /reveal for 30 s/i })).toBeDisabled()
     } finally {
       unmount()
       vi.useRealTimers()
@@ -74,7 +74,7 @@ describe("bounded reveal lifetime", () => {
     h.apiFetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     const { rerender } = renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     const signal = h.apiFetch.mock.calls[0][1].signal as AbortSignal
     rerender(<RevealDialog workspaceId="ws2" credentialId="other" credentialName="OTHER" open onOpenChange={() => {}} onRotateInstead={() => {}} />)
     expect(signal.aborted).toBe(true)
@@ -87,23 +87,40 @@ describe("bounded reveal lifetime", () => {
     h.apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid reveal response")
     expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
   })
 })
 
 describe("the reason floor", () => {
-  it("keeps Reveal disabled until the reason is long enough to mean something", () => {
-    renderDialog()
-    const button = screen.getByRole("button", { name: /reveal the existing value/i })
+  it("reason under 20 keeps dialog open with field error", async () => {
+    const { onOpenChange } = renderDialog()
+    const button = screen.getByRole("button", { name: /reveal for 30 s/i })
     expect(button).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: "test" } })
-    expect(button).toBeDisabled()
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    expect(screen.getByRole("alert")).toHaveTextContent(/at least 20 characters/i)
+    expect(screen.getByLabelText(/reason/i)).toHaveAttribute("aria-invalid", "true")
+    expect(h.apiFetch).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
 
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    expect(button).not.toBeDisabled()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    await act(async () => fireEvent.click(button))
+    expect(h.apiFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a server refusal at the field and keeps the dialog open", async () => {
+    h.apiFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: "The reason is too generic." }) })
+    const { onOpenChange } = renderDialog()
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i })))
+    expect(screen.getByRole("alert")).toHaveTextContent("The reason is too generic.")
+    expect(screen.getByLabelText(/reason/i)).toHaveValue(GOOD_REASON)
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 
   it("uses the same floor the server does", () => {
@@ -113,7 +130,7 @@ describe("the reason floor", () => {
   it("sends the trimmed reason in the request body", async () => {
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: `  ${GOOD_REASON}  ` } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
 
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
     const [url, init] = h.apiFetch.mock.calls[0]
@@ -128,30 +145,31 @@ describe("SEALED", () => {
   // been removing.
   it("cannot be revealed, and the dialog says so instead of trying", () => {
     renderDialog({ sensitivity: "SEALED" })
-    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    expect(screen.getByRole("button", { name: /reveal the existing value/i })).toBeDisabled()
-    expect(screen.getByText(/never revealable/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/reason/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /reveal for 30 s/i })).toBeDisabled()
+    expect(screen.getByRole("alert")).toHaveTextContent(/can never be revealed/i)
   })
 
   it("allows a RESTRICTED credential through the same form", () => {
     renderDialog({ sensitivity: "RESTRICTED" })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    expect(screen.getByRole("button", { name: /reveal the existing value/i })).not.toBeDisabled()
+    expect(screen.getByRole("button", { name: /reveal for 30 s/i })).not.toBeDisabled()
   })
 
   // GET /credentials does not return `sensitivity` (see the report), so the
   // sheet often cannot pre-check this layer. Saying the server will is honest;
   // pretending it is satisfied is not.
-  it("says the classification is checked server-side when the payload has none", () => {
+  it("leaves an unreported classification to the server rather than assuming one", () => {
     renderDialog({ sensitivity: null })
-    expect(screen.getByText(/classification is checked by the server/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/reason/i)).toBeInTheDocument()
+    expect(screen.queryByText(/can never be revealed/i)).not.toBeInTheDocument()
   })
 })
 
 describe("the offered better path", () => {
   it("puts rotation on the same screen and hands off when it is chosen", () => {
     const { onRotateInstead } = renderDialog()
-    expect(screen.getByText(/already have a replacement/i)).toBeInTheDocument()
+    expect(screen.getByText(/already have a new value/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /replace value instead/i }))
     expect(onRotateInstead).toHaveBeenCalled()
   })
@@ -161,19 +179,19 @@ describe("the result", () => {
   it("shows the value exactly once and drops the request form", async () => {
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
 
     expect(await screen.findByTestId("revealed-value")).toHaveTextContent("ghp_secret")
     // No second bite: the reason field and the reveal button are gone.
     expect(screen.queryByLabelText(/reason/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /reveal for 30 s/i })).not.toBeInTheDocument()
     expect(screen.getByText(/hidden automatically after 30 seconds/i)).toBeInTheDocument()
   })
 
   it("forgets the value when the dialog closes", async () => {
     const { rerender } = renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     await screen.findByTestId("revealed-value")
 
     rerender(
@@ -217,7 +235,7 @@ describe("refusals", () => {
     })
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/an owner must enable it in settings/i)
     expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
@@ -227,7 +245,7 @@ describe("refusals", () => {
     h.apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     expect(await screen.findByRole("alert")).toHaveTextContent(/http 500/i)
   })
 
@@ -235,7 +253,7 @@ describe("refusals", () => {
     h.apiFetch.mockRejectedValue(new TypeError("offline"))
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reveal for 30 s/i }))
     expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was revealed/i)
   })
 })

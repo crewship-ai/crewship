@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/missionactivity"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -53,6 +54,10 @@ func (h *IssueHandler) workAs(w http.ResponseWriter, r *http.Request, actorType,
 	}
 	if req.Action != "take_over" && req.Note == "" {
 		writeProblem(w, r, 400, "Describe the result or what the next worker should do")
+		return
+	}
+	if actorType == "user" && req.Action == "handoff_agent" && limitedChatToken(r.Context()) {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
 		return
 	}
 	if actorType == "agent" && req.Action != "handoff_agent" && req.Action != "handoff_human" {
@@ -199,6 +204,13 @@ func (h *IssueHandler) workAs(w http.ResponseWriter, r *http.Request, actorType,
 		_, err = tx.ExecContext(ctx, `UPDATE missions SET delegate_agent_id=?,assignee_type='agent',assignee_id=? WHERE id=?`, req.TargetID, req.TargetID, id)
 	}
 
+	if err == nil && actorType == "user" && req.Action == "handoff_agent" {
+		var originID string
+		originID, err = captureHumanIssueOrigin(ctx, tx, r, id)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, originID, id, wsID)
+		}
+	}
 	if err == nil && req.Action == "handoff_agent" {
 		// Pending messages to the previous worker must not revive after handoff.
 		_, err = tx.ExecContext(ctx, `UPDATE mission_comment_mentions SET state='superseded',dispatch_detail='Work handed to another worker' WHERE mission_id=? AND state='pending'`, id)

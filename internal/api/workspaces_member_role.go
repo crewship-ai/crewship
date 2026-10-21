@@ -9,9 +9,12 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"net/http"
-
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 type updateWorkspaceMemberRoleRequest struct {
@@ -53,6 +56,11 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, r, http.StatusForbidden, detail)
 	}
 
+	fail := func(what string, err error) {
+		h.logger.Error(what, "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+	}
+
 	if memberID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "memberId is required")
 		return
@@ -77,11 +85,39 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail("begin member role mutation", err)
+		return
+	}
+	defer tx.Rollback()
+	// Recheck after the body was read, on the same writer as the role and
+	// its event. A stale middleware role cannot authorize a new mutation.
+	err = tx.QueryRowContext(r.Context(), `SELECT m.role FROM workspace_members m
+JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
+JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL
+WHERE m.workspace_id=? AND m.user_id=? AND NOT EXISTS(
+ SELECT 1 FROM workspace_members guest WHERE guest.user_id=m.user_id AND guest.access_mode='restricted')`, workspaceID, callerUID).Scan(&callerRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		forbid("workspace_member.update_role", "workspace:"+workspaceID,
+			"Active trusted workspace membership is required")
+		return
+	}
+	if err != nil {
+		fail("read current role administrator", err)
+		return
+	}
+	if roleRank[callerRole] < roleRank["MANAGER"] {
+		forbid("workspace_member.update_role", "workspace:"+workspaceID,
+			"You need at least the MANAGER role to change member roles")
+		return
+	}
+
 	// Load the target's current role (scoped to this workspace). The user id
 	// comes along for the audit row: a membership id names nobody, a user id
 	// resolves to an email.
 	var currentRole, memberUserID string
-	err := h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		"SELECT role, user_id FROM workspace_members WHERE id = ? AND workspace_id = ?",
 		memberID, workspaceID).Scan(&currentRole, &memberUserID)
 	if err == sql.ErrNoRows {
@@ -116,17 +152,18 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 	// row exists (verified above), so RowsAffected == 0 means the guard
 	// subquery blocked a last-owner demotion → 409.
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(r.Context(), `
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE workspace_members
 		SET role = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?
+		  AND (? NOT IN ('ADMIN','OWNER') OR NOT EXISTS (SELECT 1 FROM workspace_members guest WHERE guest.user_id=workspace_members.user_id AND guest.access_mode='restricted'))
 		  AND NOT (
 		    role = 'OWNER'
 		    AND ? != 'OWNER'
 		    AND (SELECT COUNT(*) FROM workspace_members
 		         WHERE workspace_id = ? AND role = 'OWNER') <= 1
 		  )`,
-		req.Role, now, memberID, workspaceID, req.Role, workspaceID)
+		req.Role, now, memberID, workspaceID, req.Role, req.Role, workspaceID)
 	if err != nil {
 		h.logger.Error("update workspace member role", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -139,18 +176,76 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if affected == 0 {
-		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner of the workspace")
+		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner or promote a Guest to administrator; restore trusted access explicitly first")
 		return
 	}
 
-	// Keyed on the user, not the membership row: the audit name resolver
-	// turns a user id into an email, which is who the reader is looking for.
+	// Settings Audit still reads audit_logs (People filters, CSV and
+	// IP/UA expansion). Keep its existing projection atomic with the
+	// canonical journal; auditFromRequest is deliberately best effort.
 	auditedUser := memberUserID
 	if auditedUser == "" {
 		auditedUser = memberID
 	}
-	auditFromRequest(r, h.db, "member.role_change", "WorkspaceMember", auditedUser,
-		map[string]interface{}{"from": currentRole, "to": req.Role, "member_id": memberID})
+	metadata, err := json.Marshal(map[string]string{"from": currentRole, "to": req.Role, "member_id": memberID})
+	if err != nil {
+		fail("encode member role settings audit", err)
+		return
+	}
+	auditID := generateCUID()
+	res, err = tx.ExecContext(r.Context(), `INSERT INTO audit_logs
+(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)
+VALUES(?,?,?,'member.role_change','WorkspaceMember',?,?,?)`, auditID, workspaceID, callerUID, auditedUser, string(metadata), now)
+	if err != nil {
+		fail("write member role settings audit", err)
+		return
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		fail("acknowledge member role settings audit insert", errors.Join(err, errors.New("settings audit insert did not affect one row")))
+		return
+	}
+
+	notify, err := appendAuthorizationAudit(r.Context(), tx, h.policyJournal, journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryMemberRoleChanged,
+		ActorType: journal.ActorUser, ActorID: callerUID, Summary: "Workspace member role changed",
+		Payload: map[string]any{"subject_user_id": memberUserID, "member_id": memberID,
+			"action": "role_changed", "previous_role": currentRole, "role": req.Role},
+	})
+	if err != nil {
+		fail("audit member role mutation", err)
+		return
+	}
+	// Read back after BOTH inserts: neither audit trigger may remove or
+	// alter the legacy projection, or undo the role before commit.
+	var savedWorkspace, savedActor, savedAction, savedKind, savedEntity, savedMetadata, savedCreated string
+	var savedIP, savedUA sql.NullString
+	if err := tx.QueryRowContext(r.Context(), `SELECT workspace_id,user_id,action,entity_type,entity_id,metadata,created_at,ip_address,user_agent FROM audit_logs WHERE id=?`, auditID).Scan(
+		&savedWorkspace, &savedActor, &savedAction, &savedKind, &savedEntity, &savedMetadata, &savedCreated, &savedIP, &savedUA); err != nil {
+		fail("acknowledge member role settings audit", err)
+		return
+	}
+	if savedWorkspace != workspaceID || savedActor != callerUID || savedAction != "member.role_change" || savedKind != "WorkspaceMember" || savedEntity != auditedUser || savedMetadata != string(metadata) || savedCreated != now || savedIP.Valid || savedUA.Valid {
+		fail("acknowledge member role settings audit", errors.New("settings audit projection did not persist"))
+		return
+	}
+	// A trigger on the event must not undo the mutation after its first
+	// acknowledgement. Check the final state before committing either row.
+	var savedRole, savedUser, savedAt string
+	if err := tx.QueryRowContext(r.Context(), `SELECT role,user_id,updated_at FROM workspace_members WHERE id=? AND workspace_id=?`, memberID, workspaceID).Scan(&savedRole, &savedUser, &savedAt); err != nil {
+		fail("acknowledge member role", err)
+		return
+	}
+	if savedRole != req.Role || savedUser != memberUserID || savedAt != now {
+		fail("acknowledge member role", errors.New("member role mutation did not persist"))
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		fail("commit member role mutation", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":    "updated",

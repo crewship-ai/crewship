@@ -16,6 +16,12 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -170,7 +176,7 @@ describe("telemetry cannot break an upload", () => {
 
     go([pdf()], "picker")
     await waitFor(() => {
-      const list = useComposerStore.getState().attachments["sess-1"] ?? []
+      const list = useComposerStore.getState().attachments[K + "sess-1"] ?? []
       expect(list).toHaveLength(1)
       expect(list[0].status).toBe("ready")
     })

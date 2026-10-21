@@ -1,12 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type Ref } from "react"
 import {
   User, Building, Users, Volume2, Palette, MonitorSmartphone,
   Link2, Activity, Shield, KeyRound, ChevronRight,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { cn } from "@/lib/utils"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -14,8 +13,9 @@ import {
   SidebarSearch,
   SidebarSection,
   SidebarRow,
-  SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface NavItem {
@@ -169,15 +169,26 @@ interface SettingsNavProps {
   /** Caller's workspace role. The nav owns the per-section rule; the layout
    *  passes the raw role rather than one boolean per gated section. */
   role?: string | null
+  /** Phone, nothing open yet: the list is the page (list → detail → back). */
+  phoneInline?: boolean
+  /** The search the list comes back with (phone pilot: kept while a section is open). */
+  initialQuery?: string
+  onQueryChange?: (query: string) => void
+  /** The sections list's scroller, so the page can keep its position. */
+  scrollRef?: Ref<HTMLElement>
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
+export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false, initialQuery = "", onQueryChange, scrollRef }: SettingsNavProps) {
   const router = useRouter()
   // Switching section unmounts the cards; with edits pending, ask first.
   const guard = usePageSaveGuard()
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
-  const [query, setQuery] = useState("")
+  const [query, setQueryState] = useState(initialQuery)
+  const setQuery = (q: string) => {
+    setQueryState(q)
+    onQueryChange?.(q)
+  }
   const q = query.trim().toLowerCase()
 
   const filtered = useMemo(
@@ -197,7 +208,9 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   const firstMatch = filtered[0]?.items[0]?.key
 
   return (
-    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-card border-r border-foreground/[0.06] flex flex-col")}>
+    // The one secondary panel (Harbor 2): a 272 px column with a remembered
+    // collapse, and a bottom sheet from the top bar's panel button on a phone.
+    <SecondaryPanel kind="list" id="settings" label="Settings navigation" phoneInline={phoneInline}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}
@@ -211,18 +224,13 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
         />
       </SidebarToolbar>
 
-      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
+      <nav ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
         {filtered.map((section) => (
           <SidebarSection
             key={section.label}
-            label={section.label}
-            actions={
-              section.label === "Workspace" && workspaceName ? (
-                <span className="ml-1 truncate font-mono text-micro normal-case tracking-normal text-sidebar-foreground/70">
-                  {workspaceName}
-                </span>
-              ) : undefined
-            }
+            // The workspace group is named after the workspace (Harbor 2), so
+            // the panel says WHICH workspace these settings change.
+            label={section.label === "Workspace" && workspaceName ? workspaceName : section.label}
           >
             {section.items.map((item) => {
               const isActive = item.key === activeTab
@@ -232,15 +240,18 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                   selected={isActive}
                   onSelect={() => guard(() => (item.href ? router.push(item.href) : onTabChange(item.key)))}
                   aria-label={item.label}
+                  // v67 `.pr.set`: a 34 px row (2.2885rem at the 14.857 px root of
+                  // the Small text size) with a 24 px tile and a 13 px label.
+                  className="h-[2.2885rem] py-0"
                 >
-                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                  <span className="truncate flex-1">{item.label}</span>
+                  <SidebarRowTile icon={item.icon} active={isActive} />
+                  <span className="flex-1 truncate text-control">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/40">P2</span>
+                    <span className="ml-auto shrink-0 text-micro tabular-nums text-sidebar-foreground/40">P2</span>
                   )}
                   {item.href && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/60">Owner</span>
+                    <span className="ml-auto shrink-0 text-micro text-sidebar-foreground/60">Owner</span>
                   )}
                 </SidebarRow>
               )
@@ -248,6 +259,6 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
           </SidebarSection>
         ))}
       </nav>
-    </aside>
+    </SecondaryPanel>
   )
 }

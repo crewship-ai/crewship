@@ -12,7 +12,7 @@ import (
 // the selected membership's authorized content, independent of runtime health.
 func (h *WorkspaceHandler) memberRestrictedSurfaces(ctx context.Context, user, workspace string) ([]string, error) {
 	var chat bool
-	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL)`, user, workspace).Scan(&chat)
+	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN live_access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL)`, user, workspace).Scan(&chat)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,16 @@ func (h *WorkspaceHandler) memberRestrictedSurfaces(ctx context.Context, user, w
 			return nil, err
 		}
 	}
-	available := map[string]bool{"chat": chat, "routines": routines, "pages": len(pages) > 0, "account_security": true}
+	var viewRoutine bool
+	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members wm JOIN live_access_grants g ON g.member_id=wm.id JOIN pipelines p ON p.id=g.routine_id AND p.workspace_id=wm.workspace_id WHERE wm.user_id=? AND wm.workspace_id=? AND g.resource_kind='routine' AND g.operation='view' AND p.deleted_at IS NULL)`, user, workspace).Scan(&viewRoutine); err != nil {
+		return nil, err
+	}
+	routines = routines || viewRoutine
+	var issues bool
+	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM live_access_grants g JOIN workspace_members wm ON wm.id=g.member_id JOIN projects p ON p.id=g.project_id AND p.workspace_id=wm.workspace_id WHERE wm.user_id=? AND wm.workspace_id=? AND g.resource_kind='project' AND g.operation='list')`, user, workspace).Scan(&issues); err != nil {
+		return nil, err
+	}
+	available := map[string]bool{"issues": issues, "chat": chat, "routines": routines, "pages": len(pages) > 0, "account_security": true}
 	result := []string{}
 	for _, surface := range allowedRestrictedSurfaces() {
 		if available[surface] {

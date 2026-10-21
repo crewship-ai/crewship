@@ -90,6 +90,11 @@ func TestCovRI_Update_ReadBackRaces_500(t *testing.T) {
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
 	}
+	var title string
+	if err := h.db.QueryRow(`SELECT title FROM recurring_issues WHERE id='covri-r2'`).Scan(&title); err != nil || title == "Renamed" {
+		t.Fatalf("failed update did not roll back: %q %v", title, err)
+	}
+
 }
 
 func TestCovRI_Delete_ExecError_500(t *testing.T) {

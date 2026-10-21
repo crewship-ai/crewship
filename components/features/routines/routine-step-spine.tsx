@@ -21,6 +21,8 @@ import {
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { DetailCard, Pill } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { statusTone, type StatusTone } from "@/lib/status-tone"
 import { cn } from "@/lib/utils"
 import { describeStep, isRecord } from "@/lib/routine-step-describe"
 import {
@@ -73,27 +75,26 @@ const STEP_VISUALS: Record<string, { icon: LucideIcon; label: string; tone: stri
   crewship: { icon: PenSquare, label: "Crewship action", tone: "bg-warn/10 text-warn" },
 }
 
-/** How a recorded status reads on the row. Unknown values keep their own word. */
-const STATUS_PRESENTATION: Record<string, { label: string; className: string; dot: string }> = {
-  completed: { label: "Done", className: "text-success", dot: "bg-success" },
-  succeeded: { label: "Done", className: "text-success", dot: "bg-success" },
-  failed: { label: "Failed", className: "text-destructive", dot: "bg-destructive" },
-  error: { label: "Failed", className: "text-destructive", dot: "bg-destructive" },
-  running: { label: "Running", className: "text-primary", dot: "bg-primary animate-pulse" },
-  queued: { label: "Queued", className: "text-muted-foreground", dot: "bg-muted-foreground" },
-  waiting: { label: "Waiting", className: "text-warn", dot: "bg-warn" },
-  paused: { label: "Waiting", className: "text-warn", dot: "bg-warn" },
-  cancelled: { label: "Stopped", className: "text-muted-foreground", dot: "bg-muted-foreground" },
-  interrupted: { label: "Interrupted", className: "text-warn", dot: "bg-warn" },
-  skipped: { label: "Skipped", className: "text-muted-foreground", dot: "bg-muted-foreground" },
+/** How a recorded status reads on the row. Unknown values keep their own word.
+ *  The tone is the shared one (lib/status-tone); only the words are local. */
+const STATUS_WORD: Record<string, string> = {
+  completed: "Done",
+  succeeded: "Done",
+  failed: "Failed",
+  error: "Failed",
+  running: "Running",
+  queued: "Queued",
+  waiting: "Waiting",
+  paused: "Waiting",
+  cancelled: "Stopped",
+  interrupted: "Interrupted",
+  skipped: "Skipped",
 }
 
-const presentStatus = (status: string) =>
-  STATUS_PRESENTATION[status.toLowerCase()] ?? {
-    label: readableFieldName(status),
-    className: "text-muted-foreground",
-    dot: "bg-muted-foreground",
-  }
+const presentStatus = (status: string): { label: string; tone: StatusTone; live: boolean } => {
+  const key = status.toLowerCase()
+  return { label: STATUS_WORD[key] ?? readableFieldName(status), tone: statusTone(status), live: key === "running" }
+}
 
 export interface StepSpineRecord {
   /** Recorded executions for this step, when the run stored any. */
@@ -589,9 +590,8 @@ function SpineRow({
     } else if (execution) {
       const presentation = presentStatus(execution.latest.status)
       state = (
-        <span className={cn("flex shrink-0 items-center gap-1.5 text-[11px]", presentation.className)}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", presentation.dot)} aria-hidden="true" />
-          {presentation.label}
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px]">
+          <StatusPill tone={presentation.tone} label={presentation.label} live={presentation.live} />
           {execution.durationMs != null && (
             <span className="tabular-nums text-muted-foreground">{formatDurationMs(execution.durationMs)}</span>
           )}

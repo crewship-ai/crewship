@@ -33,7 +33,7 @@ interface ReasoningContextValue {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   duration: number | undefined;
-  /** Whole seconds elapsed since streaming started; ticks live while open. */
+  /** Duration supplied by persisted reasoning intervals; unknown stays zero. */
   elapsed: number;
 }
 
@@ -78,53 +78,17 @@ export const Reasoning = memo(
       onChange: onOpenChange,
       prop: open,
     });
-    const [duration, setDuration] = useControllableState<number | undefined>({
-      defaultProp: undefined,
-      prop: durationProp,
-    });
+    const duration = durationProp;
 
     const hasEverStreamedRef = useRef(isStreaming);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
-    const startTimeRef = useRef<number | null>(null);
-    // Total thinking time across episodes: a turn's merged reasoning block
-    // streams in several passes (think → text → think), so the timer must
-    // accumulate rather than restart from zero on each pass.
-    const accumulatedMsRef = useRef(0);
-    const [elapsed, setElapsed] = useState(0);
-
-    // Track streaming episodes and accumulate the total duration.
+    // Never infer reasoning time from component lifetime or tool gaps.
+    const elapsed = durationProp ?? 0;
     useEffect(() => {
       if (isStreaming) {
         hasEverStreamedRef.current = true;
-        if (startTimeRef.current === null) {
-          startTimeRef.current = Date.now();
-        }
-        // A new episode reopens the block; allow it to auto-close again when
-        // the final episode ends.
         setHasAutoClosed(false);
-      } else if (startTimeRef.current !== null) {
-        accumulatedMsRef.current += Date.now() - startTimeRef.current;
-        startTimeRef.current = null;
-        setDuration(Math.ceil(accumulatedMsRef.current / MS_IN_S));
       }
-    }, [isStreaming, setDuration]);
-
-    // Live elapsed ticker while streaming — the header shows "Thinking… Ns"
-    // so a long reasoning pass reads as progress, not a hang.
-    useEffect(() => {
-      if (!isStreaming) return;
-      const tick = () => {
-        if (startTimeRef.current !== null) {
-          setElapsed(
-            Math.floor(
-              (accumulatedMsRef.current + Date.now() - startTimeRef.current) / MS_IN_S
-            )
-          );
-        }
-      };
-      tick();
-      const interval = setInterval(tick, MS_IN_S);
-      return () => clearInterval(interval);
     }, [isStreaming]);
 
     // Auto-open when streaming starts (unless explicitly closed)
@@ -200,7 +164,7 @@ export type ReasoningTriggerProps = ComponentProps<
 
 /** Collapsed-header label once reasoning is done. Exported for tests. */
 export const thoughtForLabel = (duration?: number): string => {
-  if (duration === undefined) return "Thought for a few seconds";
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0) return "Reasoning duration unavailable";
   if (duration < 60) {
     return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
   }
@@ -216,7 +180,7 @@ const defaultGetThinkingMessage = (
   duration?: number,
   elapsed?: number
 ) => {
-  if (isStreaming || duration === 0) {
+  if (isStreaming) {
     return <Shimmer duration={1.6}>{thinkingLiveLabel(elapsed ?? 0)}</Shimmer>;
   }
   return <p>{thoughtForLabel(duration)}</p>;

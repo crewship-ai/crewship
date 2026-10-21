@@ -159,7 +159,7 @@ func TestCovQuery_CrewshipdDown(t *testing.T) {
 
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
-		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t"},
+		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t", AgentID: "viktor-id", AgentSlug: "viktor"},
 		CrewMembers: []CrewMember{{Slug: "nela"}, {Slug: "viktor"}},
 	})
 	req := httptest.NewRequest("POST", "http://localhost:9119/query",
@@ -183,7 +183,7 @@ func TestCovQuery_InvalidUpstreamResponse(t *testing.T) {
 
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
-		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t"},
+		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t", AgentID: "viktor-id", AgentSlug: "viktor"},
 		CrewMembers: []CrewMember{{Slug: "nela"}, {Slug: "viktor"}},
 	})
 	req := httptest.NewRequest("POST", "http://localhost:9119/query",

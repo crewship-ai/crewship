@@ -3,68 +3,24 @@ package ws
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // seededDB returns a sqlite test DB pre-populated with one workspace, crew,
 // agent, mission, and chat all wired to user "u-good".
 func seededDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(dir, "auth.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	schema := `
-		CREATE TABLE workspace_members (
-            id TEXT,
-            access_mode TEXT NOT NULL DEFAULT 'trusted',
-			workspace_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			role TEXT NOT NULL DEFAULT 'MEMBER'
-		);
-		CREATE TABLE crews (
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			deleted_at TEXT
-		);
-		CREATE TABLE agents (
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			deleted_at TEXT
-		);
-		CREATE TABLE missions (
-			id TEXT PRIMARY KEY,
-			crew_id TEXT NOT NULL
-		);
-		CREATE TABLE chats (
-            agent_id TEXT,
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			created_by TEXT,
-			mode TEXT NOT NULL DEFAULT 'CHAT',
-			origin TEXT,
-			visibility TEXT NOT NULL DEFAULT 'private'
-		);
-		CREATE TABLE access_grants (member_id TEXT, resource_kind TEXT, agent_id TEXT, project_id TEXT, operation TEXT);
-        CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
-	`
-	if _, err := db.Exec(schema); err != nil {
-		t.Fatalf("schema: %v", err)
-	}
+	db := testutil.MigratedSQLDB(t)
 	stmts := []string{
-		`INSERT INTO workspace_members(workspace_id, user_id) VALUES ('ws-1', 'u-good')`,
-		`INSERT INTO crews(id, workspace_id, deleted_at) VALUES ('crew-live', 'ws-1', NULL)`,
-		`INSERT INTO crews(id, workspace_id, deleted_at) VALUES ('crew-deleted', 'ws-1', '2024-01-01')`,
-		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-live', 'ws-1', NULL)`,
-		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-deleted', 'ws-1', '2024-01-01')`,
-		`INSERT INTO missions(id, crew_id) VALUES ('mission-1', 'crew-live')`,
-		`INSERT INTO chats(id, workspace_id, created_by) VALUES ('chat-1', 'ws-1', 'u-good')`,
+		`INSERT INTO users(id,email) VALUES ('u-good','u-good@ws.test'),('u-bad','u-bad@ws.test')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES ('ws-1','WS fixture','ws-fixture')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id) VALUES ('ws-member','ws-1','u-good')`,
+		`INSERT INTO crews(id,workspace_id,name,slug,deleted_at) VALUES ('crew-live','ws-1','Live','ws-live',NULL),('crew-deleted','ws-1','Deleted','ws-deleted','2024-01-01')`,
+		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,deleted_at) VALUES ('agent-live','ws-1','crew-live','Live','ws-agent-live','AGENT',NULL),('agent-deleted','ws-1','crew-live','Deleted','ws-agent-deleted','AGENT','2024-01-01')`,
+		`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status) VALUES ('mission-1','ws-1','crew-live','agent-live','ws-test-trace','WS fixture','TODO')`,
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES ('chat-1','ws-1','agent-live','u-good')`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -166,5 +122,61 @@ func TestCanSubscribeFailsClosedOnDBError(t *testing.T) {
 	}
 	if err == nil {
 		t.Error("expected a non-nil error on closed DB — a bare deny would let the sweep treat an infrastructure failure as a definitive revocation")
+	}
+}
+
+// Account authority must be checked at subscription and immediately before
+// queued delivery, independently of retained workspace membership.
+func TestRealtimeAccountAuthorityRevocation(t *testing.T) {
+	for _, state := range []string{"timestamp", "empty", "deleted"} {
+		t.Run(state, func(t *testing.T) {
+			db := seededDB(t)
+			authorizer := NewDBChannelAuthorizer(db)
+			channels := []string{"workspace:ws-1", "crew:crew-live", "agent:agent-live", "keeper:ws-1", "journal:ws-1", "files:crew-live", "mission:mission-1", "user:u-good", "providers:global"}
+			for _, channel := range channels {
+				if !mustVerdict(t, authorizer, "u-good", channel) {
+					t.Fatalf("active account denied %s", channel)
+				}
+			}
+			if ok, err := authorizer.CanDeliver(t.Context(), "u-good", ""); err != nil || !ok {
+				t.Fatalf("active control frame: %v, %v", ok, err)
+			}
+			switch state {
+			case "timestamp":
+				if _, err := db.Exec(`UPDATE users SET suspended_at='2026-10-16T00:00:00Z' WHERE id='u-good'`); err != nil {
+					t.Fatal(err)
+				}
+			case "empty":
+				if _, err := db.Exec(`UPDATE users SET suspended_at='' WHERE id='u-good'`); err != nil {
+					t.Fatal(err)
+				}
+			case "deleted":
+				if _, err := db.Exec(`DELETE FROM users WHERE id='u-good'`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, channel := range channels {
+				if mustVerdict(t, authorizer, "u-good", channel) {
+					t.Errorf("inactive account subscribed to %s", channel)
+				}
+				if ok, err := authorizer.CanDeliver(t.Context(), "u-good", channel); err != nil || ok {
+					t.Errorf("inactive delivery %s: %v, %v", channel, ok, err)
+				}
+			}
+			if ok, err := authorizer.CanDeliver(t.Context(), "u-good", ""); err != nil || ok {
+				t.Errorf("inactive control frame: %v, %v", ok, err)
+			}
+		})
+	}
+}
+
+func TestRealtimeControlDeliveryFailsClosedOnDBError(t *testing.T) {
+	db := seededDB(t)
+	authorizer := NewDBChannelAuthorizer(db)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := authorizer.CanDeliver(t.Context(), "u-good", ""); allowed || err == nil {
+		t.Fatalf("closed database: allowed=%v error=%v", allowed, err)
 	}
 }

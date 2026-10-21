@@ -11,14 +11,14 @@ const buttonVariants = cva(
       variant: {
         // Harbor primary: white label on --primary-strong, the one blue per
         // theme that holds white at ≥ 4.5:1 (pinned in theme-contrast.test).
-        // Hover goes deeper, not lighter, so the label keeps its contrast,
-        // and the button lifts a pixel with a soft brand-coloured glow.
+        // Harbor 2 keeps it flat — no glow, no lift; hover goes deeper, not
+        // lighter, so the label keeps its contrast.
         default:
-          "bg-primary-strong text-white shadow-[0_8px_20px_-10px_var(--primary-glow)] hover:bg-primary-strong-hover hover:-translate-y-px active:translate-y-0",
+          "bg-primary-strong text-white hover:bg-primary-strong-hover",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:
-          "border border-control-border bg-card hover:border-line-strong hover:bg-accent hover:text-accent-foreground hover:-translate-y-px active:translate-y-0",
+          "border border-control-border bg-card hover:border-line-strong hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         // Soft / tinted primary — the canonical sub-bar CTA (Style B).
@@ -34,13 +34,14 @@ const buttonVariants = cva(
           "rounded-full px-3 py-1 chip-idle data-[active=true]:chip-active focus-visible:ring-2 focus-visible:ring-ring/50",
       },
       size: {
-        default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        xs: "h-6 gap-1 rounded-sm px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
+        // Harbor 2 heights (24 / 28 / 32 px at Compact), tokens in globals.css.
+        default: "h-[var(--control-md)] px-4 py-2 has-[>svg]:px-3",
+        xs: "h-[var(--control-xs)] gap-1 rounded-sm px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-[var(--control-sm)] gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
         lg: "h-10 rounded-lg px-6 has-[>svg]:px-4",
-        icon: "size-9",
-        "icon-xs": "size-6 rounded-sm [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-8",
+        icon: "size-[var(--control-md)]",
+        "icon-xs": "size-[var(--control-xs)] rounded-sm [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-[var(--control-sm)]",
         "icon-lg": "size-10",
       },
     },
@@ -51,16 +52,56 @@ const buttonVariants = cva(
   }
 )
 
+/**
+ * `tap` (phone pilot, MOBIL-DOPORUCENI 2a): a compact control that is a real
+ * 44 × 44 px button on any coarse pointer — phone, tablet, touch laptop — with
+ * the variant drawn on a smaller inner (32 px). The button box itself is the
+ * target, so neighbours keep 44 px each in the layout and cannot overlap, which
+ * an invisible ::after ring can (and a parent's overflow can clip). A fine
+ * pointer gets the inner's own size: nothing changes on a desktop.
+ * Not for `asChild`: the inner is a span inside the button. The coarse sizes
+ * are in globals.css (`button[data-tap]`), so Button stays on the control tokens.
+ */
+const TAP_OUTER =
+  "group/tap relative inline-flex shrink-0 items-center justify-center rounded-md outline-none disabled:pointer-events-none focus-visible:[&>[data-slot=button-inner]]:ring-[3px] focus-visible:[&>[data-slot=button-inner]]:ring-ring/50"
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  tap = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    tap?: boolean
   }) {
+  if (tap && !asChild) {
+    return (
+      <button
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        data-tap=""
+        className={TAP_OUTER}
+        {...props}
+      >
+        <span
+          data-slot="button-inner"
+          className={cn(
+            buttonVariants({ variant, size }),
+            "group-disabled/tap:opacity-50",
+            className,
+          )}
+        >
+          {children}
+        </span>
+      </button>
+    )
+  }
+
   const Comp = asChild ? Slot.Root : "button"
 
   return (
@@ -70,7 +111,9 @@ function Button({
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {children}
+    </Comp>
   )
 }
 
