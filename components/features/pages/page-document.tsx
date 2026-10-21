@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Extension } from "@tiptap/core"
-import { EditorContent, useEditor } from "@tiptap/react"
+import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Collaboration from "@tiptap/extension-collaboration"
 import { Table } from "@tiptap/extension-table"
@@ -99,6 +99,8 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
     editorProps: { attributes: { class: "min-h-64 max-w-none p-6 outline-none [&_p]:my-3 [&_h1]:my-4 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:text-xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono", "aria-label": "Document editor" } },
   }, [sync.doc,sync.state?.schema])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
+  // Collaboration's Yjs undo tracks only this editor's own transactions, so it never takes back confirmed work from others.
+  const history = useEditorState({ editor, selector: ({ editor }) => ({ undo: editor?.can().undo() ?? false, redo: editor?.can().redo() ?? false }) })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
     <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
@@ -136,6 +138,8 @@ function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available
     {reviewEnabled && sync.state && !sync.denied && <div className="px-3"><DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} /></div>}
     {!sync.denied && <>
     {sync.editable && !restoring && editor && <div aria-label="Document formatting" className="flex flex-wrap gap-1 px-6">
+      <Button size="sm" variant="ghost" disabled={!history?.undo} onClick={() => editor.chain().focus().undo().run()}>Undo</Button>
+      <Button size="sm" variant="ghost" disabled={!history?.redo} onClick={() => editor.chain().focus().redo().run()}>Redo</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().setParagraph().run()}>Paragraph</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>Heading 1</Button>
       <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>Heading 2</Button>
