@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { documentSchema } from "@/lib/documents/schema"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
@@ -14,6 +14,11 @@ export interface DocumentViewerReadInput {
   activationKey: string
   target: ViewerTarget | null
   enabled: boolean
+  /** While the panel's own editor is open its saves announce page.updated;
+   *  re-reading then would unmount the editor mid-edit. Held refreshes are
+   *  dropped: the host calls refresh() when editing ends. Identity changes
+   *  (human, workspace, chat, activation) still reset the read at once. */
+  hold?: boolean
 }
 export interface SavedDocumentBody { schema: 2 | 3; rev: number; content: unknown }
 type Read = DocumentViewerRead<SavedDocumentBody>
@@ -31,12 +36,15 @@ async function readJSON(url: string, signal: AbortSignal): Promise<unknown> {
 }
 
 /** Resolves current saved content only; never opens a CRDT/editor or writes. */
-export function useDocumentViewerRead({ workspaceId, chatId, currentUserId, activationKey, target, enabled }: DocumentViewerReadInput) {
+export function useDocumentViewerRead({ workspaceId, chatId, currentUserId, activationKey, target, enabled, hold = false }: DocumentViewerReadInput) {
   const [generation, setGeneration] = useState(0)
   const refresh = useCallback(() => setGeneration(value => value + 1), [])
-  useRealtimeEventSafe("page.updated", refresh)
-  useRealtimeEventSafe("page.deleted", refresh)
-  useRealtimeEventSafe("realtime.reconnected", refresh)
+  const held = useRef(hold)
+  held.current = hold
+  const onEvent = useCallback(() => { if (!held.current) refresh() }, [refresh])
+  useRealtimeEventSafe("page.updated", onEvent)
+  useRealtimeEventSafe("page.deleted", onEvent)
+  useRealtimeEventSafe("realtime.reconnected", onEvent)
   const pageId = target?.pageId
   const available = enabled === true && nonempty(workspaceId) && nonempty(chatId) && nonempty(currentUserId) && nonempty(activationKey, 1024)
     && target?.workspaceId === workspaceId && nonempty(pageId) && target.type === "document" && target.mode === "latest"
@@ -84,5 +92,5 @@ export function useDocumentViewerRead({ workspaceId, chatId, currentUserId, acti
   // Mask during render, before effect cleanup/reset runs on an identity change.
   const read: Read = !available ? { status: "unavailable" }
     : settled?.scopeKey === scopeKey ? settled.read : { status: "loading" }
-  return { scopeKey, read }
+  return { scopeKey, read, refresh }
 }
