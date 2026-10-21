@@ -271,7 +271,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // refusal is the first definitive answer; the ref serves the click-time read,
   // the state the notice.
   const refusedRowsRef = useRef<Set<string>>(new Set())
-  const [refusedScope, setRefusedScope] = useState<string | null>(null)
+  const [refusedScopes, setRefusedScopes] = useState<ReadonlySet<string>>(() => new Set())
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
   // animation. Bumped on every session swap so loaded-from-history turns
@@ -774,11 +774,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
         )
         if (!res.ok) {
-          if (res.status === 403 || res.status === 404) { refusedRowsRef.current.add(chatReadScope); setRefusedScope(chatReadScope) }
+          if (res.status === 403 || res.status === 404) { refusedRowsRef.current.add(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
           return false
         }
-        refusedRowsRef.current.delete(chatReadScope)
-        setRefusedScope(scope => scope === chatReadScope ? null : scope)
+        if (refusedRowsRef.current.has(chatReadScope)) { refusedRowsRef.current.delete(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
         confirmedRowsRef.current.add(chatReadScope)
         if (currentChatReadScopeRef.current !== chatReadScope) return false
         // The conversation begins here, not at mount: a draft session is a URL
@@ -1421,11 +1420,13 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </Conversation>
   )
 
-  const conversationUnavailable = refusedScope === chatReadScope
+  const conversationUnavailable = refusedScopes.has(chatReadScope)
   const unavailableNotice = conversationUnavailable ? (
     <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
       <p>This conversation isn&apos;t available to you. It may be private to someone else, or it no longer exists. Your draft is still in the box below.</p>
-      <Link href={`/chat/${encodeURIComponent(agentSlug)}?new=1`} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</Link>
+      {onNewConversation
+        ? <button type="button" onClick={onNewConversation} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</button>
+        : <Link href={`/chat/${encodeURIComponent(agentSlug)}?new=1`} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</Link>}
     </div>
   ) : null
 

@@ -426,6 +426,33 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
+  it("keeps the notice across another refused send and clears it once a create succeeds", async () => {
+    createStatus = 403
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+    fireEvent.click(await firstChip())
+    await screen.findByRole("alert")
+
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(creates).toHaveLength(2))
+    expect(screen.getByRole("alert").textContent).toMatch(/isn't available to you/)
+
+    createStatus = 201
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(/isn't available to you/)).toBeNull()
+  })
+
+  it("offers the panel's own new conversation when it has one", async () => {
+    createStatus = 404
+    const onNewConversation = vi.fn()
+    render(<ChatPanel {...panelProps} onNewConversation={onNewConversation} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+    fireEvent.click(await firstChip())
+    fireEvent.click(await screen.findByRole("button", { name: "Start a new chat" }))
+    expect(onNewConversation).toHaveBeenCalledTimes(1)
+  })
+
   it("keeps the connection wording and shows no unavailable notice when the create fails for another reason", async () => {
     createStatus = 500
     render(<ChatPanel {...panelProps} />)
