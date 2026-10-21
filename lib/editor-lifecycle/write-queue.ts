@@ -23,9 +23,9 @@ export interface Pacing {
   stuckRetryMs: number
 }
 export const DEFAULT_PACING: Pacing = { minGapMs: 250, baseDelayMs: 1000, maxDelayMs: 30_000, retryBudgetMs: 120_000, stuckRetryMs: 60_000 }
-/** For callers that pace sends themselves (the Document poll loop). */
 /** Failures after which the queue stops sending until `resume()`. */
 export const haltsQueue = (kind: SendFailure["kind"]): kind is "conflict" | "rejected" | "unconfirmed" | "denied" => kind === "conflict" || kind === "rejected" || kind === "unconfirmed" || kind === "denied"
+/** For callers that pace sends themselves (the Document poll loop). */
 export const UNPACED: Pacing = { minGapMs: 0, baseDelayMs: 0, maxDelayMs: 0, retryBudgetMs: Infinity, stuckRetryMs: 0 }
 
 export interface Timers { now(): number; setTimeout(run: () => void, ms: number): unknown; clearTimeout(handle: unknown): void }
