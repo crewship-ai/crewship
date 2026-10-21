@@ -62,6 +62,12 @@ describe("FIFO with acknowledgement", () => {
 })
 
 describe("coalescing and persistence", () => {
+  it("hands out a copy of its writes, never the queue itself", () => {
+    const { queue } = setup()
+    queue.enqueue(row("a"))
+    ;(queue.writes() as Row[]).pop()
+    expect(queue.size).toBe(1)
+  })
   it("merges into the newest write only while it was never sent", async () => {
     const { queue, put } = setup()
     queue.enqueue(row("a"))
@@ -172,6 +178,48 @@ describe("driven by its own timers", () => {
     expect(queue.size).toBe(0)
     expect(events.filter(event => event.type === "ack")).toHaveLength(3)
     queue.stop()
+  })
+  const paced = { minGapMs: 50, baseDelayMs: 1000, maxDelayMs: 1000, retryBudgetMs: 60_000, stuckRetryMs: 60_000 }
+  it("backs off, not just the minimum gap, after a declined receipt", async () => {
+    const { queue } = setup({ pacing: paced })
+    const sent: string[] = []
+    let declined = false
+    queue.start(async write => { sent.push(write.id) }, () => { if (declined) return true; declined = true; return false })
+    queue.enqueue(row("a"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent).toEqual(["a"])
+    await vi.advanceTimersByTimeAsync(50)
+    expect(sent).toEqual(["a"])
+    await vi.advanceTimersByTimeAsync(950)
+    expect(sent).toEqual(["a", "a"])
+    expect(queue.size).toBe(0)
+    queue.stop()
+  })
+  it("sends nothing more when stopped while a retry timer is armed", async () => {
+    const { queue } = setup({ pacing: paced })
+    const send = vi.fn(async () => { throw new Error("503") })
+    queue.start(send)
+    queue.enqueue(row("a"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(send).toHaveBeenCalledTimes(1)
+    queue.stop()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(queue.size).toBe(1)
+  })
+  it("settles the send in flight but starts no other when stopped meanwhile", async () => {
+    const { queue, events } = setup({ pacing: paced })
+    let resolve!: () => void
+    const send = vi.fn((_write: Row) => new Promise<void>(done => { resolve = done }))
+    queue.start(send)
+    queue.enqueue(row("a")); queue.enqueue(row("b"))
+    await vi.advanceTimersByTimeAsync(0)
+    queue.stop()
+    resolve()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(queue.writes().map(write => write.id)).toEqual(["b"])
+    expect(events.at(-1)).toEqual({ type: "ack", pending: 1 })
   })
   it("stops sending after stop()", async () => {
     const { queue } = setup()

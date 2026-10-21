@@ -77,14 +77,14 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
   let lastSendAt = -Infinity, retryAt = 0, failures = 0, failingSince: number | undefined
   let driver: { send: Send<W>; verify?: Verify<W> } | undefined, timer: unknown
 
+  const backoff = () => Math.min(pacing.maxDelayMs, pacing.baseDelayMs * 2 ** (failures - 1)) * (0.5 + random() / 2)
   function record(cause: unknown) {
     const failure = classify(cause), now = timers.now()
     failures++; failingSince ??= now
     if (haltsQueue(failure.kind)) { halted = failure.kind; emit({ type: failure.kind }); return }
     const stuck = now - failingSince >= pacing.retryBudgetMs
-    const backoff = Math.min(pacing.maxDelayMs, pacing.baseDelayMs * 2 ** (failures - 1)) * (0.5 + random() / 2)
     const retryAfterMs = "retryAfterMs" in failure ? failure.retryAfterMs : undefined
-    retryAt = now + Math.max(pacing.minGapMs, retryAfterMs ?? (stuck ? pacing.stuckRetryMs : backoff))
+    retryAt = now + Math.max(pacing.minGapMs, retryAfterMs ?? (stuck ? pacing.stuckRetryMs : backoff()))
     if (failure.kind === "offline") emit({ type: "offline" })
     else if (failure.kind === "rate-limited") emit({ type: "rate-limited", retryAfterMs })
     else emit({ type: "transient-fail", retryAfterMs, stuck })
@@ -102,7 +102,7 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
     get size() { return writes.length },
     get halted() { return halted },
     head: () => writes[0],
-    writes: () => writes,
+    writes: () => [...writes],
     enqueue(write) { writes.push(write); options.persist?.put(write); pump() },
     coalesce(merge) {
       const newest = writes.at(-1)
@@ -130,7 +130,8 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
         throw cause
       }
       inflight = false
-      if (!accepted) return false
+      // A declined receipt is not a failure, but the same write must not be resent at the minimum gap.
+      if (!accepted) { failures++; retryAt = timers.now() + Math.max(pacing.minGapMs, backoff()); return false }
       writes.shift(); failures = 0; failingSince = undefined; retryAt = 0
       emit({ type: duplicate ? "duplicate-ack" : "ack", pending: writes.length })
       await options.persist?.remove(write)

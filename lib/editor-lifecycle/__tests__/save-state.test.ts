@@ -48,18 +48,39 @@ describe("save words", () => {
 })
 
 describe("DX-02: never saved without a verified receipt", () => {
+  const receipted: SaveEvent[] = [opened, { type: "stored" }, { type: "edit", pending: 1 }, { type: "send" }, { type: "ack", pending: 0 }]
+  // Each row starts saved, so a reducer that kept the receipt would fail it.
   it.each([
-    ["a recount to zero", { type: "recount", pending: 0 }],
-    ["a discarded held draft", { type: "held", drafts: 0, pending: 0 }],
-    ["a failure", { type: "transient-fail" }],
-    ["the journal becoming ready", { type: "stored" }],
-  ] as [string, SaveEvent][])("%s does not claim a receipt", (_name, event) => {
-    const state = run(opened, { type: "edit", pending: 1 }, { type: "send" }, event)
-    expect(state.receipt).toBe(false)
-    expect(saveWordOf(state)).not.toBe("saved")
+    ["new work recounted", { type: "recount", pending: 1 }, false],
+    ["a held draft found", { type: "held", drafts: 1, pending: 1 }, false],
+    ["a new edit", { type: "edit", pending: 1 }, false],
+    ["a transient failure", { type: "transient-fail" }, false],
+    ["a conflict", { type: "conflict" }, false],
+    ["an unverifiable receipt", { type: "unconfirmed" }, false],
+    ["a recount that finds nothing", { type: "recount", pending: 0 }, true],
+    ["the journal becoming ready", { type: "stored" }, true],
+  ] as [string, SaveEvent, boolean][])("after a receipt, %s keeps saved: %s", (_name, event, saved) => {
+    const state = run(...receipted, event)
+    expect(state.receipt).toBe(saved)
+    expect(saveWordOf(state) === "saved").toBe(saved)
+  })
+  it("a failure after an ack, then a new edit, is not saved until the next ack", () => {
+    const failed = run(...receipted, { type: "send" }, { type: "transient-fail", retryAfterMs: 1000 }, { type: "edit", pending: 1 })
+    expect(saveWordOf(failed)).toBe("waiting")
+    expect(durabilityOf(failed)).toBe("local")
+    const again = saveReducer(saveReducer(failed, { type: "send" }), { type: "ack", pending: 0 })
+    expect(saveWordOf(again)).toBe("saved")
+  })
+  it("storage failing after a receipt keeps what the server holds, but the next edit is unsaved", () => {
+    const state = run(...receipted, { type: "storage-unavailable", failed: true })
+    expect(saveWordOf(state)).toBe("saved")
+    expect(durabilityOf(state)).toBe("confirmed")
+    const edited = saveReducer(state, { type: "edit", pending: 1 })
+    expect(saveWordOf(edited)).toBe("unsaved")
+    expect(durabilityOf(edited)).toBe("unsaved")
   })
   it("a later edit withdraws an earlier receipt", () => {
-    const state = run(opened, { type: "edit", pending: 1 }, { type: "send" }, { type: "ack", pending: 0 }, { type: "edit", pending: 1 })
+    const state = run(...receipted, { type: "edit", pending: 1 })
     expect(state.receipt).toBe(false)
     expect(durabilityOf(state)).not.toBe("confirmed")
   })
