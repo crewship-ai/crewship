@@ -191,6 +191,17 @@ and `drafting: true`; it leaves the message text unchanged. The older
 `document_creation` metadata shape remains supported for existing clients.
 Sending both shapes is rejected. Text returned by a model does not grant consent.
 
+If a connection loses the reply, resending the same explicit submission key and
+request is refused as already accepted, with the original human message ID.
+Reload the conversation and inspect its saved result; the retry does not append
+a second human turn, start another run, or renew drafting permission. Reusing the
+key with different text or drafting permission is refused as a conflict. Current
+human and chat authority are checked before either refusal. A message saved
+before a consent-persistence failure remains visible, but its retry cannot mint
+permission or start a run; report the unconfirmed request instead of silently
+issuing a new key.
+
+
 The narrow command `vytvoř dokument o plánu uvedení produktu` remains a fallback.
 Its topic must be a single line containing letters, digits, spaces or hyphens;
 quoted, negated or ambiguous text does not grant creation permission. Use the

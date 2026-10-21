@@ -8,6 +8,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
+
+- Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.
 - Explicitly update an existing personal Document from its private chat with `run --document-target`, retaining the original human purpose and revision through agent drafting.
 - New Documents retain their initial confirmed version in history, so it remains readable after later edits.
 - Build releases with Go 1.27.3 to fix the reachable crypto/x509 certificate verification vulnerability GO-2026-6809.
