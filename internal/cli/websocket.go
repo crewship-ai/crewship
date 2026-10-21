@@ -104,12 +104,25 @@ func (c *WSClient) Subscribe(channel string) error {
 // loop for this run — the CLI surface of the `--max-turns` flag. Kept variadic
 // so existing callers stay source-compatible.
 func (c *WSClient) SendMessage(channel, chatID, content string, maxTurns ...int) error {
+	turns := 0
+	if len(maxTurns) > 0 {
+		turns = maxTurns[0]
+	}
+	return c.SendMessageWithMetadata(channel, chatID, content, turns, nil)
+}
+
+// SendMessageWithMetadata carries an explicit human action on the chat frame.
+// The server validates it; metadata never supplies a trusted human receipt.
+func (c *WSClient) SendMessageWithMetadata(channel, chatID, content string, maxTurns int, metadata map[string]any) error {
 	payload := map[string]any{
 		"session_id": chatID,
 		"content":    content,
 	}
-	if len(maxTurns) > 0 && maxTurns[0] > 0 {
-		payload["max_turns"] = maxTurns[0]
+	if maxTurns > 0 {
+		payload["max_turns"] = maxTurns
+	}
+	if metadata != nil {
+		payload["metadata"] = metadata
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

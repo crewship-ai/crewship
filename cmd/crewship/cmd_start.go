@@ -491,6 +491,7 @@ var startCmd = &cobra.Command{
 		srv.SetChatHandler(bridge)
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			bridge.SetPageChatContextResolver(apiRouter.Pages())
+			bridge.SetDocumentIterationRecorder(apiRouter.Pages())
 		}
 
 		// Wire mid-turn steering: the API's POST /chats/{id}/steer route

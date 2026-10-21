@@ -315,8 +315,9 @@ type Bridge struct {
 	// unified inbox for users who aren't watching the session live.
 	// Optional (nil = disabled); wired via SetReplyNotifier. See
 	// notify.go.
-	replyNotifier       ReplyNotifier
-	pageContextResolver PageChatContextResolver
+	replyNotifier             ReplyNotifier
+	pageContextResolver       PageChatContextResolver
+	documentIterationRecorder DocumentIterationRecorder
 }
 
 // SetPageChatContextResolver enables server-verified Page references in chat.
@@ -557,6 +558,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	msgOpt.OriginalTriggerMessageID = triggerMessageID
 	msgOpt.DocumentCreationIntent = documentCreation
+	documentIteration, err := documentIterationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation)
+	if err != nil {
+		return err
+	}
+	if documentIteration != nil && b.documentIterationRecorder == nil {
+		return errors.New("Document iteration is unavailable")
+	}
+	msgOpt.DocumentIterationIntent = documentIteration
 	var pageContext *PageChatContext
 	if hasPage {
 		if b.pageContextResolver == nil {
@@ -630,6 +639,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
 	}
 
+	if documentIteration != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)["document_iteration_intent"] = *documentIteration
+	}
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
@@ -649,10 +664,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
-		return b.convStore.SyncSession(ctx, chatID)
+		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
+			return err
+		}
+		if documentIteration != nil {
+			return b.documentIterationRecorder.RecordDocumentIteration(ctx, info.HumanAuthority, triggerMessageID, *documentIteration)
+		}
+		return nil
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if documentIteration != nil {
+			metadata["document_iteration_intent"] = *documentIteration
+		}
 		if pageContext != nil {
 			// This event is emitted only after Append succeeds. Echo the
 			// server-derived Page identity so the sender can consume its
@@ -1200,6 +1224,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if documentCreation != nil {
 		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
 	}
+	if documentIteration != nil {
+		req.UserMessage = documentIterationRunPrompt(content, documentIteration)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1210,6 +1237,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if documentCreation != nil {
 		runMeta["document_creation_intent"] = documentCreation
+	}
+	if documentIteration != nil {
+		runMeta["document_iteration_intent"] = documentIteration
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)

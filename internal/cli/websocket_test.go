@@ -439,3 +439,30 @@ func TestWSClient_ReadMessage_ConnClosedErrors(t *testing.T) {
 		t.Errorf("ReadMessage on closed conn err = %v; want one of: EOF / contains \"closed\" / http.ErrAbortHandler", err)
 	}
 }
+
+func TestWSClient_ExplicitDocumentTargetEnvelope(t *testing.T) {
+	url, recv, _, stop := startTestWSServer(t)
+	defer stop()
+	c, err := NewWSClient(url, "human-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	metadata := map[string]any{"document_iteration_intent": map[string]any{"submission_id": "one", "page_id": "same-page", "schema": 3, "rev": 7, "generation": 2}}
+	if err := c.SendMessageWithMetadata("agent:one", "chat", "Edit introduction", 4, metadata); err != nil {
+		t.Fatal(err)
+	}
+	frame := <-recv
+	var payload struct {
+		Session  string         `json:"session_id"`
+		Content  string         `json:"content"`
+		Max      int            `json:"max_turns"`
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != "send_message" || payload.Session != "chat" || payload.Content != "Edit introduction" || payload.Max != 4 || payload.Metadata["document_iteration_intent"] == nil {
+		t.Fatalf("original explicit target envelope lost: %+v", payload)
+	}
+}
