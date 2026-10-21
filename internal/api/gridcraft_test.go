@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/artifacts"
-	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type gridcraftFixtureEngine struct{}
@@ -21,9 +25,7 @@ func (gridcraftFixtureEngine) Prepare(_ context.Context, b mooring.Binding, s mo
 	return mooring.NewCandidate(b, c.Snapshot, []string{"*"}), nil
 }
 func TestGridCraftHumanDefaultOffImportReadRetryAndPrivacy(t *testing.T) {
-	f := newInstanceFixture(t)
-	f.db.SetMaxOpenConns(1)
-	mustExec(t, f.db, `PRAGMA synchronous=FULL`)
+	f := gridcraftInstanceFixture(t)
 	wmSeedPage(t, f.db, "ws-old", "workbook-original", "workbook-test", "Workbook", "boss", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-original'`)
 	base := "/api/v1/pages/workbook-test/workbook"
@@ -49,9 +51,9 @@ func TestGridCraftHumanDefaultOffImportReadRetryAndPrivacy(t *testing.T) {
 }
 
 func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testing.T) {
-	f, _ := documentCreationAdmissionFixture(t)
+	rig := pagesTransferSetupWithDB(t, gridcraftFullDB(t))
+	f, _ := documentCreationAdmissionWithPrincipal(t, newArtifactPrincipalFixtureWithRig(t, rig))
 	f.rig.db.SetMaxOpenConns(1)
-	mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
 	wmSeedPage(t, f.rig.db, f.a.WorkspaceID, "grid-agent-page", "grid-agent", "Workbook", f.a.HumanUserID, "")
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='grid-agent-page'`)
 	f.pages.artifactMasterToken = "synthetic-workbook-master"
@@ -142,9 +144,7 @@ func registerGridCraftTestRoutes(r *Router) {
 }
 
 func TestGridCraftOwnerReadAuditsOtherPrivateWorkbook(t *testing.T) {
-	f := newInstanceFixture(t)
-	f.db.SetMaxOpenConns(1)
-	mustExec(t, f.db, `PRAGMA synchronous=FULL`)
+	f := gridcraftInstanceFixture(t)
 	wmSeedPage(t, f.db, "ws-old", "workbook-admin-private", "admin-workbook", "Private workbook", "wsadmin", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-admin-private'`)
 	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
@@ -160,5 +160,62 @@ func TestGridCraftOwnerReadAuditsOtherPrivateWorkbook(t *testing.T) {
 	response := f.do(f.boss, "GET", base+"?workspace_id=ws-old", "")
 	if response.Code == 200 || strings.Contains(response.Body.String(), `"sheets"`) {
 		t.Fatalf("private bytes released without audit: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func gridcraftInstanceFixture(t *testing.T) *instanceFixture {
+	t.Helper()
+	f := newInstanceFixtureWithDB(t, gridcraftFullDB(t).DB)
+	f.db.SetMaxOpenConns(1)
+	return f
+}
+
+func TestGridCraftFixtureRetainsDurabilityAfterConnectionReplacement(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	// A connection-local PRAGMA must not be mistaken for the pool's DSN policy.
+	f.db.SetMaxIdleConns(0)
+	wmSeedPage(t, f.db, "ws-old", "reopened-workbook", "reopened-workbook", "Workbook", "boss", "")
+	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='reopened-workbook'`)
+	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+	body := `{"mutation_id":"reopened-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/reopened-workbook/workbook/operations?workspace_id=ws-old", body), 200, "FULL after replacement")
+}
+
+// The standard lightweight fixture intentionally uses NORMAL in its DSN.
+// Workbook receipts require production FULL semantics on every new connection.
+func gridcraftFullDB(t *testing.T) *database.DB {
+	t.Helper()
+	resetCapabilityCache()
+	data, err := os.ReadFile(testutil.MigratedTemplatePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "workbook.db")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open("file:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	drainBackgroundWork(t)
+	return db
+}
+
+func TestGridCraftNormalPoolCannotClaimNodeDurability(t *testing.T) {
+	f := newInstanceFixture(t)
+	f.db.SetMaxIdleConns(0) // every checkout uses the fixture's NORMAL DSN
+	wmSeedPage(t, f.db, "ws-old", "nondurable-workbook", "nondurable-workbook", "Workbook", "boss", "")
+	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='nondurable-workbook'`)
+	engine := &gridcraftBlockingEngine{before: func() { t.Fatal("non-durable admission started engine work") }}
+	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, engine)
+	body := `{"mutation_id":"nondurable-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/nondurable-workbook/workbook/operations?workspace_id=ws-old", body), 400, "NORMAL storage refused")
+	for _, table := range []string{"gridcraft_heads", "gridcraft_operations", "gridcraft_audit", "gridcraft_outbox"} {
+		var count int
+		if err := f.db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("non-durable %s changed: %d %v", table, count, err)
+		}
 	}
 }

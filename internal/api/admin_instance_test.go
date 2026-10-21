@@ -25,11 +25,18 @@ type instanceFixture struct {
 
 func newInstanceFixture(t *testing.T) *instanceFixture {
 	t.Helper()
+	return newInstanceFixtureWithDB(t, nil)
+}
+
+func newInstanceFixtureWithDB(t *testing.T, db *sql.DB) *instanceFixture {
+	t.Helper()
 	t.Setenv(backup.InstanceOwnerEmailEnv, "")
 	// Backups run whatever the test machine's disk has left; the space
 	// floor has its own tests (internal/backupplan).
 	t.Setenv("CREWSHIP_BACKUP_MIN_FREE_PERCENT", "0")
-	db := setupTestDB(t)
+	if db == nil {
+		db = setupTestDB(t)
+	}
 	seedInstanceWorkspace(t, db, "ws-old", "2026-01-01 00:00:00")
 	seedInstanceWorkspace(t, db, "ws-new", "2026-06-01 00:00:00")
 	seedInstanceUser(t, db, "boss", "boss@ex.com", "ws-old", "OWNER")
